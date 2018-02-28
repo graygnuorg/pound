@@ -344,7 +344,9 @@ typedef struct _tn {
 /* maximal session key size */
 #define KEY_SIZE    127
 
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  DEFINE_LHASH_OF(TABNODE);
+#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
 DECLARE_LHASH_OF(TABNODE);
 #endif
 

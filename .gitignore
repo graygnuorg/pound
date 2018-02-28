@@ -1,0 +1,15 @@
+Makefile
+*.orig
+*.rej
+core
+config.h
+config.log
+config.status
+stamp-h1
+.emacs*
+*.o
+*~
+dh2048.h
+dh512.h
+pound
+poundctl
