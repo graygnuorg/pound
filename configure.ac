@@ -187,38 +187,42 @@ else
         PTHREAD_CC="$CC"
 fi
 
-# Finally, execute ACTION-IF-FOUND/ACTION-IF-NOT-FOUND:
 if test x"$acx_pthread_ok" = xyes; then
-        LIBS="$PTHREAD_LIBS $LIBS"; CFLAGS="$CFLAGS $PTHREAD_CFLAGS"; CC="$PTHREAD_CC"; LDFLAGS="${LDFLAGS} ${PTHREAD_CFLAGS}"
-        :
-else
-        acx_pthread_ok=no
-
+	CC="$PTHREAD_CC";
 fi
 
 AC_MSG_NOTICE([*** Parsing options ***])
 
 AC_ARG_WITH([ssl],
  AC_HELP_STRING([--with-ssl=directory],[location of OpenSSL package]),
- [CPPFLAGS="-I${with_ssl}/include ${CPPFLAGS}"; LDFLAGS="-L${with_ssl}/lib ${LDFLAGS}"; C_SSL="${with_ssl}"],
+ [CPPFLAGS="-I${withval}/include ${CPPFLAGS}"; LDFLAGS="-L${withval}/lib ${LDFLAGS}"; C_SSL="${withval}"],
  [C_SSL=""])
 
 AC_ARG_WITH([t_rsa],
- AC_HELP_STRING([--with-t_rsa=nnn],[Time-out for RSA ephemeral keys generation]),
- [CPPFLAGS="-DT_RSA_KEYS=${with_t_rsa} ${CPPFLAGS}"; C_T_RSA="${with_t_rsa}"],
- [C_T_RSA="0"])
+ AC_HELP_STRING([--with-t_rsa=nnn],
+                [Timeout for RSA ephemeral keys generation]),
+ [T_RSA_KEYS=${withval}],
+ [T_RSA_KEYS=7200])
 
+AC_DEFINE_UNQUOTED([T_RSA_KEYS],[$T_RSA_KEYS],
+ [Timeout for RSA ephemeral keys generation])
+ 
 AC_ARG_WITH([dh],
  AC_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)]),
- [CPPFLAGS="-DDH_LEN=${with_dh} ${CPPFLAGS}"; C_DH_LEN="${with_dh}"],
- [CPPFLAGS="-DDH_LEN=2048 ${CPPFLAGS}"; C_DH_LEN="2048"])
-AC_SUBST(C_DH_LEN)
+ [DH_LEN=${withval}],
+ [DH_LEN=2048])
+
+AC_DEFINE_UNQUOTED([DH_LEN],[$DH_LEN],
+ [DH key length])
 
 AC_ARG_WITH([maxbuf],
  AC_HELP_STRING([--with-maxbuf=nnn],[Value of the MAXBUF parameter (default: 4096)]),
- [CPPFLAGS="-DMAXBUF=${with_maxbuf} ${CPPFLAGS}"; C_MAXBUF="${with_maxbuf}"],
- [C_MAXBUF="0"])
+ [MAXBUF=${withval}],
+ [MAXBUF=4096])
 
+AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
+ [Max. buffer size])
+ 
 AC_SUBST(I_OWNER)
 AC_ARG_WITH([owner],
  AC_HELP_STRING([--with-owner=name],
@@ -236,13 +240,24 @@ AC_ARG_WITH([group],
 AC_ARG_ENABLE([super], 
  AC_HELP_STRING([--enable-super],
                 [enable or disable running with supervisor process (default: enabled)]),
- [test ${enableval} = "yes" && CFLAGS="${CFLAGS} -DUPER"; C_SUPER="1"],
- [CFLAGS="${CFLAGS} -DUPER"; C_SUPER="0"])
+ [if test ${enableval} = "yes"; then
+    SUPERVISOR=1
+  else
+    SUPERVISOR=0
+  fi],
+ [SUPERVISOR=1])
+
+AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
+ [Run supervisor process])
  
 AC_ARG_ENABLE([cert1l], 
  AC_HELP_STRING([--enable-cert1l],
                 [enable or disable single-line certificate (default: disabled)]),
- [test ${enableval} = "yes" && CFLAGS="${CFLAGS} -DCERT1L"; C_CERT1L="1"])
+ [test ${enableval} = "yes"; CERT1L=$?],
+ [CERT1L=0])
+
+AC_DEFINE_UNQUOTED([CERT1L],[$CERT1L],
+ [Enable single-line certificates])
  
 AC_ARG_ENABLE([pcreposix],
  AC_HELP_STRING([--enable-pcreposix],
@@ -299,7 +314,7 @@ AC_MSG_RESULT([OK]);
 
 AC_MSG_NOTICE([*** Checking for header files ***])
 AC_HEADER_STDC
-AC_CHECK_HEADERS([arpa/inet.h errno.h netdb.h netinet/in.h netinet/tcp.h stdlib.h string.h sys/socket.h sys/un.h sys/time.h unistd.h getopt.h pthread.h sys/types.h sys/poll.h openssl/ssl.h openssl/engine.h time.h pwd.h grp.h signal.h regex.h ctype.h wait.h sys/wait.h sys/stat.h fcntl.h stdarg.h pcreposix.h pcre/pcreposix.h fnmatch.h])
+AC_CHECK_HEADERS([arpa/inet.h errno.h netdb.h netinet/in.h netinet/tcp.h stdlib.h string.h sys/socket.h sys/un.h sys/time.h unistd.h getopt.h pthread.h sys/types.h sys/poll.h openssl/ssl.h openssl/engine.h time.h pwd.h grp.h signal.h regex.h ctype.h wait.h sys/wait.h sys/stat.h sys/syslog.h syslog.h fcntl.h stdarg.h pcreposix.h pcre/pcreposix.h fnmatch.h])
 
 AC_MSG_NOTICE([*** Checking for additonal information ***])
 
@@ -314,11 +329,12 @@ AC_TRY_LINK([#include <stdio.h>
 	    [ok=no])
 if test x"$ok" = xyes; then
   AC_MSG_RESULT([yes])
-  CFLAGS="$save_CFLAGS -DHAVE_SYS_SYSLOG_H=1"
+  AC_DEFINE([HAVE_FACILITYNAMES],1,
+    [The facilitynames array is defined in sys/syslog.h])
 else
   AC_MSG_RESULT([missing])
-  CFLAGS="$save_CFLAGS -DHAVE_SYSLOG_H=1 -DMISS_FACILITYNAMES"
 fi  
+CFLAGS=$save_CFLAGS
 
 AC_TYPE_SIGNAL
 AC_C_CONST
@@ -347,6 +363,13 @@ AC_FUNC_STRFTIME
 
 AC_CHECK_FUNCS([getaddrinfo inet_ntop memset regcomp poll socket strcasecmp strchr strdup\
  strerror strncasecmp strspn strtol setsid X509_STORE_set_flags localtime_r gettimeofday])
+
+AC_DEFINE_UNQUOTED([C_SSL], ["$C_SSL"],
+ [Location of OpenSSL package])
+AC_DEFINE_UNQUOTED([C_OWNER],["$C_OWNER"],
+ [Account that owns Pound files])
+AC_DEFINE_UNQUOTED([C_GROUP],["$C_GROUP"],
+ [Group for the Pound files])
 
 if test -z "${I_OWNER}"
 then

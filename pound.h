@@ -165,6 +165,10 @@
 #error "Pound needs grp.h"
 #endif
 
+#if defined(HAVE_FACILITYNAMES) && defined(NEED_FACILITYNAMES)
+#define SYSLOG_NAMES    1
+#endif
+
 #if HAVE_SYSLOG_H
 #include    <syslog.h>
 #endif

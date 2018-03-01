@@ -25,15 +25,13 @@
  * EMail: roseg@apsis.ch
  */
 
-#ifndef MISS_FACILITYNAMES
-#define SYSLOG_NAMES    1
-#endif
+#define NEED_FACILITYNAMES
 
 #include    "pound.h"
 
 #include    <openssl/x509v3.h>
 
-#ifdef MISS_FACILITYNAMES
+#ifndef HAVE_FACILITYNAMES
 
 /* This is lifted verbatim from the Linux sys/syslog.h */
 
@@ -1534,28 +1532,20 @@ config_parse(const int argc, char **const argv)
             break;
         case 'V':
             print_log = 1;
-            logmsg(LOG_DEBUG, "Version %s", VERSION);
+            logmsg(LOG_DEBUG, "Version %s", PACKAGE_VERSION);
             logmsg(LOG_DEBUG, "  Configuration switches:");
-#ifdef  C_SUPER
-            if(strcmp(C_SUPER, "0"))
-                logmsg(LOG_DEBUG, "    --disable-super");
-#endif
-#ifdef  C_CERT1L
-            if(strcmp(C_CERT1L, "1"))
-                logmsg(LOG_DEBUG, "    --enable-cert1l");
-#endif
+	    if (!SUPERVISOR)
+		    logmsg(LOG_DEBUG, "    --disable-super");
+	    if (CERT1L)
+		    logmsg(LOG_DEBUG, "    --enable-cert1l");
 #ifdef  C_SSL
             if(strcmp(C_SSL, ""))
                 logmsg(LOG_DEBUG, "    --with-ssl=%s", C_SSL);
 #endif
-#ifdef  C_T_RSA
-            if(strcmp(C_T_RSA, "0"))
-                logmsg(LOG_DEBUG, "    --with-t_rsa=%s", C_T_RSA);
-#endif
-#ifdef  C_MAXBUF
-            if(strcmp(C_MAXBUF, "0"))
-                logmsg(LOG_DEBUG, "    --with-maxbuf=%s", C_MAXBUF);
-#endif
+            if(T_RSA_KEYS != 7200)
+                logmsg(LOG_DEBUG, "    --with-t_rsa=%d", T_RSA_KEYS);
+            if(MAXBUF != 4096)
+                logmsg(LOG_DEBUG, "    --with-maxbuf=%d", MAXBUF);
 #ifdef  C_OWNER
             if(strcmp(C_OWNER, ""))
                 logmsg(LOG_DEBUG, "    --with-owner=%s", C_OWNER);
@@ -1564,10 +1554,8 @@ config_parse(const int argc, char **const argv)
             if(strcmp(C_GROUP, ""))
                 logmsg(LOG_DEBUG, "    --with-group=%s", C_GROUP);
 #endif
-#ifdef  C_DH_LEN
-            if(strcmp(C_DH_LEN, "0"))
-                logmsg(LOG_DEBUG, "    --with-dh=%s", C_DH_LEN);
-#endif
+            if(DH_LEN != 2048)
+                logmsg(LOG_DEBUG, "    --with-dh=%d", DH_LEN);
             logmsg(LOG_DEBUG, "Exiting...");
             exit(0);
             break;

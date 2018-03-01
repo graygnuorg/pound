@@ -434,7 +434,7 @@ main(const int argc, char **argv)
 
     /* split off into monitor and working process if necessary */
     for(;;) {
-#ifdef  UPER
+#ifdef SUPERVISOR
         if((son = fork()) > 0) {
             int status;
 
@@ -547,7 +547,7 @@ main(const int argc, char **argv)
                     }
                 }
             }
-#ifdef  UPER
+#ifdef SUPERVISOR
         } else {
             /* failed to spawn son */
             logmsg(LOG_ERR, "Can't fork worker (%s) - aborted", strerror(errno));

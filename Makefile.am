@@ -1,18 +1,8 @@
-CC=@PTHREAD_CC@
 AM_CFLAGS=\
  -DF_CONF=\"@sysconfdir@/pound.cfg\"\
- -DVERSION=\"@PACKAGE_VERSION@\"\
- -DC_SSL=\"@C_SSL@\"\
- -DC_T_RSA=\"@C_T_RSA@\"\
- -DC_DH_LEN=\"@C_DH_LEN@\"\
- -DC_MAXBUF=\"@C_MAXBUF@\"\
- -DC_OWNER=\"@C_OWNER@\"\
- -DC_GROUP=\"@C_GROUP@\"\
- -DC_SUPER=\"@C_SUPER@\"\
- -DC_CERT1L=\"@C_CERT1L@\"\
- @CFLAGS@ @PTHREAD_CFLAGS@ @CPPFLAGS@
+ @PTHREAD_CFLAGS@
 
-LIBS=@LIBS@ @PTHREAD_LIBS@
+LDADD=@PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
@@ -21,7 +11,15 @@ pound_SOURCES=\
  pound.c\
  svc.c
 
-INSTALL_PROGRAM = ${INSTALL} -o @I_OWNER@ -g @I_GRP@ -m 555
+install-exec-hook:
+	-@if test "$${EUID:-65535}" -eq 0; then \
+		for program in $(sbin_PROGRAMS); do \
+			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(sbindir)/$$program$(EXEEXT); \
+		done; \
+		for program in $(bin_PROGRAMS); do \
+			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(bindir)/$$program$(EXEEXT); \
+		done; \
+	fi
 
 noinst_HEADERS=pound.h config.h dh.h
 
@@ -33,5 +31,6 @@ bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c
 
 BUILT_SOURCES=dh.h
+DISTCLEANFILES=dh.h
 
 dist_man_MANS=pound.8 poundctl.8
