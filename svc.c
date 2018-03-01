@@ -1340,27 +1340,14 @@ do_RSAgen(void)
     return;
 }
 
-#include    "dh512.h"
-
-#if DH_LEN == 1024
-#include    "dh1024.h"
-static DH   *DH512_params, *DH1024_params;
+#include    "dh.h"
+static DH   *DH512_params, *DHALT_params;
 
 DH *
 DH_tmp_callback(/* not used */SSL *s, /* not used */int is_export, int keylength)
 {
-    return keylength == 512? DH512_params: DH1024_params;
+    return keylength == 512? DH512_params : DHALT_params;
 }
-#else
-#include    "dh2048.h"
-static DH   *DH512_params, *DH2048_params;
-
-DH *
-DH_tmp_callback(/* not used */SSL *s, /* not used */int is_export, int keylength)
-{
-    return keylength == 512? DH512_params: DH2048_params;
-}
-#endif
 
 static time_t   last_RSA, last_alive, last_expire;
 
@@ -1393,9 +1380,9 @@ init_timer(void)
 
     DH512_params = get_dh512();
 #if DH_LEN == 1024
-    DH1024_params = get_dh1024();
+    DHALT_params = get_dh1024();
 #else
-    DH2048_params = get_dh2048();
+    DHALT_params = get_dh2048();
 #endif
 
     return;

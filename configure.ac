@@ -3,7 +3,7 @@ AC_INIT([pound],[2.8a-gray],[gray+pound@gnu.org.ua],
         [pound],[http://www.apsis.ch/pound])
 AC_CONFIG_SRCDIR([pound.c])
 AC_CONFIG_HEADERS([config.h])
-dnl AM_INIT_AUTOMAKE([1.11 foreign tar-ustar])
+AM_INIT_AUTOMAKE([1.11 foreign tar-ustar])
 
 # Checks for programs.
 AC_PROG_CC
@@ -13,6 +13,8 @@ dnl AC_PROG_RANLIB
 AC_MSG_NOTICE([*** Checking for threads library and/or flags ***])
 
 acx_pthread_ok=no
+AC_SUBST([PTHREAD_CFLAGS])
+AC_SUBST([PTHREAD_LIBS])
 
 # We used to check for pthread.h first, but this fails if pthread.h
 # requires special compiler flags (e.g. on True64 or Sequent).
@@ -210,22 +212,21 @@ AC_ARG_WITH([dh],
  AC_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)]),
  [CPPFLAGS="-DDH_LEN=${with_dh} ${CPPFLAGS}"; C_DH_LEN="${with_dh}"],
  [CPPFLAGS="-DDH_LEN=2048 ${CPPFLAGS}"; C_DH_LEN="2048"])
+AC_SUBST(C_DH_LEN)
 
 AC_ARG_WITH([maxbuf],
  AC_HELP_STRING([--with-maxbuf=nnn],[Value of the MAXBUF parameter (default: 4096)]),
  [CPPFLAGS="-DMAXBUF=${with_maxbuf} ${CPPFLAGS}"; C_MAXBUF="${with_maxbuf}"],
  [C_MAXBUF="0"])
 
-I_OWNER=""
-
+AC_SUBST(I_OWNER)
 AC_ARG_WITH([owner],
  AC_HELP_STRING([--with-owner=name],
                 [The account that will own the files installed by Pound]),
  [I_OWNER="${with_owner}"; C_OWNER="${with_owner}"],
  [C_OWNER=""])
 
-I_GRP=""
-
+AC_SUBST(I_GRP)
 AC_ARG_WITH([group],
  AC_HELP_STRING([--with-group=name],
                 [The group that will own the files installed by Pound]),
@@ -368,6 +369,6 @@ then
     egrep -s '^proxy' /etc/group > /dev/null && I_GRP=proxy
 fi
 
-dnl AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
 
