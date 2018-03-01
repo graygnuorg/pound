@@ -8,6 +8,14 @@ POUND - REVERSE-PROXY AND LOAD-BALANCER
     under the GPL - no warranty, it's free to use, copy and
     give away.
 
+ABOUT THIS VERSION
+
+    This is a fork of Pound 2.8a modified to compile and link
+    with OpenSSL version 1.1.0 and later. Backward compatibility
+    with earlier versions of OpenSSL is retained. The orginal code
+    has been obtained from http://www.apsis.ch/pound/Pound-2.8a.tgz.
+    The modified version was tested under production load with
+    OpenSSL 1.1.0g and 1.0.1e.
 
 WHAT POUND IS:
 
