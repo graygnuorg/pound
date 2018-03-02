@@ -213,9 +213,13 @@ AC_DEFINE_UNQUOTED([T_RSA_KEYS],[$T_RSA_KEYS],
  
 AC_ARG_WITH([dh],
  AC_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)]),
- [DH_LEN=${withval}],
+ [case ${withval} in
+  1024|2048) DH_LEN=2048;;
+  *) AC_MSG_FAILURE([invalid value for DH key length])
+  esac],
  [DH_LEN=2048])
 
+AC_SUBST(DH_LEN) 
 AC_DEFINE_UNQUOTED([DH_LEN],[$DH_LEN],
  [DH key length])
 

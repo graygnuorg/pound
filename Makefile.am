@@ -25,14 +25,21 @@ install-exec-hook:
 
 noinst_HEADERS=pound.h config.h dh.h
 
-dh.h: 
-	(openssl dhparam -5 -C -noout 512; \
-	 openssl dhparam -5 -C -noout @C_DH_LEN@) > dh.h
+DHSRC = dh512.h dh@DH_LEN@.h
+
+dh512.h:
+	openssl dhparam -5 -C -noout 512 > dh512.h
+
+dh@DH_LEN@.h:
+	openssl dhparam -5 -C -noout @DH_LEN@ > dh@DH_LEN@.h
+
+dh.h: $(DHSRC)
+	cat $(DHSRC) > dh.h
 
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c
 
-BUILT_SOURCES=dh.h
-DISTCLEANFILES=dh.h
+BUILT_SOURCES=dh.h $(DHSRC)
+DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h 
 
 dist_man_MANS=pound.8 poundctl.8
