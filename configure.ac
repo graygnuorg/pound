@@ -193,9 +193,13 @@ fi
 
 AC_MSG_NOTICE([*** Parsing options ***])
 
+AC_SUBST(SSL_CPPFLAGS)
+AC_SUBST(SSL_LDFLAGS)
 AC_ARG_WITH([ssl],
  AC_HELP_STRING([--with-ssl=directory],[location of OpenSSL package]),
- [CPPFLAGS="-I${withval}/include ${CPPFLAGS}"; LDFLAGS="-L${withval}/lib ${LDFLAGS}"; C_SSL="${withval}"],
+ [SSL_CPPFLAGS="-I${withval}/include"
+  SSL_LDFLAGS="-L${withval}/lib ${LDFLAGS}"
+  C_SSL="${withval}"],
  [C_SSL=""])
 
 AC_ARG_WITH([t_rsa],

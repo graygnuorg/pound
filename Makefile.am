@@ -2,6 +2,8 @@ AM_CFLAGS=\
  -DF_CONF=\"@sysconfdir@/pound.cfg\"\
  @PTHREAD_CFLAGS@
 
+AM_CPPFLAGS = @SSL_CPPFLAGS@
+AM_LDFLAGS  = @SSL_LDFLAGS@
 LDADD=@PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound

@@ -492,7 +492,7 @@ extern thr_arg  *get_thr_arg(void);
 /*
  * get the current queue length
  */
-extern  get_thr_qlen(void);
+extern int get_thr_qlen(void);
 
 /*
  * handle an HTTP request

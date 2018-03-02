@@ -31,7 +31,6 @@
 static char *h500 = "500 Internal Server Error",
             *h501 = "501 Not Implemented",
             *h503 = "503 Service Unavailable",
-            *h414 = "414 Request URI too long",
             *h400 = "Bad Request";
 
 static char *err_response = "HTTP/1.0 %s\r\nContent-Type: text/html\r\nContent-Length: %d\r\nExpires: now\r\nPragma: no-cache\r\nCache-control: no-cache,no-store\r\n\r\n%s";
@@ -127,7 +126,7 @@ static int
 get_line(BIO *const in, char *const buf, const int bufsize)
 {
     char    tmp;
-    int     i, n_read, seen_cr;
+    int     i, seen_cr;
 
     memset(buf, 0, bufsize);
     for(i = 0, seen_cr = 0; i < bufsize - 1; i++)
@@ -415,7 +414,7 @@ static char **
 get_headers(BIO *const in, BIO *const cl, const LISTENER *lstn)
 {
     char    **headers, buf[MAXBUF];
-    int     res, n, has_eol;
+    int     res, n;
 
     /* HTTP/1.1 allows leading CRLF */
     memset(buf, 0, MAXBUF);

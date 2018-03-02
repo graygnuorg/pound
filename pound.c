@@ -66,6 +66,9 @@ static  pid_t               son = 0;
 /*
  * OpenSSL thread support stuff
  */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+#define l_init()
+#else
 static pthread_mutex_t  *l_array;
 
 static void
@@ -104,6 +107,7 @@ l_id(void)
 {
     return (unsigned long)pthread_self();
 }
+#endif
 
 /*
  * work queue stuff
@@ -170,6 +174,7 @@ get_thr_arg(void)
 /*
  * get the current queue length
  */
+int
 get_thr_qlen(void)
 {
     int     res;
@@ -233,7 +238,6 @@ main(const int argc, char **argv)
     LISTENER            *lstn;
     pthread_t           thr;
     pthread_attr_t      attr;
-    struct sched_param  sp;
     uid_t               user_id;
     gid_t               group_id;
     FILE                *fpid;
