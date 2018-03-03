@@ -91,6 +91,21 @@ STATUS
     issues were observed with problematic SSL implementations, most notably
     with Opera 6, but these should be OK in the present version.
 
+BOOTSTRAPPING
+
+    If you obtained the sources from the repository, you will need the
+    following tools in order to build from them:
+
+      - Autoconf v.2.63 or later (http://www.gnu.org/software/automake) 
+      - Automake v.1.11 or later (http://www.gnu.org/software/autoconf)
+
+    Change to the project directory and run
+
+      ./bootstrap
+
+    This will create the configure script and populate the directory with
+    auxiliary files needed for configuration. Once done, proceed to
+    ./configure and make as discussed in the following section.
 
 INSTALLATION
 
