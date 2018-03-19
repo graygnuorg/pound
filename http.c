@@ -142,7 +142,7 @@ get_line(BIO *const in, char *const buf, const int bufsize)
                 if(tmp != '\n') {
                     /* we have CR not followed by NL */
                     do {
-                        if(BIO_read(in, &tmp, 1) < 0)
+                        if(BIO_read(in, &tmp, 1) <= 0)
                             return 1;
                     } while(tmp != '\n');
                     return 1;
@@ -169,7 +169,7 @@ get_line(BIO *const in, char *const buf, const int bufsize)
 
             /* all other control characters cause an error */
             do {
-                if(BIO_read(in, &tmp, 1) < 0)
+                if(BIO_read(in, &tmp, 1) <= 0)
                     return 1;
             } while(tmp != '\n');
             return 1;
@@ -177,7 +177,7 @@ get_line(BIO *const in, char *const buf, const int bufsize)
 
     /* line too long */
     do {
-        if(BIO_read(in, &tmp, 1) < 0)
+        if(BIO_read(in, &tmp, 1) <= 0)
             return 1;
     } while(tmp != '\n');
     return 1;
