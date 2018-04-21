@@ -261,7 +261,11 @@ AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
 AC_ARG_ENABLE([cert1l], 
  AC_HELP_STRING([--enable-cert1l],
                 [enable or disable single-line certificate (default: disabled)]),
- [test ${enableval} = "yes"; CERT1L=$?],
+ [if test ${enableval} = "yes"; then
+    CERT1L=1
+  else
+    CERT1L=0
+  fi],
  [CERT1L=0])
 
 AC_DEFINE_UNQUOTED([CERT1L],[$CERT1L],
