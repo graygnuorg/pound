@@ -1532,8 +1532,6 @@ config_parse(const int argc, char **const argv)
             logmsg(LOG_DEBUG, "  Configuration switches:");
 	    if (!SUPERVISOR)
 		    logmsg(LOG_DEBUG, "    --disable-super");
-	    if (CERT1L)
-		    logmsg(LOG_DEBUG, "    --enable-cert1l");
 #ifdef  C_SSL
             if(strcmp(C_SSL, ""))
                 logmsg(LOG_DEBUG, "    --with-ssl=%s", C_SSL);

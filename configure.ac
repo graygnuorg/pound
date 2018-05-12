@@ -258,19 +258,6 @@ AC_ARG_ENABLE([super],
 AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
  [Run supervisor process])
  
-AC_ARG_ENABLE([cert1l], 
- AC_HELP_STRING([--enable-cert1l],
-                [enable or disable single-line certificate (default: disabled)]),
- [if test ${enableval} = "yes"; then
-    CERT1L=1
-  else
-    CERT1L=0
-  fi],
- [CERT1L=0])
-
-AC_DEFINE_UNQUOTED([CERT1L],[$CERT1L],
- [Enable single-line certificates])
- 
 AC_ARG_ENABLE([pcreposix],
  AC_HELP_STRING([--enable-pcreposix],
          [enable or disable using the pcreposix library (default: enabled if available)]),

@@ -432,9 +432,6 @@ check_header(const char *header, char *const content)
                 return hd_types[i].val;
             }
         return HEADER_OTHER;
-    } else if(header[0] == ' ' || header[0] == '\t') {
-        *content = '\0';
-        return HEADER_OTHER;
     } else
         return HEADER_ILLEGAL;
 }
