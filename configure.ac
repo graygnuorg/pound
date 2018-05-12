@@ -1,5 +1,5 @@
 AC_PREREQ(2.63)
-AC_INIT([pound],[2.8a-gray],[gray+pound@gnu.org.ua],
+AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],
         [pound],[http://www.apsis.ch/pound])
 AC_CONFIG_SRCDIR([pound.c])
 AC_CONFIG_HEADERS([config.h])

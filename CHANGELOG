@@ -1,4 +1,16 @@
 ------------------------------------------------------------------------
+r83 | roseg | 2018-05-11 12:16:05 +0200 (Fri, 11 May 2018) | 9 lines
+
+Release 2.8
+
+Enhancements:
+    - removed DynScale flag and support
+    - removed support for multi-line headers (both input and output)
+
+Bug fixes:
+    - fixed potential request smuggling via fudged headers
+
+------------------------------------------------------------------------
 r82 | roseg | 2016-10-23 16:59:47 +0200 (Sun, 23 Oct 2016) | 8 lines
 
 Release 2.8a

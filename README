@@ -14,7 +14,9 @@ ABOUT THIS VERSION
     with OpenSSL version 1.1.0 and later. Backward compatibility
     with earlier versions of OpenSSL is retained. The orginal code
     has been obtained from http://www.apsis.ch/pound/Pound-2.8a.tgz.
-    The modified version was tested under production load with
+    Later on, the changes from the stable 2.8 release were applied.
+    
+    This modified version was tested under production load with
     OpenSSL 1.1.0g and 1.0.1e.
 
 WHAT POUND IS:
