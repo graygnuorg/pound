@@ -47,6 +47,7 @@ SERVICE     *services;          /* global services (if any) */
 LISTENER    *listeners;         /* all available listeners */
 
 regex_t HEADER,             /* Allowed header */
+        CONN_UPGRD,         /* upgrade in connection header */
         CHUNK_HEAD,         /* chunk header line */
         RESP_SKIP,          /* responses for which we skip response */
         RESP_IGN,           /* responses for which we ignore content */
@@ -290,6 +291,7 @@ main(const int argc, char **argv)
 
     /* prepare regular expressions */
     if(regcomp(&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&CONN_UPGRD, "(^|[ \t,])upgrade([ \t,]|$)", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&CHUNK_HEAD, "^([0-9a-f]+).*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&RESP_SKIP, "^HTTP/1.1 100.*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&RESP_IGN, "^HTTP/1.[01] (10[1-9]|1[1-9][0-9]|204|30[456]).*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
