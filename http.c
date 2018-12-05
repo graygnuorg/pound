@@ -568,7 +568,22 @@ do_http(thr_arg *arg)
     double              start_req, end_req;
     RENEG_STATE         reneg_state;
     BIO_ARG             ba1, ba2;
+    enum {
+	    WSS_REQ_GET                        = 0x01,
+	    WSS_REQ_HEADER_CONNECTION_UPGRADE  = 0x02,
+	    WSS_REQ_HEADER_UPGRADE_WEBSOCKET   = 0x04,
 
+	    WSS_RESP_101                       = 0x08,
+	    WSS_RESP_HEADER_CONNECTION_UPGRADE = 0x10,
+	    WSS_RESP_HEADER_UPGRADE_WEBSOCKET  = 0x20,
+	    WSS_COMPLETE = WSS_REQ_GET
+	                   | WSS_REQ_HEADER_CONNECTION_UPGRADE
+	                   | WSS_REQ_HEADER_UPGRADE_WEBSOCKET
+	                   | WSS_RESP_101
+	                   | WSS_RESP_HEADER_CONNECTION_UPGRADE
+	                   | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
+    };
+	    
     reneg_state = RENEG_INIT;
     ba1.reneg_state =  &reneg_state;
     ba2.reneg_state = &reneg_state;
@@ -700,7 +715,7 @@ do_http(thr_arg *arg)
             else if(!strncasecmp(request + matches[1].rm_so, "RPC_OUT_DATA", matches[1].rm_eo - matches[1].rm_so))
                 is_rpc = 0;
             else if(!strncasecmp(request + matches[1].rm_so, "GET", matches[1].rm_eo - matches[1].rm_so))
-                is_ws |= 0x1;
+                is_ws |= WSS_REQ_GET;
         } else {
             addr2str(caddr, MAXBUF - 1, &from_host, 1);
             logmsg(LOG_WARNING, "(%lx) e501 bad request \"%s\" from %s", pthread_self(), request, caddr);
@@ -747,11 +762,11 @@ do_http(thr_arg *arg)
                     conn_closed = 1;
                 /* Connection: upgrade */
                 else if(!regexec(&CONN_UPGRD, buf, 0, NULL, 0))
-                    is_ws |= 0x2;
+		    is_ws |= WSS_REQ_HEADER_CONNECTION_UPGRADE;
                 break;
             case HEADER_UPGRADE:
                 if(!strcasecmp("websocket", buf))
-                    is_ws |= 0x4;
+                    is_ws |= WSS_REQ_HEADER_UPGRADE_WEBSOCKET;
                 break;
             case HEADER_TRANSFER_ENCODING:
                 if(!strcasecmp("chunked", buf))
@@ -1422,7 +1437,7 @@ do_http(thr_arg *arg)
             if(!no_cont && !regexec(&RESP_IGN, response, 0, NULL, 0))
                 no_cont = 1;
             if(!strncasecmp("101", response + 9, 3))
-                is_ws |= 0x10;
+                is_ws |= WSS_RESP_101;
 
             for(chunked = 0, cont = -1L, n = 1; n < MAXHEADERS && headers[n]; n++) {
                 switch(check_header(headers[n], buf)) {
@@ -1431,11 +1446,11 @@ do_http(thr_arg *arg)
                         conn_closed = 1;
                     /* Connection: upgrade */
                     else if(!regexec(&CONN_UPGRD, buf, 0, NULL, 0))
-                        is_ws |= 0x20;
+                        is_ws |= WSS_RESP_HEADER_CONNECTION_UPGRADE;
                     break;
                 case HEADER_UPGRADE:
                     if(!strcasecmp("websocket", buf))
-                        is_ws |= 0x40;
+                        is_ws |= WSS_RESP_HEADER_UPGRADE_WEBSOCKET;
                     break;
                 case HEADER_TRANSFER_ENCODING:
                     if(!strcasecmp("chunked", buf)) {
@@ -1599,7 +1614,7 @@ do_http(thr_arg *arg)
                     clean_all();
                     return;
                 }
-            } else if(is_ws == 0x77) {
+            } else if(is_ws == WSS_COMPLETE) {
                 /*
                  * special mode for Websockets - content until EOF
                  */
