@@ -8,7 +8,7 @@ POUND - REVERSE-PROXY AND LOAD-BALANCER
     under the GPL - no warranty, it's free to use, copy and
     give away.
 
-ABOUT THIS VERSION (with OpenSSL v1.1.0)
+ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket support)
 
     This is a fork of Pound 2.8a modified to compile and link
     with OpenSSL version 1.1.0 and later. Backward compatibility
@@ -19,22 +19,10 @@ ABOUT THIS VERSION (with OpenSSL v1.1.0)
     This modified version was tested under production load with
     OpenSSL 1.1.0g and 1.0.1e.
 
-ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket)
-
-    This is a fork of Sergey Poznyakoff's fork (b) of Pound from
-    Apsis (a) patched with WebSocket support provided by Frank
-    Schmirler (c).
-
-    a) <http://www.apsis.ch/pound>
-    b) <https://github.com/graygnuorg/pound.git>
-    c) <http://www.apsis.ch/pound/pound_list/archive/2018/2018-08/1533635922000>
-
-    Prerequisites (Debian) are:
-
-    sudo apt install build-essential
-    sudo apt install libssl-dev
-    sudo apt install linux-headers-$(uname -r)
-    sudo apt install autoconf
+    This version was further modified by Rick O'Sullivan by
+    incorporating WebSocket support, provided by Frank Schmirler
+    (see
+    <http://www.apsis.ch/pound/pound_list/archive/2018/2018-08/1533635922000>)
 
 WHAT POUND IS:
 
