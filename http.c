@@ -550,7 +550,7 @@ log_bytes(char *res, const LONG cnt)
 void
 do_http(thr_arg *arg)
 {
-    int                 cl_11, be_11, res, chunked, n, sock, no_cont, skip, conn_closed, force_10, sock_proto, is_rpc;
+    int                 cl_11, be_11, res, chunked, n, sock, no_cont, skip, conn_closed, force_10, sock_proto, is_rpc, is_ws;
     LISTENER            *lstn;
     SERVICE             *svc;
     BACKEND             *backend, *cur_backend, *old_backend;
@@ -671,6 +671,7 @@ do_http(thr_arg *arg)
     for(cl_11 = be_11 = 0;;) {
         res_bytes = L0;
         is_rpc = -1;
+        is_ws = 0;
         v_host[0] = referer[0] = u_agent[0] = u_name[0] = '\0';
         conn_closed = 0;
         for(n = 0; n < MAXHEADERS; n++)
@@ -698,6 +699,8 @@ do_http(thr_arg *arg)
                 is_rpc = 1;
             else if(!strncasecmp(request + matches[1].rm_so, "RPC_OUT_DATA", matches[1].rm_eo - matches[1].rm_so))
                 is_rpc = 0;
+            else if(!strncasecmp(request + matches[1].rm_so, "GET", matches[1].rm_eo - matches[1].rm_so))
+                is_ws |= 0x1;
         } else {
             addr2str(caddr, MAXBUF - 1, &from_host, 1);
             logmsg(LOG_WARNING, "(%lx) e501 bad request \"%s\" from %s", pthread_self(), request, caddr);
@@ -742,6 +745,13 @@ do_http(thr_arg *arg)
             case HEADER_CONNECTION:
                 if(!strcasecmp("close", buf))
                     conn_closed = 1;
+                /* Connection: upgrade */
+                else if(!regexec(&CONN_UPGRD, buf, 0, NULL, 0))
+                    is_ws |= 0x2;
+                break;
+            case HEADER_UPGRADE:
+                if(!strcasecmp("websocket", buf))
+                    is_ws |= 0x4;
                 break;
             case HEADER_TRANSFER_ENCODING:
                 if(!strcasecmp("chunked", buf))
@@ -1411,12 +1421,21 @@ do_http(thr_arg *arg)
             /* some response codes (1xx, 204, 304) have no content */
             if(!no_cont && !regexec(&RESP_IGN, response, 0, NULL, 0))
                 no_cont = 1;
+            if(!strncasecmp("101", response + 9, 3))
+                is_ws |= 0x10;
 
             for(chunked = 0, cont = -1L, n = 1; n < MAXHEADERS && headers[n]; n++) {
                 switch(check_header(headers[n], buf)) {
                 case HEADER_CONNECTION:
                     if(!strcasecmp("close", buf))
                         conn_closed = 1;
+                    /* Connection: upgrade */
+                    else if(!regexec(&CONN_UPGRD, buf, 0, NULL, 0))
+                        is_ws |= 0x20;
+                    break;
+                case HEADER_UPGRADE:
+                    if(!strcasecmp("websocket", buf))
+                        is_ws |= 0x40;
                     break;
                 case HEADER_TRANSFER_ENCODING:
                     if(!strcasecmp("chunked", buf)) {
@@ -1579,6 +1598,114 @@ do_http(thr_arg *arg)
                     }
                     clean_all();
                     return;
+                }
+            } else if(is_ws == 0x77) {
+                /*
+                 * special mode for Websockets - content until EOF
+                 */
+                char one;
+                BIO  *cl_unbuf;
+                BIO  *be_unbuf;
+                struct pollfd p[2];
+
+                cl_11 = be_11 = 0;
+
+                memset(p, 0, sizeof(p));
+                BIO_get_fd(cl, &p[0].fd);
+                p[0].events = POLLIN | POLLPRI;
+                BIO_get_fd(be, &p[1].fd);
+                p[1].events = POLLIN | POLLPRI;
+
+                while (BIO_pending(cl) || BIO_pending(be) || poll(p, 2, cur_backend->ws_to * 1000) > 0) {
+
+                    /*
+                     * first read whatever is already in the input buffer
+                     */
+                    while(BIO_pending(cl)) {
+                        if(BIO_read(cl, &one, 1) != 1) {
+                            logmsg(LOG_NOTICE, "(%lx) error read ws request pending: %s",
+                                pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        }
+                        if(BIO_write(be, &one, 1) != 1) {
+                            if(errno)
+                                logmsg(LOG_NOTICE, "(%lx) error write ws request pending: %s",
+                                    pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        }
+                    }
+                    BIO_flush(be);
+
+                    while(BIO_pending(be)) {
+                        if(BIO_read(be, &one, 1) != 1) {
+                            logmsg(LOG_NOTICE, "(%lx) error read ws response pending: %s",
+                                pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        }
+                        if(BIO_write(cl, &one, 1) != 1) {
+                            if(errno)
+                                logmsg(LOG_NOTICE, "(%lx) error write ws response pending: %s",
+                                    pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        }
+                        res_bytes++;
+                    }
+                    BIO_flush(cl);
+
+                    /*
+                     * find the socket BIO in the chain
+                     */
+                    if ((cl_unbuf = BIO_find_type(cl, lstn->ctx? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL) {
+                         logmsg(LOG_WARNING, "(%lx) error get unbuffered: %s", pthread_self(), strerror(errno));
+                         clean_all();
+                         return;
+                    }
+                    if((be_unbuf = BIO_find_type(be, cur_backend->ctx? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL) {
+                        logmsg(LOG_WARNING, "(%lx) error get unbuffered: %s", pthread_self(), strerror(errno));
+                        clean_all();
+                        return;
+                    }
+
+                    /*
+                     * copy till EOF
+                     */
+                    if(p[0].revents) {
+                        res = BIO_read(cl_unbuf, buf, MAXBUF);
+                        if(res <= 0) {
+                            break;
+                        }
+                        if(BIO_write(be, buf, res) != res) {
+                            if(errno)
+                                logmsg(LOG_NOTICE, "(%lx) error copy ws request body: %s",
+                                    pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        } else {
+                            BIO_flush(be);
+                        }
+                        p[0].revents = 0;
+                    }
+                    if(p[1].revents) {
+                        res = BIO_read(be_unbuf, buf, MAXBUF);
+                        if(res <= 0) {
+                            break;
+                        }
+                        if(BIO_write(cl, buf, res) != res) {
+                            if(errno)
+                                logmsg(LOG_NOTICE, "(%lx) error copy ws response body: %s",
+                                    pthread_self(), strerror(errno));
+                            clean_all();
+                            return;
+                        } else {
+                            res_bytes += res;
+                            BIO_flush(cl);
+                        }
+                        p[1].revents = 0;
+                    }
                 }
             }
         }

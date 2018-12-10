@@ -418,6 +418,7 @@ check_header(const char *header, char *const content)
         { "User-agent",         10, HEADER_USER_AGENT },
         { "Destination",        11, HEADER_DESTINATION },
         { "Expect",             6,  HEADER_EXPECT },
+        { "Upgrade",            7,  HEADER_UPGRADE },
         { "",                   0,  HEADER_OTHER },
     };
     int i;

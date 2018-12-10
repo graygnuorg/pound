@@ -289,6 +289,13 @@ wait for a connection to the back-end (in seconds). Default: the
 .B TimeOut
 value. This value can be overridden for specific back-ends.
 .TP
+\fBWSTimeOut\fR value
+How long should
+.B Pound
+wait for data from either back-end or client in a connection upgraded to
+a WebSocket (in seconds). Default: 600 seconds.
+This value can be overridden for specific back-ends.
+.TP
 \fBGrace\fR value
 How long should
 .B Pound
@@ -760,6 +767,11 @@ value.
 \fBConnTO\fR val
 Override the global
 .I ConnTO
+value.
+.TP
+\fBWSTimeOut\fR val
+Override the global
+.I WSTimeOut
 value.
 .TP
 \fBHAport\fR [ address ] port
