@@ -15,7 +15,7 @@ stamp-h1
 dh.h
 dh2048.h
 dh512.h
-pound
+/pound
 poundctl
 configure
 config.guess 
