@@ -1,0 +1,23 @@
+# /etc/systemd/system/pound.service: systemd unit file
+#
+# Usage:
+#   sudo systemd-analyze verify pound.service
+#   sudo systemctl enable|disable pound
+#   sudo systemctl status|start|stop pound
+#   sudo systemctl daemon-reload
+
+[Unit]
+Description=Pound Reverse Proxy And Load Balancer
+After=network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/local/sbin/pound -f /etc/pound/pound.cfg start
+ExecStop=/usr/local/sbin/pound stop
+WorkingDirectory=/var/run/pound
+PIDFile=/var/run/pound.pid
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
