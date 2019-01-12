@@ -1,6 +1,6 @@
 #! /bin/sh
 ### BEGIN INIT INFO
-# Provides:          pound.sh
+# Provides:          pound
 # Required-Start:    $remote_fs $syslog
 # Required-Stop:     $remote_fs $syslog
 # Should-Start:      $named
@@ -12,7 +12,11 @@
 #                    HTTPS front-end for Web servers
 ### END INIT INFO
 #
-# pound	- reverse proxy, load-balancer and https front-end for web-servers
+# pound - reverse proxy, load-balancer and https front-end for web-servers
+
+# Hint: SysV configuration for rcN.d symbolic links
+#   Debian.: sudo update-rc.d pound defaults
+#   RHEL...: sudo chkconfig pound on
 
 PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
 DAEMON=/usr/local/sbin/pound
