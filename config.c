@@ -355,9 +355,6 @@ parse_be(const int is_emergency)
             SSL_CTX_set_app_data(res->ctx, res);
             SSL_CTX_set_verify(res->ctx, SSL_VERIFY_NONE, NULL);
             SSL_CTX_set_mode(res->ctx, SSL_MODE_AUTO_RETRY);
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
-            SSL_CTX_set_mode(res->ctx, SSL_MODE_SEND_FALLBACK_SCSV);
-#endif
             SSL_CTX_set_options(res->ctx, SSL_OP_ALL);
 #ifdef  SSL_OP_NO_COMPRESSION
             SSL_CTX_set_options(res->ctx, SSL_OP_NO_COMPRESSION);

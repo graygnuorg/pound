@@ -19,15 +19,18 @@ ABOUT THIS VERSION (with OpenSSL v1.1.0)
     This modified version was tested under production load with
     OpenSSL 1.1.0g and 1.0.1e.
 
-ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket)
+ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket and Patches)
 
     This is a fork of Sergey Poznyakoff's fork (b) of Pound from
-    Apsis (a) patched with WebSocket support provided by Frank
-    Schmirler (c).
+    Apsis (a) patched with WebSocket support and other patches
+    provided by Frank Schmirler (c,d).
 
     a) <http://www.apsis.ch/pound>
     b) <https://github.com/graygnuorg/pound.git>
     c) <http://www.apsis.ch/pound/pound_list/archive/2018/2018-08/1533635922000>
+    d) Wrong use of Fallback SCSV / TLS1.3 interoperability
+       <http://www.apsis.ch/pound/pound_list/archive/2018/2018-12/1545518870000#1545518870000>
+    e) Added 'etc' folder with SysV and SystemD boot scripts.
 
     Prerequisites (Debian) are:
 
