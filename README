@@ -8,7 +8,7 @@ POUND - REVERSE-PROXY AND LOAD-BALANCER
     under the GPL - no warranty, it's free to use, copy and
     give away.
 
-ABOUT THIS VERSION (with OpenSSL v1.1.0)
+ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket support)
 
     This is a fork of Pound 2.8a modified to compile and link
     with OpenSSL version 1.1.0 and later. Backward compatibility
