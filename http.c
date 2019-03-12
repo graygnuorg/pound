@@ -1172,6 +1172,7 @@ do_http(thr_arg *arg)
                 }
                 PEM_write_bio_X509(bb, x509);
                 get_line(bb, buf, MAXBUF);
+                strip_eol(buf);
                 if(BIO_printf(be, "X-SSL-certificate: %s", buf) <= 0) {
                     str_be(buf, MAXBUF - 1, cur_backend);
                     end_req = cur_time();
@@ -1183,6 +1184,7 @@ do_http(thr_arg *arg)
                     return;
                 }
                 while(get_line(bb, buf, MAXBUF) == 0) {
+                    strip_eol(buf);
                     if(BIO_printf(be, "%s", buf) <= 0) {
                         str_be(buf, MAXBUF - 1, cur_backend);
                         end_req = cur_time();
