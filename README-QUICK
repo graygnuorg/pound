@@ -1,0 +1,47 @@
+Prerequisites (Debian)
+
+    sudo apt install build-essential
+    sudo apt install libssl-dev
+    sudo apt install linux-headers-$(uname -r)
+    sudo apt install autoconf
+
+Build
+
+	1) ./bootstrap
+	2) ./configure
+	3) Standard make targets
+
+		all - Compile the entire program. (default target)
+		install - Compile the program and copy the executables, libraries, and so on to the file names where they should reside for actual use.
+		uninstall - Delete all the installed files—the copies that the ‘install’ and ‘install-*’ targets create. 
+		clean - Delete all files in the current directory that are normally created by building the program.
+		distclean - Delete all files in the current directory (or created by this makefile) that are created by configuring or building the program.
+		dist - Create a distribution tar file for this program.
+		check - Perform self-tests (if any). 
+		installcheck - Perform installation tests (if any).
+		installdirs - It’s useful to add a target named ‘installdirs’ to create the directories where files are installed, and their parent directories.
+
+Install Paths
+
+	/etc/default/pound
+	/etc/pound/
+	/etc/rsyslog.d/30-pound.conf
+	/usr/local/share/man/man8/pound.8
+	/usr/local/share/man/man8/poundctl.8
+	/usr/local/bin/poundctl
+	/usr/local/sbin/pound
+	/var/log/pound/
+
+Daemon Paths
+
+	SystemV: /etc/init.d/pound
+	SystemV: /etc/rc?.d/*pound
+	SystemD: /etc/systemd/system/pound.service
+
+Git Status / Clean
+
+	git status -u
+	git remote show origin
+	git ls-files . --ignored --exclude-standard --others
+	git clean -xn
+	git clean -xfd
