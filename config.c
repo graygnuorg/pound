@@ -77,7 +77,7 @@ static regex_t  Err414, Err500, Err501, Err503, MaxRequest, HeadRemove, RewriteL
 static regex_t  Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd, Emergency, Priority, HAport, HAportAddr;
 static regex_t  Redirect, RedirectN, TimeOut, WSTimeOut, Session, Type, TTL, ID;
 static regex_t  ClientCert, AddHeader, DisableProto, SSLAllowClientRenegotiation, SSLHonorCipherOrder, Ciphers;
-static regex_t  CAlist, VerifyList, CRLlist, NoHTTPS11, Grace, Include, ConnTO, IgnoreCase, HTTPS;
+static regex_t  CAlist, VerifyList, CRLlist, XSSLHeaders, NoHTTPS11, Grace, Include, ConnTO, IgnoreCase, HTTPS;
 static regex_t  Disabled, Threads, CNName, Anonymise, ECDHCurve;
 
 static regmatch_t   matches[5];
@@ -1234,6 +1234,8 @@ parse_HTTPS(void)
 #else
             conf_err("your version of OpenSSL does not support CRL checking");
 #endif
+        } else if(!regexec(&XSSLHeaders, lin, 4, matches, 0)) {
+            res->xSSLHeaders = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&NoHTTPS11, lin, 4, matches, 0)) {
             res->noHTTPS11 = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&Service, lin, 4, matches, 0)) {
@@ -1493,6 +1495,7 @@ config_parse(const int argc, char **const argv)
     || regcomp(&CAlist, "^[ \t]*CAlist[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&VerifyList, "^[ \t]*VerifyList[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&CRLlist, "^[ \t]*CRLlist[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&XSSLHeaders, "^[ \t]*XSSLHeaders[ \t]+([0-2])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&NoHTTPS11, "^[ \t]*NoHTTPS11[ \t]+([0-2])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Include, "^[ \t]*Include[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&ConnTO, "^[ \t]*ConnTO[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
@@ -1651,6 +1654,7 @@ config_parse(const int argc, char **const argv)
     regfree(&CAlist);
     regfree(&VerifyList);
     regfree(&CRLlist);
+    regfree(&XSSLHeaders);
     regfree(&NoHTTPS11);
     regfree(&Include);
     regfree(&ConnTO);

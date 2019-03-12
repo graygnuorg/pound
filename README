@@ -585,9 +585,15 @@ REQUEST LOGGING
 HTTPS CERTIFICATES
 
     If a client browser connects via HTTPS and if it presents a
-    certificate and if HTTPSHeaders is set, Pound will obtain the
+    certificate and if XSSLHeaders is set, Pound will obtain the
     certificate data and add the following HTTP headers to the
     request it makes to the server:
+
+    If XSSLHeaders >= 1 include:  
+
+    - X-SSL-cipher: the cipher currently in use
+
+    If XSSLHeaders >= 2 include:  
 
     - X-SSL-Subject: information about the certificate owner
 
@@ -598,8 +604,6 @@ HTTPS CERTIFICATES
     - X-SSL-notAfter: end validity date for the certificate
 
     - X-SSL-serial: certificate serial number (in decimal)
-
-    - X-SSL-cipher: the cipher currently in use
 
     - X-SSL-certificate: the full client certificate (multi-line)
 

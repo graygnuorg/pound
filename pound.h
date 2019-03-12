@@ -398,6 +398,7 @@ typedef struct _listener {
     int                 sock;               /* listening socket */
     POUND_CTX           *ctx;               /* CTX for SSL connections */
     int                 clnt_check;         /* client verification mode */
+    int                 xSSLHeaders;        /* X-SSL headers mode */
     int                 noHTTPS11;          /* HTTP 1.1 mode for SSL */
     char                *add_head;          /* extra SSL header */
     regex_t             verb;               /* pattern to match the request verb against */

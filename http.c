@@ -1091,7 +1091,7 @@ do_http(thr_arg *arg)
         free_headers(headers);
 
         /* if SSL put additional headers for client certificate */
-        if(cur_backend->be_type == 0 && ssl != NULL) {
+        if(cur_backend->be_type == 0 && ssl != NULL && lstn->xSSLHeaders > 0) {
             const SSL_CIPHER  *cipher;
 
             if((cipher = SSL_get_current_cipher(ssl)) != NULL) {
@@ -1108,7 +1108,7 @@ do_http(thr_arg *arg)
                 }
             }
 
-            if(lstn->clnt_check > 0 && x509 != NULL && (bb = BIO_new(BIO_s_mem())) != NULL) {
+            if(lstn->clnt_check > 0 && x509 != NULL && (bb = BIO_new(BIO_s_mem())) != NULL && lstn->xSSLHeaders > 1) {
                 X509_NAME_print_ex(bb, X509_get_subject_name(x509), 8, XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
                 get_line(bb, buf, MAXBUF);
                 if(BIO_printf(be, "X-SSL-Subject: %s\r\n", buf) <= 0) {
