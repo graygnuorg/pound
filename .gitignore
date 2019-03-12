@@ -2,6 +2,7 @@ Makefile
 Makefile.in
 install-sh
 *.orig
+*.pid
 *.rej
 core
 config.h
