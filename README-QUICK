@@ -8,11 +8,11 @@ Prerequisites (Debian)
 Build
 
     1) ./bootstrap
-    2) ./configure
+    2) ./configure --with-maxbuf=8192
     3) make all
        3.1) makes poundctl
        3.2) makes pound
-    4) sudo make install
+    4) sudo make install-strip
        4.1) installs /usr/local/bin/poundctl
        4.2) installs /usr/local/sbin/pound
        4.3) installs /usr/local/share/man/man8/poundctl.8
@@ -25,6 +25,7 @@ Standard make targets
 
     all - Compile the entire program. (default target)
     install - Compile the program and copy the executables, libraries, and so on to the file names where they should reside for actual use.
+	install-strip Like install, but strip the executable files while installing them.
     uninstall - Delete all the installed files—the copies that the ‘install’ and ‘install-*’ targets create. 
     clean - Delete all files in the current directory that are normally created by building the program.
     distclean - Delete all files in the current directory (or created by this makefile) that are created by configuring or building the program.

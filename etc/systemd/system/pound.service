@@ -12,10 +12,10 @@ After=network.target
 
 [Service]
 Type=forking
-ExecStart=/usr/local/sbin/pound -f /etc/pound/pound.cfg start
-ExecStop=/usr/local/sbin/pound stop
+ExecStart=/usr/local/sbin/pound -f /etc/pound/pound.cfg
+# ExecStop=/bin/kill -TERM $MAINPID
+# PIDFile=/var/run/pound.pid
 WorkingDirectory=/var/run/pound
-PIDFile=/var/run/pound.pid
 Restart=on-failure
 RestartSec=10
 
