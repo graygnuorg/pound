@@ -1170,22 +1170,12 @@ do_http(thr_arg *arg)
                     clean_all();
                     return;
                 }
-                PEM_write_bio_X509(bb, x509);
-                get_line(bb, buf, MAXBUF);
-                strip_eol(buf);
-                if(BIO_printf(be, "X-SSL-certificate: %s", buf) <= 0) {
-                    str_be(buf, MAXBUF - 1, cur_backend);
-                    end_req = cur_time();
-                    logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-                        pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
-                    err_reply(cl, h500, lstn->err500);
-                    BIO_free_all(bb);
-                    clean_all();
-                    return;
-                }
-                while(get_line(bb, buf, MAXBUF) == 0) {
+				if (lstn->xSSLHeaders > 2)
+                {
+                    PEM_write_bio_X509(bb, x509);
+                    get_line(bb, buf, MAXBUF);
                     strip_eol(buf);
-                    if(BIO_printf(be, "%s", buf) <= 0) {
+                    if(BIO_printf(be, "X-SSL-certificate: %s", buf) <= 0) {
                         str_be(buf, MAXBUF - 1, cur_backend);
                         end_req = cur_time();
                         logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
@@ -1195,18 +1185,31 @@ do_http(thr_arg *arg)
                         clean_all();
                         return;
                     }
-                }
-                if(BIO_printf(be, "\r\n") <= 0) {
-                    str_be(buf, MAXBUF - 1, cur_backend);
-                    end_req = cur_time();
-                    logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-                        pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
-                    err_reply(cl, h500, lstn->err500);
+                    while(get_line(bb, buf, MAXBUF) == 0) {
+                        strip_eol(buf);
+                        if(BIO_printf(be, "%s", buf) <= 0) {
+                            str_be(buf, MAXBUF - 1, cur_backend);
+                            end_req = cur_time();
+                            logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+                                pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
+                            err_reply(cl, h500, lstn->err500);
+                            BIO_free_all(bb);
+                            clean_all();
+                            return;
+                        }
+                    }
+                    if(BIO_printf(be, "\r\n") <= 0) {
+                        str_be(buf, MAXBUF - 1, cur_backend);
+                        end_req = cur_time();
+                        logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+                            pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
+                        err_reply(cl, h500, lstn->err500);
+                        BIO_free_all(bb);
+                        clean_all();
+                        return;
+                    }
                     BIO_free_all(bb);
-                    clean_all();
-                    return;
                 }
-                BIO_free_all(bb);
             }
         }
         /* put additional client IP header */

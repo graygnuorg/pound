@@ -548,10 +548,11 @@ returned certificate.
 Set the CRL (Certificate Revocation List) file. The CRL_file is a file that contains
 the CRLs (in PEM format).
 .TP
-\fBXSSLHeaders\fR 0|1|2
+\fBXSSLHeaders\fR 0|1|2|3
 Control sending X-SSL headers to the backend server. If this value is
 0 disable the headers. If the value is 1 send some X-SLL headers. If the
-value is 2 then send all X-SSL headers.
+value is 2 then send more X-SSL headers. If the value is 3 then send all
+X-SSL headers.
 .TP
 \fBNoHTTPS11\fR 0|1|2
 Behave like an HTTP/1.0 server for HTTPS clients. If this value is

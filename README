@@ -605,6 +605,8 @@ HTTPS CERTIFICATES
 
     - X-SSL-serial: certificate serial number (in decimal)
 
+    If XSSLHeaders = 3 include:  
+
     - X-SSL-certificate: the full client certificate (multi-line)
 
     It is the application's responsibility to actually use these
