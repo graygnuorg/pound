@@ -12,10 +12,15 @@ After=network.target
 
 [Service]
 Type=forking
+RuntimeDirectory=pound
+RuntimeDirectoryMode=755
+WorkingDirectory=/var/run/pound
+PermissionsStartOnly=false
+ExecStartPre=/bin/mkdir -m 777 -p /var/chroot/pound
+ExecStartPre=/bin/mkdir -m 777 -p /var/log/pound
 ExecStart=/usr/local/sbin/pound -f /etc/pound/pound.cfg
 # ExecStop=/bin/kill -TERM $MAINPID
 # PIDFile=/var/run/pound.pid
-WorkingDirectory=/var/run/pound
 Restart=on-failure
 RestartSec=10
 
