@@ -2,6 +2,7 @@ Prerequisites (Debian)
 
     sudo apt install build-essential
     sudo apt install libssl-dev
+    sudo apt install libpcre3-dev (see https://linux.debian.devel.narkive.com/s8mlB5Xw/pcre-package-naming)
     sudo apt install linux-headers-$(uname -r)
     sudo apt install autoconf
 
@@ -12,6 +13,7 @@ Build
     3) make all
        3.1) makes poundctl
        3.2) makes pound
+       3.3) ldd pound
     4) sudo make install-strip
        4.1) installs /usr/local/bin/poundctl
        4.2) installs /usr/local/sbin/pound
@@ -25,7 +27,7 @@ Standard make targets
 
     all - Compile the entire program. (default target)
     install - Compile the program and copy the executables, libraries, and so on to the file names where they should reside for actual use.
-	install-strip Like install, but strip the executable files while installing them.
+    install-strip Like install, but strip the executable files while installing them.
     uninstall - Delete all the installed files—the copies that the ‘install’ and ‘install-*’ targets create. 
     clean - Delete all files in the current directory that are normally created by building the program.
     distclean - Delete all files in the current directory (or created by this makefile) that are created by configuring or building the program.
