@@ -31,6 +31,7 @@ ABOUT THIS VERSION (with OpenSSL v1.1.0 and WebSocket and Patches)
     d) Wrong use of Fallback SCSV / TLS1.3 interoperability
        <http://www.apsis.ch/pound/pound_list/archive/2018/2018-12/1545518870000#1545518870000>
     e) Added 'etc' folder with SysV and SystemD boot scripts.
+	f) Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 
     Prerequisites (Debian) are:
 
