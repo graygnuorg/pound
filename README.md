@@ -35,13 +35,7 @@ provided by Frank Schmirler (3,4).
    <http://www.apsis.ch/pound/pound_list/archive/2018/2018-12/1545518870000#1545518870000>
 5. Added 'etc' folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
-
-Prerequisites (Debian) are:
-
-	sudo apt install build-essential
-	sudo apt install libssl-dev
-	sudo apt install linux-headers-$(uname -r)
-	sudo apt install autoconf
+7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
 
 ### WHAT POUND IS:
 
