@@ -33,7 +33,7 @@ provided by Frank Schmirler (3,4).
 3. <http://www.apsis.ch/pound/pound_list/archive/2018/2018-08/1533635922000>
 4. Wrong use of Fallback SCSV / TLS1.3 interoperability
    <http://www.apsis.ch/pound/pound_list/archive/2018/2018-12/1545518870000#1545518870000>
-5. Added 'etc' folder with SysV and SystemD boot scripts.
+5. Added `etc` folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
 
@@ -61,7 +61,7 @@ provided by Frank Schmirler (3,4).
     among servers according to the requested URL.
 
 Pound is a very small program, easily audited for security
-problems. It can run as setuid/setgid and/or in a chroot
+problems. It can run as `setuid/setgid` and/or in a `chroot`
 jail. Pound does not access the hard-disk at all (except
 for reading certificate file(s) on start, if required)
 and should thus pose no security threat to any machine.
@@ -125,7 +125,10 @@ Change to the project directory and run
 
 This will create the configure script and populate the directory with
 auxiliary files needed for configuration. Once done, proceed to
-./configure and make as discussed in the following section.
+
+    ./configure
+
+and make as discussed in the following section.
 
 ### INSTALLATION
 
@@ -187,8 +190,8 @@ Failing that you should install from sources:
 5.  If it works, you may want to do some testing before installing.
 
 6.  Install the executable somewhere (it's likely that
-    /usr/local/sbin would make a good choice), as well
-    as the manual page (pound.8 -> /usr/local/man/man8).
+    `/usr/local/sbin` would make a good choice), as well
+    as the manual page (`pound.8` -> `/usr/local/man/man8`).
     The supplied Makefile will do it for you.
 
 7.  Make sure Pound gets started on boot. Read the man
@@ -424,7 +427,7 @@ to that host will be mapped back and forth by Zope to the required
 URL. This works weather you access Zope directly or via any number
 of proxies on the way, Pound included.
 
-To test: add a new host name to your /etc/hosts file, making it an
+To test: add a new host name to your `etc/hosts` file, making it an
 alias for localhost - something like::
 
     127.0.0.1 localhost www.testhost.mine
@@ -642,8 +645,8 @@ limits. Please keep in mind the following requirements:
 
 - on BSD style systems all threads run in the same process space. Do
   a ps and you see a single 'pound' process. The process needs two
-  file descriptors per active request (bash: 'ulimit -n', csh
-  'limit maxfiles'/'limit openfiles').
+  file descriptors per active request (bash: `ulimit -n`, csh
+  `limit maxfiles`/`limit openfiles`).
 
 - on most systems the thread library comes with a built-in limit on the
   maximal number of concurrent threads allowed - on older systems it usually
@@ -852,9 +855,9 @@ The following problems were reported by various people who use pound:
     Note the '-nodes' flag - it's important!
 
 - Pound fails to operate correctly with SSL when RootJail is specified.
-  Solution: OpenSSL requires access to /dev/urandom, so make sure such a
+  Solution: OpenSSL requires access to `/dev/urandom`, so make sure such a
   device is accessible from the root jail directory. Thus if your root
-  jail is something like /var/pound:
+  jail is something like `/var/pound`:
 
         mkdir /var/pound/dev
         mknod /var/pound/dev/urandom c 1 9
@@ -862,8 +865,8 @@ The following problems were reported by various people who use pound:
     or whatever major/minor number are appropriate for your system.
 
 - In chroot mode logging may stop functioning.
-  Solution: make sure /dev and the root jail are on the same filesystem
-  and create a hard link in the root jail to /dev/log:
+  Solution: make sure `/dev` and the root jail are on the same filesystem
+  and create a hard link in the root jail to `/dev/log`:
 
         mkdir /chroot/jail/dev
         ln /dev/log /chroot/jail/dev/log
@@ -873,8 +876,8 @@ The following problems were reported by various people who use pound:
 
 - In chroot mode name resolution (and especially redirects) may stop
   functioning.  Solution: make sure your resolver works correctly in the
-  jail. You probably need copies of /etc/resolv.conf and (at least part)
-  of /etc/hosts. Depending on your system additional files may be required
+  jail. You probably need copies of `/etc/resolv.conf` and (at least part)
+  of `/etc/hosts`. Depending on your system additional files may be required
   check your resolver man page for details. Should name resolution fail the
   translation of host names to IP addresses would fail, thereby defeating
   the mechanism Pound uses to identify when should a Redirect be rewritten.
@@ -899,7 +902,7 @@ The following problems were reported by various people who use pound:
 
         net.ipv4.ip_nonlocal_bind = 1
 
-    in /etc/sysctl.conf (if you have one).
+    in `/etc/sysctl.conf` (if you have one).
 
     (Thanks to RUne Saetre for the suggestion).
 
