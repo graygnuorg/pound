@@ -636,15 +636,15 @@ various threading models and how they interact with system-imposed
 limits. Please keep in mind the following requirements:
 
 - on most System V derived Unices (of which Linux up to 2.4 is one),
-  a thread is a process. This means that when doing a 'ps' you will see
-  as many processes with the name 'pound' as there are active threads.
+  a thread is a process. This means that when doing a `ps` you will see
+  as many processes with the name `pound` as there are active threads.
   Each such process uses only two file descriptors, but the system needs
   to support the required number of processes, both in total and per
   user (possibly also per process group). In bash, this is `ulimit -u`,
   in csh this is `limit maxproc`.
 
 - on BSD style systems all threads run in the same process space. Do
-  a ps and you see a single 'pound' process. The process needs two
+  a `ps` and you see a single `pound` process. The process needs two
   file descriptors per active request (bash: `ulimit -n`, csh
   `limit maxfiles`/`limit openfiles`).
 
