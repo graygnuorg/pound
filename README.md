@@ -39,25 +39,25 @@ provided by Frank Schmirler (3,4).
 
 ### WHAT POUND IS:
 
-1.  a reverse-proxy: it passes requests from client
+1.  **a reverse-proxy:** it passes requests from client
     browsers to one or more back-end servers.
 
-2.  a load balancer: it will distribute the requests from
+2.  **a load balancer:** it will distribute the requests from
     the client browsers among several back-end servers,
     while keeping session information.
 
-3.  an SSL wrapper: Pound will decrypt HTTPS requests
+3.  **an SSL wrapper:** Pound will decrypt HTTPS requests
     from client browsers and pass them as plain HTTP
     to the back-end servers.
 
-4.  an HTTP/HTTPS sanitizer: Pound will verify requests
+4.  **an HTTP/HTTPS sanitizer:** Pound will verify requests
     for correctness and accept only well-formed ones.
 
-5.  a fail over-server: should a back-end server fail,
+5.  **a fail over-server:** should a back-end server fail,
     Pound will take note of the fact and stop passing
     requests to it until it recovers.
 
-6.  a request redirector: requests may be distributed
+6.  **a request redirector:** requests may be distributed
     among servers according to the requested URL.
 
 Pound is a very small program, easily audited for security
@@ -69,11 +69,11 @@ and should thus pose no security threat to any machine.
 
 ### WHAT POUND IS NOT:
 
-1.  Pound is not a Web server: by itself, Pound serves no
+1.  **Pound is not a Web server:** by itself, Pound serves no
     content - it contacts the back-end server(s) for that
     purpose.
 
-2.  Pound is not a Web accelerator: no caching is done -
+2.  **Pound is not a Web accelerator:** no caching is done -
     every request is passed "as is" to a back-end server.
 
 
@@ -166,17 +166,17 @@ Failing that you should install from sources:
 
 3.  The following options are available for the configure script:
 
-    --with-ssl=ssl_dir -- OpenSSL home directory (default: system defined).
+    `--with-ssl=ssl_dir` -- OpenSSL home directory (default: system defined).
 
-    --disable-super -- disable supervisor process (default: enabled)
+    `--disable-super` -- disable supervisor process (default: enabled)
 
-    --with-t_rsa=nnn   -- timeout of the RSA ephemeral keys regeneration
+    `--with-t_rsa=nnn`   -- timeout of the RSA ephemeral keys regeneration
     (default: 1800 seconds).
 
-    --with-owner=owner -- name of installed binaries owner (default is
+    `--with-owner=owner` -- name of installed binaries owner (default is
     system-dependent).
 
-    --with-group=group -- name of installed binaries group (default is
+    `--with-group=group` -- name of installed binaries group (default is
     system-dependent).
 
 4.  Check that the resulting Makefile is correct and possibly
@@ -352,16 +352,16 @@ are able to do it due to the nature of the beast.
 In order to see why this is the case we need to look at the way HTTPS works.
 Basically there are three stages in any HTTPS connection:
 
-1.  Connection negotiation - the client (your browser) and the server (Web
+1.  **Connection negotiation:** - the client (your browser) and the server (Web
     server or proxy) negotiate the basic parameters: ciphers to use, session
     key, etc.
 
-2.  Connection authentication: at the very least the server presents the
+2.  **Connection authentication:** at the very least the server presents the
     client with a certificate that says "I am server `www.encrypted.com` - and
     `certificate.authority.org` will verify that". The client may also present
     a certificate of its own at this stage.
 
-3.  Request/response cycle: normal HTTP is sent (through the encrypted
+3.  **Request/response cycle:** normal HTTP is sent (through the encrypted
     channel) back and forth.
 
 The vital point to notice here is that connection authentication takes place
@@ -453,7 +453,7 @@ Pound (hopefully the most useful ones): by client address, by Basic
 authentication (user id/password), by URL parameter, by cookie, by
 HTTP parameter and by header value.
 
-- by client address: in this scheme Pound directs all requests from
+- **by client address:** in this scheme Pound directs all requests from
   the same client IP address to the same back-end server. Put the
   lines
 
@@ -465,7 +465,7 @@ HTTP parameter and by header value.
     in the configuration file to achieve this effect. The value indicates
     what period of inactivity is allowed before the session is discarded.
 
-- by Basic Authentication: in this scheme Pound directs all requests from
+- **by Basic Authentication:** in this scheme Pound directs all requests from
   the same user (as identified in the Basic Authentication header) to the
   same back-end server. Put the lines
 
@@ -482,7 +482,7 @@ HTTP parameter and by header value.
     the one originally requesting it. Make sure all your servers support
     the same authentication scheme!
 
-- by URL parameter: quite often session information is passed through URL
+- **by URL parameter:** quite often session information is passed through URL
   parameters (the browser is pointed to something like `http://xxx?id=123`).
   Put the lines
 
@@ -495,7 +495,7 @@ HTTP parameter and by header value.
     to support this scheme and the sessions will be tracked based on the value
     of the "id" parameter.
 
-- by cookie value: applications that use this method pass a certain cookie
+- **by cookie value:** applications that use this method pass a certain cookie
   back and forth. Add the lines
 
         Session
@@ -507,7 +507,7 @@ HTTP parameter and by header value.
     to your configuration file - the sessions will be tracked by the value of
     the "sess" cookie.
 
-- by HTTP parameter value: applications that use this method pass an HTTP
+- **by HTTP parameter value:** applications that use this method pass an HTTP
   parameter (`http://x.y/z;parameter`) back and forth. Add the lines
 
         Session
@@ -518,7 +518,7 @@ HTTP parameter and by header value.
     to your configuration file - the sessions will be tracked by the value of
     the parameter.
 
-- by header value: applications that use this method pass a certain header
+- **by header value:** applications that use this method pass a certain header
   back and forth. Add the lines
 
         Session
@@ -587,25 +587,25 @@ certificate and if XSSLHeaders is set, Pound will obtain the
 certificate data and add the following HTTP headers to the
 request it makes to the server:
 
-If XSSLHeaders >= 1 include:
+If `XSSLHeaders >= 1` include:
 
-- X-SSL-cipher: the cipher currently in use
+- **X-SSL-cipher:** the cipher currently in use
 
-If XSSLHeaders >= 2 include:
+If `XSSLHeaders >= 2` include:
 
-- X-SSL-Subject: information about the certificate owner
+- **X-SSL-Subject:** information about the certificate owner
 
-- X-SSL-Issuer: information about the certificate issuer (CA)
+- **X-SSL-Issuer:** information about the certificate issuer (CA)
 
-- X-SSL-notBefore: begin validity date for the certificate
+- **X-SSL-notBefore:** begin validity date for the certificate
 
-- X-SSL-notAfter: end validity date for the certificate
+- **X-SSL-notAfter:** end validity date for the certificate
 
-- X-SSL-serial: certificate serial number (in decimal)
+- **X-SSL-serial:** certificate serial number (in decimal)
 
-If XSSLHeaders = 3 include:
+If `XSSLHeaders = 3` include:
 
-- X-SSL-certificate: the full client certificate (single-line)
+- **X-SSL-certificate:** the full client certificate (single-line)
 
 It is the application's responsibility to actually use these
 headers - Pound just passes this information without checking
