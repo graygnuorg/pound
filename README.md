@@ -281,9 +281,9 @@ job, it can be done. As of version 0.10, Pound supports filtering requests
 based not only on the request URL, but also on the presence or absence of
 certain headers.
 
-Let's assume that you have internal server 192.168.0.10 that is supposed to
-serve the needs of virtual host `www.server0.com` and 192.168.0.11 that serves
-`www.server1.com`.  You want Pound to listen on address 1.2.3.4 and separate
+Let's assume that you have internal server `192.168.0.10` that is supposed to
+serve the needs of virtual host `www.server0.com` and `192.168.0.11` that serves
+`www.server1.com`.  You want Pound to listen on address `1.2.3.4` and separate
 the requests to each host.  The config file would look something like this:
 
     ListenHTTP
@@ -813,7 +813,7 @@ behaviour dependent on a configuration switch: xHTTP (see the man page
 for details).
 
 If you also use the SSL wrapper feature in front of a Microsoft server
-you should probably also add 'AddHeader "Front-End-Https: on"'.
+you should probably also add `AddHeader "Front-End-Https: on"`.
 
 These changes are also required to access a Subversion server via
 Pound.
