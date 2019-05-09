@@ -16,7 +16,7 @@ give away.
 This is a fork of Pound 2.8a modified to compile and link
 with OpenSSL version 1.1.0 and later. Backward compatibility
 with earlier versions of OpenSSL is retained. The orginal code
-has been obtained from http://www.apsis.ch/pound/Pound-2.8a.tgz.
+has been obtained from <http://www.apsis.ch/pound/Pound-2.8a.tgz>.
 Later on, the changes from the stable 2.8 release were applied.
 
 This modified version was tested under production load with
@@ -116,8 +116,8 @@ with Opera 6, but these should be OK in the present version.
 If you obtained the sources from the repository, you will need the
 following tools in order to build from them:
 
-  - Autoconf v.2.63 or later (http://www.gnu.org/software/automake) 
-  - Automake v.1.11 or later (http://www.gnu.org/software/autoconf)
+  - Autoconf v.2.63 or later (<http://www.gnu.org/software/automake>)
+  - Automake v.1.11 or later (<http://www.gnu.org/software/autoconf>)
 
 Change to the project directory and run
 
@@ -134,10 +134,10 @@ if you can find one. While Apsis offers no such packages, they are available
 for quite a few systems (Suse, Debian and derivatives such as Ubuntu), as
 well as some private packages:
 
-- RPMs for RedHat are available at http://www.invoca.ch/pub/packages/pound/
+- RPMs for RedHat are available at <http://www.invoca.ch/pub/packages/pound/>
 
-- A nice FreeBSD live-CD distribution is available at http://www.targeted.org as
-http://www.targeted.org/files/fbsd62_pound23.iso.gz, including a Pound binary.
+- A nice FreeBSD live-CD distribution is available at <http://www.targeted.org> as
+<http://www.targeted.org/files/fbsd62_pound23.iso.gz>, including a Pound binary.
 
 Failing that you should install from sources:
 
@@ -150,14 +150,14 @@ Failing that you should install from sources:
     a version of OpenSSL with thread support. This is normally
     the case on Linux and Solaris (for example) but not on *BSD.
     If your system has the wrong library please download, compile
-    and install OpenSSL (from http://www.openssl.org).
+    and install OpenSSL (from <http://www.openssl.org>).
 
     If the PCRE package is available Pound will link against it.
     This will provide a significant performance boost.
 
 2.  Download the current version of Pound-current file and unpack
     it. The archive is signed.
-    My signature is available at http://www.apsis.ch/pound/roseg.asc.
+    My signature is available at <http://www.apsis.ch/pound/roseg.asc>.
     Alternately see below for stable versions.
 
     Unpack. Do the usual thing:
@@ -232,7 +232,7 @@ subscribe. You will receive confirmation and instructions in
 the reply.
 
 All messages are available and indexed (searcheable) in the
-archive http://www.apsis.ch/pound/pound_list.
+archive <http://www.apsis.ch/pound/pound_list>.
 
 The mailing list is the primary support forum for Pound - please
 post there any questions you may have. The developpers' address is
@@ -249,7 +249,7 @@ it does.
 
 A special problem arises when you try using Pound as an
 SSL wrapper: Zope assumes that the requests are made via
-HTTP and insists on prepending 'http://' to the (correct)
+HTTP and insists on prepending `http://` to the (correct)
 address in the replies, including in the `<base>` tag and
 the absolute URLs it generates (for images for example).
 This is clearly an undesirable behavior.
@@ -279,8 +279,8 @@ based not only on the request URL, but also on the presence or absence of
 certain headers.
 
 Let's assume that you have internal server 192.168.0.10 that is supposed to
-serve the needs of virtual host www.server0.com and 192.168.0.11 that serves
-www.server1.com.  You want Pound to listen on address 1.2.3.4 and separate
+serve the needs of virtual host `www.server0.com` and 192.168.0.11 that serves
+`www.server1.com`.  You want Pound to listen on address 1.2.3.4 and separate
 the requests to each host.  The config file would look something like this:
 
     ListenHTTP
@@ -357,8 +357,8 @@ Basically there are three stages in any HTTPS connection:
     key, etc.
 
 2.  Connection authentication: at the very least the server presents the
-    client with a certificate that says "I am server www.encrypted.com - and
-    certificate.authority.org will verify that". The client may also present
+    client with a certificate that says "I am server `www.encrypted.com` - and
+    `certificate.authority.org` will verify that". The client may also present
     a certificate of its own at this stage.
 
 3.  Request/response cycle: normal HTTP is sent (through the encrypted
@@ -375,8 +375,8 @@ accomplished via a Host header:
     Host: http://www.virthost.com
 
 Combining the two we get to an impasse: on connection setup the server will
-reply with the certificate for "www.realhost.com", but the request is really
-for "www.virthost.com" - and most browsers will scream blue murder (as well
+reply with the certificate for `www.realhost.com`, but the request is really
+for `www.virthost.com` - and most browsers will scream blue murder (as well
 they should) if the two do not match.
 
 There is a new twist on this however: some of the newer browsers will accept
@@ -385,8 +385,8 @@ that is not issued to a host, but rather to a domain. The result is that
 on setting-up a new SSL connection, the server replies not with "I am
 `www.encrypted.com`", but with "I am `*.encrypted.com`". If the browser is
 capable of processing this type of certificate then the connection is
-set up and normal HTTPS (with www.encrypted.com or special.encrypted.com or
-even some.other.server.encrypted.com or whatever other name matches) proceeds
+set up and normal HTTPS (with `www.encrypted.com` or `special.encrypted.com` or
+even `some.other.server.encrypted.com` or whatever other name matches) proceeds
 as usual. Pound supports these certificates and you can use virtual hosts in
 the normal way.
 
@@ -430,9 +430,9 @@ alias for localhost - something like::
     127.0.0.1 localhost www.testhost.mine
 
 Add a mapping in VHM from www.testhost.mine to some Zope folder
-(Examples is already there). Point your browser to http://localhost
+(Examples is already there). Point your browser to <http://localhost>
 and you get the normal Zope start page; point it to
-http://www.testhost.mine and you'll see the Examples starting page.
+`http://www.testhost.mine` and you'll see the Examples starting page.
 All requests are mapped correctly, and the URLs in the pages (such
 as base or absoluteURL) are translated correctly in the response.
 
@@ -483,7 +483,7 @@ HTTP parameter and by header value.
     the same authentication scheme!
 
 - by URL parameter: quite often session information is passed through URL
-  parameters (the browser is pointed to something like http://xxx?id=123).
+  parameters (the browser is pointed to something like `http://xxx?id=123`).
   Put the lines
 
         Session
@@ -508,7 +508,7 @@ HTTP parameter and by header value.
     the "sess" cookie.
 
 - by HTTP parameter value: applications that use this method pass an HTTP
-  parameter (http://x.y/z;parameter) back and forth. Add the lines
+  parameter (`http://x.y/z;parameter`) back and forth. Add the lines
 
         Session
           Type    PARM
@@ -723,9 +723,9 @@ it should be sent to a specific group of back-end servers.
 Given the ease with which IP addresses can be forged I am personally
 doubtful of the utility of such a feature. Even should you think it
 desirable, it is probably best implemented via the packet filter,
-rather than a proxy server. Assuming that requests from x.com are
-to go to s1.local, requests from y.com to s2.local and everything
-else to s3.local and s4.local, here is how to do it:
+rather than a proxy server. Assuming that requests from `x.com` are
+to go to `s1.local`, requests from `y.com` to `s2.local` and everything
+else to `s3.local` and `s4.local`, here is how to do it:
 
 - make sure your firewall blocks requests to port 8080, 8081 and 8082
 
@@ -944,10 +944,10 @@ implementation and brought the original idea for SSL header filtering.
 
 **Gurkan Sengun** tested Pound on Solaris, contributed the Solaris cc flags
 and makes a Solaris pre-compiled version available on his Web-site
-(www.linuks.mine.nu)
+(`www.linuks.mine.nu`)
 
 **Shinji Tanaka** contributed a patch for controlling logging to disk files.
-This is available at http://www.hatena-inc.co.jp/~stanaka/pound/
+This is available at `http://www.hatena-inc.co.jp/~stanaka/pound/`
 
 **Jim Washington** contributed the code for WebDAV and tested it.
 
