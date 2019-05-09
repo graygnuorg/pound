@@ -427,7 +427,7 @@ to that host will be mapped back and forth by Zope to the required
 URL. This works weather you access Zope directly or via any number
 of proxies on the way, Pound included.
 
-To test: add a new host name to your `etc/hosts` file, making it an
+To test: add a new host name to your `/etc/hosts` file, making it an
 alias for localhost - something like::
 
     127.0.0.1 localhost www.testhost.mine
@@ -640,8 +640,8 @@ limits. Please keep in mind the following requirements:
   as many processes with the name 'pound' as there are active threads.
   Each such process uses only two file descriptors, but the system needs
   to support the required number of processes, both in total and per
-  user (possibly also per process group). In bash, this is 'ulimit -u',
-  in csh this is 'limit maxproc'.
+  user (possibly also per process group). In bash, this is `ulimit -u`,
+  in csh this is `limit maxproc`.
 
 - on BSD style systems all threads run in the same process space. Do
   a ps and you see a single 'pound' process. The process needs two
