@@ -1,5 +1,5 @@
 AC_PREREQ(2.63)
-AC_INIT([pound],[2.8-patrodyne],[rick.osullivan@patrodyne.org],
+AC_INIT([pound],[2.8-patrodyne-20190905],[rick.osullivan@patrodyne.org],
         [pound],[http://www.apsis.ch/pound])
 AC_CONFIG_SRCDIR([pound.c])
 AC_CONFIG_HEADERS([config.h])
