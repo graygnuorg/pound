@@ -564,19 +564,42 @@ browser to the back-end server(s). There are two exceptions to this rule:
 Pound may add information about the SSL client certificate (as described
 below), and it will add an X-Forwarded-For header. The general format is:
 
-    X-Forwarded-for: client-IP-address
+    X-Forwarded-For: client-IP-address
 
 The back-end server(s) may use this extra information in order to create
 their log-files with the real client address (otherwise all requests will
 appear to originate from Pound itself, which is rather useless).
 
 In addition, Pound logs requests and replies to the system log. This is
-controlled by the LogLevel configuration variable (0 - no logging,
-1 - normal log, 2 - full log, 3 - Apache combined log format, 4 - Apache
-combined log format without virtual host).
+controlled by the LogFacility configuration variable:
+
+- daemon = output to the LOG_DAEMON facility.
+- local0 = output to file configured by rsyslog.
+- - = direct messages to stdout or stderr (use for journalctl).
+
+The log message format is controlled by the LogLevel configuration variable:
+
+- 0 = no logging,
+- 1 = normal log,
+- 2 = full log,
+- 3 = Apache combined log format,
+- 4 = Apache combined log format without virtual host.
 
 By default the messages go to the LOG_DAEMON facility, but you can change
-this in the configuration file. If you don't want to, you can just do a:
+this in the configuration file.
+
+In your distribution, systemd's journal may be configured to forward the
+standard output and standard error of all systemd services to /var/log/syslog.
+To suppress logs to syslog, set `ForwardToSyslog=no` in /etc/systemd/journald.conf
+then reload:
+
+    sudo systemd daemon-reload
+
+To use journalctl:
+
+    journalctl --unit pound.service --since yesterday
+
+If you don't want to use journalctl only, you can just do a:
 
     fgrep pound /var/log/messages
 
