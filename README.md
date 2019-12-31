@@ -30,9 +30,9 @@ provided by Frank Schmirler (3,4,8).
 
 1. <http://www.apsis.ch/pound>
 2. <https://github.com/graygnuorg/pound.git>
-3. <http://www.apsis.ch/pound/pound_list/archive/2018/2018-08/1533635922000>
+3. <https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-August/000037.html>
 4. Wrong use of Fallback SCSV / TLS1.3 interoperability
-   <http://www.apsis.ch/pound/pound_list/archive/2018/2018-12/1545518870000#1545518870000>
+   <https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-December/000030.html>
 5. Added `etc` folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
@@ -236,7 +236,7 @@ subscribe. You will receive confirmation and instructions in
 the reply.
 
 All messages are available and indexed (searcheable) in the
-archive <http://www.apsis.ch/pound/pound_list>.
+archive <https://admin.hostpoint.ch/mailman/listinfo/pound_apsis.ch>.
 
 The mailing list is the primary support forum for Pound - please
 post there any questions you may have. The developpers' address is
