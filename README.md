@@ -35,7 +35,7 @@ provided by Frank Schmirler (3,4,8).
 5. Added `etc` folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
-8. Added Strict-Transport-Security response header at service level.
+8. [Added Strict-Transport-Security response header at service level](https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2019-December/008038.html)
 
 ### WHAT POUND IS:
 
