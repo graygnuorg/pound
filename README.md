@@ -30,9 +30,8 @@ provided by Frank Schmirler (3,4,8).
 
 1. <http://www.apsis.ch/pound>
 2. <https://github.com/graygnuorg/pound.git>
-3. <https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-August/000037.html>
-4. Wrong use of Fallback SCSV / TLS1.3 interoperability
-   <https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-December/000030.html>
+3. [WebSocket support for pound](https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-August/000037.html)
+4. [Wrong use of Fallback SCSV / TLS1.3 interoperability](https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-December/000030.html)
 5. Added `etc` folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
