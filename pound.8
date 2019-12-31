@@ -700,6 +700,11 @@ the following
 .I End
 directives define a session-tracking mechanism for the current service. See below
 for details.
+.TP
+\fBStrictTransportSecurity\fR value
+Add a header, on each response, to declare the HTTP Strict Transport Security (HSTS) policy.
+The value, in seconds, specifies a period of time the user agent (i.e. browser) should
+remember the policy.
 .SH "BackEnd"
 A back-end is a definition of a single back-end server
 .B Pound

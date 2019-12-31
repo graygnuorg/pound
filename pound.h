@@ -377,6 +377,7 @@ typedef struct _service {
     LHASH               *sessions;  /* currently active sessions */
 #endif
     int                 disabled;   /* true if the service is disabled */
+    int                 sts;        /* strict transport security */
     struct _service     *next;
 }   SERVICE;
 
@@ -449,6 +450,7 @@ typedef enum { RENEG_INIT=0, RENEG_REJECT, RENEG_ALLOW, RENEG_ABORT } RENEG_STAT
 #define HEADER_URI                  9
 #define HEADER_DESTINATION          10
 #define HEADER_EXPECT               11
+#define HEADER_STRICT_TRANSPORT_SECURITY 12
 #define HEADER_UPGRADE              13
 
 /* control request stuff */

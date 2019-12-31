@@ -26,7 +26,7 @@ OpenSSL 1.1.0g and 1.0.1e.
 
 This is a fork of Sergey Poznyakoff's fork (2) of Pound from
 Apsis (1) patched with WebSocket support and other patches
-provided by Frank Schmirler (3,4).
+provided by Frank Schmirler (3,4,8).
 
 1. <http://www.apsis.ch/pound>
 2. <https://github.com/graygnuorg/pound.git>
@@ -36,6 +36,7 @@ provided by Frank Schmirler (3,4).
 5. Added `etc` folder with SysV and SystemD boot scripts.
 6. Added XSSLHeaders directive to control sending X-SSL headers to the back-end.
 7. Added [README-QUICK.md](https://github.com/patrodyne/pound/blob/master/README-QUICK.md)
+8. Added Strict-Transport-Security response header at service level.
 
 ### WHAT POUND IS:
 

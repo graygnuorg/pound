@@ -74,7 +74,7 @@ static CODE facilitynames[] = {
 static regex_t  Empty, Comment, User, Group, RootJail, Daemon, LogFacility, LogLevel, Alive, SSLEngine, Control;
 static regex_t  ListenHTTP, ListenHTTPS, End, Address, Port, Cert, xHTTP, Client, CheckURL;
 static regex_t  Err414, Err500, Err501, Err503, MaxRequest, HeadRemove, RewriteLocation, RewriteDestination;
-static regex_t  Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd, Emergency, Priority, HAport, HAportAddr;
+static regex_t  Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd, Emergency, Priority, HAport, HAportAddr, StrictTransportSecurity;
 static regex_t  Redirect, RedirectN, TimeOut, WSTimeOut, Session, Type, TTL, ID;
 static regex_t  ClientCert, AddHeader, DisableProto, SSLAllowClientRenegotiation, SSLHonorCipherOrder, Ciphers;
 static regex_t  CAlist, VerifyList, CRLlist, XSSLHeaders, NoHTTPS11, Grace, Include, ConnTO, IgnoreCase, HTTPS;
@@ -570,6 +570,7 @@ parse_service(const char *svc_name)
         conf_err("Service config: out of memory - aborted");
     memset(res, 0, sizeof(SERVICE));
     res->sess_type = SESS_NONE;
+    res->sts = -1;
     pthread_mutex_init(&res->mut, NULL);
     if(svc_name)
         strncpy(res->name, svc_name, KEY_SIZE);
@@ -601,6 +602,8 @@ parse_service(const char *svc_name)
             lin[matches[1].rm_eo] = '\0';
             if(regcomp(&m->pat, lin + matches[1].rm_so, REG_NEWLINE | REG_EXTENDED | (ign_case? REG_ICASE: 0)))
                 conf_err("URL bad pattern - aborted");
+        } else if(!regexec(&StrictTransportSecurity, lin, 4, matches, 0)) {
+            res->sts = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&HeadRequire, lin, 4, matches, 0)) {
             if(res->req_head) {
                 for(m = res->req_head; m->next; m = m->next)
@@ -857,12 +860,16 @@ parse_HTTP(void)
         } else if(!regexec(&LogLevel, lin, 4, matches, 0)) {
             res->log_level = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&Service, lin, 4, matches, 0)) {
-            if(res->services == NULL)
+            if(res->services == NULL) {
                 res->services = parse_service(NULL);
-            else {
+                if(res->services->sts >= 0)
+                    conf_err("StrictTransportSecurity not allowed in HTTP listener - aborted");
+            } else {
                 for(svc = res->services; svc->next; svc = svc->next)
                     ;
                 svc->next = parse_service(NULL);
+                if(svc->next->sts >= 0)
+                    conf_err("StrictTransportSecurity not allowed in HTTP listener - aborted");
             }
         } else if(!regexec(&ServiceName, lin, 4, matches, 0)) {
             lin[matches[1].rm_eo] = '\0';
@@ -1471,6 +1478,7 @@ config_parse(const int argc, char **const argv)
     || regcomp(&Service, "^[ \t]*Service[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&ServiceName, "^[ \t]*Service[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&URL, "^[ \t]*URL[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&StrictTransportSecurity, "^[ \t]*StrictTransportSecurity[ \t]+([0-9]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&HeadRequire, "^[ \t]*HeadRequire[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&HeadDeny, "^[ \t]*HeadDeny[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&BackEnd, "^[ \t]*BackEnd[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
@@ -1630,6 +1638,7 @@ config_parse(const int argc, char **const argv)
     regfree(&Service);
     regfree(&ServiceName);
     regfree(&URL);
+    regfree(&StrictTransportSecurity);
     regfree(&HeadRequire);
     regfree(&HeadDeny);
     regfree(&BackEnd);
