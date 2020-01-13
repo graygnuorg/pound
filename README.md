@@ -576,6 +576,8 @@ controlled by the LogFacility configuration variable:
 - daemon = output to the LOG_DAEMON facility.
 - local0 = output to file configured by rsyslog.
 - \- = direct messages to stdout or stderr (use for journalctl).
+- \+ = same as '-' but prepend priority \<n\> on log messages.
+- \* = same as '+' but flush the stdout buffer after each log message.
 
 The log message format is controlled by the LogLevel configuration variable:
 

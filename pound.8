@@ -236,10 +236,11 @@ to find the optimal value for your installation.
 Specify the log facility to use.
 .I value
 (default: daemon) must be one of the symbolic facility names defined in
-\fIsyslog.h\fR. This facility shall be used for logging. Using a - for
-the facility name causes
+\fIsyslog.h\fR. This facility shall be used for logging. Using - or +
+or * for the facility name causes
 .B Pound
-to log to stdout/stderr.
+to log to stdout/stderr. Use + to prepend the priority <n> to each log
+message. Further, use * to flush the stdout buffer after each log message.
 .TP
 \fBLogLevel\fR value
 Specify the logging level: 0 for no logging, 1 (default) for regular

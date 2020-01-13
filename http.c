@@ -489,6 +489,25 @@ log_time(char *res)
     return;
 }
 
+/*
+ * ISO 8601 log-file-style time format
+ */
+static void
+log_time_iso(char *res)
+{
+    time_t  now;
+    struct tm   *t_now, t_res;
+
+    now = time(NULL);
+#ifdef  HAVE_LOCALTIME_R
+    t_now = localtime_r(&now, &t_res);
+#else
+    t_now = localtime(&now);
+#endif
+    strftime(res, LOG_TIME_SIZE - 1, "%FT%T.000%z", t_now);
+    return;
+}
+
 static double
 cur_time(void)
 {
@@ -704,7 +723,14 @@ do_http(thr_arg *arg)
         }
         memset(req_time, 0, LOG_TIME_SIZE);
         start_req = cur_time();
-        log_time(req_time);
+
+        /* Use Apache Common Log format for older log levels
+         * or ISO 8601 time format for new log levels.
+         */
+        if ( lstn->log_level < 6 )
+            log_time(req_time);
+        else
+            log_time_iso(req_time);
 
         /* check for correct request */
         strncpy(request, headers[0], MAXBUF);
@@ -1370,6 +1396,22 @@ do_http(thr_arg *arg)
                 logmsg(LOG_INFO, "%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"", caddr,
                     u_name[0]? u_name: "-", req_time, request, cur_backend->be_type, referer, u_agent);
                 break;
+            case 6:
+                logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                    pthread_self(),                             // thread id
+                    req_time,                                   // request time ISO 8601
+                    response[9], response[10], response[11],    // response code
+                    (end_req - start_req) / 1000000.0,          // duration seconds
+                    s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                    v_host[0] ? v_host : "",                    // target host:port
+                    svc->name[0] ? svc->name : "",              // service name
+                    caddr,                                      // source client address
+                    buf,                                        // backend address:port
+                    u_name[0] ? u_name : "",                    // user name
+                    u_agent,                                    // user agent
+                    referer,                                    // refering URI
+                    request);                                   // request URL
+                break;
             }
             if(!cl_11 || conn_closed || force_10)
                 break;
@@ -1415,6 +1457,22 @@ do_http(thr_arg *arg)
                     caddr, u_name[0]? u_name: "-", req_time, request,
                     s_res_bytes, referer, u_agent, svc->name[0]? svc->name: "-", buf,
                     (end_req - start_req) / 1000000.0);
+                break;
+            case 6:
+                logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                    pthread_self(),                             // thread id
+                    req_time,                                   // request time ISO 8601
+                    response[9], response[10], response[11],    // response code
+                    (end_req - start_req) / 1000000.0,          // duration seconds
+                    s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                    v_host[0] ? v_host : "",                    // target host:port
+                    svc->name[0] ? svc->name : "",              // service name
+                    caddr,                                      // source client address
+                    buf,                                        // backend address:port
+                    u_name[0] ? u_name : "",                    // user name
+                    u_agent,                                    // user agent
+                    referer,                                    // refering URI
+                    request);                                   // request URL
                 break;
             }
             /* no response expected - bail out */
@@ -1787,6 +1845,22 @@ do_http(thr_arg *arg)
                 response[11], s_res_bytes, referer, u_agent, svc->name[0]? svc->name: "-", buf,
                 (end_req - start_req) / 1000000.0);
             break;
+        case 6:
+            logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                pthread_self(),                             // thread id
+                req_time,                                   // request time ISO 8601
+                response[9], response[10], response[11],    // response code
+                (end_req - start_req) / 1000000.0,          // duration seconds
+                s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                v_host[0] ? v_host : "",                    // target host:port
+                svc->name[0] ? svc->name : "",              // service name
+                caddr,                                      // source client address
+                buf,                                        // backend address:port
+                u_name[0] ? u_name : "",                    // user name
+                u_agent,                                    // user agent
+                referer,                                    // refering URI
+                request);                                   // request URL
+            break;
         }
 
         if(!be_11) {
@@ -1823,7 +1897,7 @@ thr_http(void *dummy)
 
     for(;;) {
         while((arg = get_thr_arg()) == NULL)
-            logmsg(LOG_NOTICE, "NULL get_thr_arg");
+            logmsg(LOG_NOTICE, "(%lx) get_thr_arg: http arg from request queue is NULL.", pthread_self());
         do_http(arg);
     }
 }

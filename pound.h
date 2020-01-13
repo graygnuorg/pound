@@ -636,3 +636,16 @@ extern void *thr_timer(void *);
  * listens to client requests and calls the appropriate functions
  */
 extern void *thr_control(void *);
+
+/*
+ * systemd/sd-daemon.h
+ */
+#define SD_EMERG   "<0>"  /* system is unusable */
+#define SD_ALERT   "<1>"  /* action must be taken immediately */
+#define SD_CRIT    "<2>"  /* critical conditions */
+#define SD_ERR     "<3>"  /* error conditions */
+#define SD_WARNING "<4>"  /* warning conditions */
+#define SD_NOTICE  "<5>"  /* normal but significant condition */
+#define SD_INFO    "<6>"  /* informational */
+#define SD_DEBUG   "<7>"  /* debug-level messages */
+

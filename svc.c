@@ -254,6 +254,15 @@ logmsg(const int priority, const char *fmt, ...)
     va_end(ap);
     if(log_facility == -1) {
         fprintf((priority == LOG_INFO || priority == LOG_DEBUG)? stdout: stderr, "%s\n", buf);
+    } else if (log_facility < -1) {
+        /* systemd: Prepend '<p>' to pass priority into units using SyslogLevelPrefix=true. */
+        if ( priority == LOG_INFO || priority == LOG_DEBUG )
+            fprintf(stdout, "%s%s\n", SD_INFO, buf);
+        else
+            fprintf(stderr, "%s%s\n", SD_ERR, buf);
+        /* Conditionally, flush stdout buffer. */
+        if (log_facility < -2)
+            fflush(stdout);
     } else {
         if(print_log)
             printf("%s\n", buf);
@@ -277,6 +286,15 @@ va_dcl
     va_end(ap);
     if(log_facility == -1) {
         fprintf((priority == LOG_INFO || priority == LOG_DEBUG)? stdout: stderr, "%s\n", buf);
+    } else if (log_facility < -1) {
+        /* systemd: Prepend '<p>' to pass priority into units using SyslogLevelPrefix=true. */
+        if ( priority == LOG_INFO || priority == LOG_DEBUG )
+            fprintf(stdout, "%s%s\n", SD_INFO, buf);
+        else
+            fprintf(stderr, "%s%s\n", SD_ERR, buf);
+        /* Conditionally, flush stdout buffer. */
+        if (log_facility < -2)
+            fflush(stdout);
     } else {
         if(print_log)
             printf("%s\n", buf);

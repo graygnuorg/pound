@@ -1340,6 +1340,10 @@ parse_file(void)
             lin[matches[1].rm_eo] = '\0';
             if(lin[matches[1].rm_so] == '-')
                 def_facility = -1;
+            else if(lin[matches[1].rm_so] == '+')
+                def_facility = -2;
+            else if(lin[matches[1].rm_so] == '*')
+                def_facility = -3;
             else
                 for(i = 0; facilitynames[i].c_name; i++)
                     if(!strcmp(facilitynames[i].c_name, lin + matches[1].rm_so)) {
@@ -1452,8 +1456,8 @@ config_parse(const int argc, char **const argv)
     || regcomp(&RootJail, "^[ \t]*RootJail[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Daemon, "^[ \t]*Daemon[ \t]+([01])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Threads, "^[ \t]*Threads[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-    || regcomp(&LogFacility, "^[ \t]*LogFacility[ \t]+([a-z0-9-]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-    || regcomp(&LogLevel, "^[ \t]*LogLevel[ \t]+([0-5])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&LogFacility, "^[ \t]*LogFacility[ \t]+([a-z0-9-+*]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&LogLevel, "^[ \t]*LogLevel[ \t]+([0-6])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Grace, "^[ \t]*Grace[ \t]+([0-9]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Alive, "^[ \t]*Alive[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&SSLEngine, "^[ \t]*SSLEngine[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)

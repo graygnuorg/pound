@@ -314,7 +314,7 @@ main(const int argc, char **argv)
     /* read config */
     config_parse(argc, argv);
 
-    if(log_facility != -1)
+    if(log_facility > -1)
         openlog("pound", LOG_CONS | LOG_NDELAY, LOG_DAEMON);
     if(ctrl_name != NULL) {
         struct sockaddr_un  ctrl;
@@ -391,7 +391,7 @@ main(const int argc, char **argv)
         /* daemonize - make ourselves a subprocess. */
         switch (fork()) {
             case 0:
-                if(log_facility != -1) {
+                if(log_facility > -1) {
                     close(0);
                     close(1);
                     close(2);
