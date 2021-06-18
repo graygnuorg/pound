@@ -28,7 +28,7 @@ This is a fork of Sergey Poznyakoff's fork (2) of Pound from
 Apsis (1) patched with WebSocket support and other patches
 provided by Frank Schmirler (3,4,8).
 
-1. <http://www.apsis.ch/pound>
+1. <https://www.apsis.ch/pound.html>
 2. <https://github.com/graygnuorg/pound.git>
 3. [WebSocket support for pound](https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-August/000037.html)
 4. [Wrong use of Fallback SCSV / TLS1.3 interoperability](https://admin.hostpoint.ch/pipermail/pound_apsis.ch/2018-December/000030.html)
@@ -235,7 +235,8 @@ subscribe. You will receive confirmation and instructions in
 the reply.
 
 All messages are available and indexed (searcheable) in the
-archive <https://admin.hostpoint.ch/mailman/listinfo/pound_apsis.ch>.
+archive <https://admin.hostpoint.ch/mailman/listinfo/pound_apsis.ch>
+and at <https://admin.hostpoint.ch/pipermail/pound_apsis.ch/>.
 
 The mailing list is the primary support forum for Pound - please
 post there any questions you may have. The developpers' address is
