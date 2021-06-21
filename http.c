@@ -489,6 +489,25 @@ log_time(char *res)
     return;
 }
 
+/*
+ * ISO 8601 log-file-style time format
+ */
+static void
+log_time_iso(char *res)
+{
+    time_t  now;
+    struct tm   *t_now, t_res;
+
+    now = time(NULL);
+#ifdef  HAVE_LOCALTIME_R
+    t_now = localtime_r(&now, &t_res);
+#else
+    t_now = localtime(&now);
+#endif
+    strftime(res, LOG_TIME_SIZE - 1, "%FT%T.000%z", t_now);
+    return;
+}
+
 static double
 cur_time(void)
 {
@@ -704,7 +723,14 @@ do_http(thr_arg *arg)
         }
         memset(req_time, 0, LOG_TIME_SIZE);
         start_req = cur_time();
-        log_time(req_time);
+
+        /* Use Apache Common Log format for older log levels
+         * or ISO 8601 time format for new log levels.
+         */
+        if ( lstn->log_level < 6 )
+            log_time(req_time);
+        else
+            log_time_iso(req_time);
 
         /* check for correct request */
         strncpy(request, headers[0], MAXBUF);
@@ -1091,7 +1117,7 @@ do_http(thr_arg *arg)
         free_headers(headers);
 
         /* if SSL put additional headers for client certificate */
-        if(cur_backend->be_type == 0 && ssl != NULL) {
+        if(cur_backend->be_type == 0 && ssl != NULL && lstn->xSSLHeaders > 0) {
             const SSL_CIPHER  *cipher;
 
             if((cipher = SSL_get_current_cipher(ssl)) != NULL) {
@@ -1108,7 +1134,7 @@ do_http(thr_arg *arg)
                 }
             }
 
-            if(lstn->clnt_check > 0 && x509 != NULL && (bb = BIO_new(BIO_s_mem())) != NULL) {
+            if(lstn->clnt_check > 0 && x509 != NULL && (bb = BIO_new(BIO_s_mem())) != NULL && lstn->xSSLHeaders > 1) {
                 X509_NAME_print_ex(bb, X509_get_subject_name(x509), 8, XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
                 get_line(bb, buf, MAXBUF);
                 if(BIO_printf(be, "X-SSL-Subject: %s\r\n", buf) <= 0) {
@@ -1170,20 +1196,12 @@ do_http(thr_arg *arg)
                     clean_all();
                     return;
                 }
-                PEM_write_bio_X509(bb, x509);
-                get_line(bb, buf, MAXBUF);
-                if(BIO_printf(be, "X-SSL-certificate: %s", buf) <= 0) {
-                    str_be(buf, MAXBUF - 1, cur_backend);
-                    end_req = cur_time();
-                    logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-                        pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
-                    err_reply(cl, h500, lstn->err500);
-                    BIO_free_all(bb);
-                    clean_all();
-                    return;
-                }
-                while(get_line(bb, buf, MAXBUF) == 0) {
-                    if(BIO_printf(be, "%s", buf) <= 0) {
+				if (lstn->xSSLHeaders > 2)
+                {
+                    PEM_write_bio_X509(bb, x509);
+                    get_line(bb, buf, MAXBUF);
+                    strip_eol(buf);
+                    if(BIO_printf(be, "X-SSL-certificate: %s", buf) <= 0) {
                         str_be(buf, MAXBUF - 1, cur_backend);
                         end_req = cur_time();
                         logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
@@ -1193,18 +1211,31 @@ do_http(thr_arg *arg)
                         clean_all();
                         return;
                     }
-                }
-                if(BIO_printf(be, "\r\n") <= 0) {
-                    str_be(buf, MAXBUF - 1, cur_backend);
-                    end_req = cur_time();
-                    logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-                        pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
-                    err_reply(cl, h500, lstn->err500);
+                    while(get_line(bb, buf, MAXBUF) == 0) {
+                        strip_eol(buf);
+                        if(BIO_printf(be, "%s", buf) <= 0) {
+                            str_be(buf, MAXBUF - 1, cur_backend);
+                            end_req = cur_time();
+                            logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+                                pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
+                            err_reply(cl, h500, lstn->err500);
+                            BIO_free_all(bb);
+                            clean_all();
+                            return;
+                        }
+                    }
+                    if(BIO_printf(be, "\r\n") <= 0) {
+                        str_be(buf, MAXBUF - 1, cur_backend);
+                        end_req = cur_time();
+                        logmsg(LOG_WARNING, "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+                            pthread_self(), buf, strerror(errno), (end_req - start_req) / 1000000.0);
+                        err_reply(cl, h500, lstn->err500);
+                        BIO_free_all(bb);
+                        clean_all();
+                        return;
+                    }
                     BIO_free_all(bb);
-                    clean_all();
-                    return;
                 }
-                BIO_free_all(bb);
             }
         }
         /* put additional client IP header */
@@ -1365,6 +1396,22 @@ do_http(thr_arg *arg)
                 logmsg(LOG_INFO, "%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"", caddr,
                     u_name[0]? u_name: "-", req_time, request, cur_backend->be_type, referer, u_agent);
                 break;
+            case 6:
+                logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                    pthread_self(),                             // thread id
+                    req_time,                                   // request time ISO 8601
+                    response[9], response[10], response[11],    // response code
+                    (end_req - start_req) / 1000000.0,          // duration seconds
+                    s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                    v_host[0] ? v_host : "",                    // target host:port
+                    svc->name[0] ? svc->name : "",              // service name
+                    caddr,                                      // source client address
+                    buf,                                        // backend address:port
+                    u_name[0] ? u_name : "",                    // user name
+                    u_agent,                                    // user agent
+                    referer,                                    // refering URI
+                    request);                                   // request URL
+                break;
             }
             if(!cl_11 || conn_closed || force_10)
                 break;
@@ -1411,6 +1458,22 @@ do_http(thr_arg *arg)
                     s_res_bytes, referer, u_agent, svc->name[0]? svc->name: "-", buf,
                     (end_req - start_req) / 1000000.0);
                 break;
+            case 6:
+                logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                    pthread_self(),                             // thread id
+                    req_time,                                   // request time ISO 8601
+                    response[9], response[10], response[11],    // response code
+                    (end_req - start_req) / 1000000.0,          // duration seconds
+                    s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                    v_host[0] ? v_host : "",                    // target host:port
+                    svc->name[0] ? svc->name : "",              // service name
+                    caddr,                                      // source client address
+                    buf,                                        // backend address:port
+                    u_name[0] ? u_name : "",                    // user name
+                    u_agent,                                    // user agent
+                    referer,                                    // refering URI
+                    request);                                   // request URL
+                break;
             }
             /* no response expected - bail out */
             break;
@@ -1439,6 +1502,8 @@ do_http(thr_arg *arg)
             if(!strncasecmp("101", response + 9, 3))
                 is_ws |= WSS_RESP_101;
 
+            for(n = 0; n < MAXHEADERS; n++)
+                headers_ok[n] = 1;
             for(chunked = 0, cont = -1L, n = 1; n < MAXHEADERS && headers[n]; n++) {
                 switch(check_header(headers[n], buf)) {
                 case HEADER_CONNECTION:
@@ -1496,6 +1561,11 @@ do_http(thr_arg *arg)
                         }
                     }
                     break;
+                case HEADER_STRICT_TRANSPORT_SECURITY:
+                    /* enforce pound's STS header */
+                    if(svc->sts >= 0)
+                        headers_ok[n] = 0;
+                    break;
                 }
             }
 
@@ -1505,6 +1575,8 @@ do_http(thr_arg *arg)
             /* send the response */
             if(!skip)
                 for(n = 0; n < MAXHEADERS && headers[n]; n++) {
+                    if(!headers_ok[n])
+                        continue;
                     if(BIO_printf(cl, "%s\r\n", headers[n]) <= 0) {
                         if(errno) {
                             addr2str(caddr, MAXBUF - 1, &from_host, 1);
@@ -1516,6 +1588,8 @@ do_http(thr_arg *arg)
                     }
                 }
             free_headers(headers);
+            if(!skip && ssl && svc->sts >= 0)
+                BIO_printf(cl, "Strict-Transport-Security: max-age=%d\r\n", svc->sts);
 
             /* final CRLF */
             if(!skip)
@@ -1771,6 +1845,22 @@ do_http(thr_arg *arg)
                 response[11], s_res_bytes, referer, u_agent, svc->name[0]? svc->name: "-", buf,
                 (end_req - start_req) / 1000000.0);
             break;
+        case 6:
+            logmsg(LOG_INFO, "%016lx|%s|%c%c%c|%0.3f|%s|%s|%s|%s|%s|%s|%s|%s|%s",
+                pthread_self(),                             // thread id
+                req_time,                                   // request time ISO 8601
+                response[9], response[10], response[11],    // response code
+                (end_req - start_req) / 1000000.0,          // duration seconds
+                s_res_bytes[0] == '-' ? "0" : s_res_bytes,  // response bytes
+                v_host[0] ? v_host : "",                    // target host:port
+                svc->name[0] ? svc->name : "",              // service name
+                caddr,                                      // source client address
+                buf,                                        // backend address:port
+                u_name[0] ? u_name : "",                    // user name
+                u_agent,                                    // user agent
+                referer,                                    // refering URI
+                request);                                   // request URL
+            break;
         }
 
         if(!be_11) {
@@ -1807,7 +1897,7 @@ thr_http(void *dummy)
 
     for(;;) {
         while((arg = get_thr_arg()) == NULL)
-            logmsg(LOG_NOTICE, "NULL get_thr_arg");
+            logmsg(LOG_NOTICE, "(%lx) get_thr_arg: http arg from request queue is NULL.", pthread_self());
         do_http(arg);
     }
 }

@@ -1,0 +1,2 @@
+POUND_ARGS="-f /etc/pound/pound.cfg"
+startup=1

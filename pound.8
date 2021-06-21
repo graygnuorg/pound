@@ -236,10 +236,11 @@ to find the optimal value for your installation.
 Specify the log facility to use.
 .I value
 (default: daemon) must be one of the symbolic facility names defined in
-\fIsyslog.h\fR. This facility shall be used for logging. Using a - for
-the facility name causes
+\fIsyslog.h\fR. This facility shall be used for logging. Using - or +
+or * for the facility name causes
 .B Pound
-to log to stdout/stderr.
+to log to stdout/stderr. Use + to prepend the priority <n> to each log
+message. Further, use * to flush the stdout buffer after each log message.
 .TP
 \fBLogLevel\fR value
 Specify the logging level: 0 for no logging, 1 (default) for regular
@@ -548,6 +549,12 @@ returned certificate.
 Set the CRL (Certificate Revocation List) file. The CRL_file is a file that contains
 the CRLs (in PEM format).
 .TP
+\fBXSSLHeaders\fR 0|1|2|3
+Control sending X-SSL headers to the backend server. If this value is
+0 disable the headers. If the value is 1 send some X-SLL headers. If the
+value is 2 then send more X-SSL headers. If the value is 3 then send all
+X-SSL headers.
+.TP
 \fBNoHTTPS11\fR 0|1|2
 Behave like an HTTP/1.0 server for HTTPS clients. If this value is
 0 disable the check. If the value is 1 do not allow multiple
@@ -694,6 +701,11 @@ the following
 .I End
 directives define a session-tracking mechanism for the current service. See below
 for details.
+.TP
+\fBStrictTransportSecurity\fR value
+Add a header, on each response, to declare the HTTP Strict Transport Security (HSTS) policy.
+The value, in seconds, specifies a period of time the user agent (i.e. browser) should
+remember the policy.
 .SH "BackEnd"
 A back-end is a definition of a single back-end server
 .B Pound

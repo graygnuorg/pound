@@ -254,6 +254,15 @@ logmsg(const int priority, const char *fmt, ...)
     va_end(ap);
     if(log_facility == -1) {
         fprintf((priority == LOG_INFO || priority == LOG_DEBUG)? stdout: stderr, "%s\n", buf);
+    } else if (log_facility < -1) {
+        /* systemd: Prepend '<p>' to pass priority into units using SyslogLevelPrefix=true. */
+        if ( priority == LOG_INFO || priority == LOG_DEBUG )
+            fprintf(stdout, "%s%s\n", SD_INFO, buf);
+        else
+            fprintf(stderr, "%s%s\n", SD_ERR, buf);
+        /* Conditionally, flush stdout buffer. */
+        if (log_facility < -2)
+            fflush(stdout);
     } else {
         if(print_log)
             printf("%s\n", buf);
@@ -277,6 +286,15 @@ va_dcl
     va_end(ap);
     if(log_facility == -1) {
         fprintf((priority == LOG_INFO || priority == LOG_DEBUG)? stdout: stderr, "%s\n", buf);
+    } else if (log_facility < -1) {
+        /* systemd: Prepend '<p>' to pass priority into units using SyslogLevelPrefix=true. */
+        if ( priority == LOG_INFO || priority == LOG_DEBUG )
+            fprintf(stdout, "%s%s\n", SD_INFO, buf);
+        else
+            fprintf(stderr, "%s%s\n", SD_ERR, buf);
+        /* Conditionally, flush stdout buffer. */
+        if (log_facility < -2)
+            fflush(stdout);
     } else {
         if(print_log)
             printf("%s\n", buf);
@@ -418,6 +436,7 @@ check_header(const char *header, char *const content)
         { "User-agent",         10, HEADER_USER_AGENT },
         { "Destination",        11, HEADER_DESTINATION },
         { "Expect",             6,  HEADER_EXPECT },
+        { "Strict-Transport-Security", 25, HEADER_STRICT_TRANSPORT_SECURITY },
         { "Upgrade",            7,  HEADER_UPGRADE },
         { "",                   0,  HEADER_OTHER },
     };

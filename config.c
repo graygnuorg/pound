@@ -74,10 +74,10 @@ static CODE facilitynames[] = {
 static regex_t  Empty, Comment, User, Group, RootJail, Daemon, LogFacility, LogLevel, Alive, SSLEngine, Control;
 static regex_t  ListenHTTP, ListenHTTPS, End, Address, Port, Cert, xHTTP, Client, CheckURL;
 static regex_t  Err414, Err500, Err501, Err503, MaxRequest, HeadRemove, RewriteLocation, RewriteDestination;
-static regex_t  Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd, Emergency, Priority, HAport, HAportAddr;
+static regex_t  Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd, Emergency, Priority, HAport, HAportAddr, StrictTransportSecurity;
 static regex_t  Redirect, RedirectN, TimeOut, WSTimeOut, Session, Type, TTL, ID;
 static regex_t  ClientCert, AddHeader, DisableProto, SSLAllowClientRenegotiation, SSLHonorCipherOrder, Ciphers;
-static regex_t  CAlist, VerifyList, CRLlist, NoHTTPS11, Grace, Include, ConnTO, IgnoreCase, HTTPS;
+static regex_t  CAlist, VerifyList, CRLlist, XSSLHeaders, NoHTTPS11, Grace, Include, ConnTO, IgnoreCase, HTTPS;
 static regex_t  Disabled, Threads, CNName, Anonymise, ECDHCurve;
 
 static regmatch_t   matches[5];
@@ -355,9 +355,6 @@ parse_be(const int is_emergency)
             SSL_CTX_set_app_data(res->ctx, res);
             SSL_CTX_set_verify(res->ctx, SSL_VERIFY_NONE, NULL);
             SSL_CTX_set_mode(res->ctx, SSL_MODE_AUTO_RETRY);
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
-            SSL_CTX_set_mode(res->ctx, SSL_MODE_SEND_FALLBACK_SCSV);
-#endif
             SSL_CTX_set_options(res->ctx, SSL_OP_ALL);
 #ifdef  SSL_OP_NO_COMPRESSION
             SSL_CTX_set_options(res->ctx, SSL_OP_NO_COMPRESSION);
@@ -573,6 +570,7 @@ parse_service(const char *svc_name)
         conf_err("Service config: out of memory - aborted");
     memset(res, 0, sizeof(SERVICE));
     res->sess_type = SESS_NONE;
+    res->sts = -1;
     pthread_mutex_init(&res->mut, NULL);
     if(svc_name)
         strncpy(res->name, svc_name, KEY_SIZE);
@@ -604,6 +602,8 @@ parse_service(const char *svc_name)
             lin[matches[1].rm_eo] = '\0';
             if(regcomp(&m->pat, lin + matches[1].rm_so, REG_NEWLINE | REG_EXTENDED | (ign_case? REG_ICASE: 0)))
                 conf_err("URL bad pattern - aborted");
+        } else if(!regexec(&StrictTransportSecurity, lin, 4, matches, 0)) {
+            res->sts = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&HeadRequire, lin, 4, matches, 0)) {
             if(res->req_head) {
                 for(m = res->req_head; m->next; m = m->next)
@@ -860,12 +860,16 @@ parse_HTTP(void)
         } else if(!regexec(&LogLevel, lin, 4, matches, 0)) {
             res->log_level = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&Service, lin, 4, matches, 0)) {
-            if(res->services == NULL)
+            if(res->services == NULL) {
                 res->services = parse_service(NULL);
-            else {
+                if(res->services->sts >= 0)
+                    conf_err("StrictTransportSecurity not allowed in HTTP listener - aborted");
+            } else {
                 for(svc = res->services; svc->next; svc = svc->next)
                     ;
                 svc->next = parse_service(NULL);
+                if(svc->next->sts >= 0)
+                    conf_err("StrictTransportSecurity not allowed in HTTP listener - aborted");
             }
         } else if(!regexec(&ServiceName, lin, 4, matches, 0)) {
             lin[matches[1].rm_eo] = '\0';
@@ -1237,6 +1241,8 @@ parse_HTTPS(void)
 #else
             conf_err("your version of OpenSSL does not support CRL checking");
 #endif
+        } else if(!regexec(&XSSLHeaders, lin, 4, matches, 0)) {
+            res->xSSLHeaders = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&NoHTTPS11, lin, 4, matches, 0)) {
             res->noHTTPS11 = atoi(lin + matches[1].rm_so);
         } else if(!regexec(&Service, lin, 4, matches, 0)) {
@@ -1334,6 +1340,10 @@ parse_file(void)
             lin[matches[1].rm_eo] = '\0';
             if(lin[matches[1].rm_so] == '-')
                 def_facility = -1;
+            else if(lin[matches[1].rm_so] == '+')
+                def_facility = -2;
+            else if(lin[matches[1].rm_so] == '*')
+                def_facility = -3;
             else
                 for(i = 0; facilitynames[i].c_name; i++)
                     if(!strcmp(facilitynames[i].c_name, lin + matches[1].rm_so)) {
@@ -1446,8 +1456,8 @@ config_parse(const int argc, char **const argv)
     || regcomp(&RootJail, "^[ \t]*RootJail[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Daemon, "^[ \t]*Daemon[ \t]+([01])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Threads, "^[ \t]*Threads[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-    || regcomp(&LogFacility, "^[ \t]*LogFacility[ \t]+([a-z0-9-]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-    || regcomp(&LogLevel, "^[ \t]*LogLevel[ \t]+([0-5])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&LogFacility, "^[ \t]*LogFacility[ \t]+([a-z0-9-+*]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&LogLevel, "^[ \t]*LogLevel[ \t]+([0-6])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Grace, "^[ \t]*Grace[ \t]+([0-9]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Alive, "^[ \t]*Alive[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&SSLEngine, "^[ \t]*SSLEngine[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
@@ -1472,6 +1482,7 @@ config_parse(const int argc, char **const argv)
     || regcomp(&Service, "^[ \t]*Service[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&ServiceName, "^[ \t]*Service[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&URL, "^[ \t]*URL[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&StrictTransportSecurity, "^[ \t]*StrictTransportSecurity[ \t]+([0-9]+)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&HeadRequire, "^[ \t]*HeadRequire[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&HeadDeny, "^[ \t]*HeadDeny[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&BackEnd, "^[ \t]*BackEnd[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
@@ -1496,6 +1507,7 @@ config_parse(const int argc, char **const argv)
     || regcomp(&CAlist, "^[ \t]*CAlist[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&VerifyList, "^[ \t]*VerifyList[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&CRLlist, "^[ \t]*CRLlist[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+    || regcomp(&XSSLHeaders, "^[ \t]*XSSLHeaders[ \t]+([0-3])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&NoHTTPS11, "^[ \t]*NoHTTPS11[ \t]+([0-2])[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&Include, "^[ \t]*Include[ \t]+\"(.+)\"[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
     || regcomp(&ConnTO, "^[ \t]*ConnTO[ \t]+([1-9][0-9]*)[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
@@ -1630,6 +1642,7 @@ config_parse(const int argc, char **const argv)
     regfree(&Service);
     regfree(&ServiceName);
     regfree(&URL);
+    regfree(&StrictTransportSecurity);
     regfree(&HeadRequire);
     regfree(&HeadDeny);
     regfree(&BackEnd);
@@ -1654,6 +1667,7 @@ config_parse(const int argc, char **const argv)
     regfree(&CAlist);
     regfree(&VerifyList);
     regfree(&CRLlist);
+    regfree(&XSSLHeaders);
     regfree(&NoHTTPS11);
     regfree(&Include);
     regfree(&ConnTO);

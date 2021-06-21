@@ -377,6 +377,7 @@ typedef struct _service {
     LHASH               *sessions;  /* currently active sessions */
 #endif
     int                 disabled;   /* true if the service is disabled */
+    int                 sts;        /* strict transport security */
     struct _service     *next;
 }   SERVICE;
 
@@ -398,6 +399,7 @@ typedef struct _listener {
     int                 sock;               /* listening socket */
     POUND_CTX           *ctx;               /* CTX for SSL connections */
     int                 clnt_check;         /* client verification mode */
+    int                 xSSLHeaders;        /* X-SSL headers mode */
     int                 noHTTPS11;          /* HTTP 1.1 mode for SSL */
     char                *add_head;          /* extra SSL header */
     regex_t             verb;               /* pattern to match the request verb against */
@@ -448,6 +450,7 @@ typedef enum { RENEG_INIT=0, RENEG_REJECT, RENEG_ALLOW, RENEG_ABORT } RENEG_STAT
 #define HEADER_URI                  9
 #define HEADER_DESTINATION          10
 #define HEADER_EXPECT               11
+#define HEADER_STRICT_TRANSPORT_SECURITY 12
 #define HEADER_UPGRADE              13
 
 /* control request stuff */
@@ -633,3 +636,16 @@ extern void *thr_timer(void *);
  * listens to client requests and calls the appropriate functions
  */
 extern void *thr_control(void *);
+
+/*
+ * systemd/sd-daemon.h
+ */
+#define SD_EMERG   "<0>"  /* system is unusable */
+#define SD_ALERT   "<1>"  /* action must be taken immediately */
+#define SD_CRIT    "<2>"  /* critical conditions */
+#define SD_ERR     "<3>"  /* error conditions */
+#define SD_WARNING "<4>"  /* warning conditions */
+#define SD_NOTICE  "<5>"  /* normal but significant condition */
+#define SD_INFO    "<6>"  /* informational */
+#define SD_DEBUG   "<7>"  /* debug-level messages */
+

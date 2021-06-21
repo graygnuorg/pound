@@ -1,0 +1,90 @@
+#! /bin/sh
+### BEGIN INIT INFO
+# Provides:          pound
+# Required-Start:    $remote_fs $syslog
+# Required-Stop:     $remote_fs $syslog
+# Should-Start:      $named
+# Should-Stop:       $named
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: reverse proxy and load balancer
+# Description:       reverse proxy, load balancer and
+#                    HTTPS front-end for Web servers
+### END INIT INFO
+#
+# pound - reverse proxy, load-balancer and https front-end for web-servers
+
+# Hint: SysV configuration for rcN.d symbolic links
+#   Debian.: sudo update-rc.d pound defaults
+#   RHEL...: sudo chkconfig pound on
+
+PATH=/sbin:/bin:/usr/sbin:/usr/bin:/usr/local/sbin:/usr/local/bin
+DAEMON=/usr/local/sbin/pound
+DESC="reverse proxy and load balancer"
+NAME=pound
+
+# Exit if the daemon does not exist (anymore)
+test -f $DAEMON || exit 0
+
+. /lib/lsb/init-functions
+
+# Check if pound is configured or not
+if [ -f "/etc/default/pound" ]
+then
+  . /etc/default/pound
+  if [ "$startup" != "1" ]
+  then
+    log_warning_msg "$NAME will not start unconfigured."
+    log_warning_msg "Please configure; afterwards, set startup=1 in /etc/default/pound."
+    exit 0
+  fi
+else
+  log_failure_msg "/etc/default/pound not found"
+  exit 1
+fi
+
+# The real work of an init script
+case "$1" in
+  start)
+	log_daemon_msg "Starting $DESC" "$NAME"
+    if [ ! -d "/var/run/pound" ]
+    then
+        mkdir -p /var/run/pound
+    fi
+	start_daemon $DAEMON $POUND_ARGS
+	log_end_msg $?
+	;;
+  stop)
+	log_daemon_msg "Stopping $DESC" "$NAME"
+	killproc $DAEMON
+	log_end_msg $?
+	;;
+  restart|force-reload)
+    log_daemon_msg "Validating Config"
+    if /usr/local/sbin/pound -c ; then
+      log_daemon_msg "Restarting $DESC" "$NAME"
+      killproc $DAEMON
+      start_daemon $DAEMON $POUND_ARGS
+      echo "."
+    else
+      log_daemon_msg "Failed to validate config file, refusing to restart"
+    fi
+  ;;
+  status)
+        pidofproc $DAEMON >/dev/null
+	status=$?
+	if [ $status -eq 0 ]; then
+            log_success_msg "$NAME is running"
+        else
+            log_success_msg "$NAME is not running"
+        fi
+	exit $status
+        ;;
+  *)
+	echo "Usage: $0 {start|stop|restart|force-reload|status}"
+	exit 1
+	;;
+esac
+
+# Fallthrough if work done.
+exit 0
