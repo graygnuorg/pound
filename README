@@ -241,20 +241,8 @@ ZOPE
     the absolute URLs it generates (for images for example).
     This is clearly an undesirable behavior.
 
-    For older Zope versions (prior to 2.7): a modified z2.py (as
-    well as a patch) is included in the distribution. The main
-    difference is that this z2.py allows starting an additional
-    HTTP server via the -y flag that sets the environment
-    HTTPS variable - thus correcting the problem. That means
-    that in order to use Pound as an SSL wrapper you need to:
-
-    - start Zope (modify the 'start' file) as:
-
-        python -X -w 8080 -y 8443 ...
-
-    For Zope 2.7 or later the same effect can be achieved via suitable
-    modifications to zope.conf.
-
+    For reasonably modern versions of Zope (2.7 or later) this
+    can be fixed via suitable modifications to zope.conf.
 
 
 VIRTUAL HOSTS (IN GENERAL)

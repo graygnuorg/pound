@@ -43,3 +43,5 @@ BUILT_SOURCES=dh.h $(DHSRC)
 DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h 
 
 dist_man_MANS=pound.8 poundctl.8
+
+EXTRA_DIST = COPYING FAQ CHANGELOG
