@@ -1698,7 +1698,7 @@ parse_file (void)
       else if (!regexec (&IgnoreCase, lin, 4, matches, 0))
 	{
 	  ignore_case = atoi (lin + matches[1].rm_so);
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
+#if OPENSSL_VERSION_MAJOR < 3
 #ifndef OPENSSL_NO_ECDH
 	}
       else if (!regexec (&ECDHCurve, lin, 4, matches, 0))
