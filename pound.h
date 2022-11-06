@@ -28,55 +28,20 @@
 #include    "config.h"
 #include    <stdio.h>
 #include    <math.h>
-
-#if HAVE_STDLIB_H
 #include    <stdlib.h>
-#else
-#error "Pound needs stdlib.h"
-#endif
-
-#if HAVE_UNISTD_H
 #include    <unistd.h>
-#else
-#error "Pound needs unistd.h"
-#endif
+#include    <pthread.h>
+#include    <string.h>
+#include    <stdarg.h>
 
 #if HAVE_GETOPT_H
-#include    <getopt.h>
+# include    <getopt.h>
 #endif
 
-#if HAVE_PTHREAD_H
-#include    <pthread.h>
-#else
-#error "Pound needs pthread.h"
-#endif
-
-#if HAVE_STRING_H
-#include    <string.h>
-#else
-#error "Pound needs string.h"
-#endif
-
-#if TIME_WITH_SYS_TIME
-#if HAVE_SYS_TIME_H
-#include    <sys/time.h>
-#else
-#error "Pound needs sys/time.h"
-#endif
-#if HAVE_TIME_H
 #include    <time.h>
-#else
-#error "Pound needs time.h"
-#endif
-#else /* may not mix sys/time.h and time.h */
 #if HAVE_SYS_TIME_H
-#include    <sys/time.h>
-#elif   HAVE_TIME_H
-#include    <time.h>
-#else
-#error "Pound needs time.h"
+# include    <sys/time.h>
 #endif
-#endif /* mix */
 
 #if HAVE_SYS_TYPES_H
 #include    <sys/types.h>
@@ -227,12 +192,6 @@
 #include    <fcntl.h>
 #else
 #error "Pound needs fcntl.h"
-#endif
-
-#if HAVE_STDARG_H
-#include    <stdarg.h>
-#else
-#include    <varargs.h>
 #endif
 
 #if HAVE_FNMATCH_H
@@ -600,16 +559,6 @@ extern void config_parse (const int, char **const);
 #endif
 
 /*
- * return a pre-generated RSA key
- */
-extern RSA *RSA_tmp_callback (SSL *, int, int);
-
-/*
- * return a pre-generated RSA key
- */
-extern DH *DH_tmp_callback (SSL *, int, int);
-
-/*
  * Renegotiation callback
  */
 extern void SSLINFO_callback (const SSL * s, int where, int rc);
@@ -645,3 +594,7 @@ extern void *thr_timer (void *);
  * listens to client requests and calls the appropriate functions
  */
 extern void *thr_control (void *);
+
+extern void POUND_SSL_CTX_init (SSL_CTX *ctx);
+extern int set_ECDHCurve (char *name);
+void conf_err (const char *msg);

@@ -23,8 +23,12 @@ install-exec-hook:
 		done; \
 	fi
 
-noinst_HEADERS=pound.h config.h dh.h
+noinst_HEADERS=pound.h config.h
 
+if OPENSSL_V3
+DHSRC =
+else
+noinst_HEADERS += dh.h
 DHSRC = dh512.h dh@DH_LEN@.h
 
 dh512.h:
@@ -36,11 +40,13 @@ dh@DH_LEN@.h:
 dh.h: $(DHSRC)
 	cat $(DHSRC) > dh.h
 
+BUILT_SOURCES=dh.h $(DHSRC)
+DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h 
+endif
+
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c
 
-BUILT_SOURCES=dh.h $(DHSRC)
-DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h 
 
 dist_man_MANS=pound.8 poundctl.8
 

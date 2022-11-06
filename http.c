@@ -382,8 +382,14 @@ typedef struct
  * the SSL manual says not to do it, but it works well enough anyway...
  */
 static long
-bio_callback (BIO * const bio, const int cmd, const char *argp, int argi,
+bio_callback
+#if OPENSSL_VERSION_MAJOR >= 3
+(BIO *bio, int cmd, const char *argp, size_t len, int argi,
+ long argl, int ret, size_t *processed)
+#else
+(BIO * const bio, const int cmd, const char *argp, int argi,
 	      long argl, long ret)
+#endif
 {
   BIO_ARG *bio_arg;
   struct pollfd p;
@@ -498,6 +504,17 @@ bio_callback (BIO * const bio, const int cmd, const char *argp, int argi,
 #endif
 	}
     }
+}
+
+static void
+set_callback (BIO *cl, BIO_ARG *arg)
+{
+  BIO_set_callback_arg (cl, (char *) arg);
+#if OPENSSL_VERSION_MAJOR >= 3
+  BIO_set_callback_ex (cl, bio_callback);
+#else
+  BIO_set_callback (cl, bio_callback);
+#endif
 }
 
 /*
@@ -768,8 +785,7 @@ do_http (thr_arg * arg)
       return;
     }
   ba1.timeout = lstn->to;
-  BIO_set_callback_arg (cl, (char *) &ba1);
-  BIO_set_callback (cl, bio_callback);
+  set_callback (cl, &ba1);
 
   if (lstn->ctx != NULL)
     {
@@ -1265,8 +1281,7 @@ do_http (thr_arg * arg)
 	  if (backend->to > 0)
 	    {
 	      ba2.timeout = backend->to;
-	      BIO_set_callback_arg (be, (char *) &ba2);
-	      BIO_set_callback (be, bio_callback);
+	      set_callback (be, &ba2);
 	    }
 	  if (backend->ctx != NULL)
 	    {

@@ -200,7 +200,7 @@ get_thr_qlen (void)
 /*
  * handle SIGTERM/SIGQUIT - exit
  */
-static RETSIGTYPE
+static void
 h_term (const int sig)
 {
   logmsg (LOG_NOTICE, "received signal %d - exiting...", sig);
@@ -214,7 +214,7 @@ h_term (const int sig)
 /*
  * handle SIGHUP/SIGINT - exit after grace period
  */
-static RETSIGTYPE
+static void
 h_shut (const int sig)
 {
   int status;
@@ -281,7 +281,6 @@ main (const int argc, char **argv)
   init_thr_arg ();
   CRYPTO_set_id_callback (l_id);
   CRYPTO_set_locking_callback (l_lock);
-  init_timer ();
 
   /*
    * Disable SSL Compression for OpenSSL pre-1.0.  1.0 is handled with an
@@ -504,177 +503,163 @@ main (const int argc, char **argv)
   /* split off into monitor and working process if necessary */
   for (;;)
     {
-#if SUPERVISOR
-      if ((son = fork ()) > 0)
+      if (SUPERVISOR && daemonize)
 	{
-	  int status;
+	  if ((son = fork ()) > 0)
+	    {
+	      int status;
 
-	  (void) wait (&status);
-	  if (WIFEXITED (status))
-	    logmsg (LOG_ERR,
-		    "MONITOR: worker exited normally %d, restarting...",
-		    WEXITSTATUS (status));
-	  else if (WIFSIGNALED (status))
-	    logmsg (LOG_ERR,
-		    "MONITOR: worker exited on signal %d, restarting...",
-		    WTERMSIG (status));
-	  else
-	    logmsg (LOG_ERR,
-		    "MONITOR: worker exited (stopped?) %d, restarting...",
-		    status);
+	      wait (&status);
+	      if (WIFEXITED (status))
+		logmsg (LOG_ERR,
+			"MONITOR: worker exited normally %d, restarting...",
+			WEXITSTATUS (status));
+	      else if (WIFSIGNALED (status))
+		logmsg (LOG_ERR,
+			"MONITOR: worker exited on signal %d, restarting...",
+			WTERMSIG (status));
+	      else
+		logmsg (LOG_ERR,
+			"MONITOR: worker exited (stopped?) %d, restarting...",
+			status);
+	    }
+	  else if (son == -1)
+	    {
+	      /* failed to spawn son */
+	      logmsg (LOG_ERR, "Can't fork worker (%s) - aborted",
+		      strerror (errno));
+	      exit (1);
+	    }
 	}
-      else if (son == 0)
-	{
-#endif
 
-	  /* thread stuff */
-	  pthread_attr_init (&attr);
-	  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+      /* thread stuff */
+      pthread_attr_init (&attr);
+      pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
 
 #ifdef  NEED_STACK
-	  /* set new stack size - necessary for OpenBSD/FreeBSD and Linux NPTL */
-	  if (pthread_attr_setstacksize (&attr, 1 << 18))
-	    {
-	      logmsg (LOG_ERR, "can't set stack size - aborted");
-	      exit (1);
-	    }
+      /* set new stack size - necessary for OpenBSD/FreeBSD and Linux NPTL */
+      if (pthread_attr_setstacksize (&attr, 1 << 18))
+	{
+	  logmsg (LOG_ERR, "can't set stack size - aborted");
+	  exit (1);
+	}
 #endif
-	  /* start timer */
-	  if (pthread_create (&thr, &attr, thr_timer, NULL))
+      /* start timer */
+      if (pthread_create (&thr, &attr, thr_timer, NULL))
+	{
+	  logmsg (LOG_ERR, "create thr_resurect: %s - aborted",
+		  strerror (errno));
+	  exit (1);
+	}
+
+      /* start the controlling thread (if needed) */
+      if (control_sock >= 0
+	  && pthread_create (&thr, &attr, thr_control, NULL))
+	{
+	  logmsg (LOG_ERR, "create thr_control: %s - aborted",
+		  strerror (errno));
+	  exit (1);
+	}
+
+      /* pause to make sure the service threads were started */
+      sleep (1);
+
+      /* create the worker threads */
+      for (i = 0; i < numthreads; i++)
+	if (pthread_create (&thr, &attr, thr_http, NULL))
+	  {
+	    logmsg (LOG_ERR, "create thr_http: %s - aborted",
+		    strerror (errno));
+	    exit (1);
+	  }
+
+      /*
+       * pause to make sure at least some of the worker threads were
+       * started
+       */
+      sleep (1);
+
+      /* and start working */
+      for (;;)
+	{
+	  if (shut_down)
 	    {
-	      logmsg (LOG_ERR, "create thr_resurect: %s - aborted",
-		      strerror (errno));
-	      exit (1);
+	      logmsg (LOG_NOTICE, "shutting down...");
+	      for (lstn = listeners; lstn; lstn = lstn->next)
+		close (lstn->sock);
+	      if (grace > 0)
+		{
+		  sleep (grace);
+		  logmsg (LOG_NOTICE, "grace period expired - exiting...");
+		}
+	      if (ctrl_name != NULL)
+		(void) unlink (ctrl_name);
+	      exit (0);
 	    }
-
-	  /* start the controlling thread (if needed) */
-	  if (control_sock >= 0
-	      && pthread_create (&thr, &attr, thr_control, NULL))
+	  for (lstn = listeners, i = 0; i < n_listeners; lstn = lstn->next, i++)
 	    {
-	      logmsg (LOG_ERR, "create thr_control: %s - aborted",
-		      strerror (errno));
-	      exit (1);
+	      polls[i].events = POLLIN | POLLPRI;
+	      polls[i].revents = 0;
 	    }
-
-	  /* pause to make sure the service threads were started */
-	  sleep (1);
-
-	  /* create the worker threads */
-	  for (i = 0; i < numthreads; i++)
-	    if (pthread_create (&thr, &attr, thr_http, NULL))
-	      {
-		logmsg (LOG_ERR, "create thr_http: %s - aborted",
-			strerror (errno));
-		exit (1);
-	      }
-
-	  /*
-	   * pause to make sure at least some of the worker threads were
-	   * started
-	   */
-	  sleep (1);
-
-	  /* and start working */
-	  for (;;)
+	  if (poll (polls, n_listeners, -1) < 0)
 	    {
-	      if (shut_down)
+	      logmsg (LOG_WARNING, "poll: %s", strerror (errno));
+	    }
+	  else
+	    {
+	      for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
 		{
-		  logmsg (LOG_NOTICE, "shutting down...");
-		  for (lstn = listeners; lstn; lstn = lstn->next)
-		    close (lstn->sock);
-		  if (grace > 0)
+		  if (polls[i].revents & (POLLIN | POLLPRI))
 		    {
-		      sleep (grace);
-		      logmsg (LOG_NOTICE,
-			      "grace period expired - exiting...");
-		    }
-		  if (ctrl_name != NULL)
-		    (void) unlink (ctrl_name);
-		  exit (0);
-		}
-	      for (lstn = listeners, i = 0; i < n_listeners;
-		   lstn = lstn->next, i++)
-		{
-		  polls[i].events = POLLIN | POLLPRI;
-		  polls[i].revents = 0;
-		}
-	      if (poll (polls, n_listeners, -1) < 0)
-		{
-		  logmsg (LOG_WARNING, "poll: %s", strerror (errno));
-		}
-	      else
-		{
-		  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
-		    {
-		      if (polls[i].revents & (POLLIN | POLLPRI))
+		      memset (&clnt_addr, 0, sizeof (clnt_addr));
+		      clnt_length = sizeof (clnt_addr);
+		      if ((clnt = accept (lstn->sock,
+					  (struct sockaddr *) &clnt_addr,
+					  (socklen_t *) & clnt_length)) < 0)
 			{
-			  memset (&clnt_addr, 0, sizeof (clnt_addr));
-			  clnt_length = sizeof (clnt_addr);
-			  if ((clnt =
-			       accept (lstn->sock,
-				       (struct sockaddr *) &clnt_addr,
-				       (socklen_t *) & clnt_length)) < 0)
-			    {
-			      logmsg (LOG_WARNING, "HTTP accept: %s",
-				      strerror (errno));
-			    }
-			  else if (((struct sockaddr_in *) &clnt_addr)->
-				   sin_family == AF_INET
-				   || ((struct sockaddr_in *) &clnt_addr)->
-				   sin_family == AF_INET6)
-			    {
-			      thr_arg arg;
+			  logmsg (LOG_WARNING, "HTTP accept: %s",
+				  strerror (errno));
+			}
+		      else if (((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET
+			       || ((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET6)
+			{
+			  thr_arg arg;
 
-			      if (lstn->disabled)
-				{
-				  /*
-				     addr2str(tmp, MAXBUF - 1, &clnt_addr, 1);
-				     logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
-				   */
-				  close (clnt);
-				}
-			      arg.sock = clnt;
-			      arg.lstn = lstn;
-			      if ((arg.from_host.ai_addr =
-				   (struct sockaddr *) malloc (clnt_length))
-				  == NULL)
-				{
-				  logmsg (LOG_WARNING,
-					  "HTTP arg address: malloc");
-				  close (clnt);
-				  continue;
-				}
-			      memcpy (arg.from_host.ai_addr, &clnt_addr,
-				      clnt_length);
-			      arg.from_host.ai_addrlen = clnt_length;
-			      if (((struct sockaddr_in *) &clnt_addr)->
-				  sin_family == AF_INET)
-				arg.from_host.ai_family = AF_INET;
-			      else
-				arg.from_host.ai_family = AF_INET6;
-			      if (put_thr_arg (&arg))
-				close (clnt);
-			    }
-			  else
+			  if (lstn->disabled)
 			    {
-			      /* may happen on FreeBSD, I am told */
-			      logmsg (LOG_WARNING,
-				      "HTTP connection prematurely closed by peer");
+			      /*
+				addr2str(tmp, MAXBUF - 1, &clnt_addr, 1);
+				logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
+			      */
 			      close (clnt);
 			    }
+			  arg.sock = clnt;
+			  arg.lstn = lstn;
+			  if ((arg.from_host.ai_addr = (struct sockaddr *) malloc (clnt_length)) == NULL)
+			    {
+			      logmsg (LOG_WARNING, "HTTP arg address: malloc");
+			      close (clnt);
+			      continue;
+			    }
+			  memcpy (arg.from_host.ai_addr, &clnt_addr, clnt_length);
+			  arg.from_host.ai_addrlen = clnt_length;
+			  if (((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET)
+			    arg.from_host.ai_family = AF_INET;
+			  else
+			    arg.from_host.ai_family = AF_INET6;
+			  if (put_thr_arg (&arg))
+			    close (clnt);
+			}
+		      else
+			{
+			  /* may happen on FreeBSD, I am told */
+			  logmsg (LOG_WARNING,
+				  "HTTP connection prematurely closed by peer");
+			  close (clnt);
 			}
 		    }
 		}
 	    }
-#if SUPERVISOR
 	}
-      else
-	{
-	  /* failed to spawn son */
-	  logmsg (LOG_ERR, "Can't fork worker (%s) - aborted",
-		  strerror (errno));
-	  exit (1);
-	}
-#endif
     }
 }

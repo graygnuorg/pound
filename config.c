@@ -105,11 +105,6 @@ static int be_to = 15;
 static int ws_to = 600;
 static int be_connto = 15;
 static int ignore_case = 0;
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-#ifndef OPENSSL_NO_ECDH
-static int EC_nid = NID_X9_62_prime256v1;
-#endif
-#endif
 
 #define MAX_FIN 8
 
@@ -423,19 +418,8 @@ parse_be (const int is_emergency)
 	  sprintf (lin, "%d-Pound-%ld", getpid (), random ());
 	  SSL_CTX_set_session_id_context (res->ctx, (unsigned char *) lin,
 					  strlen (lin));
-	  SSL_CTX_set_tmp_rsa_callback (res->ctx, RSA_tmp_callback);
-	  SSL_CTX_set_tmp_dh_callback (res->ctx, DH_tmp_callback);
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-#ifndef OPENSSL_NO_ECDH
-	  /* This generates a EC_KEY structure with no key, but a group defined */
-	  EC_KEY *ecdh;
-	  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-	    conf_err ("Unable to generate temp ECDH key");
-	  SSL_CTX_set_tmp_ecdh (res->ctx, ecdh);
-	  SSL_CTX_set_options (res->ctx, SSL_OP_SINGLE_ECDH_USE);
-	  EC_KEY_free (ecdh);
-#endif
-#endif
+
+	  POUND_SSL_CTX_init (res->ctx);
 	}
       else if (!regexec (&Cert, lin, 4, matches, 0))
 	{
@@ -1611,20 +1595,8 @@ parse_HTTPS (void)
 	      sprintf (lin, "%d-Pound-%ld", getpid (), random ());
 	      SSL_CTX_set_session_id_context (pc->ctx, (unsigned char *) lin,
 					      strlen (lin));
-	      SSL_CTX_set_tmp_rsa_callback (pc->ctx, RSA_tmp_callback);
-	      SSL_CTX_set_tmp_dh_callback (pc->ctx, DH_tmp_callback);
+	      POUND_SSL_CTX_init (pc->ctx);
 	      SSL_CTX_set_info_callback (pc->ctx, SSLINFO_callback);
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-#ifndef OPENSSL_NO_ECDH
-	      /* This generates a EC_KEY structure with no key, but a group defined */
-	      EC_KEY *ecdh;
-	      if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-		conf_err ("Unable to generate temp ECDH key");
-	      SSL_CTX_set_tmp_ecdh (pc->ctx, ecdh);
-	      SSL_CTX_set_options (pc->ctx, SSL_OP_SINGLE_ECDH_USE);
-	      EC_KEY_free (ecdh);
-#endif
-#endif
 	    }
 	  return res;
 	}
@@ -1732,18 +1704,15 @@ parse_file (void)
       else if (!regexec (&ECDHCurve, lin, 4, matches, 0))
 	{
 	  lin[matches[1].rm_eo] = '\0';
-	  if ((EC_nid = OBJ_sn2nid (lin + matches[1].rm_so)) == 0)
+	  if (set_ECDHCurve (lin + matches[1].rm_so) == 0)
 	    conf_err ("ECDHCurve config: invalid curve name");
 #endif
 #endif
-#if HAVE_OPENSSL_ENGINE_H
+#if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
 	}
       else if (!regexec (&SSLEngine, lin, 4, matches, 0))
 	{
 	  lin[matches[1].rm_eo] = '\0';
-#if OPENSSL_VERSION_NUMBER >= 0x00907000L
-	  ENGINE_load_builtin_engines ();
-#endif
 	  if (!(e = ENGINE_by_id (lin + matches[1].rm_so)))
 	    conf_err ("could not find engine");
 	  if (!ENGINE_init (e))

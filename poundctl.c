@@ -64,7 +64,7 @@ usage (const char *arg0)
 static char *
 prt_addr (const struct addrinfo *addr)
 {
-  static char res[UNIX_PATH_MAX];
+  static char res[UNIX_PATH_MAX + 9];
   char buf[UNIX_PATH_MAX];
   int port;
   void *src;
@@ -80,56 +80,64 @@ prt_addr (const struct addrinfo *addr)
 	  && !getnameinfo (addr->ai_addr, addr->ai_addrlen, buf,
 			   UNIX_PATH_MAX - 1, NULL, 0, 0))
 	break;
-      if (inet_ntop (AF_INET, src, buf, UNIX_PATH_MAX - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", UNIX_PATH_MAX - 1);
+      if (inet_ntop (AF_INET, src, buf, sizeof (buf) - 1) == NULL)
+	strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
       break;
 
     case AF_INET6:
-      src =
-	(void *) &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr.s6_addr;
+      src = (void *) &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr.s6_addr;
       port = ntohs (((struct sockaddr_in6 *) addr->ai_addr)->sin6_port);
       if (host_names
 	  && !getnameinfo (addr->ai_addr, addr->ai_addrlen, buf,
-			   UNIX_PATH_MAX - 1, NULL, 0, 0))
+			   sizeof (buf) - 1, NULL, 0, 0))
 	break;
-      if (inet_ntop (AF_INET6, src, buf, UNIX_PATH_MAX - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", UNIX_PATH_MAX - 1);
+      if (inet_ntop (AF_INET6, src, buf, sizeof (buf) - 1) == NULL)
+	strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
       break;
 
     case AF_UNIX:
-      strncpy (buf, (char *) addr->ai_addr, UNIX_PATH_MAX - 1);
+      strncpy (buf, (char *) addr->ai_addr, sizeof (buf) - 1);
       port = 0;
       break;
 
     default:
-      strncpy (buf, "(UNKNOWN)", UNIX_PATH_MAX - 1);
+      strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
       port = 0;
       break;
     }
-  snprintf (res, UNIX_PATH_MAX - 1, "%s:%d", buf, port);
+  snprintf (res, sizeof (res) - 1, "%s:%d", buf, port);
 #else
 #error "Pound needs inet_ntop()"
 #endif
   return res;
 }
 
-static void
+static int
 be_prt (const int sock)
 {
   BACKEND be;
   struct sockaddr_storage a, h;
   int n_be;
-
+  ssize_t n;
+  
   n_be = 0;
-  while (read (sock, (void *) &be, sizeof (BACKEND)) == sizeof (BACKEND))
+  while ((n = read (sock, (void *) &be, sizeof (BACKEND))) == sizeof (BACKEND))
     {
       if (be.disabled < 0)
 	break;
-      read (sock, &a, be.addr.ai_addrlen);
+      if (read (sock, &a, be.addr.ai_addrlen) == -1)
+	{
+	  perror ("read");
+	  return -1;
+	}
       be.addr.ai_addr = (struct sockaddr *) &a;
       if (be.ha_addr.ai_addrlen > 0)
 	{
-	  read (sock, &h, be.ha_addr.ai_addrlen);
+	  if (read (sock, &h, be.ha_addr.ai_addrlen) == -1)
+	    {
+	      perror ("read");
+	      return -1;
+	    }
 	  be.ha_addr.ai_addr = (struct sockaddr *) &h;
 	}
       if (xml_out)
@@ -143,26 +151,43 @@ be_prt (const int sock)
 		be.priority, be.t_average / 1000000,
 		be.alive ? "alive" : "DEAD");
     }
-  return;
+  if (n == -1)
+    {
+      perror ("read");
+      return -1;
+    }
+  return 0;
 }
 
-static void
+static int
 sess_prt (const int sock)
 {
   TABNODE sess;
   int n_be, n_sess, cont_len;
   char buf[KEY_SIZE + 1];
-
+  ssize_t n;
+  
   n_sess = 0;
-  while (read (sock, (void *) &sess, sizeof (TABNODE)) == sizeof (TABNODE))
+  while ((n = read (sock, (void *) &sess, sizeof (TABNODE))) == sizeof (TABNODE))
     {
       if (sess.content == NULL)
 	break;
-      read (sock, &n_be, sizeof (n_be));
-      read (sock, &cont_len, sizeof (cont_len));
+      if (read (sock, &n_be, sizeof (n_be)) == -1 ||
+	  read (sock, &cont_len, sizeof (cont_len)) == -1)
+	{
+	  perror ("read");
+	  return -1;
+	}
+
       memset (buf, 0, KEY_SIZE + 1);
       /* cont_len is at most KEY_SIZE */
-      read (sock, buf, cont_len);
+
+      if (read (sock, buf, cont_len) == -1)
+	{
+	  perror ("read");
+	  return -1;
+	}
+      
       if (xml_out)
 	{
 	  int i, j;
@@ -183,17 +208,25 @@ sess_prt (const int sock)
       else
 	printf ("    %3d. Session %s -> %d\n", n_sess++, buf, n_be);
     }
-  return;
+
+  if (n == -1)
+    {
+      perror ("read");
+      return -1;
+    }
+  return 0;
 }
 
-static void
+static int
 svc_prt (const int sock)
 {
   SERVICE svc;
   int n_svc;
+  ssize_t n;
+  int res = 0;
 
   n_svc = 0;
-  while (read (sock, (void *) &svc, sizeof (SERVICE)) == sizeof (SERVICE))
+  while ((n = read (sock, (void *) &svc, sizeof (SERVICE))) == sizeof (SERVICE))
     {
       if (svc.disabled < 0)
 	break;
@@ -215,12 +248,20 @@ svc_prt (const int sock)
 	    printf ("  %3d. Service %s (%d)\n", n_svc++,
 		    svc.disabled ? "DISABLED" : "active", svc.tot_pri);
 	}
-      be_prt (sock);
-      sess_prt (sock);
+      if ((res = be_prt (sock)) == 0)
+	res = sess_prt (sock);
       if (xml_out)
 	printf ("</service>\n");
+      if (res)
+	break;
     }
-  return;
+  
+  if (n == -1)
+    {
+      perror ("read");
+      res = -1;
+    }
+  return res;
 }
 
 static int
@@ -255,7 +296,8 @@ main (const int argc, char **argv)
     is_set;
   LISTENER lstn;
   struct sockaddr_storage a;
-
+  int status = 0;
+  
   arg0 = *argv;
   sock_name = NULL;
   en_lst = de_lst = en_svc = de_svc = en_be = de_be = is_set = a_sess =
@@ -394,7 +436,11 @@ main (const int argc, char **argv)
     }
 
   sock = get_sock (sock_name);
-  write (sock, &cmd, sizeof (cmd));
+  if (write (sock, &cmd, sizeof (cmd)) == -1)
+    {
+      perror ("write");
+      exit (1);
+    }
 
   if (!is_set)
     {
@@ -408,12 +454,15 @@ main (const int argc, char **argv)
 	  printf ("<queue size=\"%d\"/>\n", n);
 	else
 	  printf ("Requests in queue: %d\n", n);
-      while (read (sock, (void *) &lstn, sizeof (LISTENER)) ==
-	     sizeof (LISTENER))
+      while (read (sock, (void *) &lstn, sizeof (LISTENER)) == sizeof (LISTENER))
 	{
 	  if (lstn.disabled < 0)
 	    break;
-	  read (sock, &a, lstn.addr.ai_addrlen);
+	  if (read (sock, &a, lstn.addr.ai_addrlen) == -1)
+	    {
+	      perror ("read");
+	      break;
+	    }
 	  lstn.addr.ai_addr = (struct sockaddr *) &a;
 	  if (xml_out)
 	    printf
@@ -424,15 +473,17 @@ main (const int argc, char **argv)
 	    printf ("%3d. %s Listener %s %s\n", n_lstn++,
 		    lstn.ctx ? "HTTPS" : "http", prt_addr (&lstn.addr),
 		    lstn.disabled ? "*D" : "a");
-	  svc_prt (sock);
+	  if (svc_prt (sock))
+	    status = 1;
 	  if (xml_out)
 	    printf ("</listener>\n");
 	}
       if (!xml_out)
 	printf (" -1. Global services\n");
-      svc_prt (sock);
+      if (svc_prt (sock))
+	status = 1;
       if (xml_out)
 	printf ("</pound>\n");
     }
-  return 0;
+  return status;
 }

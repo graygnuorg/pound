@@ -1,6 +1,5 @@
-AC_PREREQ(2.63)
-AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],
-        [pound],[https://github.com/graygnuorg/pound])
+AC_PREREQ([2.69])
+AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_SRCDIR([pound.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.11 foreign tar-ustar])
@@ -15,28 +14,40 @@ AC_MSG_NOTICE([*** Checking for threads library and/or flags ***])
 AX_PTHREAD([CC="$PTHREAD_CC"],
            [AC_MSG_ERROR([No suitable pthread library found])])
 
-AC_MSG_NOTICE([*** Parsing options ***])
-
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
 AC_ARG_WITH([ssl],
- AC_HELP_STRING([--with-ssl=directory],[location of OpenSSL package]),
+ AS_HELP_STRING([--with-ssl=directory],[location of OpenSSL package]),
  [SSL_CPPFLAGS="-I${withval}/include"
   SSL_LDFLAGS="-L${withval}/lib ${LDFLAGS}"
   C_SSL="${withval}"],
  [C_SSL=""])
 
+saved_CPPFLAGS=$CFLAGS
+CPPFLAGS=$SSL_CPPFLAGS
+saved_LDFLAGS=$LDFLAGS
+LDFLAGS=$SSL_LDFLAGS
+AC_MSG_CHECKING([for OpenSSL version 3])
+AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <openssl/opensslv.h>],
+ [#if OPENSSL_VERSION_MAJOR >= 3
+#error "OpenSSL v3"
+#endif
+])],[openssl_v3=no],[openssl_v3=yes])
+AC_MSG_RESULT([$openssl_v3])
+CPPFLAGS=$saved_CPPFLAGS
+LDFLAGS=$saved_LDFLAGS
+AM_CONDITIONAL([OPENSSL_V3],[test "$openssl_v3" = "yes"])
+
 AC_ARG_WITH([t_rsa],
- AC_HELP_STRING([--with-t_rsa=nnn],
-                [Timeout for RSA ephemeral keys generation]),
+ AS_HELP_STRING([--with-t_rsa=nnn],[Timeout for RSA ephemeral keys generation]),
  [T_RSA_KEYS=${withval}],
  [T_RSA_KEYS=7200])
 
 AC_DEFINE_UNQUOTED([T_RSA_KEYS],[$T_RSA_KEYS],
  [Timeout for RSA ephemeral keys generation])
- 
+
 AC_ARG_WITH([dh],
- AC_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)]),
+ AS_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)]),
  [case ${withval} in
   1024|2048) DH_LEN=${withval};;
   *) AC_MSG_FAILURE([invalid value for DH key length])
@@ -48,7 +59,7 @@ AC_DEFINE_UNQUOTED([DH_LEN],[$DH_LEN],
  [DH key length])
 
 AC_ARG_WITH([maxbuf],
- AC_HELP_STRING([--with-maxbuf=nnn],[Value of the MAXBUF parameter (default: 4096)]),
+ AS_HELP_STRING([--with-maxbuf=nnn],[Value of the MAXBUF parameter (default: 4096)]),
  [MAXBUF=${withval}],
  [MAXBUF=4096])
 
@@ -57,21 +68,18 @@ AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
  
 AC_SUBST(I_OWNER)
 AC_ARG_WITH([owner],
- AC_HELP_STRING([--with-owner=name],
-                [The account that will own the files installed by Pound]),
+ AS_HELP_STRING([--with-owner=name],[The account that will own the files installed by Pound]),
  [I_OWNER="${with_owner}"; C_OWNER="${with_owner}"],
  [C_OWNER=""])
 
 AC_SUBST(I_GRP)
 AC_ARG_WITH([group],
- AC_HELP_STRING([--with-group=name],
-                [The group that will own the files installed by Pound]),
+ AS_HELP_STRING([--with-group=name],[The group that will own the files installed by Pound]),
  [I_GRP="${with_group}"; C_GROUP="${with_group}"],
  [C_GROUP=""])
 
 AC_ARG_ENABLE([super], 
- AC_HELP_STRING([--enable-super],
-                [enable or disable running with supervisor process (default: enabled)]),
+ AS_HELP_STRING([--enable-super],[enable or disable running with supervisor process (default: enabled)]),
  [if test ${enableval} = "yes"; then
     SUPERVISOR=1
   else
@@ -83,20 +91,17 @@ AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
  [Run supervisor process])
  
 AC_ARG_ENABLE([pcreposix],
- AC_HELP_STRING([--enable-pcreposix],
-         [enable or disable using the pcreposix library (default: enabled if available)]),
+ AS_HELP_STRING([--enable-pcreposix],[enable or disable using the pcreposix library (default: enabled if available)]),
  [C_PCREPOSIX=${enableval}],
  [C_PCREPOSIX=yes])
 
 AC_ARG_ENABLE([tcmalloc],
- AC_HELP_STRING([--enable-tcmalloc],
-         [enable or disable using the tcmalloc library (default: enabled if available)]),
+ AS_HELP_STRING([--enable-tcmalloc],[enable or disable using the tcmalloc library (default: enabled if available)]),
  [C_TCMALLOC=${enableval}],
  [C_TCMALLOC=yes])
 
 AC_ARG_ENABLE([hoard],
- AC_HELP_STRING([--enable-hoard],
-     [enable or disable using the hoard library (default: enabled if available and tcmalloc NOT available)]),
+ AS_HELP_STRING([--enable-hoard],[enable or disable using the hoard library (default: enabled if available and tcmalloc NOT available)]),
  [C_HOARD=${enableval}],
  [C_HOARD=yes])
 
@@ -130,26 +135,21 @@ elif test x"$C_HOARD" = xyes; then
 fi    
 
 AC_MSG_CHECKING([for pthread_attr_setstacksize in LIBS=$LIBS with CFLAGS=$CFLAGS"])
-AC_TRY_LINK([char pthread_attr_setstacksize ();],
- [return pthread_attr_setstacksize ();],
- [CFLAGS="${CFLAGS} -DNEED_STACK"]);
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[char pthread_attr_setstacksize ();]], [[return pthread_attr_setstacksize ();]])],[CFLAGS="${CFLAGS} -DNEED_STACK"],[]);
 AC_MSG_RESULT([OK]);
 
 AC_MSG_NOTICE([*** Checking for header files ***])
-AC_HEADER_STDC
-AC_CHECK_HEADERS([arpa/inet.h errno.h netdb.h netinet/in.h netinet/tcp.h stdlib.h string.h sys/socket.h sys/un.h sys/time.h unistd.h getopt.h pthread.h sys/types.h sys/poll.h openssl/ssl.h openssl/engine.h time.h pwd.h grp.h signal.h regex.h ctype.h wait.h sys/wait.h sys/stat.h sys/syslog.h syslog.h fcntl.h stdarg.h pcreposix.h pcre/pcreposix.h fnmatch.h])
+
+AC_CHECK_HEADERS([arpa/inet.h errno.h netdb.h netinet/in.h netinet/tcp.h sys/socket.h sys/un.h sys/time.h unistd.h getopt.h pthread.h sys/types.h sys/poll.h openssl/ssl.h openssl/engine.h pwd.h grp.h signal.h regex.h ctype.h wait.h sys/wait.h sys/stat.h sys/syslog.h syslog.h fcntl.h pcreposix.h pcre/pcreposix.h fnmatch.h])
 
 AC_MSG_NOTICE([*** Checking for additonal information ***])
 
 save_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS -DSYSLOG_NAMES=1"
 AC_MSG_CHECKING([for facilitynames presence])
-AC_TRY_LINK([#include <stdio.h>
+AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdio.h>
              #include <syslog.h>
-            ],
-            [void *attr=(void *)facilitynames;],
-	    [ok=yes],
-	    [ok=no])
+            ]], [[void *attr=(void *)facilitynames;]])],[ok=yes],[ok=no])
 if test x"$ok" = xyes; then
   AC_MSG_RESULT([yes])
   AC_DEFINE([HAVE_FACILITYNAMES],1,
@@ -159,11 +159,11 @@ else
 fi  
 CFLAGS=$save_CFLAGS
 
-AC_TYPE_SIGNAL
 AC_C_CONST
 AC_TYPE_UID_T
 AC_TYPE_PID_T
-AC_HEADER_TIME
+AC_CHECK_HEADERS_ONCE([sys/time.h])
+
 AC_TYPE_UNSIGNED_LONG_LONG_INT
 AC_TYPE_LONG_LONG_INT
 AC_CHECK_TYPE([in_addr_t],[],[CFLAGS="${CFLAGS} -DNEED_INADDRT"],

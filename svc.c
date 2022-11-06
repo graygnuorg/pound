@@ -262,7 +262,6 @@ IMPLEMENT_LHASH_DOALL_ARG_FN (t_cont, TABNODE *, ALL_ARG *)
 /*
  * Log an error to the syslog or to stderr
  */
-#ifdef  HAVE_STDARG_H
 void
 logmsg (const int priority, const char *fmt, ...)
 {
@@ -287,34 +286,6 @@ logmsg (const int priority, const char *fmt, ...)
     }
   return;
 }
-#else
-void
-logmsg (const int priority, const char *fmt, va_alist)
-     va_dcl
-{
-  char buf[MAXBUF + 1];
-  va_list ap;
-  struct tm *t_now, t_res;
-
-  buf[MAXBUF] = '\0';
-  va_start (ap);
-  vsnprintf (buf, MAXBUF, fmt, ap);
-  va_end (ap);
-  if (log_facility == -1)
-    {
-      fprintf ((priority == LOG_INFO
-		|| priority == LOG_DEBUG) ? stdout : stderr, "%s\n", buf);
-    }
-  else
-    {
-      if (print_log)
-	printf ("%s\n", buf);
-      else
-	syslog (log_facility | priority, "%s", buf);
-    }
-  return;
-}
-#endif
 
 /*
  * Translate inet/inet6 address/port into a string
@@ -1469,7 +1440,10 @@ do_expire (void)
 
   return;
 }
-
+
+static time_t last_alive, last_expire;
+
+#if OPENSSL_VERSION_MAJOR < 3
 static pthread_mutex_t RSA_mut;	/* mutex for RSA keygen */
 static RSA *RSA512_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
 static RSA *RSA1024_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
@@ -1477,7 +1451,7 @@ static RSA *RSA1024_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
 /*
  * return a pre-generated RSA key
  */
-RSA *
+static RSA *
 RSA_tmp_callback ( /* not used */ SSL * ssl, /* not used */ int is_export,
 		  int keylength)
 {
@@ -1547,20 +1521,29 @@ do_RSAgen (void)
     }
   if (ret_val = pthread_mutex_unlock (&RSA_mut))
     logmsg (LOG_WARNING, "thr_RSAgen() unlock: %s", strerror (ret_val));
-  return;
+}
+
+static time_t last_RSA;
+
+static inline void
+run_RSAgen (time_t t)
+{
+  if ((t - last_RSA) >= T_RSA_KEYS)
+    {
+      last_RSA = time (NULL);
+      do_RSAgen ();
+    }
 }
 
 #include    "dh.h"
 static DH *DH512_params, *DHALT_params;
 
-DH *
+static DH *
 DH_tmp_callback ( /* not used */ SSL * s, /* not used */ int is_export,
 		 int keylength)
 {
   return keylength == 512 ? DH512_params : DHALT_params;
 }
-
-static time_t last_RSA, last_alive, last_expire;
 
 /*
  * initialise the timer functions:
@@ -1598,9 +1581,52 @@ init_timer (void)
 #else
   DHALT_params = get_dh2048 ();
 #endif
-
   return;
 }
+
+#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
+#ifndef OPENSSL_NO_ECDH
+static int EC_nid = NID_X9_62_prime256v1;
+#endif
+#endif
+
+int
+set_ECDHCurve (char *name)
+{
+  int n;
+
+  if ((n = OBJ_sn2nid (name)) == 0)
+    return -1;
+  EC_nid = n;
+  return 0;
+}
+
+void
+POUND_SSL_CTX_init (SSL_CTX *ctx)
+{
+	  SSL_CTX_set_tmp_rsa_callback (ctx, RSA_tmp_callback);
+	  SSL_CTX_set_tmp_dh_callback (ctx, DH_tmp_callback);
+#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
+#ifndef OPENSSL_NO_ECDH
+	  /* This generates a EC_KEY structure with no key, but a group defined */
+	  EC_KEY *ecdh;
+	  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
+	    conf_err ("Unable to generate temp ECDH key");
+	  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
+	  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
+	  EC_KEY_free (ecdh);
+#endif
+#endif
+}
+#else /* OPENSSL_VERSION_MAJOR >= 3 */
+# define init_timer()
+# define run_RSAgen(t)
+void
+POUND_SSL_CTX_init (SSL_CTX *ctx)
+{
+  SSL_CTX_set_dh_auto (ctx, 1);
+}
+#endif
 
 /*
  * run timed functions:
@@ -1614,6 +1640,8 @@ thr_timer (void *arg)
   time_t last_time, cur_time;
   int n_wait, n_remain;
 
+  init_timer ();
+
   n_wait = EXPIRE_TO;
   if (n_wait > alive_to)
     n_wait = alive_to;
@@ -1625,16 +1653,15 @@ thr_timer (void *arg)
       if ((n_remain = n_wait - (cur_time - last_time)) > 0)
 	sleep (n_remain);
       last_time = time (NULL);
-      if ((last_time - last_RSA) >= T_RSA_KEYS)
-	{
-	  last_RSA = time (NULL);
-	  do_RSAgen ();
-	}
+
+      run_RSAgen(last_time);
+
       if ((last_time - last_alive) >= alive_to)
 	{
 	  last_alive = time (NULL);
 	  do_resurect ();
 	}
+
       if ((last_time - last_expire) >= EXPIRE_TO)
 	{
 	  last_expire = time (NULL);
@@ -1662,12 +1689,31 @@ t_dump_doall_arg (TABNODE * t, DUMP_ARG * arg)
   if (!be)
     /* should NEVER happen */
     n_be = 0;
-  (void) write (arg->control_sock, t, sizeof (TABNODE));
-  (void) write (arg->control_sock, &n_be, sizeof (n_be));
+  if (write (arg->control_sock, t, sizeof (TABNODE)) == -1)
+    {
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+	      strerror (errno));
+      return;
+    }
+  if (write (arg->control_sock, &n_be, sizeof (n_be)) == -1)
+    {
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+	      strerror (errno));
+      return;
+    }
   sz = strlen (t->key);
-  (void) write (arg->control_sock, &sz, sizeof (sz));
-  (void) write (arg->control_sock, t->key, sz);
-  return;
+  if (write (arg->control_sock, &sz, sizeof (sz)) == -1)
+    {
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+	      strerror (errno));
+      return;
+    }
+  if (write (arg->control_sock, t->key, sz))
+    {
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+	      strerror (errno));
+      return;
+    }
 }
 
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
@@ -1760,25 +1806,16 @@ sel_be (const CTRL_CMD * cmd)
   return be;
 }
 
-/*
- * The controlling thread
- * listens to client requests and calls the appropriate functions
- */
-void *
-thr_control (void *arg)
+static int
+do_list (int ctl)
 {
-  CTRL_CMD cmd;
-  struct sockaddr sa;
-  int ctl, dummy, n, ret_val;
+  int n;
   LISTENER *lstn, dummy_lstn;
   SERVICE *svc, dummy_svc;
   BACKEND *be, dummy_be;
   TABNODE dummy_sess;
-  struct pollfd polls;
+  int rc;
 
-  /* just to be safe */
-  if (control_sock < 0)
-    return NULL;
   memset (&dummy_lstn, 0, sizeof (dummy_lstn));
   dummy_lstn.disabled = -1;
   memset (&dummy_svc, 0, sizeof (dummy_svc));
@@ -1787,9 +1824,105 @@ thr_control (void *arg)
   dummy_be.disabled = -1;
   memset (&dummy_sess, 0, sizeof (dummy_sess));
   dummy_sess.content = NULL;
-  dummy = sizeof (sa);
+
+  n = get_thr_qlen ();
+  if (write (ctl, (void *) &n, sizeof (n)) == -1)
+    return -1;
+  for (lstn = listeners; lstn; lstn = lstn->next)
+    {
+      if (write (ctl, (void *) lstn, sizeof (LISTENER)) == -1)
+	return -1;
+      if (write (ctl, lstn->addr.ai_addr, lstn->addr.ai_addrlen) == -1)
+	return -1;
+      for (svc = lstn->services; svc; svc = svc->next)
+	{
+	  if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
+	    return -1;
+	  for (be = svc->backends; be; be = be->next)
+	    {
+	      if (write (ctl, (void *) be, sizeof (BACKEND)) == -1)
+		return -1;
+	      if (write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
+		return -1;
+	      if (be->ha_addr.ai_addrlen > 0 &&
+		  write (ctl, be->ha_addr.ai_addr, be->ha_addr.ai_addrlen) == -1)
+		return -1;
+	    }
+	  if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
+	    return -1;
+	  if (rc = pthread_mutex_lock (&svc->mut))
+	    logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
+	  else
+	    {
+	      dump_sess (ctl, svc->sessions, svc->backends);
+	      if (rc = pthread_mutex_unlock (&svc->mut))
+		logmsg (LOG_WARNING, "thr_control() unlock: %s",
+			strerror (rc));
+	    }
+	  if (write (ctl, (void *) &dummy_sess, sizeof (TABNODE)) == -1)
+	    return -1;
+	}
+      if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
+	return -1;
+    }
+
+  if (write (ctl, (void *) &dummy_lstn, sizeof (LISTENER)) == -1)
+    return -1;
+
+  for (svc = services; svc; svc = svc->next)
+    {
+      if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
+	return -1;
+      for (be = svc->backends; be; be = be->next)
+	{
+	  if (write (ctl, (void *) be, sizeof (BACKEND)) == -1 ||
+	      write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
+	    return -1;
+	  if (be->ha_addr.ai_addrlen > 0 &&
+	      write (ctl, be->ha_addr.ai_addr, be->ha_addr.ai_addrlen) == -1)
+	    return -1;
+	}
+      if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
+	return -1;
+
+      if (rc = pthread_mutex_lock (&svc->mut))
+	logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
+      else
+	{
+	  dump_sess (ctl, svc->sessions, svc->backends);
+	  if (rc = pthread_mutex_unlock (&svc->mut))
+	    logmsg (LOG_WARNING, "thr_control() unlock: %s", strerror (rc));
+	}
+      if (write (ctl, (void *) &dummy_sess, sizeof (TABNODE)) == -1)
+	return -1;
+    }
+  if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
+    return -1;
+  return 0;
+}
+
+/*
+ * The controlling thread
+ * listens to client requests and calls the appropriate functions
+ */
+void *
+thr_control (void *arg)
+{
+  CTRL_CMD cmd;
+  int ctl, rc;
+  LISTENER *lstn;
+  SERVICE *svc;
+  BACKEND *be;
+
+  /* just to be safe */
+  if (control_sock < 0)
+    return NULL;
   for (;;)
     {
+      struct sockaddr sa;
+      socklen_t len = sizeof (sa);
+      struct pollfd polls;
+
       polls.fd = control_sock;
       polls.events = POLLIN | POLLPRI;
       polls.revents = 0;
@@ -1798,7 +1931,7 @@ thr_control (void *arg)
 	  logmsg (LOG_WARNING, "thr_control() poll: %s", strerror (errno));
 	  continue;
 	}
-      if ((ctl = accept (control_sock, &sa, (socklen_t *) & dummy)) < 0)
+      if ((ctl = accept (control_sock, &sa, &len)) < 0)
 	{
 	  logmsg (LOG_WARNING, "thr_control() accept: %s", strerror (errno));
 	  continue;
@@ -1812,65 +1945,10 @@ thr_control (void *arg)
 	{
 	case CTRL_LST:
 	  /* logmsg(LOG_INFO, "thr_control() list"); */
-	  n = get_thr_qlen ();
-	  (void) write (ctl, (void *) &n, sizeof (n));
-	  for (lstn = listeners; lstn; lstn = lstn->next)
+	  if (do_list (ctl))
 	    {
-	      (void) write (ctl, (void *) lstn, sizeof (LISTENER));
-	      (void) write (ctl, lstn->addr.ai_addr, lstn->addr.ai_addrlen);
-	      for (svc = lstn->services; svc; svc = svc->next)
-		{
-		  (void) write (ctl, (void *) svc, sizeof (SERVICE));
-		  for (be = svc->backends; be; be = be->next)
-		    {
-		      (void) write (ctl, (void *) be, sizeof (BACKEND));
-		      (void) write (ctl, be->addr.ai_addr,
-				    be->addr.ai_addrlen);
-		      if (be->ha_addr.ai_addrlen > 0)
-			(void) write (ctl, be->ha_addr.ai_addr,
-				      be->ha_addr.ai_addrlen);
-		    }
-		  (void) write (ctl, (void *) &dummy_be, sizeof (BACKEND));
-		  if (dummy = pthread_mutex_lock (&svc->mut))
-		    logmsg (LOG_WARNING, "thr_control() lock: %s",
-			    strerror (dummy));
-		  else
-		    {
-		      dump_sess (ctl, svc->sessions, svc->backends);
-		      if (dummy = pthread_mutex_unlock (&svc->mut))
-			logmsg (LOG_WARNING, "thr_control() unlock: %s",
-				strerror (dummy));
-		    }
-		  (void) write (ctl, (void *) &dummy_sess, sizeof (TABNODE));
-		}
-	      (void) write (ctl, (void *) &dummy_svc, sizeof (SERVICE));
+	      logmsg (LOG_ERR, "do_list: write: %s", strerror (errno));
 	    }
-	  (void) write (ctl, (void *) &dummy_lstn, sizeof (LISTENER));
-	  for (svc = services; svc; svc = svc->next)
-	    {
-	      (void) write (ctl, (void *) svc, sizeof (SERVICE));
-	      for (be = svc->backends; be; be = be->next)
-		{
-		  (void) write (ctl, (void *) be, sizeof (BACKEND));
-		  (void) write (ctl, be->addr.ai_addr, be->addr.ai_addrlen);
-		  if (be->ha_addr.ai_addrlen > 0)
-		    (void) write (ctl, be->ha_addr.ai_addr,
-				  be->ha_addr.ai_addrlen);
-		}
-	      (void) write (ctl, (void *) &dummy_be, sizeof (BACKEND));
-	      if (dummy = pthread_mutex_lock (&svc->mut))
-		logmsg (LOG_WARNING, "thr_control() lock: %s",
-			strerror (dummy));
-	      else
-		{
-		  dump_sess (ctl, svc->sessions, svc->backends);
-		  if (dummy = pthread_mutex_unlock (&svc->mut))
-		    logmsg (LOG_WARNING, "thr_control() unlock: %s",
-			    strerror (dummy));
-		}
-	      (void) write (ctl, (void *) &dummy_sess, sizeof (TABNODE));
-	    }
-	  (void) write (ctl, (void *) &dummy_svc, sizeof (SERVICE));
 	  break;
 
 	case CTRL_EN_LSTN:
@@ -1944,14 +2022,14 @@ thr_control (void *arg)
 		      cmd.listener, cmd.service);
 	      break;
 	    }
-	  if (ret_val = pthread_mutex_lock (&svc->mut))
+	  if (rc = pthread_mutex_lock (&svc->mut))
 	    logmsg (LOG_WARNING, "thr_control() add session lock: %s",
-		    strerror (ret_val));
+		    strerror (rc));
 	  t_add (svc->sessions, cmd.key, &be, sizeof (be));
-	  if (ret_val = pthread_mutex_unlock (&svc->mut))
+	  if (rc = pthread_mutex_unlock (&svc->mut))
 	    logmsg (LOG_WARNING,
 		    "thoriginalfiler_control() add session unlock: %s",
-		    strerror (ret_val));
+		    strerror (rc));
 	  break;
 
 	case CTRL_DEL_SESS:
@@ -1961,13 +2039,13 @@ thr_control (void *arg)
 		      cmd.listener, cmd.service);
 	      break;
 	    }
-	  if (ret_val = pthread_mutex_lock (&svc->mut))
+	  if (rc = pthread_mutex_lock (&svc->mut))
 	    logmsg (LOG_WARNING, "thr_control() del session lock: %s",
-		    strerror (ret_val));
+		    strerror (rc));
 	  t_remove (svc->sessions, cmd.key);
-	  if (ret_val = pthread_mutex_unlock (&svc->mut))
+	  if (rc = pthread_mutex_unlock (&svc->mut))
 	    logmsg (LOG_WARNING, "thr_control() del session unlock: %s",
-		    strerror (ret_val));
+		    strerror (rc));
 	  break;
 
 	default:
