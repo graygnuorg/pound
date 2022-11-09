@@ -1,8 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- *
- * This file is part of Pound.
+ * Copyright (C) 2018-2022 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,7 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Contact information:
  * Apsis GmbH
@@ -119,7 +118,7 @@ be_prt (const int sock)
   struct sockaddr_storage a, h;
   int n_be;
   ssize_t n;
-  
+
   n_be = 0;
   while ((n = read (sock, (void *) &be, sizeof (BACKEND))) == sizeof (BACKEND))
     {
@@ -166,7 +165,7 @@ sess_prt (const int sock)
   int n_be, n_sess, cont_len;
   char buf[KEY_SIZE + 1];
   ssize_t n;
-  
+
   n_sess = 0;
   while ((n = read (sock, (void *) &sess, sizeof (TABNODE))) == sizeof (TABNODE))
     {
@@ -187,7 +186,7 @@ sess_prt (const int sock)
 	  perror ("read");
 	  return -1;
 	}
-      
+
       if (xml_out)
 	{
 	  int i, j;
@@ -255,7 +254,7 @@ svc_prt (const int sock)
       if (res)
 	break;
     }
-  
+
   if (n == -1)
     {
       perror ("read");
@@ -297,7 +296,7 @@ main (const int argc, char **argv)
   LISTENER lstn;
   struct sockaddr_storage a;
   int status = 0;
-  
+
   arg0 = *argv;
   sock_name = NULL;
   en_lst = de_lst = en_svc = de_svc = en_be = de_be = is_set = a_sess =

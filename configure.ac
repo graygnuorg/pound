@@ -1,3 +1,19 @@
+# Pound - the reverse-proxy load-balancer                -*- autoconf -*-
+# Copyright (C) 2002-2010 Apsis GmbH
+# Copyright (C) 2018-2022 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.69])
 AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_SRCDIR([pound.c])
@@ -185,7 +201,7 @@ AC_FUNC_STAT
 AC_FUNC_STRFTIME
 
 AC_CHECK_FUNCS([getaddrinfo inet_ntop memset regcomp poll socket strcasecmp strchr strdup\
- strerror strncasecmp strspn strtol setsid X509_STORE_set_flags localtime_r gettimeofday])
+ strerror strncasecmp strspn strtol X509_STORE_set_flags localtime_r gettimeofday])
 
 AC_DEFINE_UNQUOTED([C_SSL], ["$C_SSL"],
  [Location of OpenSSL package])

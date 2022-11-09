@@ -1,8 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- *
- * This file is part of Pound.
+ * Copyright (C) 2018-2022 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,598 +14,1327 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * Contact information:
- * Apsis GmbH
- * P.O.Box
- * 8707 Uetikon am See
- * Switzerland
- * EMail: roseg@apsis.ch
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-#define NEED_FACILITYNAMES
+#include "pound.h"
+#include <openssl/x509v3.h>
+#include <assert.h>
 
-#include    "pound.h"
+char *progname;
+
+/*
+ * Scanner
+ */
 
-#include    <openssl/x509v3.h>
+/* Token types: */
+enum
+  {
+    T_IDENT = 256,   /* Identifier */
+    T_NUMBER,        /* Decimal number */
+    T_STRING,        /* Quoted string */
+    T_LITERAL,       /* Unquoted literal */
+    T_ERROR,         /* Erroneous or malformed token */
+    /* Special types used as parameters to must_gettkn: */
+    T_SEQ,    /* Character sequence: either T_IDENT, T_NUMBER, or T_LITERAL */
+    T_ANY = 0
+  };
 
-#ifndef HAVE_FACILITYNAMES
-
-/* This is lifted verbatim from the Linux sys/syslog.h */
-
-typedef struct _code
+/* Locations in the source file */
+struct locus_point
 {
-  char *c_name;
-  int c_val;
-} CODE;
-
-static CODE facilitynames[] = {
-  {"auth", LOG_AUTH},
-#ifdef  LOG_AUTHPRIV
-  {"authpriv", LOG_AUTHPRIV},
-#endif
-  {"cron", LOG_CRON},
-  {"daemon", LOG_DAEMON},
-#ifdef  LOG_FTP
-  {"ftp", LOG_FTP},
-#endif
-  {"kern", LOG_KERN},
-  {"lpr", LOG_LPR},
-  {"mail", LOG_MAIL},
-  {"mark", 0},			/* never used! */
-  {"news", LOG_NEWS},
-  {"security", LOG_AUTH},	/* DEPRECATED */
-  {"syslog", LOG_SYSLOG},
-  {"user", LOG_USER},
-  {"uucp", LOG_UUCP},
-  {"local0", LOG_LOCAL0},
-  {"local1", LOG_LOCAL1},
-  {"local2", LOG_LOCAL2},
-  {"local3", LOG_LOCAL3},
-  {"local4", LOG_LOCAL4},
-  {"local5", LOG_LOCAL5},
-  {"local6", LOG_LOCAL6},
-  {"local7", LOG_LOCAL7},
-  {NULL, -1}
-};
-#endif
-
-static regex_t Empty, Comment, User, Group, RootJail, Daemon, LogFacility,
-  LogLevel, Alive, SSLEngine, Control;
-static regex_t ListenHTTP, ListenHTTPS, End, Address, Port, Cert, xHTTP,
-  Client, CheckURL;
-static regex_t Err414, Err500, Err501, Err503, MaxRequest, HeadRemove,
-  RewriteLocation, RewriteDestination;
-static regex_t Service, ServiceName, URL, HeadRequire, HeadDeny, BackEnd,
-  Emergency, Priority, HAport, HAportAddr;
-static regex_t Redirect, RedirectN, TimeOut, WSTimeOut, Session, Type, TTL,
-  ID;
-static regex_t ClientCert, AddHeader, DisableProto,
-  SSLAllowClientRenegotiation, SSLHonorCipherOrder, Ciphers;
-static regex_t CAlist, VerifyList, CRLlist, NoHTTPS11, Grace, Include, ConnTO,
-  IgnoreCase, HTTPS;
-static regex_t Disabled, Threads, CNName, Anonymise, ECDHCurve;
-
-static regmatch_t matches[5];
-
-static char *xhttp[] = {
-  "^(GET|POST|HEAD) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT|RPC_IN_DATA|RPC_OUT_DATA) ([^ ]+) HTTP/1.[01]$",
+  char const *filename;
+  int line;
+  int col;
 };
 
-static int log_level = 1;
-static int def_facility = LOG_DAEMON;
-static int clnt_to = 10;
-static int be_to = 15;
-static int ws_to = 600;
-static int be_connto = 15;
-static int ignore_case = 0;
+struct locus_range
+{
+  struct locus_point beg, end;
+};
 
-#define MAX_FIN 8
+/* Token structure */
+struct token
+{
+  int type;
+  char *str;
+  struct locus_range locus;
+};
 
-static FILE *f_in[MAX_FIN];
-static char *f_name[MAX_FIN];
-static int n_lin[MAX_FIN];
-static int cur_fin;
+static char const *
+token_type_str (int type)
+{
+  switch (type)
+    {
+    case T_IDENT:
+      return "identifier";
+
+    case T_STRING:
+      return "quoted string";
+
+    case T_NUMBER:
+      return "number";
+
+    case T_LITERAL:
+      return "literal";
+
+    case T_ANY:
+      return "any";
+
+    case T_SEQ:
+      return "sequence";
+
+    case '\n':
+      return "end of line";
+    }
+
+  abort ();//FIXME
+}
+
+struct kwtab
+{
+  char const *name;
+  int tok;
+};
 
 static int
-conf_init (const char *name)
+kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval)
 {
-  if ((f_name[0] = strdup (name)) == NULL)
+  for (; kwt->name; kwt++)
+    if ((ci ? strcasecmp : strcmp) (kwt->name, name) == 0)
+      {
+	*retval = kwt->tok;
+	return 0;
+      }
+  return -1;
+}
+
+/* Input stream */
+struct input
+{
+  struct input *prev;             /* Previous input in stack. */
+
+  FILE *file;                     /* Input file. */
+  ino_t ino;
+  dev_t devno;
+
+  struct locus_point locus;       /* Current location */
+  int prev_col;                   /* Last column in the previous line. */
+  struct token token;             /* Current token. */
+  int ready;                      /* Token already parsed and put back */
+
+  /* Input buffer: */
+  struct stringbuf buf;
+};
+
+void *
+mem2nrealloc (void *p, size_t *pn, size_t s)
+{
+  size_t n = *pn;
+  char *newp;
+
+  if (!p)
     {
-      logmsg (LOG_ERR, "open %s: out of memory", name);
-      exit (1);
+      if (!n)
+	{
+	  /* The approximate size to use for initial small allocation
+	     requests, when the invoking code  specifies an old size of zero.
+	     64 bytes is the largest "small" request for the
+	     GNU C library malloc.  */
+	  enum { DEFAULT_MXFAST = 64 };
+
+	  n = DEFAULT_MXFAST / s;
+	  n += !n;
+	}
     }
-  if ((f_in[0] = fopen (name, "rt")) == NULL)
+  else
     {
-      logmsg (LOG_ERR, "can't open open %s", name);
-      exit (1);
+      /* Set N = ceil (1.5 * N) so that progress is made if N == 1.
+	 Check for overflow, so that N * S stays in size_t range.
+	 The check is slightly conservative, but an exact check isn't
+	 worth the trouble.  */
+      if ((size_t) -1 / 3 * 2 / s <= n)
+	{
+	  errno = ENOMEM;
+	  return NULL;
+	}
+      n += (n + 1) / 2;
     }
-  n_lin[0] = 0;
-  cur_fin = 0;
-  return 0;
+
+  newp = realloc(p, n * s);
+  if (!newp)
+    return NULL;
+  *pn = n;
+  return newp;
 }
 
 void
-conf_err (const char *msg)
+xnomem (void)
 {
-  logmsg (LOG_ERR, "%s line %d: %s", f_name[cur_fin], n_lin[cur_fin], msg);
+  logmsg (LOG_CRIT, "out of memory");
   exit (1);
 }
 
-static char *
-conf_fgets (char *buf, const int max)
+void *
+xmalloc (size_t s)
 {
-  int i;
+  void *p = malloc (s);
+  if (p == NULL)
+    xnomem ();
+  return p;
+}
 
+void *
+xcalloc (size_t nmemb, size_t size)
+{
+  void *p = calloc (nmemb, size);
+  if (!p)
+    xnomem ();
+  return p;
+}
+
+void *
+xrealloc (void *p, size_t s)
+{
+  if ((p = realloc (p, s)) == NULL)
+    xnomem ();
+  return p;
+}
+
+void *
+x2nrealloc (void *p, size_t *pn, size_t s)
+{
+  if ((p = mem2nrealloc (p, pn, s)) == NULL)
+    xnomem ();
+  return p;
+}
+
+char *
+xstrdup (char const *s)
+{
+  char *p = strdup (s);
+  if (!p)
+    xnomem ();
+  return p;
+}
+
+char *
+xstrndup (const char *s, size_t n)
+{
+  char *p = strndup (s, n);
+  if (!p)
+    xnomem ();
+  return p;
+}
+
+void
+stringbuf_init (struct stringbuf *sb)
+{
+  memset (sb, 0, sizeof (*sb));
+}
+
+void
+stringbuf_reset (struct stringbuf *sb)
+{
+  sb->len = 0;
+}
+
+void
+stringbuf_free (struct stringbuf *sb)
+{
+  free (sb->base);
+}
+
+void
+stringbuf_add_char (struct stringbuf *sb, int c)
+{
+  if (sb->len == sb->size)
+    sb->base = x2nrealloc (sb->base, &sb->size, 1);
+  sb->base[sb->len++] = c;
+}
+
+void
+stringbuf_add_string (struct stringbuf *sb, char const *str)
+{
+  int c;
+
+  while ((c = *str++) != 0)
+    stringbuf_add_char (sb, c);
+}
+
+void
+stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap)
+{
   for (;;)
     {
-      if (fgets (buf, max, f_in[cur_fin]) == NULL)
-	{
-	  fclose (f_in[cur_fin]);
-	  free (f_name[cur_fin]);
-	  if (cur_fin > 0)
-	    {
-	      cur_fin--;
-	      continue;
-	    }
-	  else
-	    return NULL;
-	}
-      n_lin[cur_fin]++;
-      for (i = 0; i < max; i++)
-	if (buf[i] == '\n' || buf[i] == '\r')
-	  {
-	    buf[i] = '\0';
-	    break;
-	  }
-      if (!regexec (&Empty, buf, 4, matches, 0)
-	  || !regexec (&Comment, buf, 4, matches, 0))
-	/* comment or empty line */
-	continue;
-      if (!regexec (&Include, buf, 4, matches, 0))
-	{
-	  buf[matches[1].rm_eo] = '\0';
-	  if (cur_fin == (MAX_FIN - 1))
-	    conf_err ("Include nesting too deep");
-	  cur_fin++;
-	  if ((f_name[cur_fin] = strdup (&buf[matches[1].rm_so])) == NULL)
-	    conf_err ("Include out of memory");
-	  if ((f_in[cur_fin] = fopen (&buf[matches[1].rm_so], "rt")) == NULL)
-	    conf_err ("can't open included file");
-	  n_lin[cur_fin] = 0;
-	  continue;
-	}
-      return buf;
-    }
-}
+      size_t bufsize = sb->size - sb->len;
+      ssize_t n;
+      va_list aq;
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define general_name_string(n) \
-	(unsigned char*) \
-	strndup ((char*)ASN1_STRING_get0_data (n->d.dNSName),	\
-		 ASN1_STRING_length (n->d.dNSName) + 1)
-#else
-# define general_name_string(n) \
-	(unsigned char*) \
-	strndup ((char*)ASN1_STRING_data(n->d.dNSName),	\
-		 ASN1_STRING_length (n->d.dNSName) + 1)
-#endif
+      va_copy (aq, ap);
+      n = vsnprintf (sb->base + sb->len, bufsize, fmt, aq);
+      va_end (aq);
 
-unsigned char **
-get_subjectaltnames (X509 * x509, unsigned int *count)
-{
-  unsigned int local_count;
-  unsigned char **result;
-  STACK_OF (GENERAL_NAME) * san_stack =
-    (STACK_OF (GENERAL_NAME) *) X509_get_ext_d2i (x509, NID_subject_alt_name,
-						  NULL, NULL);
-  unsigned char *temp[sk_GENERAL_NAME_num (san_stack)];
-  GENERAL_NAME *name;
-  int i;
-
-  local_count = 0;
-  result = NULL;
-  name = NULL;
-  *count = 0;
-  if (san_stack == NULL)
-    return NULL;
-  while (sk_GENERAL_NAME_num (san_stack) > 0)
-    {
-      name = sk_GENERAL_NAME_pop (san_stack);
-      switch (name->type)
-	{
-	case GEN_DNS:
-	  temp[local_count] = general_name_string (name);
-	  if (temp[local_count] == NULL)
-	    conf_err ("out of memory");
-	  local_count++;
-	  break;
-
-	default:
-	  logmsg (LOG_INFO, "unsupported subjectAltName type encountered: %i",
-		  name->type);
-	}
-      GENERAL_NAME_free (name);
-    }
-
-  result = (unsigned char **) malloc (sizeof (unsigned char *) * local_count);
-  if (result == NULL)
-    conf_err ("out of memory");
-  for (i = 0; i < local_count; i++)
-    result[i] = temp[i];
-  *count = local_count;
-
-  sk_GENERAL_NAME_pop_free (san_stack, GENERAL_NAME_free);
-
-  return result;
-}
-
-/*
- * parse a back-end
- */
-static BACKEND *
-parse_be (const int is_emergency)
-{
-  char lin[MAXBUF];
-  BACKEND *res;
-  int has_addr, has_port;
-  struct sockaddr_in in;
-  struct sockaddr_in6 in6;
-
-  if ((res = (BACKEND *) malloc (sizeof (BACKEND))) == NULL)
-    conf_err ("BackEnd config: out of memory - aborted");
-  memset (res, 0, sizeof (BACKEND));
-  res->be_type = 0;
-  res->addr.ai_socktype = SOCK_STREAM;
-  res->to = is_emergency ? 120 : be_to;
-  res->conn_to = is_emergency ? 120 : be_connto;
-  res->ws_to = is_emergency ? 120 : ws_to;
-  res->alive = 1;
-  memset (&res->addr, 0, sizeof (res->addr));
-  res->priority = 5;
-  memset (&res->ha_addr, 0, sizeof (res->ha_addr));
-  res->url = NULL;
-  res->next = NULL;
-  has_addr = has_port = 0;
-  pthread_mutex_init (&res->mut, NULL);
-  while (conf_fgets (lin, MAXBUF))
-    {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&Address, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (get_host (lin + matches[1].rm_so, &res->addr, PF_UNSPEC))
-	    {
-	      /* if we can't resolve it assume this is a UNIX domain socket */
-	      res->addr.ai_socktype = SOCK_STREAM;
-	      res->addr.ai_family = AF_UNIX;
-	      res->addr.ai_protocol = 0;
-	      if ((res->addr.ai_addr = malloc (sizeof (struct sockaddr_un))) == NULL)
-		conf_err ("out of memory");
-	      if ((strlen (lin + matches[1].rm_so) + 1) > UNIX_PATH_MAX)
-		conf_err ("UNIX path name too long");
-	      res->addr.ai_addrlen = strlen (lin + matches[1].rm_so) + 1;
-	      res->addr.ai_addr->sa_family = AF_UNIX;
-	      strcpy (res->addr.ai_addr->sa_data, lin + matches[1].rm_so);
-	      res->addr.ai_addrlen = sizeof (struct sockaddr_un);
-	    }
-	  has_addr = 1;
-	}
-      else if (!regexec (&Port, lin, 4, matches, 0))
-	{
-	  switch (res->addr.ai_family)
-	    {
-	    case AF_INET:
-	      memcpy (&in, res->addr.ai_addr, sizeof (in));
-	      in.sin_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in, sizeof (in));
-	      break;
-
-	    case AF_INET6:
-	      memcpy (&in6, res->addr.ai_addr, sizeof (in6));
-	      in6.sin6_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in6, sizeof (in6));
-	      break;
-
-	    default:
-	      conf_err ("Port is supported only for INET/INET6 back-ends");
-	    }
-	  has_port = 1;
-	}
-      else if (!regexec (&Priority, lin, 4, matches, 0))
-	{
-	  if (is_emergency)
-	    conf_err ("Priority is not supported for Emergency back-ends");
-	  res->priority = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&TimeOut, lin, 4, matches, 0))
-	{
-	  res->to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&WSTimeOut, lin, 4, matches, 0))
-	{
-	  res->ws_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&ConnTO, lin, 4, matches, 0))
-	{
-	  res->conn_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&HAport, lin, 4, matches, 0))
-	{
-	  if (is_emergency)
-	    conf_err ("HAport is not supported for Emergency back-ends");
-	  res->ha_addr = res->addr;
-	  if ((res->ha_addr.ai_addr = malloc (res->addr.ai_addrlen)) == NULL)
-	    conf_err ("out of memory");
-	  memcpy (res->ha_addr.ai_addr, res->addr.ai_addr,
-		  res->addr.ai_addrlen);
-	  switch (res->addr.ai_family)
-	    {
-	    case AF_INET:
-	      memcpy (&in, res->ha_addr.ai_addr, sizeof (in));
-	      in.sin_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->ha_addr.ai_addr, &in, sizeof (in));
-	      break;
-
-	    case AF_INET6:
-	      memcpy (&in6, res->addr.ai_addr, sizeof (in6));
-	      in6.sin6_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in6, sizeof (in6));
-	      break;
-
-	    default:
-	      conf_err ("HAport is supported only for INET/INET6 back-ends");
-	    }
-	}
-      else if (!regexec (&HAportAddr, lin, 4, matches, 0))
-	{
-	  if (is_emergency)
-	    conf_err ("HAportAddr is not supported for Emergency back-ends");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (get_host (lin + matches[1].rm_so, &res->ha_addr, PF_UNSPEC))
-	    {
-	      /* if we can't resolve it assume this is a UNIX domain socket */
-	      res->addr.ai_socktype = SOCK_STREAM;
-	      res->ha_addr.ai_family = AF_UNIX;
-	      res->ha_addr.ai_protocol = 0;
-	      if ((res->ha_addr.ai_addr = (struct sockaddr *) strdup (lin + matches[1].rm_so)) == NULL)
-		conf_err ("out of memory");
-	      res->addr.ai_addrlen = strlen (lin + matches[1].rm_so) + 1;
-	    }
-	  else
-	    switch (res->ha_addr.ai_family)
-	      {
-	      case AF_INET:
-		memcpy (&in, res->ha_addr.ai_addr, sizeof (in));
-		in.sin_port = (in_port_t) htons (atoi (lin + matches[2].rm_so));
-		memcpy (res->ha_addr.ai_addr, &in, sizeof (in));
-		break;
-
-	      case AF_INET6:
-		memcpy (&in6, res->ha_addr.ai_addr, sizeof (in6));
-		in6.sin6_port = (in_port_t) htons (atoi (lin + matches[2].rm_so));
-		memcpy (res->ha_addr.ai_addr, &in6, sizeof (in6));
-		break;
-
-	      default:
-		conf_err ("Unknown HA address type");
-	      }
-	}
-      else if (!regexec (&HTTPS, lin, 4, matches, 0))
-	{
-	  if ((res->ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
-	    conf_err ("SSL_CTX_new failed - aborted");
-	  SSL_CTX_set_app_data (res->ctx, res);
-	  SSL_CTX_set_verify (res->ctx, SSL_VERIFY_NONE, NULL);
-	  SSL_CTX_set_mode (res->ctx, SSL_MODE_AUTO_RETRY);
-#ifdef SSL_MODE_SEND_FALLBACK_SCSV
-	  SSL_CTX_set_mode (res->ctx, SSL_MODE_SEND_FALLBACK_SCSV);
-#endif
-	  SSL_CTX_set_options (res->ctx, SSL_OP_ALL);
-#ifdef  SSL_OP_NO_COMPRESSION
-	  SSL_CTX_set_options (res->ctx, SSL_OP_NO_COMPRESSION);
-#endif
-	  SSL_CTX_clear_options (res->ctx,
-				 SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
-	  SSL_CTX_clear_options (res->ctx, SSL_OP_LEGACY_SERVER_CONNECT);
-	  sprintf (lin, "%d-Pound-%ld", getpid (), random ());
-	  SSL_CTX_set_session_id_context (res->ctx, (unsigned char *) lin,
-					  strlen (lin));
-
-	  POUND_SSL_CTX_init (res->ctx);
-	}
-      else if (!regexec (&Cert, lin, 4, matches, 0))
-	{
-	  if (res->ctx == NULL)
-	    conf_err ("BackEnd Cert can only be used after HTTPS - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (SSL_CTX_use_certificate_chain_file
-	      (res->ctx, lin + matches[1].rm_so) != 1)
-	    conf_err ("SSL_CTX_use_certificate_chain_file failed - aborted");
-	  if (SSL_CTX_use_PrivateKey_file
-	      (res->ctx, lin + matches[1].rm_so, SSL_FILETYPE_PEM) != 1)
-	    conf_err ("SSL_CTX_use_PrivateKey_file failed - aborted");
-	  if (SSL_CTX_check_private_key (res->ctx) != 1)
-	    conf_err ("SSL_CTX_check_private_key failed - aborted");
-	}
-      else if (!regexec (&Ciphers, lin, 4, matches, 0))
-	{
-	  if (res->ctx == NULL)
-	    conf_err ("BackEnd Ciphers can only be used after HTTPS - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  SSL_CTX_set_cipher_list (res->ctx, lin + matches[1].rm_so);
-	}
-      else if (!regexec (&DisableProto, lin, 4, matches, 0))
-	{
-	  if (res->ctx == NULL)
-	    conf_err ("BackEnd Disable can only be used after HTTPS - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (strcasecmp (lin + matches[1].rm_so, "SSLv2") == 0)
-	    SSL_CTX_set_options (res->ctx, SSL_OP_NO_SSLv2);
-	  else if (strcasecmp (lin + matches[1].rm_so, "SSLv3") == 0)
-	    SSL_CTX_set_options (res->ctx, SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3);
-#ifdef SSL_OP_NO_TLSv1
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1") == 0)
-	    SSL_CTX_set_options (res->ctx,
-				 SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-				 SSL_OP_NO_TLSv1);
-#endif
-#ifdef SSL_OP_NO_TLSv1_1
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1_1") == 0)
-	    SSL_CTX_set_options (res->ctx,
-				 SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-				 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1);
-#endif
-#ifdef SSL_OP_NO_TLSv1_2
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1_2") == 0)
-	    SSL_CTX_set_options (res->ctx,
-				 SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-				 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 |
-				 SSL_OP_NO_TLSv1_2);
-#endif
-	}
-      else if (!regexec (&Disabled, lin, 4, matches, 0))
-	{
-	  res->disabled = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&End, lin, 4, matches, 0))
-	{
-	  if (!has_addr)
-	    conf_err ("BackEnd missing Address - aborted");
-	  if ((res->addr.ai_family == AF_INET
-	       || res->addr.ai_family == AF_INET6) && !has_port)
-	    conf_err ("BackEnd missing Port - aborted");
-	  return res;
-	}
+      if (n < 0 || n >= bufsize || !memchr (sb->base + sb->len, '\0', n + 1))
+	sb->base = x2nrealloc (sb->base, &sb->size, 1);
       else
 	{
-	  conf_err ("unknown directive");
+	  sb->len += n;
+	  break;
+	}
+    }
+}
+
+void
+stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
+{
+  va_list ap;
+
+  va_start (ap, fmt);
+  stringbuf_vprintf (sb, fmt, ap);
+  va_end (ap);
+}
+
+static void
+stringbuf_format_locus_point (struct stringbuf *sb, struct locus_point const *loc)
+{
+  stringbuf_printf (sb, "%s:%d", loc->filename, loc->line);
+  if (loc->col)
+    stringbuf_printf (sb, ".%d", loc->col);
+}
+
+static int
+same_file (struct locus_point const *a, struct locus_point const *b)
+{
+  return a->filename == b->filename
+	 || (a->filename && b->filename && strcmp (a->filename, b->filename) == 0);
+}
+
+static void
+stringbuf_format_locus_range (struct stringbuf *sb, struct locus_range const *range)
+{
+  stringbuf_format_locus_point (sb, &range->beg);
+  if (range->end.filename)
+    {
+      if (!same_file (&range->beg, &range->end))
+	{
+	  stringbuf_add_char (sb, '-');
+	  stringbuf_format_locus_point (sb, &range->end);
+	}
+      else if (range->beg.line != range->end.line)
+	{
+	  stringbuf_add_char (sb, '-');
+	  stringbuf_printf (sb, "%d", range->end.line);
+	  if (range->end.col)
+	    stringbuf_printf (sb, ".%d", range->end.col);
+	}
+      else if (range->beg.col && range->beg.col != range->end.col)
+	{
+	  stringbuf_add_char (sb, '-');
+	  stringbuf_printf (sb, "%d", range->end.col);
+	}
+    }
+}
+
+static void
+vconf_error_at_locus_range (struct locus_range const *loc, char const *fmt, va_list ap)
+{
+  struct stringbuf sb;
+
+  stringbuf_init (&sb);
+  if (loc)
+    {
+      stringbuf_format_locus_range (&sb, loc);
+      stringbuf_add_string (&sb, ": ");
+    }
+  stringbuf_vprintf (&sb, fmt, ap);
+  logmsg (LOG_ERR, "%s", sb.base);
+  stringbuf_free (&sb);
+}
+
+static void
+conf_error_at_locus_range (struct locus_range const *loc, char const *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vconf_error_at_locus_range (loc, fmt, ap);
+  va_end (ap);
+}
+
+static void
+vconf_error_at_locus_point (struct locus_point const *loc, char const *fmt, va_list ap)
+{
+  struct stringbuf sb;
+
+  stringbuf_init (&sb);
+  if (loc)
+    {
+      stringbuf_format_locus_point (&sb, loc);
+      stringbuf_add_string (&sb, ": ");
+    }
+  stringbuf_vprintf (&sb, fmt, ap);
+  logmsg (LOG_ERR, "%s", sb.base);
+  stringbuf_free (&sb);
+}
+
+static void
+conf_error_at_locus_point (struct locus_point const *loc, char const *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vconf_error_at_locus_point (loc, fmt, ap);
+  va_end (ap);
+}
+
+static void
+regcomp_error_at_locus_range (struct locus_range const *loc, int rc, regex_t *rx,
+			      char const *expr)
+{
+  char errbuf[512];
+  regerror (rc, rx, errbuf, sizeof (errbuf));
+  conf_error_at_locus_range (loc, "%s", errbuf);
+  if (expr)
+    conf_error_at_locus_range (loc, "regular expression: %s", expr);
+}
+
+static void
+openssl_error_at_locus_range (struct locus_range const *loc, char const *msg)
+{
+  unsigned long n = ERR_get_error ();
+  conf_error_at_locus_range (loc, "%s: %s", msg, ERR_error_string (n, NULL));
+
+  if ((n = ERR_get_error ()) != 0)
+    {
+      do
+	{
+	  conf_error_at_locus_range (loc, "%s", ERR_error_string (n, NULL));
+	}
+      while ((n = ERR_get_error ()) != 0);
+    }
+}
+
+struct name_list
+{
+  struct name_list *next;
+  char name[1];
+};
+
+static struct name_list *name_list;
+
+static char const *
+name_alloc (char const *name)
+{
+  struct name_list *np;
+  np = xmalloc (sizeof (*np) + strlen (name));
+  strcpy (np->name, name);
+  np->next = name_list;
+  name_list = np;
+  return np->name;
+}
+
+static void
+name_list_free (void)
+{
+  while (name_list)
+    {
+      struct name_list *next = name_list->next;
+      free (name_list);
+      name_list = next;
+    }
+}
+
+/*
+ * Input scanner.
+ */
+static struct input *
+input_close (struct input *input)
+{
+  struct input *prev = NULL;
+  if (input)
+    {
+      prev = input->prev;
+      fclose (input->file);
+      stringbuf_free (&input->buf);
+      free (input);
+    }
+  return prev;
+}
+
+static struct input *
+input_open (char const *filename, struct stat *st)
+{
+  struct input *input;
+
+  input = xmalloc (sizeof (*input));
+  memset (input, 0, sizeof (*input));
+  if ((input->file = fopen (filename, "r")) == 0)
+    {
+      logmsg (LOG_ERR, "can't open %s: %s", filename, strerror (errno));
+      free (input);
+      return NULL;
+    }
+  input->ino = st->st_ino;
+  input->devno = st->st_dev;
+  input->locus.filename = name_alloc (filename);
+  input->locus.line = 1;
+  input->locus.col = 0;
+  return input;
+}
+
+static inline int
+input_getc (struct input *input)
+{
+  int c = fgetc (input->file);
+  if (c == '\n')
+    {
+      input->locus.line++;
+      input->prev_col = input->locus.col;
+      input->locus.col = 0;
+    }
+  else if (c == '\t')//FIXME
+    input->locus.col += 8;
+  else if (c != EOF)
+    input->locus.col++;
+  return c;
+}
+
+static void
+input_ungetc (struct input *input, int c)
+{
+  if (c != EOF)
+    {
+      ungetc (c, input->file);
+      if (c == '\n')
+	{
+	  input->locus.line--;
+	  input->locus.col = input->prev_col;
+	}
+      else
+	input->locus.col--;
+    }
+}
+
+#define is_ident_start(c) (isalpha (c) || c == '_')
+#define is_ident_cont(c) (is_ident_start (c) || isdigit (c))
+
+int
+input_gettkn (struct input *input, struct token **tok)
+{
+  int c;
+
+  if (input->ready)
+    {
+      input->ready = 0;
+      *tok = &input->token;
+      return input->token.type;
+    }
+
+  stringbuf_reset (&input->buf);
+  for (;;)
+    {
+      c = input_getc (input);
+
+      if (c == EOF)
+	{
+	  input->token.type = c;
+	  break;
+	}
+
+      if (c == '#')
+	{
+	  while ((c = input_getc (input)) != '\n')
+	    if (c == EOF)
+	      {
+		input->token.type = c;
+		goto end;
+	      }
+	  /* return newline */
+	}
+
+      if (c == '\n')
+	{
+	  input->token.locus.beg = input->locus;
+	  input->token.locus.beg.line--;
+	  input->token.locus.beg.col = input->prev_col;
+	  input->token.type = c;
+	  break;
+	}
+
+      if (isspace (c))
+	continue;
+
+      input->token.locus.beg = input->locus;
+      if (c == '"')
+	{
+	  while ((c = input_getc (input)) != '"')
+	    {
+	      if (c == '\\')
+		{
+		  c = input_getc (input);
+		  if (!(c == EOF || c == '"' || c == '\\'))
+		    {
+		      conf_error_at_locus_point (&input->locus,
+						 "unrecognized escape character: did you forget \\?");
+		    }
+		}
+	      if (c == EOF)
+		{
+		  conf_error_at_locus_point (&input->locus,
+					     "end of file in quoted string");
+		  input->token.type = T_ERROR;
+		  goto end;
+		}
+	      if (c == '\n')
+		{
+		  conf_error_at_locus_point (&input->locus,
+					     "end of line in quoted string");
+		  input->token.type = T_ERROR;
+		  goto end;
+		}
+	      stringbuf_add_char (&input->buf, c);
+	    }
+	  stringbuf_add_char (&input->buf, 0);
+	  input->token.type = T_STRING;
+	  input->token.str = input->buf.base;
+	  break;
+	}
+
+      if (is_ident_start (c))
+	{
+	  do
+	    {
+	      stringbuf_add_char (&input->buf, c);
+	    }
+	  while ((c = input_getc (input)) != EOF && is_ident_cont (c));
+	  input_ungetc (input, c);
+	  stringbuf_add_char (&input->buf, 0);
+	  input->token.type = T_IDENT;
+	  input->token.str = input->buf.base;
+	  break;
+	}
+
+      if (isdigit (c))
+	input->token.type = T_NUMBER;
+      else
+	input->token.type = T_LITERAL;
+
+      do
+	{
+	  stringbuf_add_char (&input->buf, c);
+	  if (!isdigit (c))
+	    input->token.type = T_LITERAL;
+	}
+      while ((c = input_getc (input)) != EOF && !isspace (c));
+
+      input_ungetc (input, c);
+      stringbuf_add_char (&input->buf, 0);
+      input->token.str = input->buf.base;
+      break;
+    }
+ end:
+  input->token.locus.end = input->locus;
+  *tok = &input->token;
+  return input->token.type;
+}
+
+struct token *
+input_putback (struct input *input)
+{
+  assert (input->ready == 0);
+  input->ready = 1;
+}
+
+
+struct input *cur_input;
+
+static struct locus_range *
+last_token_locus_range (void)
+{
+  if (cur_input)
+    return &cur_input->token.locus;
+  else
+    return NULL;
+}
+
+static struct locus_point *
+current_locus_point (void)
+{
+  if (cur_input)
+    return &cur_input->locus;
+  else
+    return NULL;
+}
+
+#define conf_error(fmt, ...) \
+  conf_error_at_locus_range (last_token_locus_range (), fmt, __VA_ARGS__)
+
+#define conf_regcomp_error(rc, rx, expr) \
+  regcomp_error_at_locus_range (last_token_locus_range (), rc, rx, expr)
+
+#define conf_openssl_error(msg) \
+  openssl_error_at_locus_range (last_token_locus_range (), msg)
+
+static int
+push_input (const char *filename)
+{
+  struct stat st;
+  struct input *input;
+
+  if (stat (filename, &st))
+    {
+      conf_error ("can't stat %s: %s", filename, strerror (errno));
+      return -1;
+    }
+
+  for (input = cur_input; input; input = input->prev)
+    {
+      if (input->ino == st.st_ino && input->devno == st.st_dev)
+	{
+	  if (input->prev)
+	    {
+	      conf_error ("%s already included", filename);
+	      conf_error_at_locus_point (&input->prev->locus, "here is the place of original inclusion");
+	    }
+	  else
+	    {
+	      conf_error ("%s already included (at top level)", filename);
+	    }
+	  return -1;
 	}
     }
 
-  conf_err ("BackEnd premature EOF");
+  if ((input = input_open (filename, &st)) == NULL)
+    return -1;
+
+  input->prev = cur_input;
+  cur_input = input;
+
+  return 0;
+}
+
+static void
+pop_input (void)
+{
+  cur_input = input_close (cur_input);
+}
+
+static int
+gettkn (struct token **tok)
+{
+  int t;
+
+  while (cur_input && (t = input_gettkn (cur_input, tok)) == EOF)
+    pop_input ();
+  return t;
+}
+
+static int
+token_type_eq (int a, int b)
+{
+  if (b == T_ANY || b == T_SEQ)
+    {
+      int t = b;
+      b = a;
+      a = t;
+    }
+  if (a == T_ANY)
+    return 1;
+  if (a == T_SEQ)
+    return b == T_IDENT || b == T_NUMBER || b == T_LITERAL;
+  return a == b;
+}
+
+static struct token *
+must_gettkn (int expect)
+{
+  struct token *tok;
+  int type = gettkn (&tok);
+
+  if (type == EOF)
+    {
+      conf_error ("%s", "unexpected end of file");
+      tok = NULL;
+    }
+  else if (type == T_ERROR)
+    {
+      /* error message already issued */
+      tok = NULL;
+    }
+  else if (!token_type_eq (expect, type))
+    {
+      conf_error ("expected %s, but found %s", token_type_str (expect), token_type_str (tok->type));
+      tok = NULL;
+    }
+  return tok;
+}
+
+static void
+putback_tkn (void)
+{
+  input_putback (cur_input);
+}
+
+enum
+  {
+    PARSER_OK,
+    PARSER_OK_NONL,
+    PARSER_FAIL,
+    PARSER_END
+  };
+
+typedef int (*PARSER) (void *, void *);
+
+typedef struct parser_table
+{
+  char *name;
+  PARSER parser;
+  void *data;
+  size_t off;
+  int mandatory;
+  int precedence;
+} PARSER_TABLE;
+
+static PARSER_TABLE *
+parser_find (PARSER_TABLE *tab, char const *name)
+{
+  for (; tab->name; tab++)
+    if (strcasecmp (tab->name, name) == 0)
+      return tab;
   return NULL;
 }
 
-/*
- * parse a session
- */
-static void
-parse_sess (SERVICE * const svc)
+static int
+parser_loop (PARSER_TABLE *ptab, void *data, struct locus_range *retrange)
 {
-  char lin[MAXBUF], *cp, *parm;
+  struct token *tok;
+  size_t i;
+  int res = PARSER_OK;
 
-  parm = NULL;
-  while (conf_fgets (lin, MAXBUF))
+  if (retrange)
     {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&Type, lin, 4, matches, 0))
+      retrange->beg = last_token_locus_range ()->beg;
+    }
+
+  for (;;)
+    {
+      int type = gettkn (&tok);
+
+      if (type == EOF)
 	{
-	  if (svc->sess_type != SESS_NONE)
-	    conf_err ("Multiple Session types in one Service - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  cp = lin + matches[1].rm_so;
-	  if (!strcasecmp (cp, "IP"))
-	    svc->sess_type = SESS_IP;
-	  else if (!strcasecmp (cp, "COOKIE"))
-	    svc->sess_type = SESS_COOKIE;
-	  else if (!strcasecmp (cp, "URL"))
-	    svc->sess_type = SESS_URL;
-	  else if (!strcasecmp (cp, "PARM"))
-	    svc->sess_type = SESS_PARM;
-	  else if (!strcasecmp (cp, "BASIC"))
-	    svc->sess_type = SESS_BASIC;
-	  else if (!strcasecmp (cp, "HEADER"))
-	    svc->sess_type = SESS_HEADER;
+	  if (retrange)
+	    {
+	      conf_error_at_locus_point (&retrange->beg, "unexpected end of file");
+	      return PARSER_FAIL;
+	    }
+	  goto end;
+	}
+      else if (type == T_ERROR)
+	return PARSER_FAIL;
+
+      if (retrange)
+	{
+	  retrange->end = last_token_locus_range ()->end;
+	}
+
+      if (tok->type == T_IDENT)
+	{
+	  PARSER_TABLE *ent = parser_find (ptab, tok->str);
+	  if (ent)
+	    {
+	      char *call_data = ent->data;
+	      if (!call_data)
+		call_data = data;
+
+	      switch (ent->parser ((char *)call_data + ent->off, data))
+		{
+		case PARSER_OK:
+		  type = gettkn (&tok);
+		  if (type == T_ERROR)
+		    return PARSER_FAIL;
+		  if (type != '\n' && type != EOF)
+		    {
+		      conf_error ("unexpected %s", token_type_str (type));
+		      return PARSER_FAIL;
+		    }
+		  break;
+
+		case PARSER_OK_NONL:
+		  continue;
+
+		case PARSER_FAIL:
+		  return PARSER_FAIL;
+
+		case PARSER_END:
+		  goto end;
+		}
+	    }
 	  else
-	    conf_err ("Unknown Session type");
+	    {
+	      conf_error_at_locus_range (&tok->locus, "unrecognized keyword");
+	      return PARSER_FAIL;
+	    }
 	}
-      else if (!regexec (&TTL, lin, 4, matches, 0))
+      else if (tok->type == '\n')
+	continue;
+      else
+	conf_error_at_locus_range (&tok->locus, "syntax error");
+    }
+ end:
+  return PARSER_OK;
+}
+
+typedef struct
+{
+  int log_level;
+  int facility;
+  unsigned clnt_to;
+  unsigned be_to;
+  unsigned ws_to;
+  unsigned be_connto;
+  unsigned ignore_case;
+} POUND_DEFAULTS;
+
+static POUND_DEFAULTS pound_defaults;
+
+static int
+parse_include (void *call_data, void *section_data)
+{
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+  if (push_input (tok->str))
+    return PARSER_FAIL;
+  return PARSER_OK_NONL;
+}
+
+static int
+parse_end (void *call_data, void *section_data)
+{
+  return PARSER_END;
+}
+
+static int
+int_set_one (void *call_data, void *section_data)
+{
+  *(int*)call_data = 1;
+  return PARSER_OK;
+}
+
+static int
+assign_string (void *call_data, void *section_data)
+{
+  char *s;
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+  s = xstrdup (tok->str);
+  *(char**)call_data = s;
+  return PARSER_OK;
+}
+
+static int
+assign_string_from_file (void *call_data, void *section_data)
+{
+  struct stat st;
+  char *s;
+  FILE *fp;
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+  if (stat (tok->str, &st))
+    {
+      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  // FIXME: Check st_size bounds.
+  s = xmalloc (st.st_size + 1);
+  if ((fp = fopen (tok->str, "r")) == NULL)
+    {
+      conf_error ("can't open %s: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  if (fread (s, st.st_size, 1, fp) != 1)
+    {
+      conf_error ("%s: read error: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  s[st.st_size] = 0;
+  fclose (fp);
+  *(char**)call_data = s;
+  return PARSER_OK;
+}
+
+static int
+assign_bool (void *call_data, void *section_data)
+{
+  char *s;
+  struct token *tok = must_gettkn (T_SEQ);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  if (strcmp (tok->str, "1") == 0 ||
+      strcmp (tok->str, "yes") == 0 ||
+      strcmp (tok->str, "true") == 0 ||
+      strcmp (tok->str, "on") == 0)
+    *(int *)call_data = 1;
+  else if (strcmp (tok->str, "0") == 0 ||
+	   strcmp (tok->str, "no") == 0 ||
+	   strcmp (tok->str, "false") == 0 ||
+	   strcmp (tok->str, "off") == 0)
+    *(int *)call_data = 0;
+  else
+    {
+      conf_error ("%s", "not a boolean value");
+      conf_error ("valid booleans are: %s for true value, and %s for false value",
+		  "1, yes, true, on",
+		  "0, no, false, off");
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
+static int
+assign_unsigned (void *call_data, void *section_data)
+{
+  unsigned long n;
+  char *p;
+  struct token *tok = must_gettkn (T_NUMBER);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  errno = 0;
+  n = strtoul (tok->str, &p, 10);
+  if (errno || *p || n > UINT_MAX)
+    {
+      conf_error ("%s", "bad unsigned number");
+      return PARSER_FAIL;
+    }
+  *(unsigned *)call_data = n;
+  return 0;
+}
+
+static int
+assign_int (void *call_data, void *section_data)
+{
+  long n;
+  char *p;
+  struct token *tok = must_gettkn (T_NUMBER);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  errno = 0;
+  n = strtol (tok->str, &p, 10);
+  if (errno || *p || n < INT_MIN || n > INT_MAX)
+    {
+      conf_error ("%s", "bad integer number");
+      return PARSER_FAIL;
+    }
+  *(int *)call_data = n;
+  return 0;
+}
+
+static int
+assign_LONG (void *call_data, void *section_data)
+{
+  LONG n;
+  char *p;
+  struct token *tok = must_gettkn (T_NUMBER);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  errno = 0;
+  n = STRTOL (tok->str, &p, 10);
+  if (errno || *p)
+    {
+      conf_error ("%s", "bad long number");
+      return PARSER_FAIL;
+    }
+  *(LONG *)call_data = n;
+  return 0;
+}
+
+#define assign_timeout assign_unsigned
+
+static struct kwtab facility_table[] = {
+  { "auth", LOG_AUTH },
+#ifdef  LOG_AUTHPRIV
+  { "authpriv", LOG_AUTHPRIV },
+#endif
+  { "cron", LOG_CRON },
+  { "daemon", LOG_DAEMON },
+#ifdef  LOG_FTP
+  { "ftp", LOG_FTP },
+#endif
+  { "kern", LOG_KERN },
+  { "lpr", LOG_LPR },
+  { "mail", LOG_MAIL },
+  { "news", LOG_NEWS },
+  { "syslog", LOG_SYSLOG },
+  { "user", LOG_USER },
+  { "uucp", LOG_UUCP },
+  { "local0", LOG_LOCAL0 },
+  { "local1", LOG_LOCAL1 },
+  { "local2", LOG_LOCAL2 },
+  { "local3", LOG_LOCAL3 },
+  { "local4", LOG_LOCAL4 },
+  { "local5", LOG_LOCAL5 },
+  { "local6", LOG_LOCAL6 },
+  { "local7", LOG_LOCAL7 },
+  { NULL }
+};
+
+static int
+assign_log_facility (void *call_data, void *section_data)
+{
+  struct token *tok = must_gettkn (T_SEQ);
+  int n;
+
+  if (strcmp (tok->str, "-") == 0)
+    n = -1;
+  else if (kw_to_tok (facility_table, tok->str, 1, &n) != 0)
+    {
+      conf_error ("%s", "unknown log facility name");
+      return PARSER_FAIL;
+    }
+  *(int*)call_data = n;
+
+  return PARSER_OK;
+}
+
+static int
+assign_log_level (void *call_data, void *section_data)
+{
+  unsigned n;
+  int ret = assign_unsigned (&n, NULL);
+  if (ret == PARSER_OK)
+    {
+      if (n >= INT_MAX)
 	{
-	  svc->sess_ttl = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&ID, lin, 4, matches, 0))
-	{
-	  if (svc->sess_type != SESS_COOKIE && svc->sess_type != SESS_URL
-	      && svc->sess_type != SESS_HEADER)
-	    conf_err
-	      ("no ID permitted unless COOKIE/URL/HEADER Session - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((parm = strdup (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("ID config: out of memory - aborted");
-	}
-      else if (!regexec (&End, lin, 4, matches, 0))
-	{
-	  if (svc->sess_type == SESS_NONE)
-	    conf_err ("Session type not defined - aborted");
-	  if (svc->sess_ttl == 0)
-	    conf_err ("Session TTL not defined - aborted");
-	  if ((svc->sess_type == SESS_COOKIE || svc->sess_type == SESS_URL
-	       || svc->sess_type == SESS_HEADER) && parm == NULL)
-	    conf_err ("Session ID not defined - aborted");
-	  if (svc->sess_type == SESS_COOKIE)
-	    {
-	      snprintf (lin, MAXBUF - 1, "Cookie[^:]*:.*[ \t]%s=", parm);
-	      if (regcomp (&svc->sess_start, lin, REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("COOKIE pattern failed - aborted");
-	      if (regcomp (&svc->sess_pat, "([^;]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("COOKIE pattern failed - aborted");
-	    }
-	  else if (svc->sess_type == SESS_URL)
-	    {
-	      snprintf (lin, MAXBUF - 1, "[?&]%s=", parm);
-	      if (regcomp (&svc->sess_start, lin, REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("URL pattern failed - aborted");
-	      if (regcomp (&svc->sess_pat, "([^&;#]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("URL pattern failed - aborted");
-	    }
-	  else if (svc->sess_type == SESS_PARM)
-	    {
-	      if (regcomp (&svc->sess_start, ";", REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("PARM pattern failed - aborted");
-	      if (regcomp (&svc->sess_pat, "([^?]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("PARM pattern failed - aborted");
-	    }
-	  else if (svc->sess_type == SESS_BASIC)
-	    {
-	      if (regcomp (&svc->sess_start, "Authorization:[ \t]*Basic[ \t]*",
-			   REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("BASIC pattern failed - aborted");
-	      if (regcomp (&svc->sess_pat, "([^ \t]*)",
-			   REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("BASIC pattern failed - aborted");
-	    }
-	  else if (svc->sess_type == SESS_HEADER)
-	    {
-	      snprintf (lin, MAXBUF - 1, "%s:[ \t]*", parm);
-	      if (regcomp (&svc->sess_start, lin,
-			   REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("HEADER pattern failed - aborted");
-	      if (regcomp (&svc->sess_pat, "([^ \t]*)",
-			   REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-		conf_err ("HEADER pattern failed - aborted");
-	    }
-	  if (parm != NULL)
-	    free (parm);
-	  return;
+	  conf_error ("%s", "log level out of allowed range");
+	  ret = PARSER_FAIL;
 	}
       else
 	{
-	  conf_err ("unknown directive");
+	  *(int*)call_data = n;
 	}
     }
-
-  conf_err ("Session premature EOF");
-  return;
+  return ret;
 }
 
+/*
+ * The ai_flags in the struct addrinfo is not used, unless in hints.
+ * Therefore it is reused to mark which parts of address have been
+ * initialized.
+ */
+#define ADDRINFO_SET_ADDRESS(addr) ((addr)->ai_flags = AI_NUMERICHOST)
+#define ADDRINFO_HAS_ADDRESS(addr) ((addr)->ai_flags & AI_NUMERICHOST)
+#define ADDRINFO_SET_PORT(addr) ((addr)->ai_flags |= AI_NUMERICSERV)
+#define ADDRINFO_HAS_PORT(addr) ((addr)->ai_flags & AI_NUMERICSERV)
+
+static int
+assign_address_internal (struct addrinfo *addr, struct token *tok)
+{
+  if (!tok)
+    return PARSER_FAIL;
+
+  if (tok->type != T_LITERAL)
+    {
+      conf_error_at_locus_range (&tok->locus,
+				 "expected hostname or IP address, but found %s",
+				 token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+  if (get_host (tok->str, addr, PF_UNSPEC))
+    {
+      /* if we can't resolve it assume this is a UNIX domain socket */
+      struct sockaddr_un *sun;
+      size_t len = strlen (tok->str);
+      if (len > UNIX_PATH_MAX)
+	{
+	  conf_error_at_locus_range (&tok->locus,
+				     "%s", "UNIX path name too long");
+	  return PARSER_FAIL;
+	}
+
+      len += offsetof (struct sockaddr_un, sun_path) + 1;
+      sun = xmalloc (len);
+      sun->sun_family = AF_UNIX;
+      strcpy (sun->sun_path, tok->str);
+
+      addr->ai_socktype = SOCK_STREAM;
+      addr->ai_family = AF_UNIX;
+      addr->ai_protocol = 0;
+      addr->ai_addr = (struct sockaddr *) sun;
+      addr->ai_addrlen = len;
+    }
+  ADDRINFO_SET_ADDRESS (addr);
+  return PARSER_OK;
+}
+
+static int
+assign_address (void *call_data, void *section_data)
+{
+  struct addrinfo *addr = call_data;
+
+  if (ADDRINFO_HAS_ADDRESS (addr))
+    {
+      conf_error ("%s", "Duplicate Address statement");
+      return PARSER_FAIL;
+    }
+
+  return assign_address_internal (call_data, must_gettkn (T_SEQ));
+}
+
+static int
+assign_port_internal (struct addrinfo *addr, struct token *tok)
+{
+  struct addrinfo hints, *res;
+  int rc;
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  if (!token_type_eq (T_SEQ, tok->type))
+    {
+      conf_error_at_locus_range (&tok->locus,
+				 "expected port number or service name, but found %s",
+				 token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+
+  if (!(addr->ai_family == AF_INET || addr->ai_family == AF_INET6))
+    {
+      conf_error_at_locus_range (&tok->locus, "Port is not applicable to this address family");
+      return PARSER_FAIL;
+    }
+
+  hints = *addr;
+  hints.ai_flags = 0;
+  rc = getaddrinfo (NULL, tok->str, &hints, &res);
+  if (rc != 0)
+    {
+      conf_error_at_locus_range (&tok->locus,
+				 "bad port number: %s", gai_strerror (rc));
+      return PARSER_FAIL;
+    }
+
+  switch (addr->ai_family)
+    {
+    case AF_INET:
+      ((struct sockaddr_in *)addr->ai_addr)->sin_port =
+	((struct sockaddr_in *)res->ai_addr)->sin_port;
+      break;
+
+    case AF_INET6:
+      ((struct sockaddr_in6 *)addr->ai_addr)->sin6_port =
+	((struct sockaddr_in6 *)res->ai_addr)->sin6_port;
+      break;
+
+    default:
+      conf_error_at_locus_range (&tok->locus, "%s",
+				 "Port is supported only for INET/INET6 back-ends");
+      return PARSER_FAIL;
+    }
+  freeaddrinfo (res);
+  ADDRINFO_SET_PORT (addr);
+
+  return PARSER_OK;
+}
+
+static int
+assign_port (void *call_data, void *section_data)
+{
+  struct addrinfo *addr = call_data;
+
+  if (ADDRINFO_HAS_PORT (addr))
+    {
+      conf_error ("%s", "Duplicate port statement");
+      return PARSER_FAIL;
+    }
+  if (!(ADDRINFO_HAS_ADDRESS (addr)))
+    {
+      conf_error ("%s", "Address statement should precede Port");
+      return PARSER_FAIL;
+    }
+
+  return assign_port_internal (call_data, must_gettkn (T_SEQ));
+}
+
+static int
+parse_ECDHCurve (void *call_data, void *section_data)
+{
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+#if OPENSSL_VERSION_MAJOR < 3 && !defined OPENSSL_NO_ECDH
+  if (set_ECDHCurve (tok->str) == 0)
+    {
+      conf_error ("%s", "ECDHCurve: invalid curve name");
+      return PARSER_FAIL;
+    }
+#else
+  conf_error ("%s", "statement ignored");
+#endif
+  return PARSER_OK;
+}
+
+static int
+parse_SSLEngine (void *call_data, void *section_data)
+{
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+#if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
+  ENGINE *e;
+
+  if (!(e = ENGINE_by_id (tok->str)))
+    {
+      conf_error ("%s", "unrecognized engine");
+      return PARSER_FAIL;
+    }
+
+  if (!ENGINE_init (e))
+    {
+      ENGINE_free (e);
+      conf_error ("%s", "could not init engine");
+      return PARSER_FAIL;
+    }
+
+  if (!ENGINE_set_default (e, ENGINE_METHOD_ALL))
+    {
+      ENGINE_free (e);
+      conf_error ("%s", "could not set all defaults");
+    }
+
+  ENGINE_finish (e);
+  ENGINE_free (e);
+#else
+  conf_error ("%s", "statement ignored");
+#endif
+
+  return PARSER_OK;
+}
+
+#define LIST_APPEND(type, tail, ent)                    \
+  do							\
+    {							\
+      if (*(tail) == NULL)				\
+	*(tail) = ent;					\
+      else						\
+	{						\
+	  type *x;					\
+	  for (x = *(tail); x->next; x = x->next)	\
+	    ;						\
+	  x->next = ent;				\
+	}						\
+    }							\
+  while (0)
+
+
 /*
  * basic hashing function, based on fmv
  */
@@ -647,442 +1375,1094 @@ static
 IMPLEMENT_LHASH_COMP_FN (t_cmp, const TABNODE *)
 # endif
 #endif
-/*
- * parse a service
- */
-static SERVICE *
-parse_service (const char *svc_name)
-{
-  char lin[MAXBUF];
-  SERVICE *res;
-  BACKEND *be;
-  MATCHER *m;
-  int ign_case;
 
-  if ((res = (SERVICE *) malloc (sizeof (SERVICE))) == NULL)
-    conf_err ("Service config: out of memory - aborted");
-  memset (res, 0, sizeof (SERVICE));
-  res->sess_type = SESS_NONE;
-  pthread_mutex_init (&res->mut, NULL);
-  if (svc_name)
-    strncpy (res->name, svc_name, KEY_SIZE);
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((res->sessions = lh_TABNODE_new (t_hash, t_cmp)) == NULL)
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((res->sessions = LHM_lh_new (TABNODE, t)) == NULL)
-#else
-  if ((res->sessions =
-       lh_new (LHASH_HASH_FN (t_hash), LHASH_COMP_FN (t_cmp))) == NULL)
+struct token_ent
+{
+  struct token tok;
+  struct token_ent *next;
+};
+
+typedef struct
+{
+  struct token_ent *head, *tail;
+} TOKEN_LIST;
+
+static int
+assign_token_list (void *call_data, void *section_data)
+{
+  TOKEN_LIST *tl = call_data;
+  struct token_ent *ent;
+  struct token *tok = must_gettkn (T_STRING);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  XZALLOC (ent);
+  ent->tok = *tok;
+  ent->tok.str = xstrdup (ent->tok.str);
+  if (tl->tail)
+    tl->tail->next = ent;
+  else
+    tl->head = ent;
+  tl->tail = ent;
+
+  return PARSER_OK;
+}
+
+static int
+backend_parse_haport (void *call_data, void *section_data)
+{
+  BACKEND *be = call_data;
+  struct token *tok, saved_tok;
+  int rc;
+  char *s;
+
+  if (ADDRINFO_HAS_ADDRESS (&be->ha_addr))
+    {
+      conf_error ("%s", "Duplicate HAport statement");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = must_gettkn (T_SEQ)) == NULL)
+    return PARSER_FAIL;
+
+  saved_tok = *tok;
+  saved_tok.str = strdup (tok->str);
+
+  if ((tok = must_gettkn (T_ANY)) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type == '\n')
+    {
+      be->ha_addr = be->addr;
+      tok = &saved_tok;
+      putback_tkn ();
+    }
+  else if (assign_address_internal (&be->ha_addr, &saved_tok))
+    return PARSER_FAIL;
+
+  if (assign_port_internal (&be->ha_addr, tok))
+    return PARSER_FAIL;
+
+  ADDRINFO_SET_ADDRESS (&be->ha_addr);
+
+  free (saved_tok.str);
+  return PARSER_OK;
+}
+
+static int
+backend_parse_https (void *call_data, void *section_data)
+{
+  BACKEND *be = call_data;
+  struct stringbuf sb;
+
+  if ((be->ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
+    {
+      conf_openssl_error ("SSL_CTX_new");
+      return PARSER_FAIL;
+    }
+
+  SSL_CTX_set_app_data (be->ctx, be);
+  SSL_CTX_set_verify (be->ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_mode (be->ctx, SSL_MODE_AUTO_RETRY);
+#ifdef SSL_MODE_SEND_FALLBACK_SCSV
+  SSL_CTX_set_mode (be->ctx, SSL_MODE_SEND_FALLBACK_SCSV);
 #endif
-    conf_err ("lh_new failed - aborted");
-  ign_case = ignore_case;
-  while (conf_fgets (lin, MAXBUF))
+  SSL_CTX_set_options (be->ctx, SSL_OP_ALL);
+#ifdef  SSL_OP_NO_COMPRESSION
+  SSL_CTX_set_options (be->ctx, SSL_OP_NO_COMPRESSION);
+#endif
+  SSL_CTX_clear_options (be->ctx,
+			 SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
+  SSL_CTX_clear_options (be->ctx, SSL_OP_LEGACY_SERVER_CONNECT);
+
+  stringbuf_init (&sb);
+  stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
+  SSL_CTX_set_session_id_context (be->ctx, (unsigned char *) sb.base, sb.len);
+  stringbuf_free (&sb);
+
+  POUND_SSL_CTX_init (be->ctx);
+
+  return PARSER_OK;
+}
+
+static int
+backend_parse_cert (void *call_data, void *section_data)
+{
+  BACKEND *be = call_data;
+  struct token *tok;
+
+  if (be->ctx == NULL)
     {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&URL, lin, 4, matches, 0))
-	{
-	  if (res->url)
-	    {
-	      for (m = res->url; m->next; m = m->next)
-		;
-	      if ((m->next = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("URL config: out of memory - aborted");
-	      m = m->next;
-	    }
-	  else
-	    {
-	      if ((res->url = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("URL config: out of memory - aborted");
-	      m = res->url;
-	    }
-	  memset (m, 0, sizeof (MATCHER));
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp
-	      (&m->pat, lin + matches[1].rm_so,
-	       REG_NEWLINE | REG_EXTENDED | (ign_case ? REG_ICASE : 0)))
-	    conf_err ("URL bad pattern - aborted");
-	}
-      else if (!regexec (&HeadRequire, lin, 4, matches, 0))
-	{
-	  if (res->req_head)
-	    {
-	      for (m = res->req_head; m->next; m = m->next)
-		;
-	      if ((m->next = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRequire config: out of memory - aborted");
-	      m = m->next;
-	    }
-	  else
-	    {
-	      if ((res->req_head = malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRequire config: out of memory - aborted");
-	      m = res->req_head;
-	    }
-	  memset (m, 0, sizeof (MATCHER));
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&m->pat, lin + matches[1].rm_so,
-	       REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("HeadRequire bad pattern - aborted");
-	}
-      else if (!regexec (&HeadDeny, lin, 4, matches, 0))
-	{
-	  if (res->deny_head)
-	    {
-	      for (m = res->deny_head; m->next; m = m->next)
-		;
-	      if ((m->next = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadDeny config: out of memory - aborted");
-	      m = m->next;
-	    }
-	  else
-	    {
-	      if ((res->deny_head = malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadDeny config: out of memory - aborted");
-	      m = res->deny_head;
-	    }
-	  memset (m, 0, sizeof (MATCHER));
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&m->pat, lin + matches[1].rm_so,
-		       REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("HeadDeny bad pattern - aborted");
-	}
-      else if (!regexec (&Redirect, lin, 4, matches, 0))
-	{
-	  if (res->backends)
-	    {
-	      for (be = res->backends; be->next; be = be->next)
-		;
-	      if ((be->next = (BACKEND *) malloc (sizeof (BACKEND))) == NULL)
-		conf_err ("Redirect config: out of memory - aborted");
-	      be = be->next;
-	    }
-	  else
-	    {
-	      if ((res->backends = (BACKEND *) malloc (sizeof (BACKEND))) == NULL)
-		conf_err ("Redirect config: out of memory - aborted");
-	      be = res->backends;
-	    }
-	  memset (be, 0, sizeof (BACKEND));
-	  be->be_type = 302;
-	  be->priority = 1;
-	  be->alive = 1;
-	  pthread_mutex_init (&be->mut, NULL);
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((be->url = strdup (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("Redirector config: out of memory - aborted");
-	  /* split the URL into its fields */
-	  if (regexec (&LOCATION, be->url, 4, matches, 0))
-	    conf_err ("Redirect bad URL - aborted");
-	  if ((be->redir_req = matches[3].rm_eo - matches[3].rm_so) == 1)
-	    /* the path is a single '/', so remove it */
-	    be->url[matches[3].rm_so] = '\0';
-	}
-      else if (!regexec (&RedirectN, lin, 4, matches, 0))
-	{
-	  if (res->backends)
-	    {
-	      for (be = res->backends; be->next; be = be->next)
-		;
-	      if ((be->next = (BACKEND *) malloc (sizeof (BACKEND))) == NULL)
-		conf_err ("Redirect config: out of memory - aborted");
-	      be = be->next;
-	    }
-	  else
-	    {
-	      if ((res->backends = (BACKEND *) malloc (sizeof (BACKEND))) == NULL)
-		conf_err ("Redirect config: out of memory - aborted");
-	      be = res->backends;
-	    }
-	  memset (be, 0, sizeof (BACKEND));
-	  be->be_type = atoi (lin + matches[1].rm_so);
-	  be->priority = 1;
-	  be->alive = 1;
-	  pthread_mutex_init (&be->mut, NULL);
-	  lin[matches[2].rm_eo] = '\0';
-	  if ((be->url = strdup (lin + matches[2].rm_so)) == NULL)
-	    conf_err ("Redirector config: out of memory - aborted");
-	  /* split the URL into its fields */
-	  if (regexec (&LOCATION, be->url, 4, matches, 0))
-	    conf_err ("Redirect bad URL - aborted");
-	  if ((be->redir_req = matches[3].rm_eo - matches[3].rm_so) == 1)
-	    /* the path is a single '/', so remove it */
-	    be->url[matches[3].rm_so] = '\0';
-	}
-      else if (!regexec (&BackEnd, lin, 4, matches, 0))
-	{
-	  if (res->backends)
-	    {
-	      for (be = res->backends; be->next; be = be->next)
-		;
-	      be->next = parse_be (0);
-	    }
-	  else
-	    res->backends = parse_be (0);
-	}
-      else if (!regexec (&Emergency, lin, 4, matches, 0))
-	{
-	  res->emergency = parse_be (1);
-	}
-      else if (!regexec (&Session, lin, 4, matches, 0))
-	{
-	  parse_sess (res);
-	}
-      else if (!regexec (&IgnoreCase, lin, 4, matches, 0))
-	{
-	  ign_case = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Disabled, lin, 4, matches, 0))
-	{
-	  res->disabled = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&End, lin, 4, matches, 0))
-	{
-	  for (be = res->backends; be; be = be->next)
-	    {
-	      if (!be->disabled)
-		res->tot_pri += be->priority;
-	      res->abs_pri += be->priority;
-	    }
-	  return res;
-	}
-      else
-	{
-	  conf_err ("unknown directive");
-	}
+      conf_error ("%s", "HTTPS must be used before this statement");
+      return PARSER_FAIL;
     }
 
-  conf_err ("Service premature EOF");
-  return NULL;
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if (SSL_CTX_use_certificate_chain_file (be->ctx, tok->str) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_use_certificate_chain_file");
+      return PARSER_FAIL;
+    }
+
+  if (SSL_CTX_use_PrivateKey_file (be->ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_use_PrivateKey_file");
+      return PARSER_FAIL;
+    }
+
+  if (SSL_CTX_check_private_key (be->ctx) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_check_private_key failed");
+      return PARSER_FAIL;
+    }
+
+  return PARSER_OK;
 }
 
-/*
- * return the file contents as a string
- */
-static char *
-file2str (const char *fname)
+static int
+backend_assign_ciphers (void *call_data, void *section_data)
 {
-  char *res;
-  struct stat st;
-  int fin;
+  BACKEND *be = call_data;
+  struct token *tok;
 
-  if (stat (fname, &st))
-    conf_err ("can't stat Err file - aborted");
-  if ((fin = open (fname, O_RDONLY)) < 0)
-    conf_err ("can't open Err file - aborted");
-  if ((res = malloc (st.st_size + 1)) == NULL)
-    conf_err ("can't alloc Err file (out of memory) - aborted");
-  if (read (fin, res, st.st_size) != st.st_size)
-    conf_err ("can't read Err file - aborted");
-  res[st.st_size] = '\0';
-  close (fin);
-  return res;
+  if (be->ctx == NULL)
+    {
+      conf_error ("%s", "HTTPS must be used before this statement");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  SSL_CTX_set_cipher_list (be->ctx, tok->str);
+  return PARSER_OK;
 }
 
-/*
- * parse an HTTP listener
- */
-static LISTENER *
-parse_HTTP (void)
+static int
+set_proto_opt (int *opt)
 {
-  char lin[MAXBUF];
-  LISTENER *res;
-  SERVICE *svc;
+  struct token *tok;
+  int n;
+
+  static struct kwtab kwtab[] = {
+    { "SSLv2", SSL_OP_NO_SSLv2 },
+    { "SSLv3", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 },
+#ifdef SSL_OP_NO_TLSv1
+    { "TLSv1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_1
+    { "TLSv1_1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+    { "TLSv1_2", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 |
+		 SSL_OP_NO_TLSv1_2 },
+#endif
+    { NULL }
+  };
+
+  if ((tok = must_gettkn (T_IDENT)) == NULL)
+    return PARSER_FAIL;
+
+  if (kw_to_tok (kwtab, tok->str, 0, &n))
+    {
+      conf_error ("%s", "unrecognized protocol name");
+      return PARSER_FAIL;
+    }
+
+  *opt |= n;
+
+  return PARSER_OK;
+}
+
+static int
+disable_proto (void *call_data, void *section_data)
+{
+  SSL_CTX *ctx = call_data;
+  struct token *tok;
+  int n = 0;
+
+  if (ctx == NULL)
+    {
+      conf_error ("%s", "HTTPS must be used before this statement");
+      return PARSER_FAIL;
+    }
+
+  if (set_proto_opt (&n) != PARSER_OK)
+    return PARSER_FAIL;
+
+  SSL_CTX_set_options (ctx, n);
+
+  return PARSER_OK;
+}
+
+static PARSER_TABLE backend_parsetab[] = {
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Address",
+    .mandatory = 1,
+    .precedence = 1,
+    .parser = assign_address,
+    .off = offsetof (BACKEND, addr)
+  },
+  {
+    .name = "Port",
+    .precedence = 2,
+    .parser = assign_port,
+    .off = offsetof (BACKEND, addr)
+  },
+  {
+    .name = "Priority",
+    .parser = assign_int,
+    .off = offsetof (BACKEND, priority)
+  },
+  {
+    .name = "TimeOut",
+    .parser = assign_unsigned,
+    .off = offsetof (BACKEND, to)
+  },
+  {
+    .name = "WSTimeOut",
+    .parser = assign_unsigned,
+    .off = offsetof (BACKEND, ws_to)
+  },
+  {
+    .name = "ConnTO",
+    .parser = assign_unsigned,
+    .off = offsetof (BACKEND, conn_to)
+  },
+  {
+    .name = "HAport",
+    .parser = backend_parse_haport
+  },
+  {
+    .name = "HTTPS",
+    .parser = backend_parse_https
+  },
+  {
+    .name = "Cert",
+    .parser = backend_parse_cert
+  },
+  {
+    .name = "Ciphers",
+    .parser = backend_assign_ciphers
+  },
+  {
+    .name = "Disable",
+    .parser = disable_proto,
+    .off = offsetof (BACKEND, ctx)
+  },
+  { NULL }
+};
+
+static PARSER_TABLE emergency_parsetab[] = {
+  { "End", parse_end },
+  { "Address", assign_address, NULL, offsetof (BACKEND, addr) },
+  { "Port", assign_port, NULL, offsetof (BACKEND, addr) },
+  { "TimeOut", assign_unsigned, NULL, offsetof (BACKEND, to) },
+  { "WSTimeOut", assign_unsigned, NULL, offsetof (BACKEND, ws_to) },
+  { "ConnTO", assign_unsigned, NULL, offsetof (BACKEND, conn_to) },
+  { "HTTPS", backend_parse_https },
+  { "Cert", backend_parse_cert },
+  { "Ciphers", backend_assign_ciphers },
+  { "Disable", disable_proto, NULL, offsetof (BACKEND, ctx) },
+  { NULL }
+};
+
+static int
+check_addrinfo (struct addrinfo const *addr, struct locus_range const *range, char const *name)
+{
+  if (ADDRINFO_HAS_ADDRESS (addr))
+    {
+      if (!ADDRINFO_HAS_PORT (addr) &&
+	  (addr->ai_family == AF_INET || addr->ai_family == AF_INET6))
+	{
+	  conf_error_at_locus_range (range, "%s missing Port declaration", name);
+	  return PARSER_FAIL;
+	}
+    }
+  else
+    {
+      conf_error_at_locus_range (range, "%s missing Address declaration", name);
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
+static BACKEND *
+parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
+{
+  BACKEND *be;
+  struct locus_range range;
+
+  XZALLOC (be);
+  be->be_type = 0;
+  be->addr.ai_socktype = SOCK_STREAM;
+  be->to = dfl->be_to;
+  be->conn_to = dfl->be_connto;
+  be->ws_to = dfl->ws_to;
+  be->alive = 1;
+  memset (&be->addr, 0, sizeof (be->addr));
+  be->priority = 5;
+  memset (&be->ha_addr, 0, sizeof (be->ha_addr));
+  be->url = NULL;
+  be->next = NULL;
+  pthread_mutex_init (&be->mut, NULL);
+
+  if (parser_loop (table, be, &range))
+    return NULL;
+
+  if (check_addrinfo (&be->addr, &range, "Backend") != PARSER_OK)
+    return NULL;
+
+  return be;
+}
+
+static int
+parse_backend (void *call_data, void *section_data)
+{
+  BACKEND **tail = call_data, *be;
+
+  be = parse_backend_internal (backend_parsetab, &pound_defaults);
+  if (!be)
+    return PARSER_FAIL;
+
+  LIST_APPEND (BACKEND, tail, be);
+  return PARSER_OK;
+}
+
+static int
+parse_emergency (void *call_data, void *section_data)
+{
+  BACKEND **tail = call_data, *be;
+  POUND_DEFAULTS dfl;
+
+  dfl.be_to = 120;
+  dfl.be_connto = 120;
+  dfl.ws_to = 120;
+
+  be = parse_backend_internal (emergency_parsetab, &dfl);
+  if (!be)
+    return PARSER_FAIL;
+
+  LIST_APPEND (BACKEND, tail, be);
+  return PARSER_OK;
+}
+
+
+struct service_ext
+{
+  SERVICE svc;
+  TOKEN_LIST url;
+  int ignore_case;
+};
+
+static int
+service_matcher (void *call_data, void *section_data)
+{
   MATCHER *m;
-  int has_addr, has_port;
-  struct sockaddr_in in;
-  struct sockaddr_in6 in6;
+  MATCHER **tail = call_data;
+  int rc;
 
-  if ((res = (LISTENER *) malloc (sizeof (LISTENER))) == NULL)
-    conf_err ("ListenHTTP config: out of memory - aborted");
-  memset (res, 0, sizeof (LISTENER));
-  res->to = clnt_to;
-  res->rewr_loc = 1;
-  res->err414 = "Request URI is too long";
-  res->err500 = "An internal server error occurred. Please try again later.";
-  res->err501 = "This method may not be used.";
-  res->err503 = "The service is not available. Please try again later.";
-  res->log_level = log_level;
-  if (regcomp (&res->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-    conf_err ("xHTTP bad default pattern - aborted");
-  has_addr = has_port = 0;
-  while (conf_fgets (lin, MAXBUF))
+  struct token *tok = must_gettkn (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+
+  XZALLOC (m);
+  rc = regcomp (&m->pat, tok->str, REG_ICASE | REG_NEWLINE | REG_EXTENDED);
+  if (rc)
     {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&Address, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (get_host (lin + matches[1].rm_so, &res->addr, PF_UNSPEC))
-	    conf_err ("Unknown Listener address");
-	  if (res->addr.ai_family != AF_INET
-	      && res->addr.ai_family != AF_INET6)
-	    conf_err ("Unknown Listener address family");
-	  has_addr = 1;
-	}
-      else if (!regexec (&Port, lin, 4, matches, 0))
-	{
-	  switch (res->addr.ai_family)
-	    {
-	    case AF_INET:
-	      memcpy (&in, res->addr.ai_addr, sizeof (in));
-	      in.sin_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in, sizeof (in));
-	      break;
+      conf_regcomp_error (rc, &m->pat, NULL);
+      return PARSER_FAIL;
+    }
+  LIST_APPEND (MATCHER, tail, m);
 
-	    case AF_INET6:
-	      memcpy (&in6, res->addr.ai_addr, sizeof (in6));
-	      in6.sin6_port = htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in6, sizeof (in6));
-	      break;
+  return PARSER_OK;
+}
 
-	    default:
-	      conf_err ("Unknown Listener address family");
-	    }
-	  has_port = 1;
-	}
-      else if (!regexec (&xHTTP, lin, 4, matches, 0))
-	{
-	  int n;
+static int
+assign_redirect (void *call_data, void *section_data)
+{
+  BACKEND **tail = call_data;
+  struct token *tok;
+  int code = 302;
+  BACKEND *be;
+  regmatch_t matches[5];
 
-	  n = atoi (lin + matches[1].rm_so);
-	  regfree (&res->verb);
-	  if (regcomp (&res->verb, xhttp[n], REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("xHTTP bad pattern - aborted");
-	}
-      else if (!regexec (&Client, lin, 4, matches, 0))
-	{
-	  res->to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&CheckURL, lin, 4, matches, 0))
-	{
-	  if (res->has_pat)
-	    conf_err ("CheckURL multiple pattern - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&res->url_pat, lin + matches[1].rm_so,
-	       REG_NEWLINE | REG_EXTENDED | (ignore_case ? REG_ICASE : 0)))
-	    conf_err ("CheckURL bad pattern - aborted");
-	  res->has_pat = 1;
-	}
-      else if (!regexec (&Err414, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err414 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err500, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err500 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err501, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err501 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err503, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err503 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&MaxRequest, lin, 4, matches, 0))
-	{
-	  res->max_req = ATOL (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&HeadRemove, lin, 4, matches, 0))
-	{
-	  if (res->head_off)
-	    {
-	      for (m = res->head_off; m->next; m = m->next)
-		;
-	      if ((m->next = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRemove config: out of memory - aborted");
-	      m = m->next;
-	    }
-	  else
-	    {
-	      if ((res->head_off = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRemove config: out of memory - aborted");
-	      m = res->head_off;
-	    }
-	  memset (m, 0, sizeof (MATCHER));
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&m->pat, lin + matches[1].rm_so,
-		       REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("HeadRemove bad pattern - aborted");
-	}
-      else if (!regexec (&AddHeader, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (res->add_head == NULL)
-	    {
-	      if ((res->add_head = strdup (lin + matches[1].rm_so)) == NULL)
-		conf_err ("AddHeader config: out of memory - aborted");
-	    }
-	  else
-	    {
-	      if ((res->add_head =
-		   realloc (res->add_head,
-			    strlen (res->add_head) +
-			    strlen (lin + matches[1]. rm_so) + 3)) == NULL)
-		conf_err ("AddHeader config: out of memory - aborted");
-	      strcat (res->add_head, "\r\n");
-	      strcat (res->add_head, lin + matches[1].rm_so);
-	    }
-	}
-      else if (!regexec (&RewriteLocation, lin, 4, matches, 0))
-	{
-	  res->rewr_loc = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&RewriteDestination, lin, 4, matches, 0))
-	{
-	  res->rewr_dest = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&LogLevel, lin, 4, matches, 0))
-	{
-	  res->log_level = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Service, lin, 4, matches, 0))
-	{
-	  if (res->services == NULL)
-	    res->services = parse_service (NULL);
-	  else
-	    {
-	      for (svc = res->services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (NULL);
-	    }
-	}
-      else if (!regexec (&ServiceName, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (res->services == NULL)
-	    res->services = parse_service (lin + matches[1].rm_so);
-	  else
-	    {
-	      for (svc = res->services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (lin + matches[1].rm_so);
-	    }
-	}
-      else if (!regexec (&End, lin, 4, matches, 0))
-	{
-	  if (!has_addr || !has_port)
-	    conf_err ("ListenHTTP missing Address or Port - aborted");
-	  return res;
-	}
+  if ((tok = must_gettkn (T_ANY)) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type == T_NUMBER)
+    {
+      int n = atoi (tok->str);
+      if (n == 301 || n == 302 || n == 307)
+	code = n;
       else
 	{
-	  conf_err ("unknown directive - aborted");
+	  conf_error ("%s", "invalid status code");
+	  return PARSER_FAIL;
 	}
+
+      if ((tok = must_gettkn (T_ANY)) == NULL)
+	return PARSER_FAIL;
     }
 
-  conf_err ("ListenHTTP premature EOF");
+  if (tok->type != T_STRING)
+    {
+      conf_error ("expected %s, but found %s", token_type_str (T_STRING), token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+
+  XZALLOC (be);
+  be->be_type = code;
+  be->priority = 1;
+  be->alive = 1;
+  pthread_mutex_init (&be->mut, NULL);
+  be->url = xstrdup (tok->str);
+
+  if (regexec (&LOCATION, be->url, 4, matches, 0))
+    {
+      conf_error ("%s", "Redirect bad URL - aborted");
+      return PARSER_FAIL;
+    }
+
+  if ((be->redir_req = matches[3].rm_eo - matches[3].rm_so) == 1)
+    /* the path is a single '/', so remove it */
+    be->url[matches[3].rm_so] = '\0';
+
+  LIST_APPEND (BACKEND, tail, be);
+
+  return PARSER_OK;
+}
+
+struct service_session
+{
+  int type;
+  char *id;
+  unsigned ttl;
+};
+
+static int
+session_type_parser (void *call_data, void *section_data)
+{
+  struct service_session *sp = call_data;
+  struct token *tok;
+  int n;
+
+  static struct kwtab kwtab[] = {
+    { "IP", SESS_IP },
+    { "COOKIE", SESS_COOKIE },
+    { "URL", SESS_URL },
+    { "PARM", SESS_PARM },
+    { "BASIC", SESS_BASIC },
+    { "HEADER", SESS_HEADER },
+    { NULL }
+  };
+
+  if ((tok = must_gettkn (T_IDENT)) == NULL)
+    return PARSER_FAIL;
+
+  if (kw_to_tok (kwtab, tok->str, 0, &n))
+    {
+      conf_error ("%s", "Unknown Session type");
+      return PARSER_FAIL;
+    }
+  sp->type = n;
+
+  return PARSER_OK;
+}
+
+static PARSER_TABLE session_parsetab[] = {
+  { "End", parse_end },
+  { "Type", session_type_parser },
+  { "TTL", assign_unsigned, NULL, offsetof (struct service_session, ttl) },
+  { "ID", assign_string, NULL, offsetof (struct service_session, id) },
+  { NULL }
+};
+
+static int
+xregcomp (regex_t *rx, char const *expr, int flags)
+{
+  int rc;
+
+  rc = regcomp (rx, expr, flags);
+  if (rc)
+    {
+      conf_regcomp_error (rc, rx, expr);
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
+static int
+parse_session (void *call_data, void *section_data)
+{
+  SERVICE *svc = call_data;
+  struct service_session sess;
+  struct stringbuf sb;
+  int rc;
+  struct locus_range range;
+
+  memset (&sess, 0, sizeof (sess));
+  if (parser_loop (session_parsetab, &sess, &range))
+    return PARSER_FAIL;
+
+  if (sess.type == SESS_NONE)
+    {
+      conf_error_at_locus_range (&range, "Session type not defined");
+      return PARSER_FAIL;
+    }
+
+  if (sess.ttl == 0)
+    {
+      conf_error_at_locus_range (&range, "Session TTL not defined");
+      return PARSER_FAIL;
+    }
+
+  if ((sess.type == SESS_COOKIE || sess.type == SESS_URL
+       || sess.type == SESS_HEADER) && sess.id == NULL)
+    {
+      conf_error ("%s", "Session ID not defined - aborted");
+      return PARSER_FAIL;
+    }
+
+  stringbuf_init (&sb);
+  switch (sess.type)
+    {
+    case SESS_COOKIE:
+      stringbuf_printf (&sb, "Cookie[^:]*:.*[ \t]%s=", sess.id);
+      if (xregcomp (&svc->sess_start, sb.base, REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+
+      if (xregcomp (&svc->sess_pat, "([^;]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      break;
+
+    case SESS_URL:
+      stringbuf_printf (&sb, "[?&]%s=", sess.id);
+      if (xregcomp (&svc->sess_start, sb.base, REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      if (xregcomp (&svc->sess_pat, "([^&;#]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      break;
+
+    case SESS_PARM:
+      if (xregcomp (&svc->sess_start, ";", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      if (xregcomp (&svc->sess_pat, "([^?]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      break;
+
+    case SESS_BASIC:
+      if (xregcomp (&svc->sess_start, "Authorization:[ \t]*Basic[ \t]*",
+		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      if (xregcomp (&svc->sess_pat, "([^ \t]*)",
+		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      break;
+
+    case SESS_HEADER:
+      stringbuf_printf (&sb, "%s:[ \t]*", sess.id);
+      if (xregcomp (&svc->sess_start, sb.base,
+		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      if (xregcomp (&svc->sess_pat, "([^ \t]*)",
+		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+	return PARSER_FAIL;
+      break;
+    }
+
+  svc->sess_ttl = sess.ttl;
+  svc->sess_type = sess.type;
+
+  free (sess.id);
+
+  return PARSER_OK;
+}
+
+static PARSER_TABLE service_parsetab[] = {
+  { "End", parse_end },
+  { "URL", assign_token_list, NULL, offsetof (struct service_ext, url) },
+  { "IgnoreCase", assign_bool, NULL, offsetof (struct service_ext, ignore_case) },
+  { "HeadRequire", service_matcher, NULL, offsetof (SERVICE, req_head) },
+  { "HeadDeny", service_matcher, NULL, offsetof (SERVICE, deny_head) },
+  { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
+  { "Redirect", assign_redirect, NULL, offsetof (SERVICE, backends) },
+  { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
+  { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
+  { "Session", parse_session },
+  { NULL }
+};
+
+static int
+parse_service (void *call_data, void *section_data)
+{
+  SERVICE **tail_ptr = call_data; // FIXME: should have head, tail
+  POUND_DEFAULTS *dfl = section_data;
+  struct token *tok;
+  SERVICE *svc;
+  struct service_ext ext;
+  struct locus_range range;
+
+  memset (&ext, 0, sizeof (ext));
+
+  tok = must_gettkn (T_ANY);
+
+  if (!tok)
+    return PARSER_FAIL;
+
+  ext.svc.sess_type = SESS_NONE;
+  pthread_mutex_init (&ext.svc.mut, NULL);
+
+  if (tok->type == T_STRING)
+    {
+      if (strlen (tok->str) > sizeof (ext.svc.name) - 1)
+	{
+	  conf_error ("%s", "service name too long: truncated");
+	}
+      strncpy (ext.svc.name, tok->str, sizeof (ext.svc.name) - 1);
+    }
+  else
+    putback_tkn ();
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+  if ((ext.svc.sessions = lh_TABNODE_new (t_hash, t_cmp)) == NULL)
+#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
+  if ((ext.svc.sessions = LHM_lh_new (TABNODE, t)) == NULL)
+#else
+  if ((ext.svc.sessions =
+	 lh_new (LHASH_HASH_FN (t_hash), LHASH_COMP_FN (t_cmp))) == NULL)
+#endif
+    {
+      conf_error ("%s", "lh_new failed - aborted");
+      return -1;
+    }
+
+  ext.ignore_case = dfl->ignore_case;
+  if (parser_loop (service_parsetab, &ext, &range))
+    return PARSER_FAIL;
+  else
+    {
+      struct token_ent *te;
+      BACKEND *be;
+      MATCHER **tail;
+      int flags = REG_NEWLINE | REG_EXTENDED | (ext.ignore_case ? REG_ICASE : 0);
+
+      XZALLOC (svc);
+      *svc = ext.svc;
+
+      for (be = svc->backends; be; be = be->next)
+	{
+	  if (!be->disabled)
+	    svc->tot_pri += be->priority;
+	  svc->abs_pri += be->priority;
+	}
+
+      tail = &svc->url;
+      for (te = ext.url.head; te; )
+	{
+	  struct token_ent *next = te->next;
+	  MATCHER *m;
+	  int rc;
+
+	  XZALLOC (m);
+	  rc = regcomp (&m->pat, te->tok.str, flags);
+	  if (rc)
+	    {
+	      regcomp_error_at_locus_range (&te->tok.locus, rc, &m->pat, NULL);
+	      return PARSER_FAIL;
+	    }
+	  *tail = m;
+	  tail = &m->next;
+
+	  free (te->tok.str);
+	  free (te);
+	  te = next;
+	}
+      LIST_APPEND (SERVICE, tail_ptr, svc);
+    }
+  return PARSER_OK;
+}
+
+static char *xhttp[] = {
+  "^(GET|POST|HEAD) ([^ ]+) HTTP/1.[01]$",
+  "^(GET|POST|HEAD|PUT|PATCH|DELETE) ([^ ]+) HTTP/1.[01]$",
+  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT) ([^ ]+) HTTP/1.[01]$",
+  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT) ([^ ]+) HTTP/1.[01]$",
+  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT|RPC_IN_DATA|RPC_OUT_DATA) ([^ ]+) HTTP/1.[01]$",
+};
+
+static int
+listener_parse_xhttp (void *call_data, void *section_data)
+{
+  regex_t *rx = call_data;
+  unsigned n;
+  int rc;
+
+  if ((rc = assign_unsigned (&n, NULL)) != PARSER_OK)
+    return rc;
+  if (n >= sizeof (xhttp) / sizeof (xhttp[0]))
+    {
+      conf_error ("%s", "argument out of allowed range");
+      return PARSER_FAIL;
+    }
+  regfree (rx);
+  if (xregcomp (rx, xhttp[n], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+    return PARSER_FAIL;
+  return PARSER_OK;
+}
+
+static int
+listener_parse_checkurl (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  int rc;
+
+  if (lst->has_pat)
+    {
+      conf_error ("%s", "CheckURL multiple pattern - aborted");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  rc = regcomp (&lst->url_pat, tok->str,
+		REG_NEWLINE | REG_EXTENDED |
+		(pound_defaults.ignore_case ? REG_ICASE : 0));
+  if (rc)
+    {
+      conf_regcomp_error (rc, &lst->url_pat, NULL);
+      return PARSER_FAIL;
+    }
+  lst->has_pat = 1;
+
+  return PARSER_OK;
+}
+
+static int
+parse_headremove (void *call_data, void *section_data)
+{
+  MATCHER *m, **tail = call_data;
+  struct token *tok;
+  int rc;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  XZALLOC (m);
+
+  rc = regcomp (&m->pat, tok->str, REG_ICASE | REG_NEWLINE | REG_EXTENDED);
+  if (rc)
+    {
+      conf_regcomp_error (rc, &m->pat, NULL);
+      return PARSER_FAIL;
+    }
+
+  LIST_APPEND (MATCHER, tail, m);
+
+  return PARSER_OK;
+}
+
+static int
+assign_int_range (int *dst, int min, int max)
+{
+  int n;
+  int rc;
+
+  if ((rc = assign_int (&n, NULL)) != PARSER_OK)
+    return rc;
+
+  if (!(min <= n && n <= max))
+    {
+      conf_error ("value out of allowed range (%d..%d)", min, max);
+      return PARSER_FAIL;
+    }
+  *dst = n;
+  return PARSER_OK;
+}
+
+static int
+parse_rewritelocation (void *call_data, void *section_data)
+{
+  return assign_int_range (call_data, 0, 2);
+}
+
+static int
+append_string_line (void *call_data, void *section_data)
+{
+  char **dst = call_data;
+  char *s = *dst;
+  size_t len = s ? strlen (s) : 0;
+  struct token *tok;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  s = xrealloc (s, len + strlen (tok->str) + 3);
+  if (len == 0)
+    strcpy (s, tok->str);
+  else
+    {
+      strcpy (s + len, "\r\n");
+      strcpy (s + len + 2, tok->str);
+    }
+  *dst = s;
+
+  return PARSER_OK;
+}
+
+static PARSER_TABLE http_parsetab[] = {
+  { "End", parse_end },
+  { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
+  { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
+  { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
+  { "Client", assign_unsigned, NULL, offsetof (LISTENER, to) },
+  { "CheckURL", listener_parse_checkurl },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
+  { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
+  { "HeadRemove", parse_headremove, NULL, offsetof (LISTENER, head_off) },
+  { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
+  { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
+  { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
+  { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
+  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
+  { NULL }
+};
+
+static int
+parse_listen_http (void *call_data, void *section_data)
+{
+  LISTENER *lst, **tail = call_data;
+  struct locus_range range;
+
+  XZALLOC (lst);
+  lst->to = pound_defaults.clnt_to;
+  lst->rewr_loc = 1;
+  lst->err414 = "Request URI is too long";
+  lst->err500 = "An internal server error occurred. Please try again later.";
+  lst->err501 = "This method may not be used.";
+  lst->err503 = "The service is not available. Please try again later.";
+  lst->log_level = pound_defaults.log_level;
+  if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (parser_loop (http_parsetab, lst, &range))
+    return PARSER_FAIL;
+
+  if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != PARSER_OK)
+    return PARSER_FAIL;
+
+  LIST_APPEND (LISTENER, tail, lst);
+  return PARSER_OK;
+}
+
+static int
+is_class (int c, char *cls)
+{
+  int k;
+
+  if (*cls == 0)
+    return 0;
+  if (c == *cls)
+    return 1;
+  cls++;
+  while ((k = *cls++) != 0)
+    {
+      if (k == '-' && cls[0] != 0)
+	{
+	  if (cls[-2] <= c && cls[0] <= c)
+	    return 1;
+	  cls++;
+	}
+      else if (c == k)
+	return 1;
+    }
+  return 0;
+}
+
+static char *
+extract_cn (char const *str, size_t *plen)
+{
+  while (*str)
+    {
+      if ((str[0] == 'c' || str[0] == 'C') && (str[1] == 'n' || str[1] == 'N') && str[2] == '=')
+	{
+	  size_t i;
+	  str += 3;
+	  for (i = 1; str[i] && is_class (str[i], "-*.A-Za-z0-9"); i++)
+	    ;
+	  if (str[i] == 0)
+	    {
+	      *plen = i;
+	      return (char*) str;
+	    }
+	  str += i;
+	}
+      str++;
+    }
   return NULL;
 }
 
-/*
- * Dummy certificate verification - always OK
- */
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+# define general_name_string(n) \
+	(unsigned char*) \
+	xstrndup ((char*)ASN1_STRING_get0_data (n->d.dNSName),	\
+		 ASN1_STRING_length (n->d.dNSName) + 1)
+#else
+# define general_name_string(n) \
+	(unsigned char*) \
+	xstrndup ((char*)ASN1_STRING_data(n->d.dNSName),	\
+		 ASN1_STRING_length (n->d.dNSName) + 1)
+#endif
+
+unsigned char **
+get_subjectaltnames (X509 * x509, unsigned int *count)
+{
+  unsigned int local_count;
+  unsigned char **result;
+  STACK_OF (GENERAL_NAME) * san_stack =
+    (STACK_OF (GENERAL_NAME) *) X509_get_ext_d2i (x509, NID_subject_alt_name,
+						  NULL, NULL);
+  unsigned char *temp[sk_GENERAL_NAME_num (san_stack)];
+  GENERAL_NAME *name;
+  int i;
+
+  local_count = 0;
+  result = NULL;
+  name = NULL;
+  *count = 0;
+  if (san_stack == NULL)
+    return NULL;
+  while (sk_GENERAL_NAME_num (san_stack) > 0)
+    {
+      name = sk_GENERAL_NAME_pop (san_stack);
+      switch (name->type)
+	{
+	case GEN_DNS:
+	  temp[local_count++] = general_name_string (name);
+	  break;
+
+	default:
+	  logmsg (LOG_INFO, "unsupported subjectAltName type encountered: %i",
+		  name->type);
+	}
+      GENERAL_NAME_free (name);
+    }
+
+  result = xcalloc (local_count, sizeof (unsigned char *));
+  for (i = 0; i < local_count; i++)
+    result[i] = temp[i];
+  *count = local_count;
+
+  sk_GENERAL_NAME_pop_free (san_stack, GENERAL_NAME_free);
+
+  return result;
+}
+
+static int
+https_parse_cert (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  POUND_CTX *pc;
+
+  if (lst->has_other)
+    {
+      conf_error ("%s", "Cert directives MUST precede other SSL-specific directives");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  XZALLOC (pc);
+
+  if ((pc->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
+    {
+      conf_openssl_error ("SSL_CTX_new");
+      return PARSER_FAIL;
+    }
+
+  if (SSL_CTX_use_certificate_chain_file (pc->ctx, tok->str) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_use_certificate_chain_file");
+      return PARSER_FAIL;
+    }
+  if (SSL_CTX_use_PrivateKey_file (pc->ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_use_PrivateKey_file");
+      return PARSER_FAIL;
+    }
+
+  if (SSL_CTX_check_private_key (pc->ctx) != 1)
+    {
+      conf_openssl_error ("SSL_CTX_check_private_key");
+      return PARSER_FAIL;
+    }
+
+#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
+  {
+    /* we have support for SNI */
+    FILE *fcert;
+    char server_name[MAXBUF];
+    X509 *x509;
+    char *cnp;
+    size_t cnl;
+
+    if ((fcert = fopen (tok->str, "r")) == NULL)
+      {
+	conf_error ("%s", "ListenHTTPS: could not open certificate file");
+	return PARSER_FAIL;
+      }
+
+    x509 = PEM_read_X509 (fcert, NULL, NULL, NULL);
+    fclose (fcert);
+
+    if (!x509)
+      {
+	conf_error ("%s", "could not get certificate subject");
+	return PARSER_FAIL;
+      }
+
+    memset (server_name, '\0', MAXBUF);
+    X509_NAME_oneline (X509_get_subject_name (x509), server_name,
+		       sizeof (server_name) - 1);
+    pc->subjectAltNameCount = 0;
+    pc->subjectAltNames = NULL;
+    pc->subjectAltNames = get_subjectaltnames (x509, &pc->subjectAltNameCount);
+    X509_free (x509);
+
+    if ((cnp = extract_cn (server_name, &cnl)) == NULL)
+      {
+	conf_error ("no CN in certificate subject name (%s)\n", server_name);
+	return PARSER_FAIL;
+      }
+    pc->server_name = xmalloc (cnl + 1);
+    memcpy (pc->server_name, cnp, cnl);
+    pc->server_name[cnl] = 0;
+  }
+#else
+  if (res->ctx)
+    conf_error ("%s", "multiple certificates not supported");
+#endif
+  LIST_APPEND (POUND_CTX, &lst->ctx, pc);
+
+  return PARSER_OK;
+}
+
 static int
 verify_OK (int pre_ok, X509_STORE_CTX * ctx)
 {
@@ -1091,7 +2471,7 @@ verify_OK (int pre_ok, X509_STORE_CTX * ctx)
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
 static int
-SNI_server_name (SSL * ssl, int *dummy, POUND_CTX * ctx)
+SNI_server_name (SSL *ssl, int *dummy, POUND_CTX * ctx)
 {
   const char *server_name;
   POUND_CTX *pc;
@@ -1132,881 +2512,473 @@ SNI_server_name (SSL * ssl, int *dummy, POUND_CTX * ctx)
 }
 #endif
 
-/*
- * parse an HTTPS listener
- */
-static LISTENER *
-parse_HTTPS (void)
+static int
+https_parse_client_cert (void *call_data, void *section_data)
 {
-  char lin[MAXBUF];
-  LISTENER *res;
-  SERVICE *svc;
-  MATCHER *m;
-  int has_addr, has_port, has_other;
-  long ssl_op_enable, ssl_op_disable;
-  struct sockaddr_in in;
-  struct sockaddr_in6 in6;
+  LISTENER *lst = call_data;
+  int depth;
   POUND_CTX *pc;
 
-  ssl_op_enable = SSL_OP_ALL;
+  if (!lst->ctx)
+    {
+      conf_error ("%s", "ClientCert may only be used after Cert");
+      return PARSER_FAIL;
+    }
+  lst->has_other = 1;
+
+  if (assign_int_range (&lst->clnt_check, 0, 3) != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (lst->clnt_check > 0 && assign_int (&depth, NULL) != PARSER_OK)
+    return PARSER_FAIL;
+
+  switch (lst->clnt_check)
+    {
+    case 0:
+      /* don't ask */
+      for (pc = lst->ctx; pc; pc = pc->next)
+	SSL_CTX_set_verify (pc->ctx, SSL_VERIFY_NONE, NULL);
+      break;
+
+    case 1:
+      /* ask but OK if no client certificate */
+      for (pc = lst->ctx; pc; pc = pc->next)
+	{
+	  SSL_CTX_set_verify (pc->ctx,
+			      SSL_VERIFY_PEER |
+			      SSL_VERIFY_CLIENT_ONCE, NULL);
+	  SSL_CTX_set_verify_depth (pc->ctx, depth);
+	}
+      break;
+
+    case 2:
+      /* ask and fail if no client certificate */
+      for (pc = lst->ctx; pc; pc = pc->next)
+	{
+	  SSL_CTX_set_verify (pc->ctx,
+			      SSL_VERIFY_PEER |
+			      SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
+	  SSL_CTX_set_verify_depth (pc->ctx, depth);
+	}
+      break;
+
+    case 3:
+      /* ask but do not verify client certificate */
+      for (pc = lst->ctx; pc; pc = pc->next)
+	{
+	  SSL_CTX_set_verify (pc->ctx,
+			      SSL_VERIFY_PEER |
+			      SSL_VERIFY_CLIENT_ONCE, verify_OK);
+	  SSL_CTX_set_verify_depth (pc->ctx, depth);
+	}
+      break;
+    }
+  return PARSER_OK;
+}
+
+static int
+https_parse_disable (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  return set_proto_opt (&lst->ssl_op_enable);
+}
+
+static int
+https_parse_ciphers (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  POUND_CTX *pc;
+
+  if (!lst->ctx)
+    {
+      conf_error ("%s", "Ciphers may only be used after Cert");
+      return PARSER_FAIL;
+    }
+  lst->has_other = 1;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  for (pc = lst->ctx; pc; pc = pc->next)
+    SSL_CTX_set_cipher_list (pc->ctx, tok->str);
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_honor_cipher_order (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  int bv;
+
+  if (assign_bool (&bv, NULL) != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (bv)
+    {
+      lst->ssl_op_enable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+      lst->ssl_op_disable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
+    }
+  else
+    {
+      lst->ssl_op_disable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
+      lst->ssl_op_enable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
+    }
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_allow_client_renegotiation (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+
+  if (assign_int_range (&lst->allow_client_reneg, 0, 2) != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (lst->allow_client_reneg == 2)
+    {
+      lst->ssl_op_enable |= SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
+      lst->ssl_op_disable &= ~SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
+    }
+  else
+    {
+      lst->ssl_op_disable |= SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
+      lst->ssl_op_enable &= ~SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
+    }
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_calist (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  STACK_OF (X509_NAME) *cert_names;
+  struct token *tok;
+  POUND_CTX *pc;
+
+  if (!lst->ctx)
+    {
+      conf_error ("%s", "CAList may only be used after Cert");
+      return PARSER_FAIL;
+    }
+  lst->has_other = 1;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if ((cert_names = SSL_load_client_CA_file (tok->str)) == NULL)
+    {
+      conf_openssl_error ("SSL_load_client_CA_file");
+      return PARSER_FAIL;
+    }
+
+  for (pc = lst->ctx; pc; pc = pc->next)
+    SSL_CTX_set_client_CA_list (pc->ctx, cert_names);
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_verifylist (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  POUND_CTX *pc;
+
+  if (!lst->ctx)
+    {
+      conf_error ("%s", "VerifyList may only be used after Cert");
+      return PARSER_FAIL;
+    }
+  lst->has_other = 1;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  for (pc = lst->ctx; pc; pc = pc->next)
+    if (SSL_CTX_load_verify_locations (pc->ctx, tok->str, NULL) != 1)
+      {
+	conf_openssl_error ("SSL_CTX_load_verify_locations");
+	return PARSER_FAIL;
+      }
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_crlist (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  X509_STORE *store;
+  X509_LOOKUP *lookup;
+  POUND_CTX *pc;
+
+  if (!lst->ctx)
+    {
+      conf_error ("%s", "CRlist may only be used after Cert");
+      return PARSER_FAIL;
+    }
+  lst->has_other = 1;
+
+  if ((tok = must_gettkn (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  for (pc = lst->ctx; pc; pc = pc->next)
+    {
+      store = SSL_CTX_get_cert_store (pc->ctx);
+      if ((lookup = X509_STORE_add_lookup (store, X509_LOOKUP_file ())) == NULL)
+	{
+	  conf_openssl_error ("X509_STORE_add_lookup");
+	  return PARSER_FAIL;
+	}
+
+      if (X509_load_crl_file (lookup, tok->str, X509_FILETYPE_PEM) != 1)
+	{
+	  conf_openssl_error ("X509_load_crl_file failed");
+	  return PARSER_FAIL;
+	}
+
+      X509_STORE_set_flags (store, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
+    }
+
+  return PARSER_OK;
+}
+
+static int
+https_parse_nohttps11 (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  return assign_int_range (&lst->noHTTPS11, 0, 2);
+}
+
+static PARSER_TABLE https_parsetab[] = {
+  { "End", parse_end },
+  { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
+  { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
+  { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
+  { "Client", assign_unsigned, NULL, offsetof (LISTENER, to) },
+  { "CheckURL", listener_parse_checkurl },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
+  { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
+  { "HeadRemove", parse_headremove, NULL, offsetof (LISTENER, head_off) },
+  { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
+  { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
+  { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
+  { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
+  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
+  { "Cert", https_parse_cert },
+  { "ClientCert", https_parse_client_cert },
+  { "Disable", https_parse_disable },
+  { "Ciphers", https_parse_ciphers },
+  { "SSLHonorCipherOrder", https_parse_honor_cipher_order },
+  { "SSLAllowClientRenegotiation", https_parse_allow_client_renegotiation },
+  { "CAlist", https_parse_calist },
+  { "VerifyList", https_parse_verifylist },
+  { "CRLlist", https_parse_crlist },
+  { "NoHTTPS11", https_parse_nohttps11 },
+  { NULL }
+};
+
+static int
+parse_listen_https (void *call_data, void *section_data)
+{
+  LISTENER *lst, **tail = call_data;
+  struct locus_range range;
+  POUND_CTX *pc;
+  struct stringbuf sb;
+
+  XZALLOC (lst);
+
+  lst->to = pound_defaults.clnt_to;
+  lst->rewr_loc = 1;
+  lst->err414 = "Request URI is too long";
+  lst->err500 = "An internal server error occurred. Please try again later.";
+  lst->err501 = "This method may not be used.";
+  lst->err503 = "The service is not available. Please try again later.";
+  lst->log_level = pound_defaults.log_level;
+  if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+    return PARSER_FAIL;
+
+  lst->ssl_op_enable = SSL_OP_ALL;
 #ifdef  SSL_OP_NO_COMPRESSION
-  ssl_op_enable |= SSL_OP_NO_COMPRESSION;
+  lst->ssl_op_enable |= SSL_OP_NO_COMPRESSION;
 #endif
-  ssl_op_disable =
+  lst->ssl_op_disable =
     SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
     SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
 
-  if ((res = (LISTENER *) malloc (sizeof (LISTENER))) == NULL)
-    conf_err ("ListenHTTPS config: out of memory - aborted");
-  memset (res, 0, sizeof (LISTENER));
+  if (parser_loop (https_parsetab, lst, &range))
+    return PARSER_FAIL;
 
-  res->to = clnt_to;
-  res->rewr_loc = 1;
-  res->err414 = "Request URI is too long";
-  res->err500 = "An internal server error occurred. Please try again later.";
-  res->err501 = "This method may not be used.";
-  res->err503 = "The service is not available. Please try again later.";
-  res->allow_client_reneg = 0;
-  res->log_level = log_level;
-  if (regcomp (&res->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-    conf_err ("xHTTP bad default pattern - aborted");
-  has_addr = has_port = has_other = 0;
-  while (conf_fgets (lin, MAXBUF))
+  if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (!lst->ctx)
     {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&Address, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (get_host (lin + matches[1].rm_so, &res->addr, PF_UNSPEC))
-	    conf_err ("Unknown Listener address");
-	  if (res->addr.ai_family != AF_INET
-	      && res->addr.ai_family != AF_INET6)
-	    conf_err ("Unknown Listener address family");
-	  has_addr = 1;
-	}
-      else if (!regexec (&Port, lin, 4, matches, 0))
-	{
-	  if (res->addr.ai_family == AF_INET)
-	    {
-	      memcpy (&in, res->addr.ai_addr, sizeof (in));
-	      in.sin_port = (in_port_t) htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in, sizeof (in));
-	    }
-	  else
-	    {
-	      memcpy (&in6, res->addr.ai_addr, sizeof (in6));
-	      in6.sin6_port = htons (atoi (lin + matches[1].rm_so));
-	      memcpy (res->addr.ai_addr, &in6, sizeof (in6));
-	    }
-	  has_port = 1;
-	}
-      else if (!regexec (&xHTTP, lin, 4, matches, 0))
-	{
-	  int n;
-
-	  n = atoi (lin + matches[1].rm_so);
-	  regfree (&res->verb);
-	  if (regcomp (&res->verb, xhttp[n],
-		       REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("xHTTP bad pattern - aborted");
-	}
-      else if (!regexec (&Client, lin, 4, matches, 0))
-	{
-	  res->to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&CheckURL, lin, 4, matches, 0))
-	{
-	  if (res->has_pat)
-	    conf_err ("CheckURL multiple pattern - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&res->url_pat, lin + matches[1].rm_so,
-		       REG_NEWLINE | REG_EXTENDED |
-		       (ignore_case ? REG_ICASE : 0)))
-	    conf_err ("CheckURL bad pattern - aborted");
-	  res->has_pat = 1;
-	}
-      else if (!regexec (&Err414, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err414 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err500, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err500 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err501, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err501 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Err503, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  res->err503 = file2str (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&MaxRequest, lin, 4, matches, 0))
-	{
-	  res->max_req = ATOL (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&HeadRemove, lin, 4, matches, 0))
-	{
-	  if (res->head_off)
-	    {
-	      for (m = res->head_off; m->next; m = m->next)
-		;
-	      if ((m->next = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRemove config: out of memory - aborted");
-	      m = m->next;
-	    }
-	  else
-	    {
-	      if ((res->head_off = (MATCHER *) malloc (sizeof (MATCHER))) == NULL)
-		conf_err ("HeadRemove config: out of memory - aborted");
-	      m = res->head_off;
-	    }
-	  memset (m, 0, sizeof (MATCHER));
-	  lin[matches[1].rm_eo] = '\0';
-	  if (regcomp (&m->pat, lin + matches[1].rm_so,
-		       REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-	    conf_err ("HeadRemove bad pattern - aborted");
-	}
-      else if (!regexec (&RewriteLocation, lin, 4, matches, 0))
-	{
-	  res->rewr_loc = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&RewriteDestination, lin, 4, matches, 0))
-	{
-	  res->rewr_dest = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&LogLevel, lin, 4, matches, 0))
-	{
-	  res->log_level = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Cert, lin, 4, matches, 0))
-	{
-#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
-	  /* we have support for SNI */
-	  FILE *fcert;
-	  char server_name[MAXBUF];
-	  X509 *x509;
-
-	  if (has_other)
-	    conf_err ("Cert directives MUST precede other SSL-specific directives - aborted");
-	  if (res->ctx)
-	    {
-	      for (pc = res->ctx; pc->next; pc = pc->next)
-		;
-	      if ((pc->next = malloc (sizeof (POUND_CTX))) == NULL)
-		conf_err ("ListenHTTPS new POUND_CTX: out of memory - aborted");
-	      pc = pc->next;
-	    }
-	  else
-	    {
-	      if ((res->ctx = malloc (sizeof (POUND_CTX))) == NULL)
-		conf_err ("ListenHTTPS new POUND_CTX: out of memory - aborted");
-	      pc = res->ctx;
-	    }
-	  if ((pc->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
-	    conf_err ("SSL_CTX_new failed - aborted");
-	  pc->server_name = NULL;
-	  pc->next = NULL;
-	  lin[matches[1].rm_eo] = '\0';
-	  if (SSL_CTX_use_certificate_chain_file
-	      (pc->ctx, lin + matches[1].rm_so) != 1)
-	    conf_err ("SSL_CTX_use_certificate_chain_file failed - aborted");
-	  if (SSL_CTX_use_PrivateKey_file
-	      (pc->ctx, lin + matches[1].rm_so, SSL_FILETYPE_PEM) != 1)
-	    conf_err ("SSL_CTX_use_PrivateKey_file failed - aborted");
-	  if (SSL_CTX_check_private_key (pc->ctx) != 1)
-	    conf_err ("SSL_CTX_check_private_key failed - aborted");
-	  if ((fcert = fopen (lin + matches[1].rm_so, "r")) == NULL)
-	    conf_err ("ListenHTTPS: could not open certificate file");
-	  if ((x509 = PEM_read_X509 (fcert, NULL, NULL, NULL)) == NULL)
-	    conf_err ("ListenHTTPS: could not get certificate subject");
-	  fclose (fcert);
-	  memset (server_name, '\0', MAXBUF);
-	  X509_NAME_oneline (X509_get_subject_name (x509), server_name,
-			     MAXBUF - 1);
-	  pc->subjectAltNameCount = 0;
-	  pc->subjectAltNames = NULL;
-	  pc->subjectAltNames =
-	    get_subjectaltnames (x509, &(pc->subjectAltNameCount));
-	  X509_free (x509);
-	  if (!regexec (&CNName, server_name, 4, matches, 0))
-	    {
-	      server_name[matches[1].rm_eo] = '\0';
-	      if ((pc->server_name =
-		   strdup (server_name + matches[1].rm_so)) == NULL)
-		conf_err ("ListenHTTPS: could not set certificate subject");
-	    }
-	  else
-	    conf_err ("ListenHTTPS: could not get certificate CN");
-#else
-	  /* no SNI support */
-	  if (has_other)
-	    conf_err ("Cert directives MUST precede other SSL-specific directives - aborted");
-	  if (res->ctx)
-	    conf_err ("ListenHTTPS: multiple certificates not supported - aborted");
-	  if ((res->ctx = malloc (sizeof (POUND_CTX))) == NULL)
-	    conf_err ("ListenHTTPS new POUND_CTX: out of memory - aborted");
-	  res->ctx->server_name = NULL;
-	  res->ctx->next = NULL;
-	  if ((res->ctx->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
-	    conf_err ("SSL_CTX_new failed - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if (SSL_CTX_use_certificate_chain_file
-	      (res->ctx->ctx, lin + matches[1].rm_so) != 1)
-	    conf_err ("SSL_CTX_use_certificate_chain_file failed - aborted");
-	  if (SSL_CTX_use_PrivateKey_file
-	      (res->ctx->ctx, lin + matches[1].rm_so, SSL_FILETYPE_PEM) != 1)
-	    conf_err ("SSL_CTX_use_PrivateKey_file failed - aborted");
-	  if (SSL_CTX_check_private_key (res->ctx->ctx) != 1)
-	    conf_err ("SSL_CTX_check_private_key failed - aborted");
-#endif
-	}
-      else if (!regexec (&ClientCert, lin, 4, matches, 0))
-	{
-	  has_other = 1;
-	  if (res->ctx == NULL)
-	    conf_err ("ClientCert may only be used after Cert - aborted");
-	  switch (res->clnt_check = atoi (lin + matches[1].rm_so))
-	    {
-	    case 0:
-	      /* don't ask */
-	      for (pc = res->ctx; pc; pc = pc->next)
-		SSL_CTX_set_verify (pc->ctx, SSL_VERIFY_NONE, NULL);
-	      break;
-
-	    case 1:
-	      /* ask but OK if no client certificate */
-	      for (pc = res->ctx; pc; pc = pc->next)
-		{
-		  SSL_CTX_set_verify (pc->ctx,
-				      SSL_VERIFY_PEER |
-				      SSL_VERIFY_CLIENT_ONCE, NULL);
-		  SSL_CTX_set_verify_depth (pc->ctx,
-					    atoi (lin + matches[2].rm_so));
-		}
-	      break;
-
-	    case 2:
-	      /* ask and fail if no client certificate */
-	      for (pc = res->ctx; pc; pc = pc->next)
-		{
-		  SSL_CTX_set_verify (pc->ctx,
-				      SSL_VERIFY_PEER |
-				      SSL_VERIFY_FAIL_IF_NO_PEER_CERT, NULL);
-		  SSL_CTX_set_verify_depth (pc->ctx,
-					    atoi (lin + matches[2].rm_so));
-		}
-	      break;
-
-	    case 3:
-	      /* ask but do not verify client certificate */
-	      for (pc = res->ctx; pc; pc = pc->next)
-		{
-		  SSL_CTX_set_verify (pc->ctx,
-				      SSL_VERIFY_PEER |
-				      SSL_VERIFY_CLIENT_ONCE, verify_OK);
-		  SSL_CTX_set_verify_depth (pc->ctx,
-					    atoi (lin + matches[2].rm_so));
-		}
-	      break;
-	    }
-	}
-      else if (!regexec (&AddHeader, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (res->add_head == NULL)
-	    {
-	      if ((res->add_head = strdup (lin + matches[1].rm_so)) == NULL)
-		conf_err ("AddHeader config: out of memory - aborted");
-	    }
-	  else
-	    {
-	      if ((res->add_head =
-		   realloc (res->add_head,
-			    strlen (res->add_head) +
-			    strlen (lin + matches[1].rm_so) + 3)) == NULL)
-		conf_err ("AddHeader config: out of memory - aborted");
-	      strcat (res->add_head, "\r\n");
-	      strcat (res->add_head, lin + matches[1].rm_so);
-	    }
-	}
-      else if (!regexec (&DisableProto, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (strcasecmp (lin + matches[1].rm_so, "SSLv2") == 0)
-	    ssl_op_enable |= SSL_OP_NO_SSLv2;
-	  else if (strcasecmp (lin + matches[1].rm_so, "SSLv3") == 0)
-	    ssl_op_enable |= SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3;
-#ifdef SSL_OP_NO_TLSv1
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1") == 0)
-	    ssl_op_enable |=
-		    SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1;
-#endif
-#ifdef SSL_OP_NO_TLSv1_1
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1_1") == 0)
-	    ssl_op_enable |=
-	      SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 |
-	      SSL_OP_NO_TLSv1_1;
-#endif
-#ifdef SSL_OP_NO_TLSv1_2
-	  else if (strcasecmp (lin + matches[1].rm_so, "TLSv1_2") == 0)
-	    ssl_op_enable |=
-	      SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 |
-	      SSL_OP_NO_TLSv1_1 | SSL_OP_NO_TLSv1_2;
-#endif
-	}
-      else if (!regexec (&SSLAllowClientRenegotiation, lin, 4, matches, 0))
-	{
-	  res->allow_client_reneg = atoi (lin + matches[1].rm_so);
-	  if (res->allow_client_reneg == 2)
-	    {
-	      ssl_op_enable |= SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
-	      ssl_op_disable &= ~SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
-	    }
-	  else
-	    {
-	      ssl_op_disable |= SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
-	      ssl_op_enable &= ~SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
-	    }
-	}
-      else if (!regexec (&SSLHonorCipherOrder, lin, 4, matches, 0))
-	{
-	  if (atoi (lin + matches[1].rm_so))
-	    {
-	      ssl_op_enable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
-	      ssl_op_disable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
-	    }
-	  else
-	    {
-	      ssl_op_disable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
-	      ssl_op_enable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
-	    }
-	}
-      else if (!regexec (&Ciphers, lin, 4, matches, 0))
-	{
-	  has_other = 1;
-	  if (res->ctx == NULL)
-	    conf_err ("Ciphers may only be used after Cert - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  for (pc = res->ctx; pc; pc = pc->next)
-	    SSL_CTX_set_cipher_list (pc->ctx, lin + matches[1].rm_so);
-	}
-      else if (!regexec (&CAlist, lin, 4, matches, 0))
-	{
-	  STACK_OF (X509_NAME) * cert_names;
-
-	  has_other = 1;
-	  if (res->ctx == NULL)
-	    conf_err ("CAList may only be used after Cert - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((cert_names =
-	       SSL_load_client_CA_file (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("SSL_load_client_CA_file failed - aborted");
-	  for (pc = res->ctx; pc; pc = pc->next)
-	    SSL_CTX_set_client_CA_list (pc->ctx, cert_names);
-	}
-      else if (!regexec (&VerifyList, lin, 4, matches, 0))
-	{
-	  has_other = 1;
-	  if (res->ctx == NULL)
-	    conf_err ("VerifyList may only be used after Cert - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  for (pc = res->ctx; pc; pc = pc->next)
-	    if (SSL_CTX_load_verify_locations (pc->ctx, lin + matches[1].rm_so, NULL) != 1)
-	      conf_err ("SSL_CTX_load_verify_locations failed - aborted");
-	}
-      else if (!regexec (&CRLlist, lin, 4, matches, 0))
-	{
-#if HAVE_X509_STORE_SET_FLAGS
-	  X509_STORE *store;
-	  X509_LOOKUP *lookup;
-
-	  has_other = 1;
-	  if (res->ctx == NULL)
-	    conf_err ("CRLlist may only be used after Cert - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  for (pc = res->ctx; pc; pc = pc->next)
-	    {
-	      store = SSL_CTX_get_cert_store (pc->ctx);
-	      if ((lookup = X509_STORE_add_lookup (store,
-						   X509_LOOKUP_file ())) == NULL)
-		conf_err ("X509_STORE_add_lookup failed - aborted");
-	      if (X509_load_crl_file (lookup,
-				      lin + matches[1].rm_so, X509_FILETYPE_PEM) != 1)
-		conf_err ("X509_load_crl_file failed - aborted");
-	      X509_STORE_set_flags (store,
-				    X509_V_FLAG_CRL_CHECK |
-				    X509_V_FLAG_CRL_CHECK_ALL);
-	    }
-#else
-	  conf_err ("your version of OpenSSL does not support CRL checking");
-#endif
-	}
-      else if (!regexec (&NoHTTPS11, lin, 4, matches, 0))
-	{
-	  res->noHTTPS11 = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Service, lin, 4, matches, 0))
-	{
-	  if (res->services == NULL)
-	    res->services = parse_service (NULL);
-	  else
-	    {
-	      for (svc = res->services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (NULL);
-	    }
-	}
-      else if (!regexec (&ServiceName, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (res->services == NULL)
-	    res->services = parse_service (lin + matches[1].rm_so);
-	  else
-	    {
-	      for (svc = res->services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (lin + matches[1].rm_so);
-	    }
-	}
-      else if (!regexec (&End, lin, 4, matches, 0))
-	{
-	  if (!has_addr || !has_port || res->ctx == NULL)
-	    conf_err ("ListenHTTPS missing Address, Port or Certificate - aborted");
-#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
-	  if (res->ctx->next)
-	    if (!SSL_CTX_set_tlsext_servername_callback
-		(res->ctx->ctx, SNI_server_name)
-		|| !SSL_CTX_set_tlsext_servername_arg (res->ctx->ctx,
-						       res->ctx))
-	      conf_err ("ListenHTTPS: can't set SNI callback");
-#endif
-	  for (pc = res->ctx; pc; pc = pc->next)
-	    {
-	      SSL_CTX_set_app_data (pc->ctx, res);
-	      SSL_CTX_set_mode (pc->ctx, SSL_MODE_AUTO_RETRY);
-	      SSL_CTX_set_options (pc->ctx, ssl_op_enable);
-	      SSL_CTX_clear_options (pc->ctx, ssl_op_disable);
-	      sprintf (lin, "%d-Pound-%ld", getpid (), random ());
-	      SSL_CTX_set_session_id_context (pc->ctx, (unsigned char *) lin,
-					      strlen (lin));
-	      POUND_SSL_CTX_init (pc->ctx);
-	      SSL_CTX_set_info_callback (pc->ctx, SSLINFO_callback);
-	    }
-	  return res;
-	}
-      else
-	{
-	  conf_err ("unknown directive");
-	}
+      conf_error_at_locus_range (&range, "Cert statement is missing");
+      return PARSER_FAIL;
     }
 
-  conf_err ("ListenHTTPS premature EOF");
-  return NULL;
-}
+#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
+  if (lst->ctx->next &&
+      (!SSL_CTX_set_tlsext_servername_callback (lst->ctx->ctx, SNI_server_name)
+       || !SSL_CTX_set_tlsext_servername_arg (lst->ctx->ctx, lst->ctx)))
+    {
+      conf_openssl_error ("can't set SNI callback");
+      return PARSER_FAIL;
+    }
+#endif
 
-/*
- * parse the config file
- */
-static void
-parse_file (void)
+  stringbuf_init (&sb);
+  for (pc = lst->ctx; pc; pc = pc->next)
+    {
+      SSL_CTX_set_app_data (pc->ctx, lst);
+      SSL_CTX_set_mode (pc->ctx, SSL_MODE_AUTO_RETRY);
+      SSL_CTX_set_options (pc->ctx, lst->ssl_op_enable);
+      SSL_CTX_clear_options (pc->ctx, lst->ssl_op_disable);
+      stringbuf_reset (&sb);
+      stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
+      SSL_CTX_set_session_id_context (pc->ctx, (unsigned char *) sb.base,
+				      sb.len);
+      POUND_SSL_CTX_init (pc->ctx);
+      SSL_CTX_set_info_callback (pc->ctx, SSLINFO_callback);
+    }
+  stringbuf_free (&sb);
+
+  LIST_APPEND (LISTENER, tail, lst);
+  return PARSER_OK;
+}
+
+static PARSER_TABLE top_level_parsetab[] = {
+  { "Include", parse_include },
+  { "User", assign_string, &user },
+  { "Group", assign_string, &group },
+  { "RootJail", assign_string, &root_jail },
+  { "Daemon", assign_bool, &daemonize },
+  { "Threads", assign_unsigned, &numthreads },
+  { "Grace", assign_timeout, &grace },
+  { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },
+  { "LogLevel", assign_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
+  { "Alive", assign_timeout, &alive_to },
+  { "Client", assign_timeout, NULL, offsetof (POUND_DEFAULTS, clnt_to) },
+  { "TimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_to) },
+  { "WSTimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, ws_to) },
+  { "ConnTO", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_connto) },
+  { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case) },
+  { "ECDHCurve", parse_ECDHCurve },
+  { "SSLEngine", parse_SSLEngine },
+  { "Control", assign_string, &ctrl_name },
+  { "Anonymise", int_set_one, &anonymise },
+  { "Anonymize", int_set_one, &anonymise },
+  { "Service", parse_service, &services },
+  { "ListenHTTP", parse_listen_http, &listeners },
+  { "ListenHTTPS", parse_listen_https, &listeners },
+  { NULL }
+};
+
+int
+parse_config_file (char const *file)
 {
-  char lin[MAXBUF];
-  SERVICE *svc;
-  LISTENER *lstn;
-  int i;
-#if HAVE_OPENSSL_ENGINE_H
-  ENGINE *e;
-#endif
+  int res = -1;
 
-  while (conf_fgets (lin, MAXBUF))
+  pound_defaults.facility = LOG_DAEMON;
+  pound_defaults.log_level = 1;
+  pound_defaults.clnt_to = 10;
+  pound_defaults.be_to = 15;
+  pound_defaults.ws_to = 600;
+  pound_defaults.be_connto = 15;
+  pound_defaults.ignore_case = 0;
+
+  if (push_input (file) == 0)
     {
-      if (strlen (lin) > 0 && lin[strlen (lin) - 1] == '\n')
-	lin[strlen (lin) - 1] = '\0';
-      if (!regexec (&User, lin, 4, matches, 0))
+      res = parser_loop (top_level_parsetab, &pound_defaults, NULL);
+      if (res == 0)
 	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((user = strdup (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("User config: out of memory - aborted");
-	}
-      else if (!regexec (&Group, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((group = strdup (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("Group config: out of memory - aborted");
-	}
-      else if (!regexec (&RootJail, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if ((root_jail = strdup (lin + matches[1].rm_so)) == NULL)
-	    conf_err ("RootJail config: out of memory - aborted");
-	}
-      else if (!regexec (&Daemon, lin, 4, matches, 0))
-	{
-	  daemonize = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Threads, lin, 4, matches, 0))
-	{
-	  numthreads = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&LogFacility, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (lin[matches[1].rm_so] == '-')
-	    def_facility = -1;
-	  else
-	    for (i = 0; facilitynames[i].c_name; i++)
-	      if (!strcmp (facilitynames[i].c_name, lin + matches[1].rm_so))
-		{
-		  def_facility = facilitynames[i].c_val;
-		  break;
-		}
-	}
-      else if (!regexec (&Grace, lin, 4, matches, 0))
-	{
-	  grace = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&LogLevel, lin, 4, matches, 0))
-	{
-	  log_level = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Client, lin, 4, matches, 0))
-	{
-	  clnt_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&Alive, lin, 4, matches, 0))
-	{
-	  alive_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&TimeOut, lin, 4, matches, 0))
-	{
-	  be_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&WSTimeOut, lin, 4, matches, 0))
-	{
-	  ws_to = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&ConnTO, lin, 4, matches, 0))
-	{
-	  be_connto = atoi (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&IgnoreCase, lin, 4, matches, 0))
-	{
-	  ignore_case = atoi (lin + matches[1].rm_so);
-#if OPENSSL_VERSION_MAJOR < 3
-#ifndef OPENSSL_NO_ECDH
-	}
-      else if (!regexec (&ECDHCurve, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (set_ECDHCurve (lin + matches[1].rm_so) == 0)
-	    conf_err ("ECDHCurve config: invalid curve name");
-#endif
-#endif
-#if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
-	}
-      else if (!regexec (&SSLEngine, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (!(e = ENGINE_by_id (lin + matches[1].rm_so)))
-	    conf_err ("could not find engine");
-	  if (!ENGINE_init (e))
-	    {
-	      ENGINE_free (e);
-	      conf_err ("could not init engine");
-	    }
-	  if (!ENGINE_set_default (e, ENGINE_METHOD_ALL))
-	    {
-	      ENGINE_free (e);
-	      conf_err ("could not set all defaults");
-	    }
-	  ENGINE_finish (e);
-	  ENGINE_free (e);
-#endif
-	}
-      else if (!regexec (&Control, lin, 4, matches, 0))
-	{
-	  if (ctrl_name != NULL)
-	    conf_err ("Control multiply defined - aborted");
-	  lin[matches[1].rm_eo] = '\0';
-	  ctrl_name = strdup (lin + matches[1].rm_so);
-	}
-      else if (!regexec (&ListenHTTP, lin, 4, matches, 0))
-	{
-	  if (listeners == NULL)
-	    listeners = parse_HTTP ();
-	  else
-	    {
-	      for (lstn = listeners; lstn->next; lstn = lstn->next)
-		;
-	      lstn->next = parse_HTTP ();
-	    }
-	}
-      else if (!regexec (&ListenHTTPS, lin, 4, matches, 0))
-	{
-	  if (listeners == NULL)
-	    listeners = parse_HTTPS ();
-	  else
-	    {
-	      for (lstn = listeners; lstn->next; lstn = lstn->next)
-		;
-	      lstn->next = parse_HTTPS ();
-	    }
-	}
-      else if (!regexec (&Service, lin, 4, matches, 0))
-	{
-	  if (services == NULL)
-	    services = parse_service (NULL);
-	  else
-	    {
-	      for (svc = services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (NULL);
-	    }
-	}
-      else if (!regexec (&ServiceName, lin, 4, matches, 0))
-	{
-	  lin[matches[1].rm_eo] = '\0';
-	  if (services == NULL)
-	    services = parse_service (lin + matches[1].rm_so);
-	  else
-	    {
-	      for (svc = services; svc->next; svc = svc->next)
-		;
-	      svc->next = parse_service (lin + matches[1].rm_so);
-	    }
-	}
-      else if (!regexec (&Anonymise, lin, 4, matches, 0))
-	{
-	  anonymise = 1;
-	}
-      else
-	{
-	  conf_err ("unknown directive - aborted");
+	  log_facility = pound_defaults.facility;
 	}
     }
-  return;
+  return res;
 }
-
-/*
- * prepare to parse the arguments/config file
- */
+
+static int copyright_year = 2022;
 void
-config_parse (const int argc, char **const argv)
+print_version (void)
 {
-  char *conf_name;
-  int c_opt, check_only;
+  printf ("%s (%s) %s\n", progname, PACKAGE_NAME, PACKAGE_VERSION);
+  printf ("Copyright (C) 2002-2010 Apsis GmbH\n");
+  printf ("Copyright (C) 2018-%d Sergey Poznyakoff\n", copyright_year);
+  printf ("\
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n\
+This is free software: you are free to change and redistribute it.\n\
+There is NO WARRANTY, to the extent permitted by law.\n\
+");
+}
 
-  if (regcomp (&Empty, "^[ \t]*$", REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Comment, "^[ \t]*#.*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&User, "^[ \t]*User[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Group, "^[ \t]*Group[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&RootJail, "^[ \t]*RootJail[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Daemon, "^[ \t]*Daemon[ \t]+([01])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Threads, "^[ \t]*Threads[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&LogFacility, "^[ \t]*LogFacility[ \t]+([a-z0-9-]+)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&LogLevel, "^[ \t]*LogLevel[ \t]+([0-5])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Grace, "^[ \t]*Grace[ \t]+([0-9]+)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Alive, "^[ \t]*Alive[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&SSLEngine, "^[ \t]*SSLEngine[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Control, "^[ \t]*Control[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ListenHTTP, "^[ \t]*ListenHTTP[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ListenHTTPS, "^[ \t]*ListenHTTPS[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&End, "^[ \t]*End[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Address, "^[ \t]*Address[ \t]+([^ \t]+)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Port, "^[ \t]*Port[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Cert, "^[ \t]*Cert[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&xHTTP, "^[ \t]*xHTTP[ \t]+([01234])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Client, "^[ \t]*Client[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CheckURL, "^[ \t]*CheckURL[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Err414, "^[ \t]*Err414[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Err500, "^[ \t]*Err500[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Err501, "^[ \t]*Err501[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Err503, "^[ \t]*Err503[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&MaxRequest, "^[ \t]*MaxRequest[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HeadRemove, "^[ \t]*HeadRemove[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&RewriteLocation,
-		  "^[ \t]*RewriteLocation[ \t]+([012])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&RewriteDestination,
-		  "^[ \t]*RewriteDestination[ \t]+([01])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Service, "^[ \t]*Service[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ServiceName, "^[ \t]*Service[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&URL, "^[ \t]*URL[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HeadRequire, "^[ \t]*HeadRequire[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HeadDeny, "^[ \t]*HeadDeny[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&BackEnd, "^[ \t]*BackEnd[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Emergency, "^[ \t]*Emergency[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Priority, "^[ \t]*Priority[ \t]+([1-9])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&TimeOut, "^[ \t]*TimeOut[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&WSTimeOut, "^[ \t]*WSTimeOut[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HAport, "^[ \t]*HAport[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HAportAddr,
-		  "^[ \t]*HAport[ \t]+([^ \t]+)[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Redirect, "^[ \t]*Redirect[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&RedirectN,
-		  "^[ \t]*Redirect[ \t]+(30[127])[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Session, "^[ \t]*Session[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Type, "^[ \t]*Type[ \t]+([^ \t]+)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&TTL, "^[ \t]*TTL[ \t]+([1-9-][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ID, "^[ \t]*ID[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ClientCert,
-		  "^[ \t]*ClientCert[ \t]+([0-3])[ \t]+([1-9])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&AddHeader, "^[ \t]*AddHeader[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&SSLAllowClientRenegotiation,
-		  "^[ \t]*SSLAllowClientRenegotiation[ \t]+([012])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&DisableProto,
-		  "^[ \t]*Disable[ \t]+(SSLv2|SSLv3|TLSv1|TLSv1_1|TLSv1_2)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&SSLHonorCipherOrder,
-		  "^[ \t]*SSLHonorCipherOrder[ \t]+([01])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Ciphers, "^[ \t]*Ciphers[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CAlist, "^[ \t]*CAlist[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&VerifyList, "^[ \t]*VerifyList[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CRLlist, "^[ \t]*CRLlist[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&NoHTTPS11, "^[ \t]*NoHTTPS11[ \t]+([0-2])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Include, "^[ \t]*Include[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&ConnTO, "^[ \t]*ConnTO[ \t]+([1-9][0-9]*)[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&IgnoreCase, "^[ \t]*IgnoreCase[ \t]+([01])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&HTTPS, "^[ \t]*HTTPS[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Disabled, "^[ \t]*Disabled[ \t]+([01])[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CNName, ".*[Cc][Nn]=([-*.A-Za-z0-9]+).*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&Anonymise, "^[ \t]*Anonymise[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-#ifndef OPENSSL_NO_ECDH
-      || regcomp (&ECDHCurve, "^[ \t]*ECDHCurve[ \t]+\"(.+)\"[ \t]*$",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+void
+print_help (void)
+{
+  printf ("usage: %s [-Vchv] [-f FILE] [-p FILE]\n", progname);
+  printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
+  printf ("\nOptions are:\n\n");
+  printf ("   -c        check configuration file syntax and exit\n");
+  printf ("   -f FILE   read configuration from FILE (default: %s)\n", F_CONF);
+  printf ("   -p FILE   write PID to FILE (default: %s)\n", F_PID);
+  printf ("   -V        print version and exit\n");
+  printf ("   -v        verbose mode\n");
+  printf ("\n");
+  printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
+#ifdef PACKAGE_URL
+  printf ("%s home page: <%s>\n", PACKAGE_NAME, PACKAGE_URL);
 #endif
-#endif
-    )
-    {
-      logmsg (LOG_ERR, "bad config Regex - aborted");
-      exit (1);
-    }
+}
+
+void
+config_parse (int argc, char **argv)
+{
+  int c;
+  int check_only = 0;
+  char *conf_name = F_CONF;
 
-  opterr = 0;
-  check_only = 0;
-  conf_name = F_CONF;
-  pid_name = F_PID;
-
-  while ((c_opt = getopt (argc, argv, "f:cvVp:")) > 0)
-    switch (c_opt)
+  if ((progname = strrchr (argv[0], '/')) != NULL)
+    progname++;
+  else
+    progname = argv[0];
+  while ((c = getopt (argc, argv, "cf:hp:Vv")) > 0)
+    switch (c)
       {
+      case 'c':
+	check_only = 1;
+	break;
+
       case 'f':
 	conf_name = optarg;
 	break;
+
+      case 'h':
+	print_help ();
+	exit (0);
 
       case 'p':
 	pid_name = optarg;
 	break;
 
-      case 'c':
-	check_only = 1;
-	break;
+      case 'V':
+	print_version ();
+	exit (0);
 
       case 'v':
 	print_log = 1;
 	break;
 
-      case 'V':
-	print_log = 1;
-	logmsg (LOG_DEBUG, "Version %s", PACKAGE_VERSION);
-	logmsg (LOG_DEBUG, "  Configuration switches:");
-	if (!SUPERVISOR)
-	  logmsg (LOG_DEBUG, "    --disable-super");
-#ifdef  C_SSL
-	if (strcmp (C_SSL, ""))
-	  logmsg (LOG_DEBUG, "    --with-ssl=%s", C_SSL);
-#endif
-	if (T_RSA_KEYS != 7200)
-	  logmsg (LOG_DEBUG, "    --with-t_rsa=%d", T_RSA_KEYS);
-	if (MAXBUF != 4096)
-	  logmsg (LOG_DEBUG, "    --with-maxbuf=%d", MAXBUF);
-#ifdef  C_OWNER
-	if (strcmp (C_OWNER, ""))
-	  logmsg (LOG_DEBUG, "    --with-owner=%s", C_OWNER);
-#endif
-#ifdef  C_GROUP
-	if (strcmp (C_GROUP, ""))
-	  logmsg (LOG_DEBUG, "    --with-group=%s", C_GROUP);
-#endif
-	if (DH_LEN != 2048)
-	  logmsg (LOG_DEBUG, "    --with-dh=%d", DH_LEN);
-	logmsg (LOG_DEBUG, "Exiting...");
-	exit (0);
-	break;
-
       default:
-	logmsg (LOG_ERR, "bad flag -%c", optopt);
 	exit (1);
-	break;
       }
 
   if (optind < argc)
@@ -2015,22 +2987,9 @@ config_parse (const int argc, char **const argv)
       exit (1);
     }
 
-  conf_init (conf_name);
-
-  user = NULL;
-  group = NULL;
-  root_jail = NULL;
-  ctrl_name = NULL;
-
-  numthreads = 128;
-  alive_to = 30;
-  daemonize = 1;
-  grace = 30;
-
-  services = NULL;
-  listeners = NULL;
-
-  parse_file ();
+  if (parse_config_file (conf_name))
+    exit (1);
+  name_list_free ();
 
   if (check_only)
     {
@@ -2043,80 +3002,4 @@ config_parse (const int argc, char **const argv)
       logmsg (LOG_ERR, "no listeners defined - aborted");
       exit (1);
     }
-
-  regfree (&Empty);
-  regfree (&Comment);
-  regfree (&User);
-  regfree (&Group);
-  regfree (&RootJail);
-  regfree (&Daemon);
-  regfree (&Threads);
-  regfree (&LogFacility);
-  regfree (&LogLevel);
-  regfree (&Grace);
-  regfree (&Alive);
-  regfree (&SSLEngine);
-  regfree (&Control);
-  regfree (&ListenHTTP);
-  regfree (&ListenHTTPS);
-  regfree (&End);
-  regfree (&Address);
-  regfree (&Port);
-  regfree (&Cert);
-  regfree (&xHTTP);
-  regfree (&Client);
-  regfree (&CheckURL);
-  regfree (&Err414);
-  regfree (&Err500);
-  regfree (&Err501);
-  regfree (&Err503);
-  regfree (&MaxRequest);
-  regfree (&HeadRemove);
-  regfree (&RewriteLocation);
-  regfree (&RewriteDestination);
-  regfree (&Service);
-  regfree (&ServiceName);
-  regfree (&URL);
-  regfree (&HeadRequire);
-  regfree (&HeadDeny);
-  regfree (&BackEnd);
-  regfree (&Emergency);
-  regfree (&Priority);
-  regfree (&TimeOut);
-  regfree (&WSTimeOut);
-  regfree (&HAport);
-  regfree (&HAportAddr);
-  regfree (&Redirect);
-  regfree (&RedirectN);
-  regfree (&Session);
-  regfree (&Type);
-  regfree (&TTL);
-  regfree (&ID);
-  regfree (&ClientCert);
-  regfree (&AddHeader);
-  regfree (&SSLAllowClientRenegotiation);
-  regfree (&DisableProto);
-  regfree (&SSLHonorCipherOrder);
-  regfree (&Ciphers);
-  regfree (&CAlist);
-  regfree (&VerifyList);
-  regfree (&CRLlist);
-  regfree (&NoHTTPS11);
-  regfree (&Include);
-  regfree (&ConnTO);
-  regfree (&IgnoreCase);
-  regfree (&HTTPS);
-  regfree (&Disabled);
-  regfree (&CNName);
-  regfree (&Anonymise);
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
-#ifndef OPENSSL_NO_ECDH
-  regfree (&ECDHCurve);
-#endif
-#endif
-
-  /* set the facility only here to ensure the syslog gets opened if necessary */
-  log_facility = def_facility;
-
-  return;
 }

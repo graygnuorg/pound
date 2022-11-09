@@ -223,20 +223,23 @@
  * Global variables needed by everybody
  */
 
+extern char *progname;          /* program name */
+
 extern char *user,		/* user to run as */
  *group,			/* group to run as */
  *root_jail,			/* directory to chroot to */
  *pid_name,			/* file to record pid in */
  *ctrl_name;			/* control socket name */
 
-extern int numthreads,		/* number of worker threads */
-  anonymise,			/* anonymise client address */
-  alive_to,			/* check interval for resurrection */
-  daemonize,			/* run as daemon */
-  log_facility,			/* log facility to use */
-  print_log,			/* print log messages to stdout/stderr */
-  grace,			/* grace period before shutdown */
-  control_sock;			/* control socket */
+extern unsigned numthreads,	/* number of worker threads */
+  grace;			/* grace period before shutdown */
+
+extern int anonymise;		/* anonymise client address */
+extern unsigned alive_to;	/* check interval for resurrection */
+extern int daemonize;		/* run as daemon */
+extern int log_facility;	/* log facility to use */
+extern int print_log;		/* print log messages to stdout/stderr */
+extern int control_sock;	/* control socket */
 
 extern regex_t HEADER,		/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
@@ -253,18 +256,30 @@ extern int SOL_TCP;
 
 #endif /* NO_EXTERNALS */
 
+#ifndef DEFAULT_NUMTHREADS
+# define DEFAULT_NUMTHREADS 128
+#endif
+
+#ifndef DEFAULT_GRACE_TO
+# define DEFAULT_GRACE_TO 30
+#endif
+
+#ifndef DEFAULT_ALIVE_TO
+# define DEFAULT_ALIVE_TO 30
+#endif
+
 #ifndef MAXBUF
-#define MAXBUF      4096
+# define MAXBUF      4096
 #endif
 
 #define MAXHEADERS  128
 
 #ifndef F_CONF
-#define F_CONF  "/usr/local/etc/pound.cfg"
+# define F_CONF  "/usr/local/etc/pound.cfg"
 #endif
 
 #ifndef F_PID
-#define F_PID  "/var/run/pound.pid"
+# define F_PID  "/var/run/pound.pid"
 #endif
 
 /* matcher chain */
@@ -285,9 +300,9 @@ typedef struct _backend
   int be_type;			/* 0 if real back-end, otherwise code (301, 302/default, 307) */
   struct addrinfo addr;		/* IPv4/6 address */
   int priority;			/* priority */
-  int to;			/* read/write time-out */
-  int conn_to;			/* connection time-out */
-  int ws_to;			/* websocket time-out */
+  unsigned to;			/* read/write time-out */
+  unsigned conn_to;		/* connection time-out */
+  unsigned ws_to;		/* websocket time-out */
   struct addrinfo ha_addr;	/* HA address/port */
   char *url;			/* for redirectors */
   int redir_req;		/* the redirect should include the request path */
@@ -333,7 +348,7 @@ typedef struct _service
   int tot_pri;			/* total priority for current back-ends */
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
-  int sess_ttl;			/* session time-to-live */
+  unsigned sess_ttl;		/* session time-to-live */
   regex_t sess_start;		/* pattern to identify the session data */
   regex_t sess_pat;		/* pattern to match the session data */
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
@@ -368,7 +383,7 @@ typedef struct _listener
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   char *add_head;		/* extra SSL header */
   regex_t verb;			/* pattern to match the request verb against */
-  int to;			/* client time-out */
+  unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
   char *err414, *err500, *err501, *err503;
@@ -383,6 +398,11 @@ typedef struct _listener
   int disable_ssl_v2;		/* Disable SSL version 2 */
   SERVICE *services;
   struct _listener *next;
+
+  /* Used during configuration parsing */
+  int ssl_op_enable;
+  int ssl_op_disable;
+  int has_other;
 } LISTENER;
 
 #ifndef NO_EXTERNALS
@@ -548,7 +568,7 @@ extern int connect_nb (const int, const struct addrinfo *, const int);
 /*
  * Parse arguments/config file
  */
-extern void config_parse (const int, char **const);
+extern void config_parse (int, char **);
 
 /*
  * RSA ephemeral keys: how many and how often
@@ -597,4 +617,34 @@ extern void *thr_control (void *);
 
 extern void POUND_SSL_CTX_init (SSL_CTX *ctx);
 extern int set_ECDHCurve (char *name);
-void conf_err (const char *msg);
+
+void *mem2nrealloc (void *p, size_t *pn, size_t s);
+void xnomem (void);
+void *xmalloc (size_t s);
+void *xcalloc (size_t nmemb, size_t size);
+#define xzalloc(s) xcalloc(1, s)
+#define XZALLOC(v) (v = xzalloc (sizeof ((v)[0])))
+
+void *xrealloc (void *p, size_t s);
+void *x2nrealloc (void *p, size_t *pn, size_t s);
+char *xstrdup (char const *s);
+char *xstrndup (const char *s, size_t n);
+
+struct stringbuf
+{
+  char *base;                     /* Buffer storage. */
+  size_t size;                    /* Size of buf. */
+  size_t len;                     /* Actually used length in buf. */
+};
+
+void stringbuf_init (struct stringbuf *sb);
+void stringbuf_reset (struct stringbuf *sb);
+void stringbuf_free (struct stringbuf *sb);
+void stringbuf_add_char (struct stringbuf *sb, int c);
+void stringbuf_add_string (struct stringbuf *sb, char const *str);
+void stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
+void stringbuf_printf (struct stringbuf *sb, char const *fmt, ...);
+static inline char *stringbuf_value (struct stringbuf *sb)
+{
+  return sb->base;
+}

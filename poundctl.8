@@ -1,6 +1,22 @@
-.TH POUNDCTL "8" "Jan 2010" "poundctl" "System Manager's Manual"
+.\" Pound - the reverse-proxy load-balancer
+.\" Copyright (C) 2002-2010 Apsis GmbH
+.\" Copyright (C) 2018-2022 Sergey Poznyakoff
+.\"
+.\" Pound is free software; you can redistribute it and/or modify
+.\" it under the terms of the GNU General Public License as published by
+.\" the Free Software Foundation; either version 3 of the License, or
+.\" (at your option) any later version.
+.\"
+.\" Pound is distributed in the hope that it will be useful,
+.\" but WITHOUT ANY WARRANTY; without even the implied warranty of
+.\" MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+.\" GNU General Public License for more details.
+.\"
+.\" You should have received a copy of the GNU General Public License
+.\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
+.TH POUNDCTL 8 "November 9, 2022" "poundctl" "System Manager's Manual"
 .SH NAME
-poundctl \- control the pound(8) daemon
+poundctl \- control the pound daemon
 .SH SYNOPSIS
 .TP
 .B poundctl \fI-c /path/to/socket\fR [\fI-L/-l\fR] [\fI-S/-s\fR] [\fI-B/-b\fR] [\fI-N/-n\fR] [\fI-H\fR] [\fI-X\fR]
@@ -15,39 +31,40 @@ Options available:
 .TP
 \fB\-c /path/to/socket\fR
 The path to the (Unix-domain) socket
-.B Pound
+.B pound
 was configured to listen on for control. Your
-.B Pound
+.B pound
 configuration file must contain the directive
 .I Control "/path/to/socket"
 for
 .B poundctl
 to work.
 .TP
-\fB\-L/-l n\fR
+\fB\-L/\-l \fIn\fR
 Enable/disable a listener. A disabled listener will stop accepting connection
 requests.
 .TP
-\fB\-S/-s n m\fR
+\fB\-S/\-s \fIn m\fR
 Enable/disable a service. A disabled service will not be used by
-.B Pound
+.B pound
 to answer requests.
 .TP
-\fB\-B/-b n m r\fR
+\fB\-B/\-b \fIn m r\fR
 Enable/disable a back-end. A disabled back-end will not be passed requests to
 answer. Note however that existing sessions may still cause requests to be
 sent their way.
 .TP
-\fB\-N n m k r\fR
+\fB\-N \fIn m k r\fR
 Add a session to service m in listener n. The session key is k and it points to
 back-end r.
 .TP
-\fB\-n n m k\fR
+\fB\-n \fIn m k\fR
 Remove a session from service m in listener n. The session key is k.
 .PP
-The parameters n, m and r refer to the number assigned to a particular listener,
-service and back-end in the listings. A listener number of -1 refers by convention
-to the global context.
+The parameters \fIn\fR, \fIm\fR and \fIr\fR refer to the number
+assigned to a particular listener, service and back-end in the
+listings. A listener number of -1 refers by convention to the global
+context.
 .TP
 \fB\-H\fR
 Try to resolve the addresses to symbolic names. Depending on your configuration,
@@ -59,14 +76,27 @@ Show the results in XML format.
 When called without flags
 .B poundctl
 will print out a listing of the
-.B Pound
+.B pound
 internal state.
 .SH AUTHOR
 Written by Robert Segall, Apsis GmbH.
 .SH "REPORTING BUGS"
-Report bugs to <roseg@apsis.ch>.
+Report bugs to <gray+pound@gnu.org.ua>.
 .SH COPYRIGHT
 Copyright \(co 2002-2010 Apsis GmbH.
 .br
-This is free software; see the source for copying conditions.  There is NO
-warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
+Copyright \(co 2018-2022 Sergey Poznyakoff
+.sp
+.na
+License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>
+.sp
+.ad
+This is free software: you are free to change and redistribute it.
+There is NO WARRANTY, to the extent permitted by law.
+.\" Local variables:
+.\" eval: (add-hook 'write-file-hooks 'time-stamp)
+.\" time-stamp-start: ".TH [A-Z_][A-Z0-9_.\\-]* [0-9] \""
+.\" time-stamp-format: "%:B %:d, %:y"
+.\" time-stamp-end: "\""
+.\" time-stamp-line-limit: 20
+.\" end:

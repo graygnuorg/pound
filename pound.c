@@ -1,8 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- *
- * This file is part of Pound.
+ * Copyright (C) 2018-2022 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -15,7 +14,7 @@
  * GNU General Public License for more details.
  *
  * You should have received a copy of the GNU General Public License
- * along with this program.  If not, see <http://www.gnu.org/licenses/>.
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  *
  * Contact information:
  * Apsis GmbH
@@ -28,22 +27,22 @@
 #include    "pound.h"
 
 /* common variables */
-char *user,			/* user to run as */
- *group,			/* group to run as */
- *root_jail,			/* directory to chroot to */
- *pid_name,			/* file to record pid in */
- *ctrl_name;			/* control socket name */
+char *user;			/* user to run as */
+char *group;			/* group to run as */
+char *root_jail;		/* directory to chroot to */
+char *pid_name = F_PID;		/* file to record pid in */
+char *ctrl_name;		/* control socket name */
 
-int alive_to,			/* check interval for resurrection */
-  anonymise,			/* anonymise client address */
-  daemonize,			/* run as daemon */
-  log_facility,			/* log facility to use */
-  print_log,			/* print log messages to stdout/stderr */
-  grace,			/* grace period before shutdown */
-  control_sock;			/* control socket */
+int anonymise;			/* anonymise client address */
+int daemonize = 1;		/* run as daemon */
+int log_facility = -1;		/* log facility to use */
+int print_log;			/* print log messages to stdout/stderr */
+int control_sock = -1;		/* control socket */
+
+unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
+unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */
 
 SERVICE *services;		/* global services (if any) */
-
 LISTENER *listeners;		/* all available listeners */
 
 regex_t HEADER,			/* Allowed header */
@@ -123,7 +122,7 @@ l_id (void)
 static thr_arg *first = NULL, *last = NULL;
 static pthread_cond_t arg_cond;
 static pthread_mutex_t arg_mut;
-int numthreads;
+unsigned numthreads = DEFAULT_NUMTHREADS;
 
 static void
 init_thr_arg (void)
@@ -259,11 +258,7 @@ main (const int argc, char **argv)
   struct protoent *pe;
 #endif
 
-  print_log = 0;
   (void) umask (077);
-  control_sock = -1;
-  log_facility = -1;
-  logmsg (LOG_NOTICE, "starting...");
 
   signal (SIGHUP, h_shut);
   signal (SIGINT, h_shut);
@@ -340,7 +335,10 @@ main (const int argc, char **argv)
   config_parse (argc, argv);
 
   if (log_facility != -1)
-    openlog ("pound", LOG_CONS | LOG_NDELAY, LOG_DAEMON);
+    openlog (progname, LOG_CONS | LOG_NDELAY, LOG_DAEMON);
+
+  logmsg (LOG_NOTICE, "starting...");
+
   if (ctrl_name != NULL)
     {
       struct sockaddr_un ctrl;
@@ -355,9 +353,8 @@ main (const int argc, char **argv)
 		  strerror (errno));
 	  exit (1);
 	}
-      if (bind
-	  (control_sock, (struct sockaddr *) &ctrl,
-	   (socklen_t) sizeof (ctrl)) < 0)
+      if (bind (control_sock, (struct sockaddr *) &ctrl,
+		(socklen_t) sizeof (ctrl)) < 0)
 	{
 	  logmsg (LOG_ERR, "Control \"%s\" bind: %s", ctrl.sun_path,
 		  strerror (errno));
@@ -448,6 +445,8 @@ main (const int argc, char **argv)
 	      close (0);
 	      close (1);
 	      close (2);
+	      open ("/dev/null", O_RDONLY);
+	      open ("/dev/null", O_WRONLY);
 	    }
 	  break;
 
@@ -456,11 +455,9 @@ main (const int argc, char **argv)
 	  exit (1);
 
 	default:
-	  exit (0);
+	  _exit (0);
 	}
-#ifdef  HAVE_SETSID
-      (void) setsid ();
-#endif
+      setsid ();
     }
 
   /* record pid in file */

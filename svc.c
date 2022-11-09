@@ -263,28 +263,35 @@ IMPLEMENT_LHASH_DOALL_ARG_FN (t_cont, TABNODE *, ALL_ARG *)
  * Log an error to the syslog or to stderr
  */
 void
-logmsg (const int priority, const char *fmt, ...)
+vlogmsg (const int priority, const char *fmt, va_list ap)
 {
-  char buf[MAXBUF + 1];
-  va_list ap;
-
-  buf[MAXBUF] = '\0';
-  va_start (ap, fmt);
-  vsnprintf (buf, MAXBUF, fmt, ap);
-  va_end (ap);
-  if (log_facility == -1)
+  if (log_facility == -1 || print_log)
     {
-      fprintf ((priority == LOG_INFO
-		|| priority == LOG_DEBUG) ? stdout : stderr, "%s\n", buf);
+      FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
+		     ? stdout : stderr;
+      if (progname)
+	fprintf (fp, "%s: ", progname);
+      vfprintf (fp, fmt, ap);
+      fputc ('\n', fp);
     }
   else
     {
-      if (print_log)
-	printf ("%s\n", buf);
-      else
-	syslog (log_facility | priority, "%s", buf);
+      struct stringbuf sb;
+      stringbuf_init (&sb);
+      stringbuf_vprintf (&sb, fmt, ap);
+      syslog (priority, "%s", stringbuf_value (&sb));
+      stringbuf_free (&sb);
     }
   return;
+}
+
+void
+logmsg (const int priority, const char *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vlogmsg (priority, fmt, ap);
+  va_end (ap);
 }
 
 /*
@@ -1611,7 +1618,10 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
 	  /* This generates a EC_KEY structure with no key, but a group defined */
 	  EC_KEY *ecdh;
 	  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-	    conf_err ("Unable to generate temp ECDH key");
+	    {
+	      logmsg (LOG_ERR, "Unable to generate temp ECDH key");
+	      exit (1);
+	    }
 	  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
 	  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
 	  EC_KEY_free (ecdh);
