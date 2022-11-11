@@ -1,0 +1,3 @@
+# @configure_input@                                     -*- shell-script -*-
+
+PATH=@abs_builddir@:@abs_top_builddir@:$srcdir:$PATH

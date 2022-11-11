@@ -30,15 +30,22 @@ char *progname;
 /* Token types: */
 enum
   {
-    T_IDENT = 256,   /* Identifier */
-    T_NUMBER,        /* Decimal number */
-    T_STRING,        /* Quoted string */
-    T_LITERAL,       /* Unquoted literal */
-    T_ERROR,         /* Erroneous or malformed token */
-    /* Special types used as parameters to must_gettkn: */
-    T_SEQ,    /* Character sequence: either T_IDENT, T_NUMBER, or T_LITERAL */
-    T_ANY = 0
+    T__BASE = 256,
+    T_IDENT = T__BASE, /* Identifier */
+    T_NUMBER,          /* Decimal number */
+    T_STRING,          /* Quoted string */
+    T_LITERAL,         /* Unquoted literal */
+    T__END,
+    T_ERROR = T__END,  /* Erroneous or malformed token */
   };
+
+typedef unsigned TOKENMASK;
+
+#define T_BIT(t) ((TOKENMASK)1<<((t)-T__BASE))
+#define T_MASK_ISSET(m,t) ((m) & T_BIT(t))
+#define T_ANY 0 /* any token, inlcuding newline */
+/* Unquoted character sequence */
+#define T_UNQ (T_BIT (T_IDENT) | T_BIT (T_NUMBER) | T_BIT(T_LITERAL))
 
 /* Locations in the source file */
 struct locus_point
@@ -61,9 +68,15 @@ struct token
   struct locus_range locus;
 };
 
+/*
+ * Return a static string describing the given type.
+ * Note, that in addition to the types defined above, this function returns
+ * meaningful description for all possible ASCII characters.
+ */
 static char const *
-token_type_str (int type)
+token_type_str (unsigned type)
 {
+  static char buf[6];
   switch (type)
     {
     case T_IDENT:
@@ -78,19 +91,95 @@ token_type_str (int type)
     case T_LITERAL:
       return "literal";
 
-    case T_ANY:
-      return "any";
-
-    case T_SEQ:
-      return "sequence";
-
     case '\n':
       return "end of line";
+
+    case '\t':
+      return "'\\t'";
+
+    case '\\':
+      return "'\\'";
+
+    case '\"':
+      return "'\"'";
     }
 
-  abort ();//FIXME
+  if (isprint (type))
+    {
+      buf[0] = buf[2] = '\'';
+      buf[1] = type;
+      buf[3] = 0;
+    }
+  else if (iscntrl (type))
+    {
+      buf[0] = '^';
+      buf[1] = type ^ 0100;
+      buf[2] = 0;
+    }
+  else
+    {
+      buf[5] = 0;
+      buf[4] = (type & 7) + '0';
+      type >>= 3;
+      buf[3] = (type & 7) + '0';
+      type >>= 3;
+      buf[2] = (type & 7) + '0';
+      buf[1] = '0';
+      buf[0] = '\\';
+    }
+  return buf;
 }
 
+static size_t
+token_mask_str (TOKENMASK mask, char *buf, size_t size)
+{
+  unsigned i = 0;
+  char *q = buf, *end = buf + size - 1;
+
+  for (i = T__BASE; i < T__END; i++)
+    {
+      if (mask & T_BIT (i))
+	{
+	  char const *s;
+
+	  mask &= ~T_BIT (i);
+	  if (q > buf)
+	    {
+	      if (mask)
+		{
+		  if (end - q <= 2)
+		    break;
+		  *q++ = ',';
+		  *q++ = ' ';
+		}
+	      else
+		{
+		  if (end - q <= 4)
+		    break;
+		  strcpy (q, " or ");
+		  q += 4;
+		}
+	    }
+	  s = token_type_str (i);
+	  while (*s && q < end)
+	    {
+	      *q++ = *s++;
+	    }
+	}
+    }
+  *q = 0;
+  return q - buf;
+}
+
+/*
+ * Buffer size for token buffer used as input to token_mask_str.  This takes
+ * into account only T_.* types above, as returned by token_type_str.
+ *
+ * Be sure to update this constant if you change anything above.
+ */
+#define MAX_TOKEN_BUF_SIZE 45
+
+
 struct kwtab
 {
   char const *name;
@@ -574,7 +663,7 @@ input_gettkn (struct input *input, struct token **tok)
 		  if (!(c == EOF || c == '"' || c == '\\'))
 		    {
 		      conf_error_at_locus_point (&input->locus,
-						 "unrecognized escape character: did you forget \\?");
+						 "unrecognized escape character");
 		    }
 		}
 	      if (c == EOF)
@@ -728,24 +817,8 @@ gettkn (struct token **tok)
   return t;
 }
 
-static int
-token_type_eq (int a, int b)
-{
-  if (b == T_ANY || b == T_SEQ)
-    {
-      int t = b;
-      b = a;
-      a = t;
-    }
-  if (a == T_ANY)
-    return 1;
-  if (a == T_SEQ)
-    return b == T_IDENT || b == T_NUMBER || b == T_LITERAL;
-  return a == b;
-}
-
 static struct token *
-must_gettkn (int expect)
+gettkn_expect_mask (int expect)
 {
   struct token *tok;
   int type = gettkn (&tok);
@@ -760,12 +833,28 @@ must_gettkn (int expect)
       /* error message already issued */
       tok = NULL;
     }
-  else if (!token_type_eq (expect, type))
+  else if (expect == 0)
+    /* any token is accepted */;
+  else if (!T_MASK_ISSET (expect, type))
     {
-      conf_error ("expected %s, but found %s", token_type_str (expect), token_type_str (tok->type));
+      char buf[MAX_TOKEN_BUF_SIZE];
+      token_mask_str (expect, buf, sizeof (buf));
+      conf_error ("expected %s, but found %s", buf, token_type_str (tok->type));
       tok = NULL;
     }
   return tok;
+}
+
+static struct token *
+gettkn_any (void)
+{
+  return gettkn_expect_mask (T_ANY);
+}
+
+static struct token *
+gettkn_expect (int type)
+{
+  return gettkn_expect_mask (T_BIT (type));
 }
 
 static void
@@ -790,8 +879,6 @@ typedef struct parser_table
   PARSER parser;
   void *data;
   size_t off;
-  int mandatory;
-  int precedence;
 } PARSER_TABLE;
 
 static PARSER_TABLE *
@@ -899,7 +986,7 @@ static POUND_DEFAULTS pound_defaults;
 static int
 parse_include (void *call_data, void *section_data)
 {
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
   if (push_input (tok->str))
@@ -924,7 +1011,7 @@ static int
 assign_string (void *call_data, void *section_data)
 {
   char *s;
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
   s = xstrdup (tok->str);
@@ -938,7 +1025,7 @@ assign_string_from_file (void *call_data, void *section_data)
   struct stat st;
   char *s;
   FILE *fp;
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
   if (stat (tok->str, &st))
@@ -968,7 +1055,7 @@ static int
 assign_bool (void *call_data, void *section_data)
 {
   char *s;
-  struct token *tok = must_gettkn (T_SEQ);
+  struct token *tok = gettkn_expect_mask (T_UNQ);
 
   if (!tok)
     return PARSER_FAIL;
@@ -999,7 +1086,7 @@ assign_unsigned (void *call_data, void *section_data)
 {
   unsigned long n;
   char *p;
-  struct token *tok = must_gettkn (T_NUMBER);
+  struct token *tok = gettkn_expect (T_NUMBER);
 
   if (!tok)
     return PARSER_FAIL;
@@ -1020,7 +1107,7 @@ assign_int (void *call_data, void *section_data)
 {
   long n;
   char *p;
-  struct token *tok = must_gettkn (T_NUMBER);
+  struct token *tok = gettkn_expect (T_NUMBER);
 
   if (!tok)
     return PARSER_FAIL;
@@ -1041,7 +1128,7 @@ assign_LONG (void *call_data, void *section_data)
 {
   LONG n;
   char *p;
-  struct token *tok = must_gettkn (T_NUMBER);
+  struct token *tok = gettkn_expect (T_NUMBER);
 
   if (!tok)
     return PARSER_FAIL;
@@ -1090,7 +1177,7 @@ static struct kwtab facility_table[] = {
 static int
 assign_log_facility (void *call_data, void *section_data)
 {
-  struct token *tok = must_gettkn (T_SEQ);
+  struct token *tok = gettkn_expect_mask (T_UNQ);
   int n;
 
   if (strcmp (tok->str, "-") == 0)
@@ -1141,7 +1228,7 @@ assign_address_internal (struct addrinfo *addr, struct token *tok)
   if (!tok)
     return PARSER_FAIL;
 
-  if (tok->type != T_LITERAL)
+  if (tok->type != T_LITERAL && tok->type != T_STRING)
     {
       conf_error_at_locus_range (&tok->locus,
 				 "expected hostname or IP address, but found %s",
@@ -1186,7 +1273,7 @@ assign_address (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  return assign_address_internal (call_data, must_gettkn (T_SEQ));
+  return assign_address_internal (call_data, gettkn_any ());
 }
 
 static int
@@ -1198,7 +1285,7 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
   if (!tok)
     return PARSER_FAIL;
 
-  if (!token_type_eq (T_SEQ, tok->type))
+  if (tok->type != T_IDENT && tok->type != T_NUMBER)
     {
       conf_error_at_locus_range (&tok->locus,
 				 "expected port number or service name, but found %s",
@@ -1261,13 +1348,13 @@ assign_port (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  return assign_port_internal (call_data, must_gettkn (T_SEQ));
+  return assign_port_internal (call_data, gettkn_any ());
 }
 
 static int
 parse_ECDHCurve (void *call_data, void *section_data)
 {
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
 #if OPENSSL_VERSION_MAJOR < 3 && !defined OPENSSL_NO_ECDH
@@ -1285,7 +1372,7 @@ parse_ECDHCurve (void *call_data, void *section_data)
 static int
 parse_SSLEngine (void *call_data, void *section_data)
 {
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
 #if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
@@ -1392,7 +1479,7 @@ assign_token_list (void *call_data, void *section_data)
 {
   TOKEN_LIST *tl = call_data;
   struct token_ent *ent;
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
 
   if (!tok)
     return PARSER_FAIL;
@@ -1423,13 +1510,13 @@ backend_parse_haport (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = must_gettkn (T_SEQ)) == NULL)
+  if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
 
   saved_tok = *tok;
   saved_tok.str = strdup (tok->str);
 
-  if ((tok = must_gettkn (T_ANY)) == NULL)
+  if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
 
   if (tok->type == '\n')
@@ -1498,7 +1585,7 @@ backend_parse_cert (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   if (SSL_CTX_use_certificate_chain_file (be->ctx, tok->str) != 1)
@@ -1534,7 +1621,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   SSL_CTX_set_cipher_list (be->ctx, tok->str);
@@ -1565,7 +1652,7 @@ set_proto_opt (int *opt)
     { NULL }
   };
 
-  if ((tok = must_gettkn (T_IDENT)) == NULL)
+  if ((tok = gettkn_expect (T_IDENT)) == NULL)
     return PARSER_FAIL;
 
   if (kw_to_tok (kwtab, tok->str, 0, &n))
@@ -1607,14 +1694,11 @@ static PARSER_TABLE backend_parsetab[] = {
   },
   {
     .name = "Address",
-    .mandatory = 1,
-    .precedence = 1,
     .parser = assign_address,
     .off = offsetof (BACKEND, addr)
   },
   {
     .name = "Port",
-    .precedence = 2,
     .parser = assign_port,
     .off = offsetof (BACKEND, addr)
   },
@@ -1625,17 +1709,17 @@ static PARSER_TABLE backend_parsetab[] = {
   },
   {
     .name = "TimeOut",
-    .parser = assign_unsigned,
+    .parser = assign_timeout,
     .off = offsetof (BACKEND, to)
   },
   {
     .name = "WSTimeOut",
-    .parser = assign_unsigned,
+    .parser = assign_timeout,
     .off = offsetof (BACKEND, ws_to)
   },
   {
     .name = "ConnTO",
-    .parser = assign_unsigned,
+    .parser = assign_timeout,
     .off = offsetof (BACKEND, conn_to)
   },
   {
@@ -1666,9 +1750,9 @@ static PARSER_TABLE emergency_parsetab[] = {
   { "End", parse_end },
   { "Address", assign_address, NULL, offsetof (BACKEND, addr) },
   { "Port", assign_port, NULL, offsetof (BACKEND, addr) },
-  { "TimeOut", assign_unsigned, NULL, offsetof (BACKEND, to) },
-  { "WSTimeOut", assign_unsigned, NULL, offsetof (BACKEND, ws_to) },
-  { "ConnTO", assign_unsigned, NULL, offsetof (BACKEND, conn_to) },
+  { "TimeOut", assign_timeout, NULL, offsetof (BACKEND, to) },
+  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, ws_to) },
+  { "ConnTO", assign_timeout, NULL, offsetof (BACKEND, conn_to) },
   { "HTTPS", backend_parse_https },
   { "Cert", backend_parse_cert },
   { "Ciphers", backend_assign_ciphers },
@@ -1771,7 +1855,7 @@ service_matcher (void *call_data, void *section_data)
   MATCHER **tail = call_data;
   int rc;
 
-  struct token *tok = must_gettkn (T_STRING);
+  struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
 
@@ -1796,7 +1880,7 @@ assign_redirect (void *call_data, void *section_data)
   BACKEND *be;
   regmatch_t matches[5];
 
-  if ((tok = must_gettkn (T_ANY)) == NULL)
+  if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
 
   if (tok->type == T_NUMBER)
@@ -1810,7 +1894,7 @@ assign_redirect (void *call_data, void *section_data)
 	  return PARSER_FAIL;
 	}
 
-      if ((tok = must_gettkn (T_ANY)) == NULL)
+      if ((tok = gettkn_any ()) == NULL)
 	return PARSER_FAIL;
     }
 
@@ -1866,7 +1950,7 @@ session_type_parser (void *call_data, void *section_data)
     { NULL }
   };
 
-  if ((tok = must_gettkn (T_IDENT)) == NULL)
+  if ((tok = gettkn_expect (T_IDENT)) == NULL)
     return PARSER_FAIL;
 
   if (kw_to_tok (kwtab, tok->str, 0, &n))
@@ -1882,7 +1966,7 @@ session_type_parser (void *call_data, void *section_data)
 static PARSER_TABLE session_parsetab[] = {
   { "End", parse_end },
   { "Type", session_type_parser },
-  { "TTL", assign_unsigned, NULL, offsetof (struct service_session, ttl) },
+  { "TTL", assign_timeout, NULL, offsetof (struct service_session, ttl) },
   { "ID", assign_string, NULL, offsetof (struct service_session, id) },
   { NULL }
 };
@@ -2014,7 +2098,7 @@ parse_service (void *call_data, void *section_data)
 
   memset (&ext, 0, sizeof (ext));
 
-  tok = must_gettkn (T_ANY);
+  tok = gettkn_any ();
 
   if (!tok)
     return PARSER_FAIL;
@@ -2133,7 +2217,7 @@ listener_parse_checkurl (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   rc = regcomp (&lst->url_pat, tok->str,
@@ -2156,7 +2240,7 @@ parse_headremove (void *call_data, void *section_data)
   struct token *tok;
   int rc;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   XZALLOC (m);
@@ -2205,7 +2289,7 @@ append_string_line (void *call_data, void *section_data)
   size_t len = s ? strlen (s) : 0;
   struct token *tok;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   s = xrealloc (s, len + strlen (tok->str) + 3);
@@ -2226,7 +2310,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
   { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
-  { "Client", assign_unsigned, NULL, offsetof (LISTENER, to) },
+  { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
@@ -2385,7 +2469,7 @@ https_parse_cert (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   XZALLOC (pc);
@@ -2597,7 +2681,7 @@ https_parse_ciphers (void *call_data, void *section_data)
     }
   lst->has_other = 1;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   for (pc = lst->ctx; pc; pc = pc->next)
@@ -2666,7 +2750,7 @@ https_parse_calist (void *call_data, void *section_data)
     }
   lst->has_other = 1;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   if ((cert_names = SSL_load_client_CA_file (tok->str)) == NULL)
@@ -2695,7 +2779,7 @@ https_parse_verifylist (void *call_data, void *section_data)
     }
   lst->has_other = 1;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   for (pc = lst->ctx; pc; pc = pc->next)
@@ -2724,7 +2808,7 @@ https_parse_crlist (void *call_data, void *section_data)
     }
   lst->has_other = 1;
 
-  if ((tok = must_gettkn (T_STRING)) == NULL)
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   for (pc = lst->ctx; pc; pc = pc->next)
@@ -2760,7 +2844,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
   { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
-  { "Client", assign_unsigned, NULL, offsetof (LISTENER, to) },
+  { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
@@ -2901,6 +2985,8 @@ parse_config_file (char const *file)
       res = parser_loop (top_level_parsetab, &pound_defaults, NULL);
       if (res == 0)
 	{
+	  if (cur_input)
+	    exit (1);
 	  log_facility = pound_defaults.facility;
 	}
     }

@@ -14,6 +14,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with this pound.  If not, see <http://www.gnu.org/licenses/>.
+SUBDIRS = . tests
+
 AM_CFLAGS=\
  -DF_CONF=\"@sysconfdir@/pound.cfg\"\
  @PTHREAD_CFLAGS@
@@ -57,12 +59,11 @@ dh.h: $(DHSRC)
 	cat $(DHSRC) > dh.h
 
 BUILT_SOURCES=dh.h $(DHSRC)
-DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h 
+DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h
 endif
 
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c
-
 
 dist_man_MANS=pound.8 poundctl.8
 

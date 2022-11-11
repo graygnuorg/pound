@@ -28,7 +28,7 @@ dnl AC_PROG_RANLIB
 AC_MSG_NOTICE([*** Checking for threads library and/or flags ***])
 
 AX_PTHREAD([CC="$PTHREAD_CC"],
-           [AC_MSG_ERROR([No suitable pthread library found])])
+	   [AC_MSG_ERROR([No suitable pthread library found])])
 
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
@@ -70,7 +70,7 @@ AC_ARG_WITH([dh],
   esac],
  [DH_LEN=2048])
 
-AC_SUBST(DH_LEN) 
+AC_SUBST(DH_LEN)
 AC_DEFINE_UNQUOTED([DH_LEN],[$DH_LEN],
  [DH key length])
 
@@ -81,7 +81,7 @@ AC_ARG_WITH([maxbuf],
 
 AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
  [Max. buffer size])
- 
+
 AC_SUBST(I_OWNER)
 AC_ARG_WITH([owner],
  AS_HELP_STRING([--with-owner=name],[The account that will own the files installed by Pound]),
@@ -94,7 +94,7 @@ AC_ARG_WITH([group],
  [I_GRP="${with_group}"; C_GROUP="${with_group}"],
  [C_GROUP=""])
 
-AC_ARG_ENABLE([super], 
+AC_ARG_ENABLE([super],
  AS_HELP_STRING([--enable-super],[enable or disable running with supervisor process (default: enabled)]),
  [if test ${enableval} = "yes"; then
     SUPERVISOR=1
@@ -105,7 +105,7 @@ AC_ARG_ENABLE([super],
 
 AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
  [Run supervisor process])
- 
+
 AC_ARG_ENABLE([pcreposix],
  AS_HELP_STRING([--enable-pcreposix],[enable or disable using the pcreposix library (default: enabled if available)]),
  [C_PCREPOSIX=${enableval}],
@@ -127,10 +127,10 @@ AC_CHECK_LIB([dl],[dlopen])
 AC_CHECK_LIB([socket],[socket],[LIBS="-lsocket -lnsl ${LIBS}"])
 AC_CHECK_LIB([resolv],[hstrerror],[LIBS="-lresolv ${LIBS}"])
 AC_CHECK_LIB([crypto],[BIO_new],
-             [LIBS="-lcrypto ${LIBS}"],
+	     [LIBS="-lcrypto ${LIBS}"],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lcrypto) - aborted],[1])])
 AC_CHECK_LIB([ssl],[SSL_CTX_new],
-             [LIBS="-lssl ${LIBS}"],
+	     [LIBS="-lssl ${LIBS}"],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lssl) - aborted])])
 if test x"$C_PCREPOSIX" = xyes; then
   AC_CHECK_LIB([pcreposix],[regcomp],[],
@@ -138,7 +138,7 @@ if test x"$C_PCREPOSIX" = xyes; then
      LIBS="-lpcre $LIBS"
      AC_CHECK_LIB([pcreposix],[regexec],
        [LIBS="-lpcreposix -lpcre $save_LIBS"
-        AC_DEFINE([HAVE_LIBPCREPOSIX],[1],[])],
+	AC_DEFINE([HAVE_LIBPCREPOSIX],[1],[])],
        [LIBS="$save_LIBS"])])
 fi
 
@@ -148,7 +148,7 @@ if test x"$C_TCMALLOC" = xyes; then
 elif test x"$C_HOARD" = xyes; then
   AC_CHECK_LIB([hoard],[malloc],
     [LIBS="${LIBS} -lhoard"])
-fi    
+fi
 
 AC_MSG_CHECKING([for pthread_attr_setstacksize in LIBS=$LIBS with CFLAGS=$CFLAGS"])
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[char pthread_attr_setstacksize ();]], [[return pthread_attr_setstacksize ();]])],[CFLAGS="${CFLAGS} -DNEED_STACK"],[]);
@@ -164,15 +164,15 @@ save_CFLAGS="$CFLAGS"
 CFLAGS="$CFLAGS -DSYSLOG_NAMES=1"
 AC_MSG_CHECKING([for facilitynames presence])
 AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdio.h>
-             #include <syslog.h>
-            ]], [[void *attr=(void *)facilitynames;]])],[ok=yes],[ok=no])
+	     #include <syslog.h>
+	    ]], [[void *attr=(void *)facilitynames;]])],[ok=yes],[ok=no])
 if test x"$ok" = xyes; then
   AC_MSG_RESULT([yes])
   AC_DEFINE([HAVE_FACILITYNAMES],1,
     [The facilitynames array is defined in sys/syslog.h])
 else
   AC_MSG_RESULT([missing])
-fi  
+fi
 CFLAGS=$save_CFLAGS
 
 AC_C_CONST
@@ -231,6 +231,9 @@ then
     egrep -s '^proxy' /etc/group > /dev/null && I_GRP=proxy
 fi
 
+AC_CONFIG_TESTDIR(tests)
+AC_CONFIG_FILES([tests/Makefile tests/atlocal])
+AM_MISSING_PROG([AUTOM4TE], [autom4te])
+
 AC_CONFIG_FILES([Makefile])
 AC_OUTPUT
-
