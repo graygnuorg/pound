@@ -639,6 +639,7 @@ struct stringbuf
 
 void stringbuf_init (struct stringbuf *sb);
 void stringbuf_reset (struct stringbuf *sb);
+char *stringbuf_finish (struct stringbuf *sb);
 void stringbuf_free (struct stringbuf *sb);
 void stringbuf_add_char (struct stringbuf *sb, int c);
 void stringbuf_add_string (struct stringbuf *sb, char const *str);

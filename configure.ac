@@ -13,7 +13,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this pound.  If not, see <http://www.gnu.org/licenses/>.
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.69])
 AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_SRCDIR([pound.c])

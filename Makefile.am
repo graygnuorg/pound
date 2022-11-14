@@ -13,7 +13,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License
-# along with this pound.  If not, see <http://www.gnu.org/licenses/>.
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
 SUBDIRS = . tests
 
 AM_CFLAGS=\

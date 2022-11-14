@@ -13,8 +13,8 @@
 .\" GNU General Public License for more details.
 .\"
 .\" You should have received a copy of the GNU General Public License
-.\" along with this pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 9, 2022" "pound" "System Manager's Manual"
+.\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
+.TH POUND 8 "November 14, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -140,7 +140,7 @@ will reply with "503 Service Unavailable", without checking additional
 .IP
 Normally, the connection between
 .B pound
-and 
+and
 .I back-ends
 is via plain HTTP.  It is, however, possible to use HTTPS as well.
 .SH OPTIONS
@@ -282,18 +282,18 @@ to find the optimal value for your installation.
 Specify the log facility to use.  The
 .I ident
 is one of the following:
-.BR auth , 
-.BR authpriv , 
-.BR cron , 
+.BR auth ,
+.BR authpriv ,
+.BR cron ,
 .BR daemon ,
-.BR ftp , 
+.BR ftp ,
 .BR kern ,
-.BR lpr , 
-.BR mail , 
-.BR news , 
+.BR lpr ,
+.BR mail ,
+.BR news ,
 .BR syslog ,
-.BR user , 
-.BR uucp , 
+.BR user ,
+.BR uucp ,
 .B local0
 through
 .BR local7 .
@@ -386,7 +386,7 @@ program.
 \fBInclude\fR "/path/to/file"
 Include the file as though it were part of the configuration file.
 .TP
-\fBAnonymise\fR 
+\fBAnonymise\fR
 (alternative spelling \fBAnonymize\fR also accepted) Replace the last
 byte of the client address with 0 for logging purposes.
 Default: log the client address in full.
@@ -406,18 +406,29 @@ available:
 The address that
 .B pound
 will listen on. This can be a numeric IP address, or a symbolic host name
-that must be resolvable at run-time.  This is a
-.B mandatory
-parameter. The address 0.0.0.0 may be used as an alias for 'all available
-addresses on this machine', but this practice is strongly discouraged, as
-it will interfere with the rewriting mechanisms (see below).
+that must be resolvable at run-time, or a full pathname of a UNIX
+socket.  Either this parameter or
+.B SocketFrom
+(see below) must be present. The address 0.0.0.0 may be used as an
+alias for 'all available addresses on this machine', but this practice
+is strongly discouraged, as it will interfere with the rewriting
+mechanisms (see below).
 .TP
 \fBPort\fR \fIport\fR
 The port number or service name that
 .B pound
-will listen on.  This is a
-.B mandatory
-parameter.
+will listen on.  This parameter must be present if the
+.B Address
+parameter contains an IPv4 or IPv6 address.
+.TP
+.B SocketFrom "/path/to/socket"
+Read the socket to listen on from the UNIX socket given as argument.
+If this parameter is supplied, neither
+.B Address
+nor
+.B Port
+may be used.  This parameter is intended for testing
+.BR pound .
 .TP
 \fBxHTTP\fR \fIn\fR
 Defines which HTTP verbs are accepted. The possible values are:
@@ -769,9 +780,9 @@ are specific to a single service. The following directives are available:
 \fBAddress\fR \fIaddress\fR
 The address that
 .B pound
-will connect to. This can be a numeric IP address, or a symbolic host name
-that must be resolvable at run-time. If the name cannot be resolved to a valid
-address,
+will connect to. This can be a numeric IP address, a symbolic host name
+that must be resolvable at run-time, or a full pathname of a UNIX
+socket. If the name cannot be resolved to a valid address,
 .B pound
 will assume that it represents the path for a Unix-domain socket. This is a
 .B mandatory

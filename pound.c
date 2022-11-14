@@ -367,12 +367,26 @@ main (const int argc, char **argv)
   for (lstn = listeners, n_listeners = 0; lstn;
        lstn = lstn->next, n_listeners++)
     {
-      int opt;
-
       /* prepare the socket */
-      if ((lstn->sock =
-	   socket (lstn->addr.ai_family == AF_INET ? PF_INET : PF_INET6,
-		   SOCK_STREAM, 0)) < 0)
+      int opt;
+      int domain;
+
+      switch (lstn->addr.ai_family)
+	{
+	case AF_INET:
+	  domain = PF_INET;
+	  break;
+	case AF_INET6:
+	  domain = PF_INET6;
+	  break;
+	case AF_UNIX:
+	  domain = PF_UNIX;
+	  unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
+	  break;
+	default:
+	  abort ();
+	}
+      if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
 	{
 	  addr2str (tmp, MAXBUF - 1, &lstn->addr, 0);
 	  logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted", tmp,
@@ -382,9 +396,8 @@ main (const int argc, char **argv)
       opt = 1;
       setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, (void *) &opt,
 		  sizeof (opt));
-      if (bind
-	  (lstn->sock, lstn->addr.ai_addr,
-	   (socklen_t) lstn->addr.ai_addrlen) < 0)
+      if (bind (lstn->sock, lstn->addr.ai_addr,
+		(socklen_t) lstn->addr.ai_addrlen) < 0)
 	{
 	  addr2str (tmp, MAXBUF - 1, &lstn->addr, 0);
 	  logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted", tmp,
@@ -617,8 +630,7 @@ main (const int argc, char **argv)
 			  logmsg (LOG_WARNING, "HTTP accept: %s",
 				  strerror (errno));
 			}
-		      else if (((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET
-			       || ((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET6)
+		      else
 			{
 			  thr_arg arg;
 
@@ -630,8 +642,10 @@ main (const int argc, char **argv)
 			      */
 			      close (clnt);
 			    }
+
 			  arg.sock = clnt;
 			  arg.lstn = lstn;
+
 			  if ((arg.from_host.ai_addr = (struct sockaddr *) malloc (clnt_length)) == NULL)
 			    {
 			      logmsg (LOG_WARNING, "HTTP arg address: malloc");
@@ -639,20 +653,10 @@ main (const int argc, char **argv)
 			      continue;
 			    }
 			  memcpy (arg.from_host.ai_addr, &clnt_addr, clnt_length);
+			  arg.from_host.ai_family = clnt_addr.ss_family;
 			  arg.from_host.ai_addrlen = clnt_length;
-			  if (((struct sockaddr_in *) &clnt_addr)->sin_family == AF_INET)
-			    arg.from_host.ai_family = AF_INET;
-			  else
-			    arg.from_host.ai_family = AF_INET6;
 			  if (put_thr_arg (&arg))
 			    close (clnt);
-			}
-		      else
-			{
-			  /* may happen on FreeBSD, I am told */
-			  logmsg (LOG_WARNING,
-				  "HTTP connection prematurely closed by peer");
-			  close (clnt);
 			}
 		    }
 		}

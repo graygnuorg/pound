@@ -342,6 +342,13 @@ stringbuf_add_char (struct stringbuf *sb, int c)
   sb->base[sb->len++] = c;
 }
 
+char *
+stringbuf_finish (struct stringbuf *sb)
+{
+  stringbuf_add_char (sb, 0);
+  return sb->base;
+}
+
 void
 stringbuf_add_string (struct stringbuf *sb, char const *str)
 {
@@ -2258,6 +2265,117 @@ parse_headremove (void *call_data, void *section_data)
 }
 
 static int
+read_fd (int fd)
+{
+  struct msghdr msg;
+  struct iovec iov[1];
+  char base[1];
+  union
+  {
+    struct cmsghdr cm;
+    char control[CMSG_SPACE (sizeof (int))];
+  } control_un;
+  struct cmsghdr *cmptr;
+
+  msg.msg_control = control_un.control;
+  msg.msg_controllen = sizeof (control_un.control);
+
+  msg.msg_name = NULL;
+  msg.msg_namelen = 0;
+
+  iov[0].iov_base = base;
+  iov[0].iov_len = sizeof (base);
+
+  msg.msg_iov = iov;
+  msg.msg_iovlen = 1;
+  if (recvmsg (fd, &msg, 0) > 0)
+    {
+      if ((cmptr = CMSG_FIRSTHDR (&msg)) != NULL
+	  && cmptr->cmsg_len == CMSG_LEN (sizeof (int))
+	  && cmptr->cmsg_level == SOL_SOCKET
+	  && cmptr->cmsg_type == SCM_RIGHTS)
+	return *((int*) CMSG_DATA (cmptr));
+    }
+  return -1;
+}
+
+static int
+listener_parse_socket_from (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct sockaddr_storage ss;
+  socklen_t sslen = sizeof (ss);
+  struct token *tok;
+  struct addrinfo addr;
+  int sfd, fd;
+
+  if (ADDRINFO_HAS_ADDRESS (&lst->addr))
+    {
+      conf_error ("%s", "Duplicate Address or SocketFrom statement");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  memset (&addr, 0, sizeof (addr));
+  if (assign_address_internal (&addr, tok) != PARSER_OK)
+    return PARSER_FAIL;
+
+  if ((sfd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
+    {
+      conf_error ("socket: %s", strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  if (connect (sfd, addr.ai_addr, addr.ai_addrlen) < 0)
+    {
+      conf_error ("connect %s: %s",
+		  ((struct sockaddr_un*)addr.ai_addr)->sun_path,
+		  strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  fd = read_fd (sfd);
+
+  if (fd == -1)
+    {
+      conf_error ("can't get socket: %s", strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  if (getsockname (fd, (struct sockaddr*) &ss, &sslen) == -1)
+    {
+      conf_error ("can't get socket address: %s", strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  free (lst->addr.ai_addr);
+  lst->addr.ai_addr = xmalloc (sslen);
+  memcpy (lst->addr.ai_addr, &ss, sslen);
+  lst->addr.ai_addrlen = sslen;
+  lst->addr.ai_family = ss.ss_family;
+  ADDRINFO_SET_ADDRESS (&lst->addr);
+  ADDRINFO_SET_PORT (&lst->addr);
+
+  {
+    struct stringbuf sb;
+    char tmp[MAXBUF];
+    addr2str (tmp, sizeof (tmp), &lst->addr, 0);
+
+    stringbuf_init (&sb);
+    stringbuf_format_locus_range (&sb, &tok->locus);
+    stringbuf_add_string (&sb, ": obtained address ");
+    stringbuf_add_string (&sb, tmp);
+    logmsg (LOG_DEBUG, "%s", stringbuf_finish (&sb));
+    stringbuf_free (&sb);
+  }
+
+  lst->sock = fd;
+
+  return PARSER_OK;
+}
+
+static int
 assign_int_range (int *dst, int min, int max)
 {
   int n;
@@ -2309,6 +2427,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "End", parse_end },
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
   { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
+  { "SocketFrom", listener_parse_socket_from },
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
@@ -2333,6 +2452,7 @@ parse_listen_http (void *call_data, void *section_data)
   struct locus_range range;
 
   XZALLOC (lst);
+  lst->sock = -1;
   lst->to = pound_defaults.clnt_to;
   lst->rewr_loc = 1;
   lst->err414 = "Request URI is too long";
@@ -2843,6 +2963,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "End", parse_end },
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
   { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
+  { "SocketFrom", listener_parse_socket_from },
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
@@ -2880,6 +3001,7 @@ parse_listen_https (void *call_data, void *section_data)
 
   XZALLOC (lst);
 
+  lst->sock = -1;
   lst->to = pound_defaults.clnt_to;
   lst->rewr_loc = 1;
   lst->err414 = "Request URI is too long";

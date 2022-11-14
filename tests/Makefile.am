@@ -13,8 +13,8 @@
 ## GNU General Public License for more details.
 ##
 ## You should have received a copy of the GNU General Public License
-## along with this pound.  If not, see <http://www.gnu.org/licenses/>.
-EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4
+## along with pound.  If not, see <http://www.gnu.org/licenses/>.
+EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4 poundharness.pl
 DISTCLEANFILES       = atconfig $(check_SCRIPTS)
 MAINTAINERCLEANFILES = Makefile.in $(TESTSUITE)
 
@@ -61,6 +61,8 @@ check-local: atconfig atlocal $(TESTSUITE)
 
 TESTSUITE_AT = \
  testsuite.at \
- config.at
+ config.at\
+ echo.at\
+ xhttp.at
 
 noinst_PROGRAMS = 
