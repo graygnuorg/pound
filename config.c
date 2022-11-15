@@ -3072,6 +3072,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "Group", assign_string, &group },
   { "RootJail", assign_string, &root_jail },
   { "Daemon", assign_bool, &daemonize },
+  { "Supervisor", assign_bool, &enable_supervisor },
   { "Threads", assign_unsigned, &numthreads },
   { "Grace", assign_timeout, &grace },
   { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },

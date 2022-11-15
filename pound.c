@@ -35,6 +35,7 @@ char *ctrl_name;		/* control socket name */
 
 int anonymise;			/* anonymise client address */
 int daemonize = 1;		/* run as daemon */
+int enable_supervisor = SUPERVISOR; /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
 int print_log;			/* print log messages to stdout/stderr */
 int control_sock = -1;		/* control socket */
@@ -44,6 +45,7 @@ unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */
 
 SERVICE *services;		/* global services (if any) */
 LISTENER *listeners;		/* all available listeners */
+int n_listeners;                /* Number of listeners */
 
 regex_t HEADER,			/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
@@ -59,9 +61,6 @@ static int shut_down = 0;
 /* for systems without the definition */
 int SOL_TCP;
 #endif
-
-/* worker pid */
-static pid_t son = 0;
 
 /*
  * OpenSSL thread support stuff
@@ -120,17 +119,12 @@ l_id (void)
  * work queue stuff
  */
 static thr_arg *first = NULL, *last = NULL;
-static pthread_cond_t arg_cond;
-static pthread_mutex_t arg_mut;
-unsigned numthreads = DEFAULT_NUMTHREADS;
-
-static void
-init_thr_arg (void)
-{
-  pthread_cond_init (&arg_cond, NULL);
-  pthread_mutex_init (&arg_mut, NULL);
-  return;
-}
+static pthread_cond_t arg_cond = PTHREAD_COND_INITIALIZER;
+static pthread_cond_t active_cond = PTHREAD_COND_INITIALIZER;
+static pthread_mutex_t arg_mut = PTHREAD_MUTEX_INITIALIZER;
+unsigned numthreads = DEFAULT_NUMTHREADS; /* Max. number of threads */
+unsigned active_threads; /* Number of threads currently active, i.e processing
+			    some requests. */
 
 /*
  * add a request to the queue
@@ -169,7 +163,7 @@ get_thr_arg (void)
   thr_arg *res;
 
   pthread_mutex_lock (&arg_mut);
-  
+
   /*
    * Wait until something becomes available in the queue.  Spurious wakeups
    * from pthread_cond_wait can occur, hence the need for a loop.
@@ -192,6 +186,7 @@ get_thr_arg (void)
      */
     pthread_cond_signal (&arg_cond);
 
+  active_threads++;
   pthread_mutex_unlock (&arg_mut);
   return res;
 }
@@ -212,76 +207,391 @@ get_thr_qlen (void)
   return res;
 }
 
-/*
- * handle SIGTERM/SIGQUIT - exit
- */
-static void
-h_term (const int sig)
+void
+active_threads_decr (void)
 {
-  logmsg (LOG_NOTICE, "received signal %d - exiting...", sig);
-  if (son > 0)
-    kill (son, sig);
-  if (ctrl_name != NULL)
-    (void) unlink (ctrl_name);
-  exit (0);
+  pthread_mutex_lock (&arg_mut);
+  active_threads--;
+  if (active_threads == 0)
+    pthread_cond_broadcast (&active_cond);
+  pthread_mutex_unlock (&arg_mut);
 }
 
-/*
- * handle SIGHUP/SIGINT - exit after grace period
- */
-static void
-h_shut (const int sig)
+void
+active_threads_wait (void)
 {
-  int status;
-  LISTENER *lstn;
+  struct timespec ts;
 
-  logmsg (LOG_NOTICE, "received signal %d - shutting down...", sig);
-  if (son > 0)
+  pthread_mutex_lock (&arg_mut);
+  ts.tv_sec += grace;
+  if (active_threads > 0)
     {
-      for (lstn = listeners; lstn; lstn = lstn->next)
-	close (lstn->sock);
-      kill (son, sig);
-      (void) wait (&status);
-      if (ctrl_name != NULL)
-	(void) unlink (ctrl_name);
-      exit (0);
+      logmsg (LOG_NOTICE, "waiting for %u active threads to terminate",
+	      active_threads);
+      clock_gettime (CLOCK_REALTIME, &ts);
+      while (active_threads > 0 &&
+	     pthread_cond_timedwait (&active_cond, &arg_mut, &ts) == 0)
+	;
+    }
+  pthread_mutex_unlock (&arg_mut);
+}
+
+static void
+listener_cleanup (void *ptr)
+{
+  LISTENER *lstn;
+  for (lstn = listeners; lstn; lstn = lstn->next)
+    close (lstn->sock);
+}
+
+void *
+thr_dispatch (void *unused)
+{
+  int i;
+  LISTENER *lstn;
+  struct pollfd *polls;
+
+  /* alloc the poll structures */
+  if ((polls = calloc (n_listeners, sizeof (struct pollfd))) == NULL)
+    {
+      logmsg (LOG_ERR, "Out of memory for poll - aborted");
+      exit (1);
+    }
+  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
+    polls[i].fd = lstn->sock;
+
+  pthread_cleanup_push (listener_cleanup, NULL);
+  for (;;)
+    {
+      for (lstn = listeners, i = 0; i < n_listeners; lstn = lstn->next, i++)
+	{
+	  polls[i].events = POLLIN | POLLPRI;
+	  polls[i].revents = 0;
+	}
+      if (poll (polls, n_listeners, -1) < 0)
+	{
+	  logmsg (LOG_WARNING, "poll: %s", strerror (errno));
+	}
+      else
+	{
+	  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
+	    {
+	      if (polls[i].revents & (POLLIN | POLLPRI))
+		{
+		  struct sockaddr_storage clnt_addr;
+		  socklen_t clnt_length;
+		  int clnt;
+
+		  memset (&clnt_addr, 0, sizeof (clnt_addr));
+		  clnt_length = sizeof (clnt_addr);
+		  if ((clnt = accept (lstn->sock,
+				      (struct sockaddr *) &clnt_addr,
+				      &clnt_length)) < 0)
+		    {
+		      logmsg (LOG_WARNING, "HTTP accept: %s",
+			      strerror (errno));
+		    }
+		  else
+		    {
+		      thr_arg arg;
+
+		      if (lstn->disabled)
+			{
+			  /*
+			    addr2str(tmp, MAXBUF - 1, &clnt_addr, 1);
+			    logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
+			  */
+			  close (clnt);
+			}
+
+		      arg.sock = clnt;
+		      arg.lstn = lstn;
+
+		      if ((arg.from_host.ai_addr = (struct sockaddr *) malloc (clnt_length)) == NULL)
+			{
+			  logmsg (LOG_WARNING, "HTTP arg address: malloc");
+			  close (clnt);
+			  continue;
+			}
+		      memcpy (arg.from_host.ai_addr, &clnt_addr, clnt_length);
+		      arg.from_host.ai_family = clnt_addr.ss_family;
+		      arg.from_host.ai_addrlen = clnt_length;
+		      if (put_thr_arg (&arg))
+			close (clnt);
+		    }
+		}
+	    }
+	}
+    }
+  pthread_cleanup_pop (1);
+}
+
+static void
+pidfile_create (void)
+{
+  FILE *fp;
+
+  if (!pid_name)
+    return;
+  if ((fp = fopen (pid_name, "wt")) != NULL)
+    {
+      fprintf (fp, "%d\n", getpid ());
+      fclose (fp);
     }
   else
-    shut_down = 1;
+    logmsg (LOG_NOTICE, "Create \"%s\": %s", pid_name, strerror (errno));
 }
 
-/*
- * Pound: the reverse-proxy/load-balancer
- *
- * Arguments:
- *  -f config_file      configuration file - exclusive of other flags
- */
+static void
+pidfile_delete (void)
+{
+  if (pid_name)
+    unlink (pid_name);
+}
+
+struct signal_handler
+{
+  int signo;
+  void (*handler) (int);
+};
+
+static void
+signull (int arg)
+{
+  /* nothing */
+}
+
+static struct signal_handler fatal_signals[] = {
+  { SIGHUP, signull },
+  { SIGINT, signull },
+  { SIGTERM, signull },
+  { SIGQUIT, signull },
+  { SIGPIPE, SIG_IGN },
+  { 0, NULL }
+};
+
+static void
+server (void)
+{
+  int i;
+  pthread_attr_t attr;
+  pthread_t thr;
+  struct sigaction act;
+  sigset_t sigs;
+  void *res;
+
+  sigemptyset(&sigs);
+
+  act.sa_flags = 0;
+  sigemptyset (&act.sa_mask);
+
+  for (i = 0; fatal_signals[i].signo; i++)
+    {
+      sigaddset (&sigs, fatal_signals[i].signo);
+      act.sa_handler = fatal_signals[i].handler;
+      sigaction (fatal_signals[i].signo, &act, NULL);
+    }
+  pthread_sigmask (SIG_BLOCK, &sigs, NULL);
+
+  /* thread stuff */
+  pthread_attr_init (&attr);
+  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+
+#ifdef  NEED_STACK
+  /* set new stack size - necessary for OpenBSD/FreeBSD and Linux NPTL */
+  if (pthread_attr_setstacksize (&attr, 1 << 18))
+    {
+      logmsg (LOG_ERR, "can't set stack size - aborted");
+      exit (1);
+    }
+#endif
+
+  /* start timer */
+  if (pthread_create (&thr, &attr, thr_timer, NULL))
+    {
+      logmsg (LOG_ERR, "create thr_resurect: %s - aborted",
+	      strerror (errno));
+      exit (1);
+    }
+
+  /* start the controlling thread (if needed) */
+  if (control_sock >= 0 && pthread_create (&thr, &attr, thr_control, NULL))
+    {
+      logmsg (LOG_ERR, "create thr_control: %s - aborted", strerror (errno));
+      exit (1);
+    }
+
+  /* FIXME: pause to make sure the service threads were started */
+  sleep (1);
+
+  /* create the worker threads */
+  for (i = 0; i < numthreads; i++)
+    if (pthread_create (&thr, &attr, thr_http, NULL))
+      {
+	logmsg (LOG_ERR, "create thr_http: %s - aborted", strerror (errno));
+	exit (1);
+      }
+
+  pthread_create (&thr, NULL, thr_dispatch, NULL);
+
+  /* Wait for a signal to arrive */
+  sigwait (&sigs, &i);
+
+  logmsg (LOG_NOTICE, "shutting down...");
+
+  /* Stop main dispatcher thread */
+  pthread_cancel (thr);
+  pthread_join (thr, &res);
+
+  switch (i)
+    {
+    case SIGHUP:
+    case SIGINT:
+      active_threads_wait ();
+      break;
+
+    default:
+      /* Exit immediately */
+      break;
+    }
+
+  if (ctrl_name != NULL)
+    unlink (ctrl_name);
+
+  exit (0);
+}
+
+#if SUPERVISOR
+static void
+supervisor (void)
+{
+  pid_t pid = 0;
+  int i;
+  struct sigaction act;
+  sigset_t sigs;
+  pid_t child_pid = 0;
+  int status;
+
+  enum supervisor_state
+  {
+    S_RUNNING,         /* Program is running */
+    S_TERMINATING,     /* Program is terminating */
+  } state = S_RUNNING;
+
+  sigemptyset (&sigs);
+
+  act.sa_flags = 0;
+  sigemptyset (&act.sa_mask);
+
+  for (i = 0; fatal_signals[i].signo; i++)
+    {
+      sigaddset (&sigs, fatal_signals[i].signo);
+      act.sa_handler = fatal_signals[i].handler;
+      sigaction (fatal_signals[i].signo, &act, NULL);
+    }
+
+  act.sa_handler = signull;
+  sigaction (SIGCHLD, &act, NULL);
+  sigaddset (&sigs, SIGCHLD);
+
+  act.sa_handler = signull;
+  sigaction (SIGALRM, &act, NULL);
+  sigaddset (&sigs, SIGALRM);
+
+  for (;;)
+    {
+      if (pid == 0)
+	{
+	  if (state != S_RUNNING)
+	    break;
+	  pid = fork ();
+	  if (pid == -1)
+	    {
+	      logmsg (LOG_ERR, "fork: %s", strerror (errno));
+	      break;
+	    }
+	  if (pid == 0)
+	    {
+	      server ();
+	      exit (0);
+	    }
+	}
+
+      sigwait (&sigs, &i);
+      logmsg (LOG_NOTICE, "got signal %d", i);
+
+      if (i == SIGCHLD)
+	{
+	  if (wait (&status) != pid)
+	    {
+	      logmsg (LOG_ERR, "wait: %s", strerror (errno));
+	    }
+	  else if (WIFEXITED (status))
+	    {
+	      int code = WEXITSTATUS (status);
+	      if (code == 0)
+		return;
+	      else
+		logmsg (LOG_NOTICE, "child exited with status %d", code);
+	    }
+	  else if (WIFSIGNALED (status))
+	    {
+	      char const *coremsg = "";
+#ifdef WCOREDUMP
+	      if (WCOREDUMP (status))
+		coremsg = " (core dumped)";
+#endif
+	      logmsg (LOG_NOTICE, "child terminated on signal %d%s",
+		      WTERMSIG (status), coremsg);
+	    }
+	  else if (WIFSTOPPED (status))
+	    {
+	      logmsg (LOG_NOTICE, "child stopped on signal %d",
+		      WSTOPSIG (status));
+	    }
+	  else
+	    {
+	      logmsg (LOG_NOTICE, "child terminated with unrecognized status %d", status);
+	    }
+	  if (state == S_RUNNING)
+	    {
+	      /* restart the child */
+	      pid = 0;
+	      continue;
+	    }
+	  else
+	    break;
+	}
+      else if (i == SIGALRM)
+	{
+	  kill (pid, SIGKILL);
+	  break;
+	}
+      else if (state == S_RUNNING)
+	{
+	  /* Termination signal received.  Send it to child. */
+	  if (pid)
+	    kill (pid, i);
+	  state = S_TERMINATING;
+	  alarm (grace + 1);
+	}
+    }
+}
+#endif
 
 int
 main (const int argc, char **argv)
 {
-  int n_listeners, i, clnt_length, clnt;
-  struct pollfd *polls;
+  int i;
   LISTENER *lstn;
-  pthread_t thr;
-  pthread_attr_t attr;
   uid_t user_id;
   gid_t group_id;
-  FILE *fpid;
-  struct sockaddr_storage clnt_addr;
   char tmp[MAXBUF];
 #ifndef SOL_TCP
   struct protoent *pe;
 #endif
 
   (void) umask (077);
-
-  signal (SIGHUP, h_shut);
-  signal (SIGINT, h_shut);
-  signal (SIGTERM, h_term);
-  signal (SIGQUIT, h_term);
-  signal (SIGPIPE, SIG_IGN);
-
   srandom (getpid ());
 
   /* SSL stuff */
@@ -289,7 +599,6 @@ main (const int argc, char **argv)
   SSL_library_init ();
   OpenSSL_add_all_algorithms ();
   l_init ();
-  init_thr_arg ();
   CRYPTO_set_id_callback (l_id);
   CRYPTO_set_locking_callback (l_lock);
 
@@ -351,7 +660,7 @@ main (const int argc, char **argv)
   config_parse (argc, argv);
 
   if (log_facility != -1)
-    openlog (progname, LOG_CONS | LOG_NDELAY, LOG_DAEMON);
+    openlog (progname, LOG_CONS | LOG_NDELAY | LOG_PID, LOG_DAEMON);
 
   logmsg (LOG_NOTICE, "starting...");
 
@@ -423,17 +732,6 @@ main (const int argc, char **argv)
       listen (lstn->sock, 512);
     }
 
-  /* alloc the poll structures */
-  if ((polls =
-       (struct pollfd *) calloc (n_listeners,
-				 sizeof (struct pollfd))) == NULL)
-    {
-      logmsg (LOG_ERR, "Out of memory for poll - aborted");
-      exit (1);
-    }
-  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
-    polls[i].fd = lstn->sock;
-
   /* set uid if necessary */
   if (user)
     {
@@ -489,15 +787,6 @@ main (const int argc, char **argv)
       setsid ();
     }
 
-  /* record pid in file */
-  if ((fpid = fopen (pid_name, "wt")) != NULL)
-    {
-      fprintf (fpid, "%d\n", getpid ());
-      fclose (fpid);
-    }
-  else
-    logmsg (LOG_NOTICE, "Create \"%s\": %s", pid_name, strerror (errno));
-
   /* chroot if necessary */
   if (root_jail)
     {
@@ -526,157 +815,16 @@ main (const int argc, char **argv)
 	exit (1);
       }
 
-  /* split off into monitor and working process if necessary */
-  for (;;)
-    {
-      if (SUPERVISOR && daemonize)
-	{
-	  if ((son = fork ()) > 0)
-	    {
-	      int status;
+  pidfile_create ();
 
-	      wait (&status);
-	      if (WIFEXITED (status))
-		logmsg (LOG_ERR,
-			"MONITOR: worker exited normally %d, restarting...",
-			WEXITSTATUS (status));
-	      else if (WIFSIGNALED (status))
-		logmsg (LOG_ERR,
-			"MONITOR: worker exited on signal %d, restarting...",
-			WTERMSIG (status));
-	      else
-		logmsg (LOG_ERR,
-			"MONITOR: worker exited (stopped?) %d, restarting...",
-			status);
-	    }
-	  else if (son == -1)
-	    {
-	      /* failed to spawn son */
-	      logmsg (LOG_ERR, "Can't fork worker (%s) - aborted",
-		      strerror (errno));
-	      exit (1);
-	    }
-	}
-
-      /* thread stuff */
-      pthread_attr_init (&attr);
-      pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-
-#ifdef  NEED_STACK
-      /* set new stack size - necessary for OpenBSD/FreeBSD and Linux NPTL */
-      if (pthread_attr_setstacksize (&attr, 1 << 18))
-	{
-	  logmsg (LOG_ERR, "can't set stack size - aborted");
-	  exit (1);
-	}
+#if SUPERVISOR
+  if (enable_supervisor && daemonize)
+    supervisor ();
+  else
 #endif
-      /* start timer */
-      if (pthread_create (&thr, &attr, thr_timer, NULL))
-	{
-	  logmsg (LOG_ERR, "create thr_resurect: %s - aborted",
-		  strerror (errno));
-	  exit (1);
-	}
+    server ();
 
-      /* start the controlling thread (if needed) */
-      if (control_sock >= 0
-	  && pthread_create (&thr, &attr, thr_control, NULL))
-	{
-	  logmsg (LOG_ERR, "create thr_control: %s - aborted",
-		  strerror (errno));
-	  exit (1);
-	}
+  pidfile_delete ();
 
-      /* pause to make sure the service threads were started */
-      sleep (1);
-
-      /* create the worker threads */
-      for (i = 0; i < numthreads; i++)
-	if (pthread_create (&thr, &attr, thr_http, NULL))
-	  {
-	    logmsg (LOG_ERR, "create thr_http: %s - aborted",
-		    strerror (errno));
-	    exit (1);
-	  }
-
-      /*
-       * pause to make sure at least some of the worker threads were
-       * started
-       */
-      sleep (1);
-
-      /* and start working */
-      for (;;)
-	{
-	  if (shut_down)
-	    {
-	      logmsg (LOG_NOTICE, "shutting down...");
-	      for (lstn = listeners; lstn; lstn = lstn->next)
-		close (lstn->sock);
-	      if (grace > 0)
-		{
-		  sleep (grace);
-		  logmsg (LOG_NOTICE, "grace period expired - exiting...");
-		}
-	      if (ctrl_name != NULL)
-		(void) unlink (ctrl_name);
-	      exit (0);
-	    }
-	  for (lstn = listeners, i = 0; i < n_listeners; lstn = lstn->next, i++)
-	    {
-	      polls[i].events = POLLIN | POLLPRI;
-	      polls[i].revents = 0;
-	    }
-	  if (poll (polls, n_listeners, -1) < 0)
-	    {
-	      logmsg (LOG_WARNING, "poll: %s", strerror (errno));
-	    }
-	  else
-	    {
-	      for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
-		{
-		  if (polls[i].revents & (POLLIN | POLLPRI))
-		    {
-		      memset (&clnt_addr, 0, sizeof (clnt_addr));
-		      clnt_length = sizeof (clnt_addr);
-		      if ((clnt = accept (lstn->sock,
-					  (struct sockaddr *) &clnt_addr,
-					  (socklen_t *) & clnt_length)) < 0)
-			{
-			  logmsg (LOG_WARNING, "HTTP accept: %s",
-				  strerror (errno));
-			}
-		      else
-			{
-			  thr_arg arg;
-
-			  if (lstn->disabled)
-			    {
-			      /*
-				addr2str(tmp, MAXBUF - 1, &clnt_addr, 1);
-				logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
-			      */
-			      close (clnt);
-			    }
-
-			  arg.sock = clnt;
-			  arg.lstn = lstn;
-
-			  if ((arg.from_host.ai_addr = (struct sockaddr *) malloc (clnt_length)) == NULL)
-			    {
-			      logmsg (LOG_WARNING, "HTTP arg address: malloc");
-			      close (clnt);
-			      continue;
-			    }
-			  memcpy (arg.from_host.ai_addr, &clnt_addr, clnt_length);
-			  arg.from_host.ai_family = clnt_addr.ss_family;
-			  arg.from_host.ai_addrlen = clnt_length;
-			  if (put_thr_arg (&arg))
-			    close (clnt);
-			}
-		    }
-		}
-	    }
-	}
-    }
+  return 0;
 }

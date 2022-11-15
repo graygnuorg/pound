@@ -237,6 +237,7 @@ extern unsigned numthreads,	/* number of worker threads */
 extern int anonymise;		/* anonymise client address */
 extern unsigned alive_to;	/* check interval for resurrection */
 extern int daemonize;		/* run as daemon */
+extern int enable_supervisor;   /* run supervisor process */
 extern int log_facility;	/* log facility to use */
 extern int print_log;		/* print log messages to stdout/stderr */
 extern int control_sock;	/* control socket */
@@ -485,6 +486,9 @@ extern thr_arg *get_thr_arg (void);
  * get the current queue length
  */
 extern int get_thr_qlen (void);
+
+/* Decrement number of active threads. */
+void active_threads_decr (void);
 
 /*
  * handle an HTTP request

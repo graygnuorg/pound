@@ -268,6 +268,11 @@ puts itself in the background). By specifying this option you can force
 to work like a regular process. Useful for debugging or if you want to
 use something like \fIdaemontools\fR.
 .TP
+\fBSupervisor\fR \fIbool\fR
+When running in daemon mode, start a \fIsupervisor\fR process first.
+This process will monitor the subordinate \fBpound\fR process, restarting
+it if it fails.
+.TP
 \fBThreads\fR \fInnn\fR
 How many worker threads
 .B pound

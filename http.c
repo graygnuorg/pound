@@ -2394,5 +2394,6 @@ thr_http (void *dummy)
     {
       arg = get_thr_arg ();
       do_http (arg);
+      active_threads_decr ();
     }
 }
