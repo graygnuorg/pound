@@ -1338,14 +1338,13 @@ End
 .br
 .SH FILES
 .TP
-\fI/var/run/pound.nnn\fR
+\fI$localstatedir\fB/run/pound.pid\fR
 this is where
 .B pound
 will attempt to record its process id.
 .TP
-\fI/usr/local/etc/pound.cfg\fR
-the default configuration file (the location may be changed when compiling - see the
-F_CONF flag in the Makefile).
+\fI$sysconfdir\fB/pound.cfg\fR
+the default configuration file.
 .TP
 \fI/usr/local/etc/pound/cert.pem\fR
 the certificate file(s) for HTTPS. The location must be defined in the configuration

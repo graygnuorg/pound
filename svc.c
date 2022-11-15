@@ -294,7 +294,7 @@ logmsg (const int priority, const char *fmt, ...)
   va_end (ap);
 }
 
-/*
+/* FIXME: use getnameinfo
  * Translate inet/inet6 address/port into a string
  */
 void
@@ -306,7 +306,6 @@ addr2str (char *const res, const int res_len, const struct addrinfo *addr,
   void *src;
 
   memset (res, 0, res_len);
-#ifdef  HAVE_INET_NTOP
   switch (addr->ai_family)
     {
     case AF_INET:
@@ -337,9 +336,6 @@ addr2str (char *const res, const int res_len, const struct addrinfo *addr,
     snprintf (res, res_len, "%s", buf);
   else
     snprintf (res, res_len, "%s:%d", buf, port);
-#else
-#error "Pound needs inet_ntop()"
-#endif
   return;
 }
 
@@ -837,28 +833,22 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
   struct addrinfo hints;
   int ret_val;
 
-#ifdef  HAVE_INET_NTOP
   memset (&hints, 0, sizeof (hints));
   hints.ai_family = ai_family;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_CANONNAME;
   if ((ret_val = getaddrinfo (name, NULL, &hints, &chain)) == 0)
     {
-#ifdef _AIX
-      ap = chain;
-#else
       for (ap = chain; ap != NULL; ap = ap->ai_next)
 	if (ap->ai_socktype == SOCK_STREAM)
 	  break;
-#endif
       if (ap == NULL)
 	{
 	  freeaddrinfo (chain);
 	  return EAI_NONAME;
 	}
       *res = *ap;
-      if ((res->ai_addr =
-	   (struct sockaddr *) malloc (ap->ai_addrlen)) == NULL)
+      if ((res->ai_addr = malloc (ap->ai_addrlen)) == NULL)
 	{
 	  freeaddrinfo (chain);
 	  return EAI_MEMORY;
@@ -866,9 +856,6 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
       memcpy (res->ai_addr, ap->ai_addr, ap->ai_addrlen);
       freeaddrinfo (chain);
     }
-#else
-#error  "Pound requires getaddrinfo()"
-#endif
   return ret_val;
 }
 

@@ -16,11 +16,11 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 SUBDIRS = . tests
 
-AM_CFLAGS=\
- -DF_CONF=\"@sysconfdir@/pound.cfg\"\
- @PTHREAD_CFLAGS@
+AM_CFLAGS = @PTHREAD_CFLAGS@
 
-AM_CPPFLAGS = @SSL_CPPFLAGS@
+AM_CPPFLAGS = @SSL_CPPFLAGS@ \
+ -DSYSCONFDIR=\"$(sysconfdir)\"\
+ -DLOCALSTATEDIR=\"$(localstatedir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
 LDADD=@PTHREAD_LIBS@
 

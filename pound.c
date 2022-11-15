@@ -30,7 +30,7 @@
 char *user;			/* user to run as */
 char *group;			/* group to run as */
 char *root_jail;		/* directory to chroot to */
-char *pid_name = F_PID;		/* file to record pid in */
+char *pid_name = POUND_PID;     /* file to record pid in */
 char *ctrl_name;		/* control socket name */
 
 int anonymise;			/* anonymise client address */
@@ -397,14 +397,12 @@ server (void)
   pthread_attr_init (&attr);
   pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
 
-#ifdef  NEED_STACK
-  /* set new stack size - necessary for OpenBSD/FreeBSD and Linux NPTL */
+  /* set new stack size  */
   if (pthread_attr_setstacksize (&attr, 1 << 18))
     {
       logmsg (LOG_ERR, "can't set stack size - aborted");
       exit (1);
     }
-#endif
 
   /* start timer */
   if (pthread_create (&thr, &attr, thr_timer, NULL))

@@ -3141,8 +3141,10 @@ print_help (void)
   printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
   printf ("\nOptions are:\n\n");
   printf ("   -c        check configuration file syntax and exit\n");
-  printf ("   -f FILE   read configuration from FILE (default: %s)\n", F_CONF);
-  printf ("   -p FILE   write PID to FILE (default: %s)\n", F_PID);
+  printf ("   -f FILE   read configuration from FILE (default: %s)\n",
+	  POUND_CONF);
+  printf ("   -p FILE   write PID to FILE (default: %s)\n",
+	  POUND_PID);
   printf ("   -V        print version and exit\n");
   printf ("   -v        verbose mode\n");
   printf ("\n");
@@ -3157,7 +3159,7 @@ config_parse (int argc, char **argv)
 {
   int c;
   int check_only = 0;
-  char *conf_name = F_CONF;
+  char *conf_name = SYSCONFDIR "/" POUND_CONF;
 
   if ((progname = strrchr (argv[0], '/')) != NULL)
     progname++;

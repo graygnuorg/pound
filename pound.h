@@ -25,197 +25,91 @@
  * EMail: roseg@apsis.ch
  */
 
-#include    "config.h"
-#include    <stdio.h>
-#include    <math.h>
-#include    <stdlib.h>
-#include    <unistd.h>
-#include    <pthread.h>
-#include    <string.h>
-#include    <stdarg.h>
+#include "config.h"
+#include <stdio.h>
+#include <math.h>
+#include <stdlib.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <string.h>
+#include <stdarg.h>
+#include <inttypes.h>
+#include <time.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <poll.h>
+#include <pwd.h>
+#include <grp.h>
+#include <syslog.h>
+#include <signal.h>
+#include <ctype.h>
+#include <errno.h>
+#include <sys/wait.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <fnmatch.h>
 
 #if HAVE_GETOPT_H
-# include    <getopt.h>
-#endif
-
-#include    <time.h>
-#if HAVE_SYS_TIME_H
-# include    <sys/time.h>
-#endif
-
-#if HAVE_SYS_TYPES_H
-#include    <sys/types.h>
-#else
-#error "Pound needs sys/types.h"
-#endif
-
-#if HAVE_SYS_SOCKET_H
-#include    <sys/socket.h>
-#else
-#error "Pound needs sys/socket.h"
-#endif
-
-#if HAVE_SYS_UN_H
-#include    <sys/un.h>
-#else
-#error "Pound needs sys/un.h"
+# include <getopt.h>
 #endif
 
 #ifndef UNIX_PATH_MAX
 /* on Linux this is defined in linux/un.h rather than sys/un.h - go figure */
-#define UNIX_PATH_MAX   108
-#endif
-
-#if HAVE_NETINET_IN_H
-#include    <netinet/in.h>
-#else
-#error "Pound needs netinet/in.h"
-#endif
-
-#if HAVE_NETINET_TCP_H
-#include    <netinet/tcp.h>
-#else
-#error "Pound needs netinet/tcp.h"
-#endif
-
-#if HAVE_ARPA_INET_H
-#include    <arpa/inet.h>
-#else
-#error "Pound needs arpa/inet.h"
-#endif
-
-#if HAVE_NETDB_H
-#include    <netdb.h>
-#else
-#error "Pound needs netdb.h"
-#endif
-
-#if HAVE_SYS_POLL_H
-#include    <sys/poll.h>
-#else
-#error "Pound needs sys/poll.h"
+# define UNIX_PATH_MAX   108
 #endif
 
 #if HAVE_OPENSSL_SSL_H
-#define OPENSSL_THREAD_DEFINES
-#include    <openssl/ssl.h>
-#include    <openssl/lhash.h>
-#include    <openssl/err.h>
-#if OPENSSL_VERSION_NUMBER >= 0x00907000L
-#ifndef OPENSSL_THREADS
-#error  "Pound requires OpenSSL with thread support"
-#endif
+# define OPENSSL_THREAD_DEFINES
+# include <openssl/ssl.h>
+# include <openssl/lhash.h>
+# include <openssl/err.h>
+# if OPENSSL_VERSION_NUMBER >= 0x00907000L
+#  ifndef OPENSSL_THREADS
+#   error "Pound requires OpenSSL with thread support"
+#  endif
+# else
+#  ifndef THREADS
+#   error  "Pound requires OpenSSL with thread support"
+#  endif
+# endif
 #else
-#ifndef THREADS
-#error  "Pound requires OpenSSL with thread support"
-#endif
-#endif
-#else
-#error "Pound needs openssl/ssl.h"
+# error "Pound needs openssl/ssl.h"
 #endif
 
 #if HAVE_OPENSSL_ENGINE_H
-#include    <openssl/engine.h>
-#endif
-
-#if HAVE_PWD_H
-#include    <pwd.h>
-#else
-#error "Pound needs pwd.h"
-#endif
-
-#if HAVE_GRP_H
-#include    <grp.h>
-#else
-#error "Pound needs grp.h"
-#endif
-
-#if defined(HAVE_FACILITYNAMES) && defined(NEED_FACILITYNAMES)
-#define SYSLOG_NAMES    1
-#endif
-
-#if HAVE_SYSLOG_H
-#include    <syslog.h>
-#endif
-
-#if HAVE_SYS_SYSLOG_H
-#include    <sys/syslog.h>
-#endif
-
-#if HAVE_SIGNAL_H
-#include    <signal.h>
-#else
-#error "Pound needs signal.h"
+# include <openssl/engine.h>
 #endif
 
 #if HAVE_LIBPCREPOSIX
-#if HAVE_PCREPOSIX_H
-#include    <pcreposix.h>
-#elif HAVE_PCRE_PCREPOSIX_H
-#include    <pcre/pcreposix.h>
+# if HAVE_PCREPOSIX_H
+#  include <pcreposix.h>
+# elif HAVE_PCRE_PCREPOSIX_H
+#  include <pcre/pcreposix.h>
+# else
+#  error "You have libpcreposix, but the header files are missing. Use --disable-pcreposix"
+# endif
 #else
-#error "You have libpcreposix, but the header files are missing. Use --disable-pcreposix"
-#endif
-#elif HAVE_REGEX_H
-#include    <regex.h>
-#else
-#error "Pound needs regex.h"
-#endif
-
-#if HAVE_CTYPE_H
-#include    <ctype.h>
-#else
-#error "Pound needs ctype.h"
-#endif
-
-#if HAVE_ERRNO_H
-#include    <errno.h>
-#else
-#error "Pound needs errno.h"
-#endif
-
-#if HAVE_WAIT_H
-#include    <wait.h>
-#elif   HAVE_SYS_WAIT_H
-#include    <sys/wait.h>
-#else
-#error "Pound needs sys/wait.h"
-#endif
-
-#if HAVE_SYS_STAT_H
-#include    <sys/stat.h>
-#else
-#error "Pound needs sys/stat.h"
-#endif
-
-#if HAVE_FCNTL_H
-#include    <fcntl.h>
-#else
-#error "Pound needs fcntl.h"
-#endif
-
-#if HAVE_FNMATCH_H
-#include    <fnmatch.h>
-#else
-#error "Pound needs fnmatch.h"
-#endif
-
-#ifndef __STDC__
-#define const
+# include <regex.h>
 #endif
 
 #ifdef  HAVE_LONG_LONG_INT
-#define LONG    long long
-#define L0      0LL
-#define L_1     -1LL
-#define STRTOL  strtoll
-#define ATOL    atoll
+# define LONG    long long
+# define L0      0LL
+# define L_1     -1LL
+# define STRTOL  strtoll
+# define ATOL    atoll
 #else
-#define LONG    long
-#define L0      0L
-#define L_1     -1L
-#define STRTOL  strtol
-#define ATOL    atol
+# define LONG    long
+# define L0      0L
+# define L_1     -1L
+# define STRTOL  strtol
+# define ATOL    atol
 #endif
 
 #ifndef NO_EXTERNALS
@@ -275,25 +169,40 @@ extern int SOL_TCP;
 
 #define MAXHEADERS  128
 
-#ifndef F_CONF
-# define F_CONF  "/usr/local/etc/pound.cfg"
+#ifndef SYSCONFDIR
+# define SYSCONFDIR "/etc"
+#endif
+#ifndef LOCALSTATEDIR
+# define LOCALSTATEDIR "/var"
 #endif
 
-#ifndef F_PID
-# define F_PID  "/var/run/pound.pid"
+#ifndef POUND_CONF
+# define POUND_CONF SYSCONFDIR "/" "pound.cfg"
+#endif
+
+#ifndef POUND_PID
+# define POUND_PID  LOCALSTATEDIR "/run/pound.pid"
 #endif
 
 /* matcher chain */
 typedef struct _matcher
 {
-  regex_t pat;			/* pattern to match the request/header against */
+  regex_t pat;		/* pattern to match the request/header against */
   struct _matcher *next;
 } MATCHER;
 
 /* back-end types */
 typedef enum
-{ SESS_NONE, SESS_IP, SESS_COOKIE, SESS_URL, SESS_PARM, SESS_HEADER,
-    SESS_BASIC } SESS_TYPE;
+  {
+    SESS_NONE,
+    SESS_IP,
+    SESS_COOKIE,
+    SESS_URL,
+    SESS_PARM,
+    SESS_HEADER,
+    SESS_BASIC
+  }
+  SESS_TYPE;
 
 /* back-end definition */
 typedef struct _backend
@@ -389,7 +298,7 @@ typedef struct _listener
   regex_t url_pat;		/* pattern to match the request URL against */
   char *err413, *err414, *err500, *err501, *err503;
 				/* error messages */
-  LONG max_req;			/* max. request size */
+  LONG max_req; 		/* max. request size */
   MATCHER *head_off;		/* headers to remove */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
@@ -457,79 +366,39 @@ typedef struct
   char key[KEY_SIZE + 1];
 } CTRL_CMD;
 
-#ifdef  NEED_INADDRT
-/* for oldish Unices - normally this is in /usr/include/netinet/in.h */
-typedef u_int32_t in_addr_t;
-#endif
-
-#ifdef  NEED_INPORTT
-/* for oldish Unices - normally this is in /usr/include/netinet/in.h */
-typedef u_int16_t in_port_t;
-#endif
-
-#ifdef  NEED_TIMET
-/* for oldish Unices - normally this is in /usr/include/time.h */
-typedef u_int32_t time_t;
-#endif
-
-/*
- * add a request to the queue
- */
-extern int put_thr_arg (thr_arg *);
-
-/*
- * get a request from the queue
- */
-extern thr_arg *get_thr_arg (void);
-
-/*
- * get the current queue length
- */
-extern int get_thr_qlen (void);
-
+/* add a request to the queue */
+int put_thr_arg (thr_arg *);
+/* get a request from the queue */
+thr_arg *get_thr_arg (void);
+/* get the current queue length */
+int get_thr_qlen (void);
 /* Decrement number of active threads. */
 void active_threads_decr (void);
 
-/*
- * handle an HTTP request
- */
-extern void *thr_http (void *);
+/* handle HTTP requests */
+void *thr_http (void *);
 
-/*
- * Log an error to the syslog or to stderr
- */
-extern void logmsg (const int, const char *, ...);
+/* Log an error to the syslog or to stderr */
+void logmsg (const int, const char *, ...);
 
-/*
- * Parse a URL, possibly decoding hexadecimal-encoded characters
- */
-extern int cpURL (char *, char *, int);
+/* Parse a URL, possibly decoding hexadecimal-encoded characters */
+int cpURL (char *, char *, int);
 
-/*
- * Translate inet/inet6 address into a string
- */
-extern void addr2str (char *, const int, const struct addrinfo *, const int);
+/* Translate inet/inet6 address into a string */
+void addr2str (char *, const int, const struct addrinfo *, const int);
 
-/*
- * Return a string representation for a back-end address
- */
+/* Return a string representation for a back-end address */
 #define str_be(BUF, LEN, BE)    addr2str((BUF), (LEN), &(BE)->addr, 0)
 
-/*
- * Find the right service for a request
- */
-extern SERVICE *get_service (const LISTENER *, const char *, char **const);
+/* Find the right service for a request */
+SERVICE *get_service (const LISTENER *, const char *, char **const);
 
-/*
- * Find the right back-end for a request
- */
-extern BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
-			     const char *, char **const);
+/* Find the right back-end for a request */
+BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
+		      const char *, char **const);
 
-/*
- * Search for a host name, return the addrinfo for it
- */
-extern int get_host (char *const, struct addrinfo *, int);
+/* Search for a host name, return the addrinfo for it */
+int get_host (char *const, struct addrinfo *, int);
 
 /*
  * Find if a redirect needs rewriting
@@ -537,73 +406,67 @@ extern int get_host (char *const, struct addrinfo *, int);
  * (1) if the redirect was done to the correct location with the wrong protocol
  * (2) if the redirect was done to the back-end rather than the listener
  */
-extern int need_rewrite (const int, char *const, char *const, const char *,
-			 const LISTENER *, const BACKEND *);
+int need_rewrite (const int, char *const, char *const, const char *,
+		  const LISTENER *, const BACKEND *);
 /*
  * (for cookies only) possibly create session based on response headers
  */
-extern void upd_session (SERVICE * const, char **const, BACKEND * const);
+void upd_session (SERVICE * const, char **const, BACKEND * const);
 
 /*
  * Parse a header
  */
-extern int check_header (const char *, char *);
+int check_header (const char *, char *);
 
 #define BE_DISABLE  -1
 #define BE_KILL     1
 #define BE_ENABLE   0
+
 /*
  * mark a backend host as dead;
  * do nothing if no resurection code is active
  */
-extern void kill_be (SERVICE * const, const BACKEND *, const int);
+void kill_be (SERVICE * const, const BACKEND *, const int);
 
 /*
  * Update the number of requests and time to answer for a given back-end
  */
-extern void upd_be (SERVICE * const svc, BACKEND * const be, const double);
+void upd_be (SERVICE * const svc, BACKEND * const be, const double);
 
 /*
  * Non-blocking version of connect(2). Does the same as connect(2) but
  * ensures it will time-out after a much shorter time period CONN_TO.
  */
-extern int connect_nb (const int, const struct addrinfo *, const int);
+int connect_nb (const int, const struct addrinfo *, const int);
 
 /*
  * Parse arguments/config file
  */
-extern void config_parse (int, char **);
+void config_parse (int, char **);
 
 /*
  * RSA ephemeral keys: how many and how often
  */
 #define N_RSA_KEYS  11
 #ifndef T_RSA_KEYS
-#define T_RSA_KEYS  7200
+# define T_RSA_KEYS  7200
 #endif
 
 /*
  * Renegotiation callback
  */
-extern void SSLINFO_callback (const SSL * s, int where, int rc);
+void SSLINFO_callback (const SSL * s, int where, int rc);
 
 /*
  * expiration stuff
  */
 #ifndef EXPIRE_TO
-#define EXPIRE_TO   60
+# define EXPIRE_TO   60
 #endif
 
 #ifndef HOST_TO
-#define HOST_TO     300
+# define HOST_TO     300
 #endif
-
-/*
- * initialise the timer functions:
- *  - host_mut
- *  - RSA_mut and keys
- */
-extern void init_timer (void);
 
 /*
  * run timed functions:
@@ -611,16 +474,16 @@ extern void init_timer (void);
  *  - resurrect every alive_to seconds
  *  - expire every EXPIRE_TO seconds
  */
-extern void *thr_timer (void *);
+void *thr_timer (void *);
 
 /*
  * The controlling thread
  * listens to client requests and calls the appropriate functions
  */
-extern void *thr_control (void *);
+void *thr_control (void *);
 
-extern void POUND_SSL_CTX_init (SSL_CTX *ctx);
-extern int set_ECDHCurve (char *name);
+void POUND_SSL_CTX_init (SSL_CTX *ctx);
+int set_ECDHCurve (char *name);
 
 void *mem2nrealloc (void *p, size_t *pn, size_t s);
 void xnomem (void);

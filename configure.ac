@@ -18,15 +18,13 @@ AC_PREREQ([2.69])
 AC_INIT([pound],[2.8-gray],[gray+pound@gnu.org.ua],[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_SRCDIR([pound.c])
 AC_CONFIG_HEADERS([config.h])
-AM_INIT_AUTOMAKE([1.11 foreign tar-ustar])
+AM_INIT_AUTOMAKE([1.15 foreign tar-ustar])
 
 # Checks for programs.
 AC_PROG_CC
 dnl AC_PROG_RANLIB
 
 # Checks for libraries.
-AC_MSG_NOTICE([*** Checking for threads library and/or flags ***])
-
 AX_PTHREAD([CC="$PTHREAD_CC"],
 	   [AC_MSG_ERROR([No suitable pthread library found])])
 
@@ -85,14 +83,12 @@ AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
 AC_SUBST(I_OWNER)
 AC_ARG_WITH([owner],
  AS_HELP_STRING([--with-owner=name],[The account that will own the files installed by Pound]),
- [I_OWNER="${with_owner}"; C_OWNER="${with_owner}"],
- [C_OWNER=""])
+ [I_OWNER="${with_owner}"])
 
 AC_SUBST(I_GRP)
 AC_ARG_WITH([group],
  AS_HELP_STRING([--with-group=name],[The group that will own the files installed by Pound]),
- [I_GRP="${with_group}"; C_GROUP="${with_group}"],
- [C_GROUP=""])
+ [I_GRP="${with_group}"])
 
 AC_ARG_ENABLE([super],
  AS_HELP_STRING([--enable-super],[enable or disable running with supervisor process (default: enabled)]),
@@ -104,7 +100,7 @@ AC_ARG_ENABLE([super],
  [SUPERVISOR=1])
 
 AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
- [Run supervisor process])
+ [Compile supervisor code])
 
 AC_ARG_ENABLE([pcreposix],
  AS_HELP_STRING([--enable-pcreposix],[enable or disable using the pcreposix library (default: enabled if available)]),
@@ -121,8 +117,6 @@ AC_ARG_ENABLE([hoard],
  [C_HOARD=${enableval}],
  [C_HOARD=yes])
 
-
-AC_MSG_NOTICE([*** Checking for libraries ***])
 AC_CHECK_LIB([dl],[dlopen])
 AC_CHECK_LIB([socket],[socket],[LIBS="-lsocket -lnsl ${LIBS}"])
 AC_CHECK_LIB([resolv],[hstrerror],[LIBS="-lresolv ${LIBS}"])
@@ -150,65 +144,12 @@ elif test x"$C_HOARD" = xyes; then
     [LIBS="${LIBS} -lhoard"])
 fi
 
-AC_MSG_CHECKING([for pthread_attr_setstacksize in LIBS=$LIBS with CFLAGS=$CFLAGS"])
-AC_LINK_IFELSE([AC_LANG_PROGRAM([[char pthread_attr_setstacksize ();]], [[return pthread_attr_setstacksize ();]])],[CFLAGS="${CFLAGS} -DNEED_STACK"],[]);
-AC_MSG_RESULT([OK]);
+AC_CHECK_HEADERS([getopt.h pthread.h openssl/ssl.h openssl/engine.h pcreposix.h pcre/pcreposix.h])
 
-AC_MSG_NOTICE([*** Checking for header files ***])
-
-AC_CHECK_HEADERS([arpa/inet.h errno.h netdb.h netinet/in.h netinet/tcp.h sys/socket.h sys/un.h sys/time.h unistd.h getopt.h pthread.h sys/types.h sys/poll.h openssl/ssl.h openssl/engine.h pwd.h grp.h signal.h regex.h ctype.h wait.h sys/wait.h sys/stat.h sys/syslog.h syslog.h fcntl.h pcreposix.h pcre/pcreposix.h fnmatch.h])
-
-AC_MSG_NOTICE([*** Checking for additonal information ***])
-
-save_CFLAGS="$CFLAGS"
-CFLAGS="$CFLAGS -DSYSLOG_NAMES=1"
-AC_MSG_CHECKING([for facilitynames presence])
-AC_LINK_IFELSE([AC_LANG_PROGRAM([[#include <stdio.h>
-	     #include <syslog.h>
-	    ]], [[void *attr=(void *)facilitynames;]])],[ok=yes],[ok=no])
-if test x"$ok" = xyes; then
-  AC_MSG_RESULT([yes])
-  AC_DEFINE([HAVE_FACILITYNAMES],1,
-    [The facilitynames array is defined in sys/syslog.h])
-else
-  AC_MSG_RESULT([missing])
-fi
-CFLAGS=$save_CFLAGS
-
-AC_C_CONST
 AC_TYPE_UID_T
 AC_TYPE_PID_T
-AC_CHECK_HEADERS_ONCE([sys/time.h])
-
 AC_TYPE_UNSIGNED_LONG_LONG_INT
 AC_TYPE_LONG_LONG_INT
-AC_CHECK_TYPE([in_addr_t],[],[CFLAGS="${CFLAGS} -DNEED_INADDRT"],
- [#include <sys/types.h>
-  #include <netinet/in.h>
-  ])
-AC_CHECK_TYPE([in_port_t],[],[CFLAGS="${CFLAGS} -DNEED_INPORTT"],
- [#include <sys/types.h>
-  #include <netinet/in.h>
-  ])
-AC_CHECK_TYPE([time_t],[],[CFLAGS="${CFLAGS} -DNEED_TIMET"],
- [#include <time.h>])
-
-AC_FUNC_FORK
-AC_FUNC_MEMCMP
-AC_FUNC_SELECT_ARGTYPES
-AC_FUNC_LSTAT_FOLLOWS_SLASHED_SYMLINK
-AC_FUNC_STAT
-AC_FUNC_STRFTIME
-
-AC_CHECK_FUNCS([getaddrinfo inet_ntop memset regcomp poll socket strcasecmp strchr strdup\
- strerror strncasecmp strspn strtol X509_STORE_set_flags localtime_r gettimeofday])
-
-AC_DEFINE_UNQUOTED([C_SSL], ["$C_SSL"],
- [Location of OpenSSL package])
-AC_DEFINE_UNQUOTED([C_OWNER],["$C_OWNER"],
- [Account that owns Pound files])
-AC_DEFINE_UNQUOTED([C_GROUP],["$C_GROUP"],
- [Group for the Pound files])
 
 if test -z "${I_OWNER}"
 then
@@ -219,7 +160,6 @@ then
     egrep -s '^www' /etc/passwd > /dev/null && I_OWNER=www
     egrep -s '^proxy' /etc/passwd > /dev/null && I_OWNER=proxy
 fi
-
 
 if test -z "${I_GRP}"
 then

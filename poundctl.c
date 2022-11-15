@@ -69,7 +69,6 @@ prt_addr (const struct addrinfo *addr)
   void *src;
 
   memset (buf, 0, UNIX_PATH_MAX);
-#ifdef  HAVE_INET_NTOP
   switch (addr->ai_family)
     {
     case AF_INET:
@@ -105,9 +104,6 @@ prt_addr (const struct addrinfo *addr)
       break;
     }
   snprintf (res, sizeof (res) - 1, "%s:%d", buf, port);
-#else
-#error "Pound needs inet_ntop()"
-#endif
   return res;
 }
 
