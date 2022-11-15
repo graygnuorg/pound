@@ -2392,8 +2392,7 @@ thr_http (void *dummy)
 
   for (;;)
     {
-      while ((arg = get_thr_arg ()) == NULL)
-	logmsg (LOG_NOTICE, "NULL get_thr_arg");
+      arg = get_thr_arg ();
       do_http (arg);
     }
 }

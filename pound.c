@@ -147,7 +147,7 @@ put_thr_arg (thr_arg * arg)
     }
   memcpy (res, arg, sizeof (thr_arg));
   res->next = NULL;
-  (void) pthread_mutex_lock (&arg_mut);
+  pthread_mutex_lock (&arg_mut);
   if (last == NULL)
     first = last = res;
   else
@@ -155,8 +155,8 @@ put_thr_arg (thr_arg * arg)
       last->next = res;
       last = last->next;
     }
-  (void) pthread_mutex_unlock (&arg_mut);
   pthread_cond_signal (&arg_cond);
+  pthread_mutex_unlock (&arg_mut);
   return 0;
 }
 
@@ -168,15 +168,31 @@ get_thr_arg (void)
 {
   thr_arg *res;
 
-  (void) pthread_mutex_lock (&arg_mut);
-  if (first == NULL)
-    (void) pthread_cond_wait (&arg_cond, &arg_mut);
-  if ((res = first) != NULL)
-    if ((first = first->next) == NULL)
-      last = NULL;
-  (void) pthread_mutex_unlock (&arg_mut);
-  if (first != NULL)
+  pthread_mutex_lock (&arg_mut);
+  
+  /*
+   * Wait until something becomes available in the queue.  Spurious wakeups
+   * from pthread_cond_wait can occur, hence the need for a loop.
+   */
+  while (first == NULL)
+    pthread_cond_wait (&arg_cond, &arg_mut);
+
+  /* Dequeue the head element */
+  res = first;
+  if ((first = first->next) == NULL)
+    last = NULL;
+  else
+    /*
+     * If there's still more in the queue, signal other threads, so they
+     * can have their share.
+     * Notice, that pthread_cond_signal() may be called whether or not the
+     * current thread owns the mutex associated with the condition.  However,
+     * if predictable scheduling behavior is required, the mutex should be
+     * locked.
+     */
     pthread_cond_signal (&arg_cond);
+
+  pthread_mutex_unlock (&arg_mut);
   return res;
 }
 
@@ -189,10 +205,10 @@ get_thr_qlen (void)
   int res;
   thr_arg *tap;
 
-  (void) pthread_mutex_lock (&arg_mut);
+  pthread_mutex_lock (&arg_mut);
   for (res = 0, tap = first; tap != NULL; tap = tap->next, res++)
     ;
-  (void) pthread_mutex_unlock (&arg_mut);
+  pthread_mutex_unlock (&arg_mut);
   return res;
 }
 
