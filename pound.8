@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 14, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "November 15, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -28,13 +28,13 @@ pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .B Pound
 is a reverse-proxy load balancing server. It accepts requests from HTTP/HTTPS
 clients and distributes them to one or more Web servers. The HTTPS requests are
-decrypted and passed to the back-ends as plain HTTP.
+decrypted and passed to the backends as plain HTTP.
 .PP
-If more than one back-end server is defined,
+If more than one backend server is defined,
 .B pound
 chooses one of them randomly, based on defined priorities. By default,
 .B pound
-keeps track of associations between clients and back-end servers (sessions).
+keeps track of associations between clients and backend servers (sessions).
 .SH GENERAL PRINCIPLES
 .P
 In general
@@ -43,7 +43,7 @@ needs three types of objects defined in order to function:
 .IR listeners ,
 .I services
 and
-.IR back-ends .
+.IR backends .
 .TP
 \fBListeners\fR
 A
@@ -89,50 +89,50 @@ may also define a
 .I session
 mechanism: if defined, future requests from a given client will always
 be answered by the same
-.IR back-end .
+.IR backend .
 .TP
-\fBBack-ends\fR
+\fBbackends\fR
 The
-.I back-ends
+.I backends
 are the actual servers for the content requested. By itself,
 .B pound
 supplies no responses - all contents must be received from a "real"
 web server. The
-.I back-end
+.I backend
 defines how the server should be contacted.
 .IP
 Three types of
-.I back-ends
+.I backends
 may be defined: a "regular"
-.I back-end
+.I backend
 which receives requests and returns responses, a "redirect"
-.IR back-end ,
+.IR backend ,
 in which case
 .B pound
 will respond with a redirect response, without accessing any
-.I back-end
+.I backend
 at all, or an "emergency"
-.IR back-end ,
+.IR backend ,
 which will be used only if all other backends are "dead".
 .IP
 Multiple
-.I back-ends
+.I backends
 may be defined within a
 .IR service ,
 in which case
 .B pound
 will load-balance between the available
-.IR back-ends .
+.IR backends .
 .IP
 If a
-.I back-end
+.I backend
 fails to respond, it will be considered "dead", in which case
 .B pound
 will stop sending requests to it. Dead
-.I back-ends
+.I backends
 are periodically checked for availability, and once they respond again they
 are "resurrected" and requests are sent again their way. If no
-.I back-ends
+.I backends
 are available (none were defined, or all are "dead") then
 .B pound
 will reply with "503 Service Unavailable", without checking additional
@@ -141,7 +141,7 @@ will reply with "503 Service Unavailable", without checking additional
 Normally, the connection between
 .B pound
 and
-.I back-ends
+.I backends
 is via plain HTTP.  It is, however, possible to use HTTPS as well.
 .SH OPTIONS
 The following command line options are available:
@@ -185,7 +185,7 @@ Print version:
 .B pound
 will exit immediately after printing the current version and configuration flags.
 .PP
-In general, any number of back-end servers may be specified. Use the priority to
+In general, any number of backend servers may be specified. Use the priority to
 affect the load distribution among unequal-performance servers.
 .SH "CONFIGURATION FILE"
 Each line in the file is considered a complete configuration
@@ -322,7 +322,7 @@ overridden for specific services.
 \fBAlive\fR \fIn\fR
 Specify how often
 .B pound
-will check for resurrected back-end hosts (default: 30 seconds). In
+will check for resurrected backend hosts (default: 30 seconds). In
 general, it is a good idea to set this as low as possible - it
 will find resurrected hosts faster. However, if you set it too
 low it will consume resources - so beware.
@@ -341,22 +341,22 @@ This value can be overridden for specific listeners.
 \fBTimeOut\fR \fIn\fR
 How long should
 .B pound
-wait for a response from the back-end (in seconds). Default: 15 seconds.
-This value can be overridden for specific back-ends.
+wait for a response from the backend (in seconds). Default: 15 seconds.
+This value can be overridden for specific backends.
 .TP
 \fBConnTO\fR \fIn\fR
 How long should
 .B pound
-wait for a connection to the back-end (in seconds). Default: the
+wait for a connection to the backend (in seconds). Default: the
 .B TimeOut
-value. This value can be overridden for specific back-ends.
+value. This value can be overridden for specific backends.
 .TP
 \fBWSTimeOut\fR \fIn\fR
 How long should
 .B pound
-wait for data from either back-end or client in a connection upgraded to
+wait for data from either backend or client in a connection upgraded to
 a WebSocket (in seconds). Default: 600 seconds.
-This value can be overridden for specific back-ends.
+This value can be overridden for specific backends.
 .TP
 \fBGrace\fR \fIn\fR
 How long should
@@ -502,7 +502,7 @@ the header itself may be a regular pattern (though this should be used with
 caution).
 .TP
 \fBAddHeader\fR "header: to add"
-Add the defined header to the request passed to the back-end server. The header
+Add the defined header to the request passed to the backend server. The header
 is added verbatim. Use multiple \fIAddHeader\fR directives if you need to add more
 than one header.
 .TP
@@ -510,9 +510,9 @@ than one header.
 If set to 1, force
 .B pound
 to change the Location: and Content-location: headers in responses. If they
-point to the back-end itself or to the listener (but with the wrong protocol),
+point to the backend itself or to the listener (but with the wrong protocol),
 the response will be changed to show the virtual host in the request. Default:
-1 (active).  If the value is set to 2, only the back-end address is compared;
+1 (active).  If the value is set to 2, only the backend address is compared;
 this is useful for redirecting a request to an HTTPS listener on
 the same server as the HTTP listener.
 .TP
@@ -520,7 +520,7 @@ the same server as the HTTP listener.
 If set to \fItrue\fI, force
 .B pound
 to change the "Destination:" header in requests. The header is changed to point
-to the back-end itself with the correct protocol. Default: \fIfalse\fR.
+to the backend itself with the correct protocol. Default: \fIfalse\fR.
 .TP
 \fBLogLevel\fR value
 Override the global
@@ -634,7 +634,7 @@ requests on SSL connections. If the value is 2 (default), disable multiple
 requests on SSL connections only for MSIE clients. Required
 work-around for a bug in certain versions of IE.
 .SH "Service"
-A service is a definition of which back-end servers
+A service is a definition of which backend servers
 .B pound
 will use to reply to incoming requests. A service may be defined as part
 of a listener (in which case it will be used only by that listener), or
@@ -702,16 +702,16 @@ Directives enclosed between a
 and
 the following
 .I End
-directives define a single back-end server (see below for details). You may define
-multiple back-ends per service, in which case
+directives define a single backend server (see below for details). You
+may define multiple backends per service, in which case
 .B pound
 will attempt to load-balance between them.
 .TP
 \fBRedirect\fR [\fIcode\fR] "url"
-This is a special type of back-end. Instead of sending the request to a back-end
+This is a special type of backend. Instead of sending the request to a backend
 .B pound
 replies immediately with a redirection to the given URL. You may define multiple
-redirectors in a service, as well as mixing them with regular back-ends.
+redirectors in a service, as well as mixing them with regular backends.
 .IP
 The address the client is redirected to is determined by the actual
 .I url
@@ -759,7 +759,7 @@ Directives enclosed between an
 and
 the following
 .I End
-directives define an emergency back-end server (see below for details). You may define
+directives define an emergency backend server (see below for details). You may define
 only one emergency server per service, which
 .B pound
 will attempt to use if all backends are down.
@@ -773,7 +773,7 @@ the following
 directives define a session-tracking mechanism for the current service. See below
 for details.
 .SH "Backend"
-A back-end is a definition of a single back-end server
+A backend is a definition of a single backend server
 .B pound
 will use to reply to incoming requests.  All configuration directives enclosed between
 .I Backend
@@ -797,10 +797,10 @@ The port number or service name that
 .B pound
 will connect to. This is a
 .B mandatory
-parameter for non Unix-domain back-ends.
+parameter for non Unix-domain backends.
 .TP
 \fBHTTPS\fR
-The back-end is using HTTPS.
+The backend is using HTTPS.
 .TP
 \fBCert\fR "certificate file"
 Specify the certificate that
@@ -833,8 +833,8 @@ This directive may appear only after the
 directive.
 .TP
 \fBPriority\fR \fIn\fR
-The priority of this back-end (between 1 and 9, 5 is default). Higher priority
-back-ends will be used more often than lower priority ones, so you should
+The priority of this backend (between 1 and 9, 5 is default). Higher priority
+backends will be used more often than lower priority ones, so you should
 define higher priorities for more capable servers.
 .TP
 \fBTimeOut\fR \fIn\fR
@@ -856,17 +856,17 @@ value.
 A port (and optional address) to be used for server function checks. See below
 the "High Availability" section for a more detailed discussion. By default
 .B pound
-uses the same address as the back-end server, but you may use a separate address
+uses the same address as the backend server, but you may use a separate address
 if you wish. This directive applies only to non Unix-domain servers.
 .TP
 \fBDisabled\fR \fIbool\fR
 Start
 .B pound
-with this back-end disabled (1) or enabled (0). If started as disabled, the
-back-end can be later enabled with
+with this backend disabled (1) or enabled (0). If started as disabled, the
+backend can be later enabled with
 .BR poundctl (8).
 .SH "Emergency"
-The emergency server will be used once all existing back-ends are "dead".
+The emergency server will be used once all existing backends are "dead".
 All configuration directives enclosed between
 .I Emergency
 and
@@ -889,7 +889,7 @@ The port number that
 .B pound
 will connect to. This is a
 .B mandatory
-parameter for non Unix-domain back-ends.
+parameter for non Unix-domain backends.
 .PP
 Additionally, the following directives are also supported:
 .BR TimeOut ,
@@ -908,9 +908,9 @@ directives enclosed between
 .I Session
 and
 .I End
-are specific to a single service. Once a sessions is identified,
+are specific to a single service. Once a session is identified,
 .B pound
-will attempt to send all requests within that session to the same back-end
+will attempt to send all requests within that session to the same backend
 server.
 .PP
 The following directives are available:
@@ -938,7 +938,7 @@ the cookie) and HEADER (the header name).
 See below for some examples.
 .SH HIGH-AVAILABILITY
 .B Pound
-attempts to keep track of active back-end servers, and will temporarily disable
+attempts to keep track of active backend servers, and will temporarily disable
 servers that do not respond (though not necessarily dead: an overloaded server
 that
 .B pound
@@ -951,7 +951,7 @@ In general it is a good idea to set this time interval as low as is consistent w
 your resources in order to benefit from resurrected servers at the earliest possible
 time. The default value of 30 seconds is probably a good choice.
 .PP
-The clients that happen upon a dead backend server will just receive a
+The clients that happen to hit a dead backend server will just receive a
 .I "503 Service Unavailable"
 message.
 .PP
@@ -967,7 +967,7 @@ will attempt periodically (every
 seconds) to connect to this port. If the port does not respond, the server is considered dead.
 .B "It never makes sense to have the"
 .I HAport
-.B "identical to the main back-end port:"
+.B "identical to the main backend port:"
 this would only generate extra, unnecessary activity (CPU, network traffic) for no good
 reason whatsoever.  The
 .B HAport
@@ -977,7 +977,7 @@ that wish to take servers off-line in a controlled manner.
 By default the address of the
 .B HAport
 health monitor is the same as that of the
-back-end server. You may specify a different address though, for example if you have
+backend server. You may specify a different address though, for example if you have
 a monitoring program running on another host.
 .SH HTTPS HEADERS
 If a client browser connects to
@@ -1024,7 +1024,7 @@ for extra security bonus points.
 .PP
 .B Pound
 tries to sanitize all HTTP/HTTPS requests: the request itself, the headers and the contents
-are checked for conformance to the RFC's and only valid requests are passed to the back-end
+are checked for conformance to the RFC's and only valid requests are passed to the backend
 servers. This is not absolutely fool-proof - as the recent Apache problem with chunked
 transfers demonstrated. However, given the current standards, this is the best that can
 be done - HTTP is an inherently weak protocol.
@@ -1042,7 +1042,7 @@ this issue - for other Web servers you are on your own. May the source be with y
 .PP
 .B Pound
 deals with (and sanitizes) HTTP/1.1 requests. Thus even if you have an HTTP/1.0 server,
-a single connection to an HTTP/1.1 client is kept, while the connection to the back-end
+a single connection to an HTTP/1.1 client is kept, while the connection to the backend
 server is re-opened as necessary.
 .PP
 .B Pound
@@ -1204,10 +1204,10 @@ Service
 End
 .PP
 Here is a more complex example: assume your static images (GIF/JPEG) are to be served
-from a single back-end 192.168.0.10. In addition, 192.168.0.11 is to do the
+from a single backend 192.168.0.10. In addition, 192.168.0.11 is to do the
 hosting for www.myserver.com with URL-based sessions, and 192.168.0.20 (a 1GHz PIII)
 and 192.168.0.21 (800Mhz Duron) are for all other requests (cookie-based sessions).
-The logging will be done by the back-end servers.  The configuration file may look like this:
+The logging will be done by the backend servers.  The configuration file may look like this:
 .IP
 User        "nobody"
 .br
