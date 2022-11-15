@@ -937,9 +937,8 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
       /*
        * check if the Location points to the back-end
        */
-      if (memcmp
-	  (&be_addr.sin_addr.s_addr, &in_addr.sin_addr.s_addr,
-	   sizeof (in_addr.sin_addr.s_addr)) == 0
+      if (memcmp (&be_addr.sin_addr.s_addr, &in_addr.sin_addr.s_addr,
+		  sizeof (in_addr.sin_addr.s_addr)) == 0
 	  && memcmp (&be_addr.sin_port, &in_addr.sin_port,
 		     sizeof (in_addr.sin_port)) == 0)
 	{
@@ -995,7 +994,7 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
 	  &&
 	  (memcmp (&be_addr.sin_port, &in_addr.sin_port,
 		   sizeof (in_addr.sin_port)) != 0
-	   || strcasecmp (proto, lstn->ctx ? "http" : "https")))
+	   || strcasecmp (proto, lstn->ctx ? "https" : "http")))
 	{
 	  free (addr.ai_addr);
 	  return 1;
@@ -1014,7 +1013,7 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
 	  &&
 	  (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
 		   sizeof (in6_addr.sin6_port)) != 0
-	   || strcasecmp (proto, lstn->ctx ? "http" : "https")))
+	   || strcasecmp (proto, lstn->ctx ? "https" : "http")))
 	{
 	  free (addr.ai_addr);
 	  return 1;

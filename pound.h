@@ -386,7 +386,7 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
-  char *err414, *err500, *err501, *err503;
+  char *err413, *err414, *err500, *err501, *err503;
 				/* error messages */
   LONG max_req;			/* max. request size */
   MATCHER *head_off;		/* headers to remove */

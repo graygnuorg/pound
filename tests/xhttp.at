@@ -16,9 +16,6 @@
 AT_SETUP([xHTTP])
 AT_KEYWORDS([xhttp])
 
-# FIXME: For not supported methods, pound returns 501, whereas the
-# 405 "Method Not Allowed" response would be more appropriate.
-
 m4_pushdef([HTTP_EXPECT],
 [m4_pushdef([code],[$1])dnl
 m4_foreach([verb],[m4_shift($@)],[verb /echo/foo

@@ -467,6 +467,10 @@ only to the request path -
 .B pound
 will still check that the request is syntactically correct.
 .TP
+\fBErr413\fR "filename"
+A file with the text to be displayed if an Error 413 occurs.
+Default: "Request too large.".
+.TP
 \fBErr414\fR "filename"
 A file with the text to be displayed if an Error 414 occurs.
 Default: "Request URI is too long.".
@@ -485,7 +489,7 @@ Default: "The service is not available. Please try again later.".
 .TP
 \fBMaxRequest\fR \fIn\fR
 Request maximal size. All requests will be limited to these many bytes. If
-a request contains more data than allowed, an error 414 is returned. Default:
+a request contains more data than allowed, an error 413 is returned. Default:
 unlimited.
 .TP
 \fBHeadRemove\fR "header pattern"

@@ -61,8 +61,14 @@ check-local: atconfig atlocal $(TESTSUITE)
 
 TESTSUITE_AT = \
  testsuite.at \
+ addheader.at\
+ checkurl.at\
  config.at\
  echo.at\
+ errfile.at\
+ headrem.at\
+ maxrequest.at\
+ rewriteloc.at\
  xhttp.at
 
 noinst_PROGRAMS = 

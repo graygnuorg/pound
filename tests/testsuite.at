@@ -15,8 +15,16 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 m4_version_prereq([2.52g])
 
+## PT_CONF(CONFIG,[STATUS = `0'], [STDOUT], [STDERR], [RUN-IF-FAIL], [RUN-IF-PASS])
+m4_define([PT_CONF],
+[cat > pound.cfg <<_CONF
+$1
+_CONF
+AT_CHECK([pound -c -f pound.cfg],m4_shift($@))])
+
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
-## PT_RUN(CONFIG, SCRIPT)
+
+## PT_CHECK(CONFIG, SCRIPT)
 m4_define([PT_CHECK],
 [AT_CHECK([
 PT_PREREQ_PERL
@@ -42,3 +50,9 @@ AT_INIT
 m4_include([config.at])
 m4_include([echo.at])
 m4_include([xhttp.at])
+m4_include([checkurl.at])
+m4_include([errfile.at])
+m4_include([maxrequest.at])
+m4_include([headrem.at])
+m4_include([addheader.at])
+m4_include([rewriteloc.at])

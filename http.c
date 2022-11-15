@@ -33,7 +33,8 @@
 static char *h500 = "500 Internal Server Error",
 	    *h501 = "501 Not Implemented",
 	    *h503 = "503 Service Unavailable",
-	    *h400 = "Bad Request";
+	    *h400 = "400 Bad Request",
+	    *h413 = "413 Payload Too Large";
 
 static char *err_response =
 	"HTTP/1.0 %s\r\n"
@@ -1127,9 +1128,9 @@ do_http (thr_arg * arg)
 	  && is_rpc != 1)
 	{
 	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
-	  logmsg (LOG_NOTICE, "(%lx) e501 request too large (%ld) from %s",
+	  logmsg (LOG_NOTICE, "(%lx) e413 request too large (%ld) from %s",
 		  pthread_self (), cont, caddr);
-	  err_reply (cl, h501, lstn->err501);
+	  err_reply (cl, h413, lstn->err413);
 	  free_headers (headers);
 	  clean_all ();
 	  return;

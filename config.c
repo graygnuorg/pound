@@ -1920,7 +1920,7 @@ assign_redirect (void *call_data, void *section_data)
 
   if (regexec (&LOCATION, be->url, 4, matches, 0))
     {
-      conf_error ("%s", "Redirect bad URL - aborted");
+      conf_error ("%s", "Redirect bad URL");
       return PARSER_FAIL;
     }
 
@@ -2020,7 +2020,7 @@ parse_session (void *call_data, void *section_data)
   if ((sess.type == SESS_COOKIE || sess.type == SESS_URL
        || sess.type == SESS_HEADER) && sess.id == NULL)
     {
-      conf_error ("%s", "Session ID not defined - aborted");
+      conf_error ("%s", "Session ID not defined");
       return PARSER_FAIL;
     }
 
@@ -2133,7 +2133,7 @@ parse_service (void *call_data, void *section_data)
 	 lh_new (LHASH_HASH_FN (t_hash), LHASH_COMP_FN (t_cmp))) == NULL)
 #endif
     {
-      conf_error ("%s", "lh_new failed - aborted");
+      conf_error ("%s", "lh_new failed");
       return -1;
     }
 
@@ -2220,7 +2220,7 @@ listener_parse_checkurl (void *call_data, void *section_data)
 
   if (lst->has_pat)
     {
-      conf_error ("%s", "CheckURL multiple pattern - aborted");
+      conf_error ("%s", "CheckURL multiple pattern");
       return PARSER_FAIL;
     }
 
@@ -2431,6 +2431,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
@@ -2455,7 +2456,8 @@ parse_listen_http (void *call_data, void *section_data)
   lst->sock = -1;
   lst->to = pound_defaults.clnt_to;
   lst->rewr_loc = 1;
-  lst->err414 = "Request URI is too long";
+  lst->err413 = "Request too large.";
+  lst->err414 = "Request URI is too long.";
   lst->err500 = "An internal server error occurred. Please try again later.";
   lst->err501 = "This method may not be used.";
   lst->err503 = "The service is not available. Please try again later.";
@@ -2967,6 +2969,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
@@ -3004,7 +3007,8 @@ parse_listen_https (void *call_data, void *section_data)
   lst->sock = -1;
   lst->to = pound_defaults.clnt_to;
   lst->rewr_loc = 1;
-  lst->err414 = "Request URI is too long";
+  lst->err413 = "Request too large.";
+  lst->err414 = "Request URI is too long.";
   lst->err500 = "An internal server error occurred. Please try again later.";
   lst->err501 = "This method may not be used.";
   lst->err503 = "The service is not available. Please try again later.";
@@ -3207,7 +3211,7 @@ config_parse (int argc, char **argv)
 
   if (listeners == NULL)
     {
-      logmsg (LOG_ERR, "no listeners defined - aborted");
+      logmsg (LOG_ERR, "no listeners defined");
       exit (1);
     }
 }

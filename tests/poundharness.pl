@@ -85,7 +85,7 @@ $SIG{CHLD} = sub {
 	    return;
 	}
     } elsif (WIFSIGNALED($?)) {
-        print STDERR "pound terminated on signal " . WTERMSIG($?) . "\n";
+	print STDERR "pound terminated on signal " . WTERMSIG($?) . "\n";
     } else {
 	print STDERR "pound terminated with unrecogized status " . $? . "\n";
     }
@@ -104,11 +104,11 @@ sub usage_error {
 }
 
 GetOptions('config|f=s' => \$config,
-           'verbose|v+' => \$verbose,
+	   'verbose|v+' => \$verbose,
 	   'log-level|l=n' => \$log_level,
 	   'transcript|x=s' => \$transcript_file,
 	   'statistics|s' => \$statistics,
-           'startup-timeout|t=n' => \$startup_timeout)
+	   'startup-timeout|t=n' => \$startup_timeout)
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
@@ -165,13 +165,13 @@ sub preproc {
     my @state;
     unshift @state, ST_INIT;
     print $out <<EOT;
-# Initial settings by $0    
+# Initial settings by $0
 Daemon 0
 LogFacility -
 LogLevel $log_level
 EOT
 ;
-    my $be;    
+    my $be;
     while (<$in>) {
 	chomp;
 	if (/^\s*(?:#.)?$/) {
@@ -247,7 +247,6 @@ use strict;
 use warnings;
 use Carp;
 use HTTP::Tiny;
-use Socket qw(:DEFAULT :crlf);
 use Data::Dumper;
 
 sub new {
@@ -267,7 +266,7 @@ sub new {
 	    or croak "can't create transcript file $xscript: $!";
     }
     $self->{server} = 0;
-    $self->{http} = HTTP::Tiny->new();
+    $self->{http} = HTTP::Tiny->new(max_redirect => 0);
     return $self;
 }
 
@@ -281,20 +280,20 @@ sub send {
     my $lst = $listeners->get($self->{server});
     my $host = delete $self->{REQ}{HEADERS}{host} || $lst->host;
     my $url = $self->{REQ}{PROTO} . '://' .
-    	      $host .
-    	      ':' .
-    	      $lst->port .
-    	      $self->{REQ}{URI};
+	      $host .
+	      ':' .
+	      $lst->port .
+	      $self->{REQ}{URI};
     my %options;
     $options{peer} = $lst->host;
     if (exists($self->{REQ}{HEADERS})) {
-    	$options{headers} = $self->{REQ}{HEADERS};
+	$options{headers} = $self->{REQ}{HEADERS};
     }
-    if (exists($self->{REQ}{BODY}) && @{$self->{REQ}{BODY}}) {
-    	$options{content} = join($CRLF, @{$self->{REQ}{BODY}});
+    if (exists($self->{REQ}{BODY})) {
+	$options{content} = $self->{REQ}{BODY};
     }
     if ($verbose) {
-    	print "URL $self->{REQ}{METHOD} $url\n";
+	print "URL $self->{REQ}{METHOD} $url\n";
     }
     if (my $fh = $self->{xscript}) {
 	print $fh "$self->{filename}:$self->{REQ}{BEG}-$self->{REQ}{END}: sending $self->{REQ}{METHOD} $url to server $self->{server}\n";
@@ -312,9 +311,10 @@ sub send {
     }
     if (my $fh = $self->{xscript}) {
 	print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: " .
-	           ($ok ? "OK" : "FAIL")."\n";
+		   ($ok ? "OK" : "FAIL")."\n";
     }
-    $self->{REQ} = $self->{EXP} = {};
+    delete $self->{REQ};
+    delete $self->{EXP};
 }
 
 sub assert {
@@ -336,14 +336,23 @@ sub assert {
 		}
 	    }
 	}
+	if ($self->{EXP}{NOTHEADERS}) {
+	    foreach my $h (sort keys %{$self->{EXP}{NOTHEADERS}}) {
+		if (exists($response->{headers}{$h}) &&
+		    $response->{headers}{$h} eq $self->{EXP}{NOTHEADERS}{$h}) {
+		    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: header \"$h: $self->{EXP}{NOTHEADERS}{$h}\" is present in the response\n";
+		}
+	    }
+	}
+
 	if (exists($self->{EXP}{BODY}) &&
-	    join("$CRLF", @{$self->{EXP}{BODY}}) ne $response->{content}) {
+	    $self->{EXP}{BODY} ne $response->{content}) {
 	    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: response content mismatch\n";
 	}
     }
     return 1
 }
-    
+
 
 sub parse {
     my $self = shift;
@@ -354,9 +363,9 @@ sub parse {
 
 sub syntax_error {
     my ($self, $message) = @_;
-    $message //= "syntax error";
+    $message //= "syntax error\n";
     my $locus = $self->{filename} . ':' . $self->{line};
-    confess "$locus: $message";
+#    confess "$locus: $message";
 }
 
 sub parse_req {
@@ -366,7 +375,7 @@ sub parse_req {
     while (<$fh>) {
 	$self->{line}++;
 	chomp;
-	
+
 	if (/^(?:#.*)?$/) {
 	    next;
 	}
@@ -413,7 +422,7 @@ sub parse_headers {
 	    $self->parse_body;
 	    return;
 	}
-	
+
 	if (/^end$/) {
 	    $self->{REQ}{END} = $self->{line};
 	    $self->parse_expect;
@@ -424,8 +433,8 @@ sub parse_headers {
 	    next;
 	}
 
-	if (/^(?<name>[A-Za-z][A-Za-z0-9_]*):\s*(?<value>.*)$/) {
-	    $self->{REQ}{HEADERS}{lc($+{name})} = $+{value};
+	if (/^(?<name>[A-Za-z][A-Za-z0-9_-]*):\s*(?<value>.*)$/) {
+	    $self->{REQ}{HEADERS}{lc($+{name})} = $self->expandvars($+{value});
 	} else {
 	    $self->syntax_error;
 	    return;
@@ -445,6 +454,9 @@ sub parse_body {
 
 	if (/^end$/) {
 	    $self->{REQ}{END} = $self->{line};
+	    if ($self->{REQ}{BODY}) {
+		$self->{REQ}{BODY} = join("\n", @{$self->{REQ}{BODY}})."\n";
+	    }
 	    $self->parse_expect;
 	    return;
 	}
@@ -494,6 +506,23 @@ sub parse_expect {
     $self->syntax_error("unexpected end of file");
 }
 
+sub replvar {
+    my ($self, $var) = @_;
+    if ($var =~ m{LISTENER(\d+)?}) {
+	return $listeners->get($1//0)->address;
+    } elsif ($var =~ m{BACKEND(\d+)?}) {
+	return $backends->get($1//0)->address;
+    }
+    return '${' . $var . '}';
+}
+
+sub expandvars {
+    my ($self, $v) = @_;
+    $v =~ s{ \$ \{ ([A-Za-z][A-Za-z0-9]*) \} }
+	   { $self->replvar($1) }xeg;
+    return $v;
+}
+
 sub parse_expect_headers {
     my $self = shift;
     my $fh = $self->{fh};
@@ -506,7 +535,7 @@ sub parse_expect_headers {
 	    $self->parse_expect_body;
 	    return;
 	}
-	
+
 	if (/^end$/) {
 	    $self->{EXP}{END} = $self->{line};
 	    $self->send;
@@ -518,7 +547,9 @@ sub parse_expect_headers {
 	}
 
 	if (/^(?<name>[A-Za-z][A-Za-z0-9_-]*):\s*(?<value>.*)$/) {
-	    $self->{EXP}{HEADERS}{$+{name}} = $+{value};
+	    $self->{EXP}{HEADERS}{lc($+{name})} = $self->expandvars($+{value});
+	} elsif (/^-(?<name>[A-Za-z][A-Za-z0-9_-]*):\s*(?<value>.*)$/) {
+	    $self->{EXP}{NOTHEADERS}{lc($+{name})} = $self->expandvars($+{value});
 	} else {
 	    $self->syntax_error;
 	    return;
@@ -538,6 +569,7 @@ sub parse_expect_body {
 
 	if (/^end$/) {
 	    $self->{EXP}{END} = $self->{line};
+	    $self->{EXP}{BODY} = join("\n", @{$self->{EXP}{BODY}})."\n";
 	    $self->send;
 	    return;
 	}
@@ -568,7 +600,7 @@ use IO::FDPass;
 use Fcntl;
 
 sub new {
-    my ($class, $ident, $keepopen) = @_;
+    my ($class, $number, $ident, $keepopen) = @_;
     my $socket;
     socket($socket, PF_INET, SOCK_STREAM, 0)
 	or croak "socket: $!";
@@ -583,9 +615,16 @@ sub new {
 	or die "bind: $!";
     my $sa = getsockname($socket);
     my ($port, $ip) = sockaddr_in($sa);
-    bless { ident => $ident, socket => $socket, host => inet_ntoa($ip),port => $port }, $class;
+    bless {
+	number => $number,
+	ident => $ident,
+	socket => $socket,
+	host => inet_ntoa($ip),
+	port => $port
+    }, $class;
 }
 
+sub number { shift->{number} }
 sub ident { shift->{ident} }
 sub socket_handle { shift->{socket} }
 sub fd { fileno(shift->socket_handle) }
@@ -623,7 +662,7 @@ sub send_fd {
 
 sub listen {
     my ($self, $backlog) = @_;
-    listen($self->socket_handle, $backlog // 8)	
+    listen($self->socket_handle, $backlog // 8)
 	or croak "listen: $!";
 }
 
@@ -641,9 +680,9 @@ sub keepopen { shift->{keepopen} }
 sub count { scalar @{shift->{listeners}} }
 sub create {
     my ($self, $ident) = @_;
-    my $lst = Listener->new($ident, $self->keepopen);
+    my $lst = Listener->new($self->count(), $ident, $self->keepopen);
     if ($self->keepopen) {
-    	$lst->set_pass_fd("lst".$self->count().".sock");
+	$lst->set_pass_fd("lst".$self->count().".sock");
     }
     push @{$self->{listeners}}, $lst;
     return $lst;
@@ -667,7 +706,7 @@ sub find_socket {
     }
     croak "Listener not found";
 }
-    
+
 sub selector {
     my $self = shift;
     my $sel = IO::Select->new();
@@ -696,7 +735,7 @@ sub wait {
 	close($sock);
     }
 }
-	    
+
 sub read_and_process {
     my $self = shift;
     my $sel = $self->selector;
@@ -704,33 +743,47 @@ sub read_and_process {
 	foreach my $conn ($sel->can_read) {
 	    my $fh;
 	    my $remote = accept($fh, $conn);
-	    threads->create(\&process_http_request, $fh, $self->find_socket($conn)->ident)->detach();
+	    threads->create(\&process_http_request, $fh, $self->find_socket($conn))->detach();
 	}
     }
 }
 
 sub http_echo {
     my $http = shift;
-    my @argv = (200, "OK",
-		 headers => {
-		     'x-backend-ident' => $http->header('x-backend-ident'),
-		     'x-orig-uri' => $http->uri,
-		});
+    my %headers = (
+	'x-backend-ident' => $http->header('x-backend-ident'),
+	'x-backend-number' => $http->backend->number,
+	'x-orig-uri' => $http->uri,
+	);
+    while (my ($k, $v) = each %{$http->header}) {
+	$headers{'x-orig-header-' . $k} = $v;
+    }
+    my @argv = (200, "OK", headers => \%headers);
+
     if (my $body = $http->body) {
 	push @argv, body => $body
     }
     $http->reply(@argv);
 }
 
+sub http_redirect {
+    my ($http, $rest) = @_;
+    my $redir = $http->header('x-redirect')//'';
+    $http->reply(301, "Moved Permanently", headers => {
+			'location' => $redir . '/echo' . $rest
+		 });
+}
+
 sub process_http_request {
-    my ($sock, $ident) = @_;
+    my ($sock, $backend) = @_;
 
     my %endpoints = (
-	'echo' => \&http_echo
+	'echo' => \&http_echo,
+	'redirect' => \&http_redirect,
     );
 
     local $| = 1;
-    my $http = HTTPServ->new($sock, $ident);
+    my $http = HTTPServ->new($sock, $backend);
     $http->parse();
     if ($http->uri =~ m{^/([^/]+)(/.*)?}) {
 	my ($dir, $rest) = ($1, $2);
@@ -755,11 +808,12 @@ use Socket qw(:crlf);
 use Carp;
 
 sub new {
-    my ($class, $fh, $ident) = @_;
-    bless { fh => $fh, ident => $ident }, $class;
+    my ($class, $fh, $backend) = @_;
+    bless { fh => $fh, backend => $backend }, $class;
 }
 
-sub ident { shift->{ident} }
+sub backend { shift->{backend} }
+sub ident { shift->backend->ident }
 sub method { shift->{METHOD} }
 sub version { shift->{VERSION} }
 sub uri { shift->{URI} }
@@ -776,13 +830,13 @@ sub close {
     my $http = shift;
     close $http->{fh};
 }
-    
+
 sub getline {
     my $http = shift;
     local $/ = $CRLF;
     my $fh = $http->{fh};
     chomp(my $ret = <$fh>);
-    return $ret		
+    return $ret
 }
 
 sub ParseRequest {
@@ -809,7 +863,7 @@ sub ParseHeader {
 	$http->{HEADERS}{lc($name)} = $value;
     }
     $http->{HEADERS}{'x-backend-ident'} = $http->ident;
-}	    
+}
 
 sub GetBody {
     my $http = shift;
@@ -851,10 +905,10 @@ poundharness - run pound tests
 =head1 SYNOPSIS
 
 B<poundharness>
-[B<-sv>]    
+[B<-sv>]
 [B<-f I<FILE>>]
 [B<-l I<N>>]
-[B<-t I<N>>]    
+[B<-t I<N>>]
 [B<-x I<FILE>>]
 [B<--config=>I<SRC>[B<:>I<DST>]]
 [B<--log-level=>I<N>]
@@ -888,7 +942,7 @@ expected responses.  Each request is sent to the specified listener (the one
 created in the preprocessing step described above), and the obtained response
 is compared with the expectation.  If it matches, the test succeeds.  See
 the section B<SCRIPT FILE>], for a detailed discussion of the script file
-format.    
+format.
 
 When all the tests from I<SCRIPT> are run, the program terminates.  Its
 status code reflects the results of the run: 0 if all tests succeeded, 1
@@ -896,11 +950,11 @@ if some of them failed, 2 if another error occurred and 77 if tests cannot
 be run because of missing Perl module.
 
 B<Poundharness> requires Perl 5.22.1 or later and B<IO::FDPass> module.
-If these requirements are not met, it exits with code 77.    
+If these requirements are not met, it exits with code 77.
 
 Status 3 is returned if B<poundharness> is used with wrong command line
-switches or arguments, 
-    
+switches or arguments,
+
 =head1 OPTIONS
 
 =over 4
@@ -910,30 +964,30 @@ switches or arguments,
 Read source configuration file from I<SRC>, write processed configuration
 to I<DST> and use it as configuration file when running B<pound>.  If
 I<DST> is omitted, F<pound.cfg> is assumed.  If this option is not given,
-I<SRC> defaulst to F<pound.cfi>.    
-    
+I<SRC> defaulst to F<pound.cfi>.
+
 =item B<-l>, B<--log-level=> I<N>
 
 Set B<pound> I<LogLevel> configuration parameter.
-    
+
 =item B<-s>, B<--statistics>
 
-Print short statistics at the end of the run.    
+Print short statistics at the end of the run.
 
 =item B<-t>, B<--startup-timeout=> I<N>
 
 Timeout for B<pound> startup, in seconds.  Default is 2.
-    
+
 =item B<-v>, B<--verbose>
 
-Increase output verbosity.    
+Increase output verbosity.
 
 =item B<-x>, B<--transcript=> I<FILE>
 
 Write test transcript to I<FILE>.
-    
+
 =back
-    
+
 =head1 SCRIPT FILE
 
 B<Poundharness> script file consists of a sequence of HTTP requests and
@@ -949,10 +1003,43 @@ An expected response must follow each request.  It begins with a
 three digit response code on a line alone.  The code may be followed by
 any number of response headers.  If present, the test will succeed only
 if the actual response contains all expected headers and their corresponding
-values coincide.  Headers may be followed by a newline and response body
-(content).  If present, it will be matched literally against the actual
-response.  The response is terminated with the word B<end> on a line alone.
+values coincide. Header lines starting with a minus sign denote headers,
+that must be absent in the response. E.g. the header line
 
+    -X-Forwarded-Proto: https
+
+means that heade B<X-Forwarded-Proto: https> must be absent in the response.
+The test will fail if it is present.
+
+Headers may be followed by a newline and response body (content).  If
+present, it will be matched literally against the actual response.
+The response is terminated with the word B<end> on a line alone.
+
+The values of both request and expeced headers may contain the following
+I<variables>, which are expanded when reading the file:
+
+=over 4
+
+=item B<${LISTENERI<n>}>
+
+Expands to the address of the I<n>th listener (I<IP>:I<PORT>).
+
+=item B<${LISTENER}>
+
+Same as B<${LISTENER0}>.
+
+=item B<${BACKENDI<n>}>
+
+Expands to the address of the I<n>th backend (I<IP>:I<PORT>).
+
+=item B<${BACKEND}>
+
+Same as B<${BACKEND0}>.
+
+=back    
+
+Numbering of listeners and backends starts from 0.
+    
 The B<server> statement can be used to specify the B<pound> listener to
 send the requests to.  It has the form
 
@@ -966,13 +1053,19 @@ occurs first.
 =head1 BACKENDS
 
 Each B<Backend> statement in the configuration file causes creation of
-a HTTP server behind it.  These built-in servers currently support only
-the B</echo> endpoint.  Any requests with URLs under that endpoint are
-replied with exact copy of the incoming requests, with the addition of
-the two headers:
+a HTTP server behind it.  These built-in servers currently two endpoints:
+
+=head2 /echo
+    
+Any requests with URLs under that endpoint are replied with exact copy of the
+incoming requests, with the addition of the following headers:
 
 =over 4
 
+=item B<x-backend-number>
+
+Ordinal number of the backend in configuration (0-based).    
+    
 =item B<x-backend-ident>
 
 Identifier of the backend, in form B<I<FILE>:I<LINE>>, where I<FILE> is the
@@ -983,7 +1076,27 @@ corresponding B<Backend> keyword is located.
 
 Copy of the original URI.
 
-=back    
+=item B<x-orig-header->I<header>
+
+The value of the header I<header> in the request.    
+    
+=back
+
+=head2 /redirect
+
+Redirects the request to the B</echo> endpoint.  The value of the
+B<x-redirect> header, if any, is prepended to the value of the B<Location>
+header.  E.g. the following request
+
+    GET /redirect/foo?bar=0 HTTP/1.1
+    X-Redirect: https://example.org
+
+will get the following response:
+
+    HTTP/1.1 301 Moved permanently
+    Location: https://example.org/echo/foo?bar=0
+
+This backend is used to test the B<RewriteLocation> functionality.    
     
 =head1 FILES
 
@@ -992,13 +1105,13 @@ Copy of the original URI.
 =item pound.cfi
 
 Source configuration file.  Can be changed using the B<--config> option.
-    
+
 =item pound.cfg
 
 Destination configuration file.  The modified configuration is written to
 it and it is then passed to B<pound> as its configuration file.
 
-Can be changed using the B<--config> option.    
+Can be changed using the B<--config> option.
 
 =item pound.log
 
@@ -1013,12 +1126,12 @@ Keeps PID of the running B<pound> instance.
 Temporary UNIX sockets for passing created socket descriptors to B<pound>.
 These are removed on success.
 
-=back    
-    
+=back
+
 =head1 SEE ALSO
 
 B<pound> (8)
-    
+
 =head1 AUTHOR
 
 Sergey Poznyakoff <gray@gnu.org>
