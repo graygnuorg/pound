@@ -584,7 +584,6 @@ main (const int argc, char **argv)
   LISTENER *lstn;
   uid_t user_id;
   gid_t group_id;
-  char tmp[MAXBUF];
 #ifndef SOL_TCP
   struct protoent *pe;
 #endif
@@ -693,6 +692,7 @@ main (const int argc, char **argv)
       /* prepare the socket */
       int opt;
       int domain;
+      char abuf[MAX_ADDR_BUFSIZE];
 
       switch (lstn->addr.ai_family)
 	{
@@ -711,8 +711,8 @@ main (const int argc, char **argv)
 	}
       if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
 	{
-	  addr2str (tmp, MAXBUF - 1, &lstn->addr, 0);
-	  logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted", tmp,
+	  logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted",
+		  addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
 		  strerror (errno));
 	  exit (1);
 	}
@@ -722,8 +722,8 @@ main (const int argc, char **argv)
       if (bind (lstn->sock, lstn->addr.ai_addr,
 		(socklen_t) lstn->addr.ai_addrlen) < 0)
 	{
-	  addr2str (tmp, MAXBUF - 1, &lstn->addr, 0);
-	  logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted", tmp,
+	  logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted",
+		  addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
 		  strerror (errno));
 	  exit (1);
 	}

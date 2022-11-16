@@ -722,7 +722,7 @@ do_http (thr_arg * arg)
     **headers,
     headers_ok[MAXHEADERS],
     v_host[MAXBUF], referer[MAXBUF], u_agent[MAXBUF], u_name[MAXBUF],
-    caddr[MAXBUF], req_time[LOG_TIME_SIZE], s_res_bytes[LOG_BYTES_SIZE], *mh;
+    caddr[MAX_ADDR_BUFSIZE], req_time[LOG_TIME_SIZE], s_res_bytes[LOG_BYTES_SIZE], *mh;
   SSL *ssl, *be_ssl;
   LONG cont, res_bytes;
   regmatch_t matches[4];
@@ -814,7 +814,7 @@ do_http (thr_arg * arg)
 	{
 	  /*
 	   * no need to log every client without a certificate...
-	   * addr2str(caddr, MAXBUF - 1, &from_host, 1);
+	   * addr2str(caddr, sizeof (caddr), &from_host, 1);
 	   * logmsg(LOG_NOTICE, "BIO_do_handshake with %s failed: %s",
 	   * caddr, ERR_error_string(ERR_get_error(), NULL)); x509 =
 	   * NULL;
@@ -829,8 +829,8 @@ do_http (thr_arg * arg)
 	      && lstn->clnt_check < 3
 	      && SSL_get_verify_result (ssl) != X509_V_OK)
 	    {
-	      addr2str (caddr, MAXBUF - 1, &from_host, 1);
-	      logmsg (LOG_NOTICE, "Bad certificate from %s", caddr);
+	      logmsg (LOG_NOTICE, "Bad certificate from %s",
+		      addr2str (caddr, sizeof (caddr), &from_host, 1));
 	      X509_free (x509);
 	      BIO_reset (cl);
 	      BIO_free_all (cl);
@@ -872,9 +872,10 @@ do_http (thr_arg * arg)
 	    {
 	      if (errno)
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE, "(%lx) error read from %s: %s",
-			  pthread_self (), caddr, strerror (errno));
+			  pthread_self (),
+			  addr2str (caddr, sizeof (caddr), &from_host, 1),
+			  strerror (errno));
 		  /*
 		   * err_reply(cl, h500, lstn->err500);
 		   */
@@ -908,9 +909,9 @@ do_http (thr_arg * arg)
 	}
       else
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_WARNING, "(%lx) e501 bad request \"%s\" from %s",
-		  pthread_self (), request, caddr);
+		  pthread_self (), request,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
 	  clean_all ();
@@ -925,9 +926,9 @@ do_http (thr_arg * arg)
 	   * the URL probably contained a %00 aka NULL - which we don't
 	   * allow
 	   */
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE, "(%lx) e501 URL \"%s\" (contains NULL) from %s",
-		  pthread_self (), url, caddr);
+		  pthread_self (), url,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
 	  clean_all ();
@@ -935,9 +936,9 @@ do_http (thr_arg * arg)
 	}
       if (lstn->has_pat && regexec (&lstn->url_pat, url, 0, NULL, 0))
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE, "(%lx) e501 bad URL \"%s\" from %s",
-		  pthread_self (), url, caddr);
+		  pthread_self (), url,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
 	  clean_all ();
@@ -986,10 +987,10 @@ do_http (thr_arg * arg)
 		chunked = 1;
 	      else
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE,
 			  "(%lx) e400 multiple Transfer-encoding \"%s\" from %s",
-			  pthread_self (), url, caddr);
+			  pthread_self (), url,
+			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h400,
 			     "Bad request: multiple Transfer-encoding values");
 		  free_headers (headers);
@@ -1001,10 +1002,10 @@ do_http (thr_arg * arg)
 	    case HEADER_CONTENT_LENGTH:
 	      if (cont != L_1 || strchr (buf, ','))
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE,
 			  "(%lx) e400 multiple Content-length \"%s\" from %s",
-			  pthread_self (), url, caddr);
+			  pthread_self (), url,
+			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h400,
 			     "Bad request: multiple Content-length values");
 		  free_headers (headers);
@@ -1014,10 +1015,10 @@ do_http (thr_arg * arg)
 	      for (mh = buf; *mh; mh++)
 		if (!isdigit (*mh))
 		  {
-		    addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		    logmsg (LOG_NOTICE,
 			    "(%lx) e400 Content-length bad value \"%s\" from %s",
-			    pthread_self (), url, caddr);
+			    pthread_self (), url,
+			    addr2str (caddr, sizeof (caddr), &from_host, 1));
 		    err_reply (cl, h400,
 			       "Bad request: Content-length bad value");
 		    free_headers (headers);
@@ -1043,9 +1044,10 @@ do_http (thr_arg * arg)
 	    case HEADER_ILLEGAL:
 	      if (lstn->log_level > 0)
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE, "(%lx) bad header from %s (%s)",
-			  pthread_self (), caddr, headers[n]);
+			  pthread_self (),
+			  addr2str (caddr, sizeof (caddr), &from_host, 1),
+			  headers[n]);
 		}
 	      headers_ok[n] = 0;
 	      break;
@@ -1110,10 +1112,10 @@ do_http (thr_arg * arg)
        */
       if (chunked != 0 && cont != L_1)
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE,
 		  "(%lx) e501 Transfer-encoding and Content-length \"%s\" from %s",
-		  pthread_self (), url, caddr);
+		  pthread_self (), url,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h400,
 		     "Bad request: Transfer-encoding and Content-length headers present");
 	  free_headers (headers);
@@ -1127,9 +1129,9 @@ do_http (thr_arg * arg)
       if (lstn->max_req > L0 && cont > L0 && cont > lstn->max_req
 	  && is_rpc != 1)
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE, "(%lx) e413 request too large (%ld) from %s",
-		  pthread_self (), cont, caddr);
+		  pthread_self (), cont,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h413, lstn->err413);
 	  free_headers (headers);
 	  clean_all ();
@@ -1156,9 +1158,10 @@ do_http (thr_arg * arg)
        */
       if ((svc = get_service (lstn, url, &headers[1])) == NULL)
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE, "(%lx) e503 no service \"%s\" from %s %s",
-		  pthread_self (), request, caddr, v_host[0] ? v_host : "-");
+		  pthread_self (), request,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1),
+		  v_host[0] ? v_host : "-");
 	  err_reply (cl, h503, lstn->err503);
 	  free_headers (headers);
 	  clean_all ();
@@ -1166,9 +1169,10 @@ do_http (thr_arg * arg)
 	}
       if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL)
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE, "(%lx) e503 no back-end \"%s\" from %s %s",
-		  pthread_self (), request, caddr, v_host[0] ? v_host : "-");
+		  pthread_self (), request,
+		  addr2str (caddr, sizeof (caddr), &from_host, 1),
+		  v_host[0] ? v_host : "-");
 	  err_reply (cl, h503, lstn->err503);
 	  free_headers (headers);
 	  clean_all ();
@@ -1238,9 +1242,9 @@ do_http (thr_arg * arg)
 	      if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL
 		  || backend == old_backend)
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE, "(%lx) e503 no back-end \"%s\" from %s",
-			  pthread_self (), request, caddr);
+			  pthread_self (), request,
+			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h503, lstn->err503);
 		  free_headers (headers);
 		  clean_all ();
@@ -1366,7 +1370,7 @@ do_http (thr_arg * arg)
 			      pthread_self (), buf);
 		      break;
 		    }
-		  str_be (caddr, MAXBUF - 1, cur_backend);
+		  str_be (caddr, sizeof (caddr), cur_backend);
 		  strcpy (loc_path, buf + matches[3].rm_so);
 		  snprintf (buf, MAXBUF, "Destination: http://%s%s", caddr,
 			    loc_path);
@@ -1576,7 +1580,7 @@ do_http (thr_arg * arg)
        */
       if (cur_backend->be_type == 0)
 	{
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
+	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  BIO_printf (be, "X-Forwarded-For: %s\r\n", caddr);
 
 	  /*
@@ -1595,10 +1599,11 @@ do_http (thr_arg * arg)
 	    {
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
-	      addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	      logmsg (LOG_NOTICE,
 		      "(%lx) e500 for %s copy_chunks to %s/%s (%.3f sec)",
-		      pthread_self (), caddr, buf, request,
+		      pthread_self (),
+		      addr2str (caddr, sizeof (caddr), &from_host, 1),
+		      buf, request,
 		      (end_req - start_req) / 1000000.0);
 	      err_reply (cl, h500, lstn->err500);
 	      clean_all ();
@@ -1614,10 +1619,11 @@ do_http (thr_arg * arg)
 	    {
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
-	      addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	      logmsg (LOG_NOTICE,
 		      "(%lx) e500 for %s error copy client cont to %s/%s: %s (%.3f sec)",
-		      pthread_self (), caddr, buf, request, strerror (errno),
+		      pthread_self (),
+		      addr2str (caddr, sizeof (caddr), &from_host, 1),
+		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
 	      err_reply (cl, h500, lstn->err500);
 	      clean_all ();
@@ -1712,10 +1718,11 @@ do_http (thr_arg * arg)
 	{
 	  str_be (buf, MAXBUF - 1, cur_backend);
 	  end_req = cur_time ();
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	  logmsg (LOG_NOTICE,
 		  "(%lx) e500 for %s error flush to %s/%s: %s (%.3f sec)",
-		  pthread_self (), caddr, buf, request, strerror (errno),
+		  pthread_self (),
+		  addr2str (caddr, sizeof (caddr), &from_host, 1),
+		  buf, request, strerror (errno),
 		  (end_req - start_req) / 1000000.0);
 	  err_reply (cl, h500, lstn->err500);
 	  clean_all ();
@@ -1754,7 +1761,7 @@ do_http (thr_arg * arg)
 	  else
 	    strncpy (buf, cur_backend->url, sizeof (buf) - 1);
 	  redirect_reply (cl, buf, cur_backend->be_type);
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
+	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  switch (lstn->log_level)
 	    {
 	    case 0:
@@ -1801,7 +1808,7 @@ do_http (thr_arg * arg)
 	   * actual request length
 	   */
 	  log_bytes (s_res_bytes, res_bytes);
-	  addr2str (caddr, MAXBUF - 1, &from_host, 1);
+	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  str_be (buf, MAXBUF - 1, cur_backend);
 	  switch (lstn->log_level)
 	    {
@@ -1866,10 +1873,11 @@ do_http (thr_arg * arg)
 	    {
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
-	      addr2str (caddr, MAXBUF - 1, &from_host, 1);
 	      logmsg (LOG_NOTICE,
 		      "(%lx) e500 for %s response error read from %s/%s: %s (%.3f secs)",
-		      pthread_self (), caddr, buf, request, strerror (errno),
+		      pthread_self (),
+		      addr2str (caddr, sizeof (caddr), &from_host, 1),
+		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
 	      err_reply (cl, h500, lstn->err500);
 	      clean_all ();
@@ -1993,9 +2001,10 @@ do_http (thr_arg * arg)
 		  {
 		    if (errno)
 		      {
-			addr2str (caddr, MAXBUF - 1, &from_host, 1);
 			logmsg (LOG_NOTICE, "(%lx) error write to %s: %s",
-				pthread_self (), caddr, strerror (errno));
+				pthread_self (),
+				addr2str (caddr, sizeof (caddr), &from_host, 1),
+				strerror (errno));
 		      }
 		    free_headers (headers);
 		    clean_all ();
@@ -2013,9 +2022,10 @@ do_http (thr_arg * arg)
 	    {
 	      if (errno)
 		{
-		  addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		  logmsg (LOG_NOTICE, "(%lx) error flush headers to %s: %s",
-			  pthread_self (), caddr, strerror (errno));
+			  pthread_self (),
+			  addr2str (caddr, sizeof (caddr), &from_host, 1),
+			  strerror (errno));
 		}
 	      clean_all ();
 	      return;
@@ -2140,9 +2150,10 @@ do_http (thr_arg * arg)
 		    break;
 		  if (errno)
 		    {
-		      addr2str (caddr, MAXBUF - 1, &from_host, 1);
 		      logmsg (LOG_NOTICE, "(%lx) error final flush to %s: %s",
-			      pthread_self (), caddr, strerror (errno));
+			      pthread_self (),
+			      addr2str (caddr, sizeof (caddr), &from_host, 1),
+			      strerror (errno));
 		    }
 		  clean_all ();
 		  return;
@@ -2295,7 +2306,7 @@ do_http (thr_arg * arg)
        */
       memset (s_res_bytes, 0, LOG_BYTES_SIZE);
       log_bytes (s_res_bytes, res_bytes);
-      addr2str (caddr, MAXBUF - 1, &from_host, 1);
+      addr2str (caddr, sizeof (caddr), &from_host, 1);
       if (anonymise)
 	{
 	  char *last;

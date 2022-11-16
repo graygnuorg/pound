@@ -26,13 +26,13 @@
  */
 
 #include "config.h"
+#include <stddef.h>
 #include <stdio.h>
-#include <math.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <unistd.h>
 #include <pthread.h>
 #include <string.h>
-#include <stdarg.h>
 #include <inttypes.h>
 #include <time.h>
 #include <sys/time.h>
@@ -63,6 +63,16 @@
 /* on Linux this is defined in linux/un.h rather than sys/un.h - go figure */
 # define UNIX_PATH_MAX   108
 #endif
+
+#ifndef NI_MAXHOST
+# define NI_MAXHOST      1025
+#endif
+
+#ifndef NI_MAXSERV
+# define NI_MAXSERV      32
+#endif
+
+#define MAX_ADDR_BUFSIZE (NI_MAXHOST + NI_MAXSERV + 4)
 
 #if HAVE_OPENSSL_SSL_H
 # define OPENSSL_THREAD_DEFINES
@@ -385,7 +395,7 @@ void logmsg (const int, const char *, ...);
 int cpURL (char *, char *, int);
 
 /* Translate inet/inet6 address into a string */
-void addr2str (char *, const int, const struct addrinfo *, const int);
+char *addr2str (char *, int, const struct addrinfo *, int);
 
 /* Return a string representation for a back-end address */
 #define str_be(BUF, LEN, BE)    addr2str((BUF), (LEN), &(BE)->addr, 0)

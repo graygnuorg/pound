@@ -2363,13 +2363,12 @@ listener_parse_socket_from (void *call_data, void *section_data)
 
   {
     struct stringbuf sb;
-    char tmp[MAXBUF];
-    addr2str (tmp, sizeof (tmp), &lst->addr, 0);
+    char tmp[MAX_ADDR_BUFSIZE];
 
     stringbuf_init (&sb);
     stringbuf_format_locus_range (&sb, &tok->locus);
     stringbuf_add_string (&sb, ": obtained address ");
-    stringbuf_add_string (&sb, tmp);
+    stringbuf_add_string (&sb, addr2str (tmp, sizeof (tmp), &lst->addr, 0));
     logmsg (LOG_DEBUG, "%s", stringbuf_finish (&sb));
     stringbuf_free (&sb);
   }

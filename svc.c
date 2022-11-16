@@ -294,49 +294,69 @@ logmsg (const int priority, const char *fmt, ...)
   va_end (ap);
 }
 
-/* FIXME: use getnameinfo
+/*
  * Translate inet/inet6 address/port into a string
  */
-void
-addr2str (char *const res, const int res_len, const struct addrinfo *addr,
-	  const int no_port)
+char *
+addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 {
-  char buf[MAXBUF];
-  int port;
-  void *src;
+  int n;
+  char *ptr = res;
 
-  memset (res, 0, res_len);
-  switch (addr->ai_family)
+  if (res == NULL || res_len <= 0 || addr == NULL)
+    return NULL;
+
+  ptr[res_len - 1] = 0;
+  --res_len;
+
+  if (addr->ai_family == AF_UNIX)
     {
-    case AF_INET:
-      src = (void *) &((struct sockaddr_in *) addr->ai_addr)->sin_addr.s_addr;
-      port = ntohs (((struct sockaddr_in *) addr->ai_addr)->sin_port);
-      if (inet_ntop (AF_INET, src, buf, MAXBUF - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", MAXBUF - 1);
-      break;
-
-    case AF_INET6:
-      src = (void *) &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr.s6_addr;
-      port = ntohs (((struct sockaddr_in6 *) addr->ai_addr)->sin6_port);
-      if (inet_ntop (AF_INET6, src, buf, MAXBUF - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", MAXBUF - 1);
-      break;
-
-    case AF_UNIX:
-      strncpy (buf, (char *) addr->ai_addr, MAXBUF - 1);
-      port = 0;
-      break;
-
-    default:
-      strncpy (buf, "(UNKNOWN)", MAXBUF - 1);
-      port = 0;
-      break;
+      struct sockaddr_un *sun = (struct sockaddr_un *)addr->ai_addr;
+      n = addr->ai_addrlen - offsetof (struct sockaddr_un, sun_path);
+      if (n > res_len)
+	n = res_len;
+      strncpy (ptr, sun->sun_path, n);
+      if (ptr[n-1] != 0 && n < res_len)
+	ptr[n] = 0;
     }
-  if (no_port)
-    snprintf (res, res_len, "%s", buf);
   else
-    snprintf (res, res_len, "%s:%d", buf, port);
-  return;
+    {
+      char hostbuf[NI_MAXHOST];
+      char portbuf[NI_MAXSERV];
+
+      int rc = getnameinfo (addr->ai_addr, addr->ai_addrlen,
+			    hostbuf, sizeof (hostbuf),
+			    portbuf, sizeof (portbuf),
+			    NI_NUMERICHOST | NI_NUMERICSERV);
+
+      if (rc)
+	{
+	  logmsg (LOG_ERR, "getnameinfo: %s", gai_strerror (rc));
+	  strncpy (ptr, "(UNKNOWN)", res_len);
+	}
+      else
+	{
+	  if (addr->ai_family == AF_INET6)
+	    snprintf (ptr, res_len+1, "[%s]", hostbuf);
+	  else
+	    strncpy (ptr, hostbuf, res_len);
+
+	  n = strlen (ptr);
+	  ptr += n;
+	  res_len -= n;
+
+	  if (!no_port)
+	    {
+	      if (res_len)
+		{
+		  *ptr++ = ':';
+		  res_len--;
+		  strncpy (ptr, portbuf, res_len);
+		}
+	    }
+	}
+    }
+  return res;
 }
 
 /*
