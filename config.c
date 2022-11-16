@@ -702,11 +702,15 @@ input_gettkn (struct input *input, struct token **tok)
 	      stringbuf_add_char (&input->buf, c);
 	    }
 	  while ((c = input_getc (input)) != EOF && is_ident_cont (c));
-	  input_ungetc (input, c);
-	  stringbuf_add_char (&input->buf, 0);
-	  input->token.type = T_IDENT;
-	  input->token.str = input->buf.base;
-	  break;
+	  if (c == EOF || isspace (c))
+	    {
+	      input_ungetc (input, c);
+	      stringbuf_add_char (&input->buf, 0);
+	      input->token.type = T_IDENT;
+	      input->token.str = input->buf.base;
+	      break;
+	    }
+	  /* It is a literal */
 	}
 
       if (isdigit (c))
@@ -1235,7 +1239,7 @@ assign_address_internal (struct addrinfo *addr, struct token *tok)
   if (!tok)
     return PARSER_FAIL;
 
-  if (tok->type != T_LITERAL && tok->type != T_STRING)
+  if (tok->type != T_IDENT && tok->type != T_LITERAL && tok->type != T_STRING)
     {
       conf_error_at_locus_range (&tok->locus,
 				 "expected hostname or IP address, but found %s",
