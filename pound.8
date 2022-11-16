@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 15, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "November 16, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -183,7 +183,8 @@ puts itself in the background. Normal operational messages will still go to sysl
 \fB\-V\fR
 Print version:
 .B pound
-will exit immediately after printing the current version and configuration flags.
+will exit immediately after printing the current version, licensing
+terms, and configuration flags.
 .PP
 In general, any number of backend servers may be specified. Use the priority to
 affect the load distribution among unequal-performance servers.
@@ -1338,13 +1339,25 @@ End
 .br
 .SH FILES
 .TP
-\fI$localstatedir\fB/run/pound.pid\fR
-this is where
+.B /var/run/pound.pid
+This is where
 .B pound
-will attempt to record its process id.
+will attempt to record its process id.  The exact location is
+determined at compile time by the value of the \fB\-\-localstatedir\fR
+configuration switch.  It can be changed at runtime using the
+.B \-p
+command line option.   Use
+.B pound \-V
+to inspect the actual default.
 .TP
-\fI$sysconfdir\fB/pound.cfg\fR
-the default configuration file.
+.B /etc/pound.cfg\fR
+The default configuration file.  The exact location is
+determined at compile time by the value of the \fB\-\-sysconfdir\fR
+configuration switch.  It can be changed at runtime using the
+.B \-f
+command line option.  Use
+.B pound \-V
+to inspect the actual default.
 .TP
 \fI/usr/local/etc/pound/cert.pem\fR
 the certificate file(s) for HTTPS. The location must be defined in the configuration
