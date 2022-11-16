@@ -902,7 +902,7 @@ parser_find (PARSER_TABLE *tab, char const *name)
 }
 
 static int
-parser_loop (PARSER_TABLE *ptab, void *data, struct locus_range *retrange)
+parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data, struct locus_range *retrange)
 {
   struct token *tok;
   size_t i;
@@ -939,11 +939,10 @@ parser_loop (PARSER_TABLE *ptab, void *data, struct locus_range *retrange)
 	  PARSER_TABLE *ent = parser_find (ptab, tok->str);
 	  if (ent)
 	    {
-	      char *call_data = ent->data;
-	      if (!call_data)
-		call_data = data;
+	      if (ent->data)
+		call_data = ent->data;
 
-	      switch (ent->parser ((char *)call_data + ent->off, data))
+	      switch (ent->parser ((char *)call_data + ent->off, section_data))
 		{
 		case PARSER_OK:
 		  type = gettkn (&tok);
@@ -991,8 +990,6 @@ typedef struct
   unsigned be_connto;
   unsigned ignore_case;
 } POUND_DEFAULTS;
-
-static POUND_DEFAULTS pound_defaults;
 
 static int
 parse_include (void *call_data, void *section_data)
@@ -1811,7 +1808,7 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
   be->next = NULL;
   pthread_mutex_init (&be->mut, NULL);
 
-  if (parser_loop (table, be, &range))
+  if (parser_loop (table, be, dfl, &range))
     return NULL;
 
   if (check_addrinfo (&be->addr, &range, "Backend") != PARSER_OK)
@@ -1825,7 +1822,7 @@ parse_backend (void *call_data, void *section_data)
 {
   BACKEND **tail = call_data, *be;
 
-  be = parse_backend_internal (backend_parsetab, &pound_defaults);
+  be = parse_backend_internal (backend_parsetab, section_data);
   if (!be)
     return PARSER_FAIL;
 
@@ -1837,7 +1834,7 @@ static int
 parse_emergency (void *call_data, void *section_data)
 {
   BACKEND **tail = call_data, *be;
-  POUND_DEFAULTS dfl;
+  POUND_DEFAULTS dfl = *(POUND_DEFAULTS*)section_data;
 
   dfl.be_to = 120;
   dfl.be_connto = 120;
@@ -2006,7 +2003,7 @@ parse_session (void *call_data, void *section_data)
   struct locus_range range;
 
   memset (&sess, 0, sizeof (sess));
-  if (parser_loop (session_parsetab, &sess, &range))
+  if (parser_loop (session_parsetab, &sess, section_data, &range))
     return PARSER_FAIL;
 
   if (sess.type == SESS_NONE)
@@ -2142,7 +2139,7 @@ parse_service (void *call_data, void *section_data)
     }
 
   ext.ignore_case = dfl->ignore_case;
-  if (parser_loop (service_parsetab, &ext, &range))
+  if (parser_loop (service_parsetab, &ext, section_data, &range))
     return PARSER_FAIL;
   else
     {
@@ -2219,6 +2216,7 @@ static int
 listener_parse_checkurl (void *call_data, void *section_data)
 {
   LISTENER *lst = call_data;
+  POUND_DEFAULTS *dfl = section_data;
   struct token *tok;
   int rc;
 
@@ -2233,7 +2231,7 @@ listener_parse_checkurl (void *call_data, void *section_data)
 
   rc = regcomp (&lst->url_pat, tok->str,
 		REG_NEWLINE | REG_EXTENDED |
-		(pound_defaults.ignore_case ? REG_ICASE : 0));
+		(dfl->ignore_case ? REG_ICASE : 0));
   if (rc)
     {
       conf_regcomp_error (rc, &lst->url_pat, NULL);
@@ -2453,22 +2451,23 @@ static int
 parse_listen_http (void *call_data, void *section_data)
 {
   LISTENER *lst, **tail = call_data;
+  POUND_DEFAULTS *dfl = section_data;
   struct locus_range range;
 
   XZALLOC (lst);
   lst->sock = -1;
-  lst->to = pound_defaults.clnt_to;
+  lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
   lst->err413 = "Request too large.";
   lst->err414 = "Request URI is too long.";
   lst->err500 = "An internal server error occurred. Please try again later.";
   lst->err501 = "This method may not be used.";
   lst->err503 = "The service is not available. Please try again later.";
-  lst->log_level = pound_defaults.log_level;
+  lst->log_level = dfl->log_level;
   if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
     return PARSER_FAIL;
 
-  if (parser_loop (http_parsetab, lst, &range))
+  if (parser_loop (http_parsetab, lst, section_data, &range))
     return PARSER_FAIL;
 
   if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != PARSER_OK)
@@ -3001,6 +3000,7 @@ static int
 parse_listen_https (void *call_data, void *section_data)
 {
   LISTENER *lst, **tail = call_data;
+  POUND_DEFAULTS *dfl = section_data;
   struct locus_range range;
   POUND_CTX *pc;
   struct stringbuf sb;
@@ -3008,14 +3008,14 @@ parse_listen_https (void *call_data, void *section_data)
   XZALLOC (lst);
 
   lst->sock = -1;
-  lst->to = pound_defaults.clnt_to;
+  lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
   lst->err413 = "Request too large.";
   lst->err414 = "Request URI is too long.";
   lst->err500 = "An internal server error occurred. Please try again later.";
   lst->err501 = "This method may not be used.";
   lst->err503 = "The service is not available. Please try again later.";
-  lst->log_level = pound_defaults.log_level;
+  lst->log_level = dfl->log_level;
   if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
     return PARSER_FAIL;
 
@@ -3027,7 +3027,7 @@ parse_listen_https (void *call_data, void *section_data)
     SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
     SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
 
-  if (parser_loop (https_parsetab, lst, &range))
+  if (parser_loop (https_parsetab, lst, section_data, &range))
     return PARSER_FAIL;
 
   if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != PARSER_OK)
@@ -3101,18 +3101,19 @@ int
 parse_config_file (char const *file)
 {
   int res = -1;
-
-  pound_defaults.facility = LOG_DAEMON;
-  pound_defaults.log_level = 1;
-  pound_defaults.clnt_to = 10;
-  pound_defaults.be_to = 15;
-  pound_defaults.ws_to = 600;
-  pound_defaults.be_connto = 15;
-  pound_defaults.ignore_case = 0;
+  POUND_DEFAULTS pound_defaults = {
+    .facility = LOG_DAEMON,
+    .log_level = 1,
+    .clnt_to = 10,
+    .be_to = 15,
+    .ws_to = 600,
+    .be_connto = 15,
+    .ignore_case = 0
+  };
 
   if (push_input (file) == 0)
     {
-      res = parser_loop (top_level_parsetab, &pound_defaults, NULL);
+      res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
       if (res == 0)
 	{
 	  if (cur_input)

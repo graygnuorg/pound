@@ -194,6 +194,9 @@ extern int SOL_TCP;
 # define POUND_PID  LOCALSTATEDIR "/run/pound.pid"
 #endif
 
+#define ATTR_PRINTFLIKE(fmt,narg)                               \
+    __attribute__ ((__format__ (__printf__, fmt, narg)))
+
 /* matcher chain */
 typedef struct _matcher
 {
@@ -308,7 +311,7 @@ typedef struct _listener
   regex_t url_pat;		/* pattern to match the request URL against */
   char *err413, *err414, *err500, *err501, *err503;
 				/* error messages */
-  LONG max_req; 		/* max. request size */
+  LONG max_req;			/* max. request size */
   MATCHER *head_off;		/* headers to remove */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
@@ -389,7 +392,8 @@ void active_threads_decr (void);
 void *thr_http (void *);
 
 /* Log an error to the syslog or to stderr */
-void logmsg (const int, const char *, ...);
+void logmsg (const int, const char *, ...)
+  ATTR_PRINTFLIKE(2,3);
 
 /* Parse a URL, possibly decoding hexadecimal-encoded characters */
 int cpURL (char *, char *, int);
@@ -521,7 +525,9 @@ void stringbuf_free (struct stringbuf *sb);
 void stringbuf_add_char (struct stringbuf *sb, int c);
 void stringbuf_add_string (struct stringbuf *sb, char const *str);
 void stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
-void stringbuf_printf (struct stringbuf *sb, char const *fmt, ...);
+void stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
+  ATTR_PRINTFLIKE(2,3);
+
 static inline char *stringbuf_value (struct stringbuf *sb)
 {
   return sb->base;

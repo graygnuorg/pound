@@ -67,8 +67,10 @@ TESTSUITE_AT = \
  echo.at\
  errfile.at\
  headrem.at\
+ headrequire.at\
  maxrequest.at\
  rewriteloc.at\
+ url.at\
  xhttp.at
 
 noinst_PROGRAMS = 

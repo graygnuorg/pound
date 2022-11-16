@@ -47,8 +47,8 @@ use constant {
 ## Early checks
 ## ------------
 
-# Check for perl version
-eval "require 5.022_001";
+# Check for perl version.
+eval "require 5.026_003";
 if ($@) {
     print STDERR "$@";
     exit(EX_SKIP);
@@ -80,8 +80,10 @@ $SIG{CHLD} = sub {
     if (WIFEXITED($?)) {
 	if (WEXITSTATUS($?)) {
 	    print STDERR "pound terminated with code " . WEXITSTATUS($?) . "\n";
-	} elsif ($verbose) {
-	    print "pound finished\n";
+	} else {
+	    if ($verbose) {
+		print "pound finished\n";
+	    }
 	    return;
 	}
     } elsif (WIFSIGNALED($?)) {
@@ -227,7 +229,7 @@ sub runner {
     if ($pound_pid > 0) {
 	# Send all listener descriptors to pound
 	$listeners->send_fd;
-	# Wait for the thins to settle
+	# Wait for the things to settle
 	if ($verbose) {
 	    print "waiting for pound to start up\n";
 	}
@@ -596,8 +598,13 @@ use strict;
 use warnings;
 use Carp;
 use Socket qw(:DEFAULT :crlf);;
-use IO::FDPass;
 use Fcntl;
+
+eval "require IO::FDPass";
+if ($@) {
+    print STDERR "required module IO::FDPass not present\n";
+    exit(::EX_SKIP);
+}
 
 sub new {
     my ($class, $number, $ident, $keepopen) = @_;
@@ -1036,10 +1043,10 @@ Expands to the address of the I<n>th backend (I<IP>:I<PORT>).
 
 Same as B<${BACKEND0}>.
 
-=back    
+=back
 
 Numbering of listeners and backends starts from 0.
-    
+
 The B<server> statement can be used to specify the B<pound> listener to
 send the requests to.  It has the form
 
@@ -1056,7 +1063,7 @@ Each B<Backend> statement in the configuration file causes creation of
 a HTTP server behind it.  These built-in servers currently two endpoints:
 
 =head2 /echo
-    
+
 Any requests with URLs under that endpoint are replied with exact copy of the
 incoming requests, with the addition of the following headers:
 
@@ -1064,8 +1071,8 @@ incoming requests, with the addition of the following headers:
 
 =item B<x-backend-number>
 
-Ordinal number of the backend in configuration (0-based).    
-    
+Ordinal number of the backend in configuration (0-based).
+
 =item B<x-backend-ident>
 
 Identifier of the backend, in form B<I<FILE>:I<LINE>>, where I<FILE> is the
@@ -1078,8 +1085,8 @@ Copy of the original URI.
 
 =item B<x-orig-header->I<header>
 
-The value of the header I<header> in the request.    
-    
+The value of the header I<header> in the request.
+
 =back
 
 =head2 /redirect
@@ -1096,8 +1103,8 @@ will get the following response:
     HTTP/1.1 301 Moved permanently
     Location: https://example.org/echo/foo?bar=0
 
-This backend is used to test the B<RewriteLocation> functionality.    
-    
+This backend is used to test the B<RewriteLocation> functionality.
+
 =head1 FILES
 
 =over 4

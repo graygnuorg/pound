@@ -588,7 +588,7 @@ main (const int argc, char **argv)
   struct protoent *pe;
 #endif
 
-  (void) umask (077);
+  umask (077);
   srandom (getpid ());
 
   /* SSL stuff */
@@ -668,7 +668,7 @@ main (const int argc, char **argv)
       memset (&ctrl, 0, sizeof (ctrl));
       ctrl.sun_family = AF_UNIX;
       strncpy (ctrl.sun_path, ctrl_name, sizeof (ctrl.sun_path) - 1);
-      (void) unlink (ctrl.sun_path);
+      unlink (ctrl.sun_path);
       if ((control_sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
 	{
 	  logmsg (LOG_ERR, "Control \"%s\" create: %s", ctrl.sun_path,
@@ -717,8 +717,7 @@ main (const int argc, char **argv)
 	  exit (1);
 	}
       opt = 1;
-      setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, (void *) &opt,
-		  sizeof (opt));
+      setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
       if (bind (lstn->sock, lstn->addr.ai_addr,
 		(socklen_t) lstn->addr.ai_addrlen) < 0)
 	{
