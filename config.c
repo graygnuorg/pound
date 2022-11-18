@@ -939,10 +939,8 @@ parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data, struct loc
 	  PARSER_TABLE *ent = parser_find (ptab, tok->str);
 	  if (ent)
 	    {
-	      if (ent->data)
-		call_data = ent->data;
-
-	      switch (ent->parser ((char *)call_data + ent->off, section_data))
+	      void *data = ent->data ? ent->data : call_data;
+	      switch (ent->parser ((char*)data + ent->off, section_data))
 		{
 		case PARSER_OK:
 		  type = gettkn (&tok);
@@ -1961,7 +1959,7 @@ session_type_parser (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_IDENT)) == NULL)
     return PARSER_FAIL;
 
-  if (kw_to_tok (kwtab, tok->str, 0, &n))
+  if (kw_to_tok (kwtab, tok->str, 1, &n))
     {
       conf_error ("%s", "Unknown Session type");
       return PARSER_FAIL;
