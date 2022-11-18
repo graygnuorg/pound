@@ -1,5 +1,6 @@
 .dir-locals.el
 .gdbinit
+ChangeLog
 Makefile
 Makefile.in
 install-sh

@@ -67,4 +67,19 @@ poundctl_SOURCES=poundctl.c
 
 dist_man_MANS=pound.8 poundctl.8
 
-EXTRA_DIST = COPYING FAQ CHANGELOG
+EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README.md AUTHORS THANKS
+
+.PHONY: ChangeLog
+ChangeLog:
+	$(AM_V_GEN)if test -d .git; then                                    \
+	   (git log --pretty='format:%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
+                    --date=short;                                           \
+            echo "";                                                        \
+            echo "Local Variables:";                                        \
+            echo "mode: change-log";                                        \
+            echo "version-control: never";                                  \
+            echo "buffer-read-only: t";                                     \
+            echo "End:";                                                    \
+            echo "";                                                        \
+            sed -n -e '2,/^$$/s/^##//p' Makefile.am) > ChangeLog;           \
+	fi
