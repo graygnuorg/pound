@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 16, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "November 19, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1058,285 +1058,174 @@ else).
 .SH EXAMPLES
 To translate HTTPS requests to a local HTTP server (assuming your network address
 is 192.0.2.1):
-.IP
+.PP
+.EX
 ListenHTTPS
-.br
     Address 192.0.2.1
-.br
     Port    443
-.br
     Cert    "/etc/pound/server.pem"
-.br
-
-.br
     Service
-.br
 	Backend
-.br
 	    Address 127.0.0.1
-.br
 	    Port    80
-.br
 	End
-.br
     End
-.br
 End
+.EE
 .PP
 To distribute the HTTP/HTTPS requests to three Web servers, where the third one
 is a newer and faster machine:
-.IP
+.PP
+.EX
 ListenHTTP
-.br
     Address 192.0.2.1
-.br
     Port    80
-.br
 End
-.br
-ListenHTTPS
-.br
-    Address 192.0.2.1
-.br
-    Port    443
-.br
-    Cert    "/etc/pound/server.pem"
-.br
-End
-.br
 
-.br
-Service
-.br
-    Backend
-.br
-	Address 192.168.0.10
-.br
-	Port    80
-.br
-    End
-.br
-    Backend
-.br
-	Address 192.168.0.11
-.br
-	Port    80
-.br
-    End
-.br
-    Backend
-.br
-	Address 192.168.0.12
-.br
-	Port    80
-.br
-	Priority 3
-.br
-    End
-.br
+ListenHTTPS
+    Address 192.0.2.1
+    Port    443
+    Cert    "/etc/pound/server.pem"
 End
+
+Service
+    Backend
+	Address 192.168.0.10
+	Port    80
+    End
+
+    Backend
+	Address 192.168.0.11
+	Port    80
+    End
+
+    Backend
+	Address 192.168.0.12
+	Port    80
+	Priority 3
+    End
+End
+.EE
 .PP
 To separate between image requests and other Web content and send all requests
 for a specific URL to a secure server:
-.IP
-ListenHTTP
-.br
-    Address 192.0.2.1
-.br
-    Port    80
-.br
-End
-.br
-
-.br
-# Images server(s)
-.br
-Service
-.br
-    URL ".*.(jpg|gif)"
-.br
-    Backend
-.br
-	Address 192.168.0.12
-.br
-	Port    80
-.br
-    End
-.br
-End
-.br
-
-.br
-# redirect all requests for /forbidden
-.br
-Service
-.br
-    Url         "/forbidden.*"
-.br
-    Redirect    "https://xyzzy.com"
-.br
-End
-.br
-
-.br
-# Catch-all server(s)
-.br
-Service
-.br
-    Backend
-.br
-	Address 192.168.0.10
-.br
-	Port    80
-.br
-    End
-.br
-    Backend
-.br
-	Address 192.168.0.11
-.br
-	Port    80
-.br
-    End
-.br
-    Session
-.br
-	Type    BASIC
-.br
-	TTL     300
-.br
-    End
-.br
-End
 .PP
-Here is a more complex example: assume your static images (GIF/JPEG) are to be served
-from a single backend 192.168.0.10. In addition, 192.168.0.11 is to do the
-hosting for www.myserver.com with URL-based sessions, and 192.168.0.20 (a 1GHz PIII)
-and 192.168.0.21 (800Mhz Duron) are for all other requests (cookie-based sessions).
-The logging will be done by the backend servers.  The configuration file may look like this:
-.IP
-User        "nobody"
-.br
-Group       "nogroup"
-.br
-RootJail    "/var/pound/jail"
-.br
-Alive       60
-.br
-LogLevel    0
-.br
-
-.br
-# Main listening ports
-.br
+.EX
 ListenHTTP
-.br
     Address 192.0.2.1
-.br
     Port    80
-.br
-    Client  10
-.br
 End
-.br
-ListenHTTPS
-.br
-    Address 192.0.2.1
-.br
-    Port    443
-.br
-    Cert    "/etc/pound/pound.pem"
-.br
-    Client  20
-.br
-End
-.br
 
-.br
-# Image server
-.br
+# Images server(s)
 Service
-.br
     URL ".*.(jpg|gif)"
-.br
     Backend
-.br
+	Address 192.168.0.12
+	Port    80
+    End
+End
+
+# redirect all requests for /forbidden
+
+Service
+    Url         "/forbidden.*"
+    Redirect    "https://xyzzy.com"
+End
+
+# Catch-all server(s)
+Service
+    Backend
 	Address 192.168.0.10
-.br
 	Port    80
-.br
     End
-.br
-End
-.br
 
-.br
-# Virtual host www.myserver.com
-.br
-Service
-.br
-    URL         ".*sessid=.*"
-.br
-    HeadRequire "Host:.*www.myserver.com.*"
-.br
     Backend
-.br
 	Address 192.168.0.11
-.br
 	Port    80
-.br
     End
-.br
-    Session
-.br
-	Type    URL
-.br
-	ID      "sessid"
-.br
-	TTL     120
-.br
-    End
-.br
-End
-.br
 
-.br
-# Everybody else
-.br
-Service
-.br
-    Backend
-.br
-	Address 192.168.0.20
-.br
-	Port    80
-.br
-	Priority 5
-.br
-    End
-.br
-    Backend
-.br
-	Address 192.168.0.21
-.br
-	Port    80
-.br
-	Priority 4
-.br
-    End
-.br
     Session
-.br
-	Type    COOKIE
-.br
-	ID      "userid"
-.br
-	TTL     180
-.br
+	Type    BASIC
+	TTL     300
     End
-.br
 End
-.br
+.EE
+.PP
+Here is a more complex example: assume your static images (GIF/JPEG)
+are to be served from a single backend 192.168.0.10. In addition,
+192.168.0.11 is to do the hosting for \fIwww.myserver.com\fR with
+URL-based sessions, and 192.168.0.20 (a 1GHz PIII) and 192.168.0.21
+(800Mhz Duron) are for all other requests (cookie-based sessions).
+The logging will be done by backend servers.  The configuration file
+may look like this:
+.PP
+.EX
+User        "nobody"
+Group       "nogroup"
+RootJail    "/var/pound/jail"
+Alive       60
+LogLevel    0
+
+# Main listening ports
+ListenHTTP
+    Address 192.0.2.1
+    Port    80
+    Client  10
+End
+
+ListenHTTPS
+    Address 192.0.2.1
+    Port    443
+    Cert    "/etc/pound/pound.pem"
+    Client  20
+End
+
+# Image server
+Service
+    URL ".*.(jpg|gif)"
+    Backend
+	Address 192.168.0.10
+	Port    80
+    End
+End
+
+# Virtual host www.myserver.com
+Service
+    URL         ".*sessid=.*"
+    HeadRequire "Host:.*www.myserver.com.*"
+    Backend
+	Address 192.168.0.11
+	Port    80
+    End
+
+    Session
+	Type    URL
+	ID      "sessid"
+	TTL     120
+    End
+End
+
+# Everybody else
+Service
+    Backend
+	Address 192.168.0.20
+	Port    80
+	Priority 5
+    End
+
+    Backend
+	Address 192.168.0.21
+	Port    80
+	Priority 4
+    End
+
+    Session
+	Type    COOKIE
+	ID      "userid"
+	TTL     180
+    End
+End
+.EE
 .SH FILES
 .TP
 .B /var/run/pound.pid

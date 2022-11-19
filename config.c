@@ -1305,8 +1305,11 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
       return PARSER_FAIL;
     }
 
-  hints = *addr;
+  memset (&hints, 0, sizeof(hints));
   hints.ai_flags = 0;
+  hints.ai_family = addr->ai_family;
+  hints.ai_socktype = addr->ai_socktype;
+  hints.ai_protocol = addr->ai_protocol;
   rc = getaddrinfo (NULL, tok->str, &hints, &res);
   if (rc != 0)
     {

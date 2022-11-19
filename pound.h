@@ -318,7 +318,6 @@ typedef struct _listener
   int disabled;			/* true if the listener is disabled */
   int log_level;		/* log level for this listener */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
-  int disable_ssl_v2;		/* Disable SSL version 2 */
   SERVICE *services;
   struct _listener *next;
 

@@ -46,6 +46,14 @@ does not access the hard-disk at all (except for reading certificate
 files on start, if required) and should thus pose no security threat
 to any machine.
 
+## Notice On Project Versioning
+
+I took over __pound__ development at its 2.x branch.  The branch 3.x
+which emerged for a short time before the original project was
+abandoned I consider a failed experiment. To ensure consistent
+versioning and avoid confusion, my versioning of __pound__ starts with
+4.0.
+
 ## What Pound Is Not:
 
 1. __Pound__ is not a Web server: it serves no content itself, it only
@@ -53,6 +61,11 @@ to any machine.
    actual web servers (*backends*).
 2. __Pound__ is not a Web accelerator: no caching is done --
    every request is passed to a backend server "as is".
+
+## Documentation
+
+Documentation in manpage format is available in the distribution.  A
+copy of the documentation is [available online](https://www.gnu.org.ua/software/pound/pound.html).
 
 ## Build requirements
 
@@ -249,7 +262,8 @@ so, run the following command as root:
 __Pound__ looks for its configuration file in a location defined at
 [compile time](#user-content-compilation], normally `/etc/pound.cfg`,
 or `/usr/local/etc/pound.cfg`.  It's syntax is discussed in detail
-in the manual.  Here we will describe some example configurations.
+in the [manual](https://www.gnu.org.ua/software/pound/pound.html).
+Here we will describe some example configurations.
 
 Any __pound__ configuration must contain at least two parts:
 a `ListenHTTP` (or `ListenHTTPS`) section, that declares a *frontend*,
