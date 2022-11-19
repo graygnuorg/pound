@@ -728,25 +728,21 @@ your
 does contain a path, then the request path is ignored.
 .IP
 Examples: if you specified
-.br
-
-.br
-    Redirect "http://abc.example"
-.br
-
-.br
+.IP
+.EX
+Redirect "http://abc.example"
+.EE
+.IP
 and the client requested
 .I http://xyz/a/b/c
 then it will be redirected to
-.IR "http://abc.example/a/b/c",
+.IR "http://abc.example/a/b/c" ,
 but if you specified
-.br
-
-.br
-    Redirect "http://abc.example/index.html"
-.br
-
-.br
+.IP
+.EX
+Redirect "http://abc.example/index.html"
+.EE
+.IP
 it will be sent to
 .IR "http://abc.example/index.html".
 .IP
@@ -1248,16 +1244,16 @@ command line option.  Use
 .B pound \-V
 to inspect the actual default.
 .TP
-\fI/usr/local/etc/pound/cert.pem\fR
+.B /usr/local/etc/pound/cert.pem
 the certificate file(s) for HTTPS. The location must be defined in the configuration
 file - this is only a suggestion. The file must contain a PEM-encoded certificate,
 optionally a certificate chain from a known Certificate Authority to your server certificate
 and a PEM-encoded private key (not password protected). See
-.B openssl (1)
+.BR openssl (1)
 for details. This file should be well protected, lest someone gets your server
 private key.
 .SH AUTHOR
-Written by Robert Segall, Apsis GmbH.
+Written by Robert Segall (Apsis GmbH), and Sergey Poznyakoff.
 .SH "REPORTING BUGS"
 Report bugs to <gray+pound@gnu.org.ua>.
 .SH COPYRIGHT
