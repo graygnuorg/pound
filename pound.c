@@ -24,7 +24,8 @@
  * EMail: roseg@apsis.ch
  */
 
-#include    "pound.h"
+#include "pound.h"
+#include "extern.h"
 
 /* common variables */
 char *user;			/* user to run as */
@@ -43,8 +44,10 @@ int control_sock = -1;		/* control socket */
 unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
 unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */
 
-SERVICE *services;		/* global services (if any) */
-LISTENER *listeners;		/* all available listeners */
+SERVICE_HEAD services = SLIST_HEAD_INITIALIZER (services);
+                                /* global services (if any) */
+LISTENER_HEAD listeners = SLIST_HEAD_INITIALIZER (listeners);
+				/* all available listeners */
 int n_listeners;                /* Number of listeners */
 
 regex_t HEADER,			/* Allowed header */
@@ -118,7 +121,7 @@ l_id (void)
 /*
  * work queue stuff
  */
-static thr_arg *first = NULL, *last = NULL;
+static THR_ARG_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
 static pthread_cond_t arg_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t active_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t arg_mut = PTHREAD_MUTEX_INITIALIZER;
@@ -130,25 +133,18 @@ unsigned active_threads; /* Number of threads currently active, i.e processing
  * add a request to the queue
  */
 int
-put_thr_arg (thr_arg * arg)
+put_thr_arg (THR_ARG *arg)
 {
-  thr_arg *res;
+  THR_ARG *res;
 
-  if ((res = malloc (sizeof (thr_arg))) == NULL)
+  if ((res = malloc (sizeof (res[0]))) == NULL)
     {
       logmsg (LOG_WARNING, "thr_arg malloc");
       return -1;
     }
-  memcpy (res, arg, sizeof (thr_arg));
-  res->next = NULL;
+  memcpy (res, arg, sizeof (*res));
   pthread_mutex_lock (&arg_mut);
-  if (last == NULL)
-    first = last = res;
-  else
-    {
-      last->next = res;
-      last = last->next;
-    }
+  SLIST_PUSH (&thr_head, res, next);
   pthread_cond_signal (&arg_cond);
   pthread_mutex_unlock (&arg_mut);
   return 0;
@@ -157,10 +153,10 @@ put_thr_arg (thr_arg * arg)
 /*
  * get a request from the queue
  */
-thr_arg *
+THR_ARG *
 get_thr_arg (void)
 {
-  thr_arg *res;
+  THR_ARG *res;
 
   pthread_mutex_lock (&arg_mut);
 
@@ -168,14 +164,13 @@ get_thr_arg (void)
    * Wait until something becomes available in the queue.  Spurious wakeups
    * from pthread_cond_wait can occur, hence the need for a loop.
    */
-  while (first == NULL)
+  while (SLIST_EMPTY (&thr_head))
     pthread_cond_wait (&arg_cond, &arg_mut);
 
   /* Dequeue the head element */
-  res = first;
-  if ((first = first->next) == NULL)
-    last = NULL;
-  else
+  res = SLIST_FIRST (&thr_head);
+  SLIST_SHIFT (&thr_head, next);
+  if (!SLIST_EMPTY (&thr_head))
     /*
      * If there's still more in the queue, signal other threads, so they
      * can have their share.
@@ -197,12 +192,12 @@ get_thr_arg (void)
 int
 get_thr_qlen (void)
 {
-  int res;
-  thr_arg *tap;
+  int res = 0;
+  THR_ARG *tap;
 
   pthread_mutex_lock (&arg_mut);
-  for (res = 0, tap = first; tap != NULL; tap = tap->next, res++)
-    ;
+  SLIST_FOREACH (tap, &thr_head, next)
+    res++;
   pthread_mutex_unlock (&arg_mut);
   return res;
 }
@@ -240,7 +235,7 @@ static void
 listener_cleanup (void *ptr)
 {
   LISTENER *lstn;
-  for (lstn = listeners; lstn; lstn = lstn->next)
+  SLIST_FOREACH (lstn, &listeners, next)
     close (lstn->sock);
 }
 
@@ -257,24 +252,30 @@ thr_dispatch (void *unused)
       logmsg (LOG_ERR, "Out of memory for poll - aborted");
       exit (1);
     }
-  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
-    polls[i].fd = lstn->sock;
+
+  i = 0;
+  SLIST_FOREACH (lstn, &listeners, next)
+    polls[i++].fd = lstn->sock;
 
   pthread_cleanup_push (listener_cleanup, NULL);
   for (;;)
     {
-      for (lstn = listeners, i = 0; i < n_listeners; lstn = lstn->next, i++)
+      i = 0;
+      SLIST_FOREACH (lstn, &listeners, next)
 	{
 	  polls[i].events = POLLIN | POLLPRI;
 	  polls[i].revents = 0;
+	  i++;
 	}
+
       if (poll (polls, n_listeners, -1) < 0)
 	{
 	  logmsg (LOG_WARNING, "poll: %s", strerror (errno));
 	}
       else
 	{
-	  for (lstn = listeners, i = 0; lstn; lstn = lstn->next, i++)
+	  i = 0;
+	  SLIST_FOREACH (lstn, &listeners, next)
 	    {
 	      if (polls[i].revents & (POLLIN | POLLPRI))
 		{
@@ -293,7 +294,7 @@ thr_dispatch (void *unused)
 		    }
 		  else
 		    {
-		      thr_arg arg;
+		      THR_ARG arg;
 
 		      if (lstn->disabled)
 			{
@@ -320,6 +321,7 @@ thr_dispatch (void *unused)
 			close (clnt);
 		    }
 		}
+	      i++;
 	    }
 	}
     }
@@ -686,8 +688,8 @@ main (const int argc, char **argv)
     }
 
   /* open listeners */
-  for (lstn = listeners, n_listeners = 0; lstn;
-       lstn = lstn->next, n_listeners++)
+  n_listeners = 0;
+  SLIST_FOREACH (lstn, &listeners, next)
     {
       /* prepare the socket */
       int opt;
@@ -727,6 +729,7 @@ main (const int argc, char **argv)
 	  exit (1);
 	}
       listen (lstn->sock, 512);
+      n_listeners++;
     }
 
   /* set uid if necessary */

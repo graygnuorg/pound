@@ -41,7 +41,7 @@ install-exec-hook:
 		done; \
 	fi
 
-noinst_HEADERS=pound.h config.h
+noinst_HEADERS=pound.h extern.h config.h
 
 if OPENSSL_V3
 DHSRC =

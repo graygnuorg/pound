@@ -122,45 +122,6 @@
 # define ATOL    atol
 #endif
 
-#ifndef NO_EXTERNALS
-/*
- * Global variables needed by everybody
- */
-
-extern char *progname;          /* program name */
-
-extern char *user,		/* user to run as */
- *group,			/* group to run as */
- *root_jail,			/* directory to chroot to */
- *pid_name,			/* file to record pid in */
- *ctrl_name;			/* control socket name */
-
-extern unsigned numthreads,	/* number of worker threads */
-  grace;			/* grace period before shutdown */
-
-extern int anonymise;		/* anonymise client address */
-extern unsigned alive_to;	/* check interval for resurrection */
-extern int daemonize;		/* run as daemon */
-extern int enable_supervisor;   /* run supervisor process */
-extern int log_facility;	/* log facility to use */
-extern int print_log;		/* print log messages to stdout/stderr */
-extern int control_sock;	/* control socket */
-
-extern regex_t HEADER,		/* Allowed header */
-  CONN_UPGRD,			/* upgrade in connection header */
-  CHUNK_HEAD,			/* chunk header line */
-  RESP_SKIP,			/* responses for which we skip response */
-  RESP_IGN,			/* responses for which we ignore content */
-  LOCATION,			/* the host we are redirected to */
-  AUTHORIZATION;		/* the Authorisation header */
-
-#ifndef  SOL_TCP
-/* for systems without the definition */
-extern int SOL_TCP;
-#endif
-
-#endif /* NO_EXTERNALS */
-
 #ifndef DEFAULT_NUMTHREADS
 # define DEFAULT_NUMTHREADS 128
 #endif
@@ -196,13 +157,72 @@ extern int SOL_TCP;
 
 #define ATTR_PRINTFLIKE(fmt,narg)                               \
     __attribute__ ((__format__ (__printf__, fmt, narg)))
+
+/*
+ * Singly-linked list macros.
+ */
 
+#define SLIST_HEAD(name, type)			\
+  struct name					\
+    {						\
+      struct type *sl_first;			\
+      struct type *sl_last;			\
+    }
+
+#define SLIST_HEAD_INITIALIZER(head)		\
+  { NULL, NULL }
+
+#define SLIST_ENTRY(type)			\
+  struct type *
+
+#define SLIST_INIT(head)				\
+  do							\
+    {							\
+      (head)->sl_first = (head)->sl_last = NULL;	\
+    }							\
+  while (0)
+
+/* Append elt to the tail of the list. */
+#define SLIST_PUSH(head, elt, field)			\
+  do							\
+    {							\
+      if ((head)->sl_last)				\
+	(head)->sl_last->field = (elt);			\
+      else						\
+	(head)->sl_first = (elt);			\
+      (head)->sl_last = (elt);				\
+    }							\
+  while (0)
+
+/* Remove element from the head of the list. */
+#define SLIST_SHIFT(head, field)					\
+  do									\
+    {									\
+      if ((head)->sl_first != NULL &&					\
+	  ((head)->sl_first = (head)->sl_first->field) == NULL)		\
+	(head)->sl_last = NULL;						\
+    }									\
+  while (0)
+
+#define SLIST_FOREACH(var, head, field)		\
+  for ((var) = (head)->sl_first; (var); (var) = (var)->field)
+
+#define SLIST_COPY(dst, src)			\
+  *dst = *src
+
+#define SLIST_FIRST(head) ((head)->sl_first)
+#define SLIST_EMPTY(head) (SLIST_FIRST (head) == NULL)
+#define SLIST_NEXT(elt, field) ((elt)->field)
+
+
 /* matcher chain */
 typedef struct _matcher
 {
   regex_t pat;		/* pattern to match the request/header against */
-  struct _matcher *next;
+  SLIST_ENTRY (_matcher) next;
 } MATCHER;
+
+typedef SLIST_HEAD(,_matcher) MATCHER_HEAD;
 
 /* back-end types */
 typedef enum
@@ -237,8 +257,10 @@ typedef struct _backend
   int alive;			/* false if the back-end is dead */
   int resurrect;		/* this back-end is to be resurrected */
   int disabled;			/* true if the back-end is disabled */
-  struct _backend *next;
+  SLIST_ENTRY (_backend) next;
 } BACKEND;
+
+typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
 
 typedef struct _tn
 {
@@ -262,10 +284,10 @@ DECLARE_LHASH_OF (TABNODE);
 typedef struct _service
 {
   char name[KEY_SIZE + 1];	/* symbolic name */
-  MATCHER *url,			/* request matcher */
-   *req_head,			/* required headers */
-   *deny_head;			/* forbidden headers */
-  BACKEND *backends;
+  MATCHER_HEAD url;		/* request matcher */
+  MATCHER_HEAD req_head;	/* required headers */
+  MATCHER_HEAD deny_head;	/* forbidden headers */
+  BACKEND_HEAD backends;
   BACKEND *emergency;
   int abs_pri;			/* abs total priority for all back-ends */
   int tot_pri;			/* total priority for current back-ends */
@@ -275,17 +297,15 @@ typedef struct _service
   regex_t sess_start;		/* pattern to identify the session data */
   regex_t sess_pat;		/* pattern to match the session data */
 #if OPENSSL_VERSION_NUMBER >= 0x10000000L
-    LHASH_OF (TABNODE) * sessions;	/* currently active sessions */
+  LHASH_OF (TABNODE) * sessions;	/* currently active sessions */
 #else
   LHASH *sessions;		/* currently active sessions */
 #endif
   int disabled;			/* true if the service is disabled */
-  struct _service *next;
+  SLIST_ENTRY (_service) next;
 } SERVICE;
 
-#ifndef NO_EXTERNALS
-extern SERVICE *services;	/* global services (if any) */
-#endif /* NO_EXTERNALS */
+typedef SLIST_HEAD (,_service) SERVICE_HEAD;
 
 typedef struct _pound_ctx
 {
@@ -293,15 +313,17 @@ typedef struct _pound_ctx
   char *server_name;
   unsigned char **subjectAltNames;
   unsigned int subjectAltNameCount;
-  struct _pound_ctx *next;
+  SLIST_ENTRY (_pound_ctx) next;
 } POUND_CTX;
+
+typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 
 /* Listener definition */
 typedef struct _listener
 {
   struct addrinfo addr;		/* IPv4/6 address */
   int sock;			/* listening socket */
-  POUND_CTX *ctx;		/* CTX for SSL connections */
+  POUND_CTX_HEAD ctx_head;	/* CTX for SSL connections */
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   char *add_head;		/* extra SSL header */
@@ -312,14 +334,14 @@ typedef struct _listener
   char *err413, *err414, *err500, *err501, *err503;
 				/* error messages */
   LONG max_req;			/* max. request size */
-  MATCHER *head_off;		/* headers to remove */
+  MATCHER_HEAD head_off;	/* headers to remove */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
   int log_level;		/* log level for this listener */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
-  SERVICE *services;
-  struct _listener *next;
+  SERVICE_HEAD services;
+  SLIST_ENTRY (_listener) next;
 
   /* Used during configuration parsing */
   int ssl_op_enable;
@@ -327,21 +349,27 @@ typedef struct _listener
   int has_other;
 } LISTENER;
 
-#ifndef NO_EXTERNALS
-extern LISTENER *listeners;	/* all available listeners */
-#endif /* NO_EXTERNALS */
+typedef SLIST_HEAD(,_listener) LISTENER_HEAD;
 
 typedef struct _thr_arg
 {
   int sock;
   LISTENER *lstn;
   struct addrinfo from_host;
-  struct _thr_arg *next;
-} thr_arg;			/* argument to processing threads: socket, origin */
+  SLIST_ENTRY(_thr_arg) next;
+} THR_ARG;		/* argument to processing threads: socket, origin */
+
+typedef SLIST_HEAD(,_thr_arg) THR_ARG_HEAD;
 
 /* Track SSL handshare/renegotiation so we can reject client-renegotiations. */
 typedef enum
-{ RENEG_INIT = 0, RENEG_REJECT, RENEG_ALLOW, RENEG_ABORT } RENEG_STATE;
+  {
+    RENEG_INIT = 0,
+    RENEG_REJECT,
+    RENEG_ALLOW,
+    RENEG_ABORT
+  }
+  RENEG_STATE;
 
 /* Header types */
 #define HEADER_ILLEGAL              -1
@@ -379,9 +407,9 @@ typedef struct
 } CTRL_CMD;
 
 /* add a request to the queue */
-int put_thr_arg (thr_arg *);
+int put_thr_arg (THR_ARG *);
 /* get a request from the queue */
-thr_arg *get_thr_arg (void);
+THR_ARG *get_thr_arg (void);
 /* get the current queue length */
 int get_thr_qlen (void);
 /* Decrement number of active threads. */

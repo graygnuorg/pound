@@ -25,7 +25,8 @@
  * EMail: roseg@apsis.ch
  */
 
-#include    "pound.h"
+#include "pound.h"
+#include "extern.h"
 
 /*
  * HTTP error replies
@@ -703,7 +704,7 @@ log_bytes (char *res, const LONG cnt)
  * handle an HTTP request
  */
 void
-do_http (thr_arg * arg)
+do_http (THR_ARG *arg)
 {
   int cl_11, be_11, res, chunked, n, sock, no_cont, skip, conn_closed,
     force_10, sock_proto, is_rpc, is_ws;
@@ -750,12 +751,12 @@ do_http (thr_arg * arg)
   ba2.reneg_state = &reneg_state;
   ba1.timeout = 0;
   ba2.timeout = 0;
-  from_host = ((thr_arg *) arg)->from_host;
+  from_host = arg->from_host;
   memcpy (&from_host_addr, from_host.ai_addr, from_host.ai_addrlen);
   from_host.ai_addr = (struct sockaddr *) &from_host_addr;
-  lstn = ((thr_arg *) arg)->lstn;
-  sock = ((thr_arg *) arg)->sock;
-  free (((thr_arg *) arg)->from_host.ai_addr);
+  lstn = arg->lstn;
+  sock = arg->sock;
+  free (arg->from_host.ai_addr);
   free (arg);
 
   if (lstn->allow_client_reneg)
@@ -788,9 +789,9 @@ do_http (thr_arg * arg)
   ba1.timeout = lstn->to;
   set_callback (cl, &ba1);
 
-  if (lstn->ctx != NULL)
+  if (!SLIST_EMPTY (&lstn->ctx_head))
     {
-      if ((ssl = SSL_new (lstn->ctx->ctx)) == NULL)
+      if ((ssl = SSL_new (SLIST_FIRST (&lstn->ctx_head)->ctx)) == NULL)
 	{
 	  logmsg (LOG_WARNING, "(%lx) SSL_new: failed", pthread_self ());
 	  BIO_reset (cl);
@@ -812,6 +813,7 @@ do_http (thr_arg * arg)
       cl = bb;
       if (BIO_do_handshake (cl) <= 0)
 	{
+	  logmsg (LOG_DEBUG, "NO CERT");
 	  /*
 	   * no need to log every client without a certificate...
 	   * addr2str(caddr, sizeof (caddr), &from_host, 1);
@@ -1053,14 +1055,14 @@ do_http (thr_arg * arg)
 	      break;
 	    }
 
-	  if (headers_ok[n] && lstn->head_off)
+	  if (headers_ok[n] && !SLIST_EMPTY (&lstn->head_off))
 	    {
 	      /*
 	       * maybe header to be removed
 	       */
 	      MATCHER *m;
 
-	      for (m = lstn->head_off; m; m = m->next)
+	      SLIST_FOREACH (m, &lstn->head_off, next)
 		if (!(headers_ok[n] = regexec (&m->pat, headers[n], 0, NULL, 0)))
 		  break;
 	    }
@@ -1675,7 +1677,9 @@ do_http (thr_arg * arg)
 	  /*
 	   * find the socket BIO in the chain
 	   */
-	  if ((cl_unbuf = BIO_find_type (cl, lstn->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
+	  if ((cl_unbuf = BIO_find_type (cl,
+					 SLIST_EMPTY (&lstn->ctx_head)
+					   ? BIO_TYPE_SOCKET : BIO_TYPE_SSL)) == NULL)
 	    {
 	      logmsg (LOG_WARNING, "(%lx) error get unbuffered: %s",
 		      pthread_self (), strerror (errno));
@@ -2233,7 +2237,9 @@ do_http (thr_arg * arg)
 		   * find the socket BIO in the chain
 		   */
 		  if ((cl_unbuf =
-		       BIO_find_type (cl, lstn->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
+		       BIO_find_type (cl,
+				      SLIST_EMPTY (&lstn->ctx_head)
+				       ? BIO_TYPE_SOCKET : BIO_TYPE_SSL)) == NULL)
 		    {
 		      logmsg (LOG_WARNING, "(%lx) error get unbuffered: %s",
 			      pthread_self (), strerror (errno));
@@ -2399,7 +2405,7 @@ do_http (thr_arg * arg)
 void *
 thr_http (void *dummy)
 {
-  thr_arg *arg;
+  THR_ARG *arg;
 
   for (;;)
     {

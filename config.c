@@ -18,6 +18,7 @@
  */
 
 #include "pound.h"
+#include "extern.h"
 #include <openssl/x509v3.h>
 #include <assert.h>
 
@@ -1414,22 +1415,6 @@ parse_SSLEngine (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
-
-#define LIST_APPEND(type, tail, ent)                    \
-  do							\
-    {							\
-      if (*(tail) == NULL)				\
-	*(tail) = ent;					\
-      else						\
-	{						\
-	  type *x;					\
-	  for (x = *(tail); x->next; x = x->next)	\
-	    ;						\
-	  x->next = ent;				\
-	}						\
-    }							\
-  while (0)
-
 
 /*
  * basic hashing function, based on fmv
@@ -1475,18 +1460,15 @@ IMPLEMENT_LHASH_COMP_FN (t_cmp, const TABNODE *)
 struct token_ent
 {
   struct token tok;
-  struct token_ent *next;
+  SLIST_ENTRY (token_ent) next;
 };
 
-typedef struct
-{
-  struct token_ent *head, *tail;
-} TOKEN_LIST;
+typedef SLIST_HEAD (,token_ent) TOKEN_HEAD;
 
 static int
 assign_token_list (void *call_data, void *section_data)
 {
-  TOKEN_LIST *tl = call_data;
+  TOKEN_HEAD *head = call_data;
   struct token_ent *ent;
   struct token *tok = gettkn_expect (T_STRING);
 
@@ -1496,11 +1478,7 @@ assign_token_list (void *call_data, void *section_data)
   XZALLOC (ent);
   ent->tok = *tok;
   ent->tok.str = xstrdup (ent->tok.str);
-  if (tl->tail)
-    tl->tail->next = ent;
-  else
-    tl->head = ent;
-  tl->tail = ent;
+  SLIST_PUSH (head, ent, next);
 
   return PARSER_OK;
 }
@@ -1806,7 +1784,6 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
   be->priority = 5;
   memset (&be->ha_addr, 0, sizeof (be->ha_addr));
   be->url = NULL;
-  be->next = NULL;
   pthread_mutex_init (&be->mut, NULL);
 
   if (parser_loop (table, be, dfl, &range))
@@ -1821,20 +1798,23 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
 static int
 parse_backend (void *call_data, void *section_data)
 {
-  BACKEND **tail = call_data, *be;
+  BACKEND_HEAD *head = call_data;
+  BACKEND *be;
 
   be = parse_backend_internal (backend_parsetab, section_data);
   if (!be)
     return PARSER_FAIL;
 
-  LIST_APPEND (BACKEND, tail, be);
+  SLIST_PUSH (head, be, next);
+
   return PARSER_OK;
 }
 
 static int
 parse_emergency (void *call_data, void *section_data)
 {
-  BACKEND **tail = call_data, *be;
+  BACKEND **res_ptr = call_data;
+  BACKEND *be;
   POUND_DEFAULTS dfl = *(POUND_DEFAULTS*)section_data;
 
   dfl.be_to = 120;
@@ -1845,7 +1825,8 @@ parse_emergency (void *call_data, void *section_data)
   if (!be)
     return PARSER_FAIL;
 
-  LIST_APPEND (BACKEND, tail, be);
+  *res_ptr = be;
+
   return PARSER_OK;
 }
 
@@ -1853,15 +1834,15 @@ parse_emergency (void *call_data, void *section_data)
 struct service_ext
 {
   SERVICE svc;
-  TOKEN_LIST url;
+  TOKEN_HEAD url;
   int ignore_case;
 };
 
 static int
-service_matcher (void *call_data, void *section_data)
+assign_matcher (void *call_data, void *section_data)
 {
   MATCHER *m;
-  MATCHER **tail = call_data;
+  MATCHER_HEAD *head = call_data;
   int rc;
 
   struct token *tok = gettkn_expect (T_STRING);
@@ -1875,7 +1856,7 @@ service_matcher (void *call_data, void *section_data)
       conf_regcomp_error (rc, &m->pat, NULL);
       return PARSER_FAIL;
     }
-  LIST_APPEND (MATCHER, tail, m);
+  SLIST_PUSH (head, m, next);
 
   return PARSER_OK;
 }
@@ -1883,7 +1864,7 @@ service_matcher (void *call_data, void *section_data)
 static int
 assign_redirect (void *call_data, void *section_data)
 {
-  BACKEND **tail = call_data;
+  BACKEND_HEAD *head = call_data;
   struct token *tok;
   int code = 302;
   BACKEND *be;
@@ -1930,7 +1911,7 @@ assign_redirect (void *call_data, void *section_data)
     /* the path is a single '/', so remove it */
     be->url[matches[3].rm_so] = '\0';
 
-  LIST_APPEND (BACKEND, tail, be);
+  SLIST_PUSH (head, be, next);
 
   return PARSER_OK;
 }
@@ -2085,8 +2066,8 @@ static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
   { "URL", assign_token_list, NULL, offsetof (struct service_ext, url) },
   { "IgnoreCase", assign_bool, NULL, offsetof (struct service_ext, ignore_case) },
-  { "HeadRequire", service_matcher, NULL, offsetof (SERVICE, req_head) },
-  { "HeadDeny", service_matcher, NULL, offsetof (SERVICE, deny_head) },
+  { "HeadRequire", assign_matcher, NULL, offsetof (SERVICE, req_head) },
+  { "HeadDeny", assign_matcher, NULL, offsetof (SERVICE, deny_head) },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
   { "Redirect", assign_redirect, NULL, offsetof (SERVICE, backends) },
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
@@ -2098,7 +2079,7 @@ static PARSER_TABLE service_parsetab[] = {
 static int
 parse_service (void *call_data, void *section_data)
 {
-  SERVICE **tail_ptr = call_data; // FIXME: should have head, tail
+  SERVICE_HEAD *head = call_data;
   POUND_DEFAULTS *dfl = section_data;
   struct token *tok;
   SERVICE *svc;
@@ -2106,6 +2087,15 @@ parse_service (void *call_data, void *section_data)
   struct locus_range range;
 
   memset (&ext, 0, sizeof (ext));
+  SLIST_INIT (&ext.url);
+  /*
+   * No use to do SLIST_INIT (&ext.svc.url), since no keywords in
+   * service_parsetab attempt to modify it. Its counterpart in svc
+   * will be initialized after it is allocated (see below).
+   */
+  SLIST_INIT (&ext.svc.req_head);
+  SLIST_INIT (&ext.svc.deny_head);
+  SLIST_INIT (&ext.svc.backends);
 
   tok = gettkn_any ();
 
@@ -2144,27 +2134,29 @@ parse_service (void *call_data, void *section_data)
     return PARSER_FAIL;
   else
     {
-      struct token_ent *te;
       BACKEND *be;
-      MATCHER **tail;
       int flags = REG_NEWLINE | REG_EXTENDED | (ext.ignore_case ? REG_ICASE : 0);
 
       XZALLOC (svc);
       *svc = ext.svc;
+      SLIST_INIT (&svc->url);
+      SLIST_COPY (&svc->req_head, &ext.svc.req_head);
+      SLIST_COPY (&svc->deny_head, &ext.svc.deny_head);
+      SLIST_COPY (&svc->backends, &ext.svc.backends);
 
-      for (be = svc->backends; be; be = be->next)
+      SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  if (!be->disabled)
 	    svc->tot_pri += be->priority;
 	  svc->abs_pri += be->priority;
 	}
 
-      tail = &svc->url;
-      for (te = ext.url.head; te; )
+      while (!SLIST_EMPTY (&ext.url))
 	{
-	  struct token_ent *next = te->next;
 	  MATCHER *m;
 	  int rc;
+	  struct token_ent *te = SLIST_FIRST (&ext.url);
+	  SLIST_SHIFT (&ext.url, next);
 
 	  XZALLOC (m);
 	  rc = regcomp (&m->pat, te->tok.str, flags);
@@ -2173,14 +2165,14 @@ parse_service (void *call_data, void *section_data)
 	      regcomp_error_at_locus_range (&te->tok.locus, rc, &m->pat, NULL);
 	      return PARSER_FAIL;
 	    }
-	  *tail = m;
-	  tail = &m->next;
+
+	  SLIST_PUSH (&svc->url, m, next);
 
 	  free (te->tok.str);
 	  free (te);
-	  te = next;
 	}
-      LIST_APPEND (SERVICE, tail_ptr, svc);
+
+      SLIST_PUSH (head, svc, next);
     }
   return PARSER_OK;
 }
@@ -2239,30 +2231,6 @@ listener_parse_checkurl (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
   lst->has_pat = 1;
-
-  return PARSER_OK;
-}
-
-static int
-parse_headremove (void *call_data, void *section_data)
-{
-  MATCHER *m, **tail = call_data;
-  struct token *tok;
-  int rc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
-
-  XZALLOC (m);
-
-  rc = regcomp (&m->pat, tok->str, REG_ICASE | REG_NEWLINE | REG_EXTENDED);
-  if (rc)
-    {
-      conf_regcomp_error (rc, &m->pat, NULL);
-      return PARSER_FAIL;
-    }
-
-  LIST_APPEND (MATCHER, tail, m);
 
   return PARSER_OK;
 }
@@ -2439,7 +2407,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
   { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
-  { "HeadRemove", parse_headremove, NULL, offsetof (LISTENER, head_off) },
+  { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
@@ -2448,14 +2416,13 @@ static PARSER_TABLE http_parsetab[] = {
   { NULL }
 };
 
-static int
-parse_listen_http (void *call_data, void *section_data)
+static LISTENER *
+listener_alloc (POUND_DEFAULTS *dfl)
 {
-  LISTENER *lst, **tail = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range;
+  LISTENER *lst;
 
   XZALLOC (lst);
+
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
@@ -2466,6 +2433,25 @@ parse_listen_http (void *call_data, void *section_data)
   lst->err503 = "The service is not available. Please try again later.";
   lst->log_level = dfl->log_level;
   if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+    {
+      free (lst);
+      return NULL;
+    }
+  SLIST_INIT (&lst->head_off);
+  SLIST_INIT (&lst->services);
+  SLIST_INIT (&lst->ctx_head);
+  return lst;
+}
+
+static int
+parse_listen_http (void *call_data, void *section_data)
+{
+  LISTENER *lst;
+  LISTENER_HEAD *list_head = call_data;
+  POUND_DEFAULTS *dfl = section_data;
+  struct locus_range range;
+
+  if ((lst = listener_alloc (dfl)) == NULL)
     return PARSER_FAIL;
 
   if (parser_loop (http_parsetab, lst, section_data, &range))
@@ -2474,7 +2460,7 @@ parse_listen_http (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != PARSER_OK)
     return PARSER_FAIL;
 
-  LIST_APPEND (LISTENER, tail, lst);
+  SLIST_PUSH (list_head, lst, next);
   return PARSER_OK;
 }
 
@@ -2667,7 +2653,7 @@ https_parse_cert (void *call_data, void *section_data)
   if (res->ctx)
     conf_error ("%s", "multiple certificates not supported");
 #endif
-  LIST_APPEND (POUND_CTX, &lst->ctx, pc);
+  SLIST_PUSH (&lst->ctx_head, pc, next);
 
   return PARSER_OK;
 }
@@ -2680,7 +2666,7 @@ verify_OK (int pre_ok, X509_STORE_CTX * ctx)
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
 static int
-SNI_server_name (SSL *ssl, int *dummy, POUND_CTX * ctx)
+SNI_server_name (SSL *ssl, int *dummy, POUND_CTX_HEAD *ctx_head)
 {
   const char *server_name;
   POUND_CTX *pc;
@@ -2691,7 +2677,7 @@ SNI_server_name (SSL *ssl, int *dummy, POUND_CTX * ctx)
   /* logmsg(LOG_DEBUG, "Received SSL SNI Header for servername %s", servername); */
 
   SSL_set_SSL_CTX (ssl, NULL);
-  for (pc = ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, ctx_head, next)
     {
       if (fnmatch (pc->server_name, server_name, 0) == 0)
 	{
@@ -2716,7 +2702,7 @@ SNI_server_name (SSL *ssl, int *dummy, POUND_CTX * ctx)
     }
 
   /* logmsg(LOG_DEBUG, "No match for %s, default used", server_name); */
-  SSL_set_SSL_CTX (ssl, ctx->ctx);
+  SSL_set_SSL_CTX (ssl, SLIST_FIRST (ctx_head)->ctx);
   return SSL_TLSEXT_ERR_OK;
 }
 #endif
@@ -2728,7 +2714,7 @@ https_parse_client_cert (void *call_data, void *section_data)
   int depth;
   POUND_CTX *pc;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error ("%s", "ClientCert may only be used after Cert");
       return PARSER_FAIL;
@@ -2745,13 +2731,13 @@ https_parse_client_cert (void *call_data, void *section_data)
     {
     case 0:
       /* don't ask */
-      for (pc = lst->ctx; pc; pc = pc->next)
+      SLIST_FOREACH (pc, &lst->ctx_head, next)
 	SSL_CTX_set_verify (pc->ctx, SSL_VERIFY_NONE, NULL);
       break;
 
     case 1:
       /* ask but OK if no client certificate */
-      for (pc = lst->ctx; pc; pc = pc->next)
+      SLIST_FOREACH (pc, &lst->ctx_head, next)
 	{
 	  SSL_CTX_set_verify (pc->ctx,
 			      SSL_VERIFY_PEER |
@@ -2762,7 +2748,7 @@ https_parse_client_cert (void *call_data, void *section_data)
 
     case 2:
       /* ask and fail if no client certificate */
-      for (pc = lst->ctx; pc; pc = pc->next)
+      SLIST_FOREACH (pc, &lst->ctx_head, next)
 	{
 	  SSL_CTX_set_verify (pc->ctx,
 			      SSL_VERIFY_PEER |
@@ -2773,7 +2759,7 @@ https_parse_client_cert (void *call_data, void *section_data)
 
     case 3:
       /* ask but do not verify client certificate */
-      for (pc = lst->ctx; pc; pc = pc->next)
+      SLIST_FOREACH (pc, &lst->ctx_head, next)
 	{
 	  SSL_CTX_set_verify (pc->ctx,
 			      SSL_VERIFY_PEER |
@@ -2799,7 +2785,7 @@ https_parse_ciphers (void *call_data, void *section_data)
   struct token *tok;
   POUND_CTX *pc;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error ("%s", "Ciphers may only be used after Cert");
       return PARSER_FAIL;
@@ -2809,7 +2795,7 @@ https_parse_ciphers (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  for (pc = lst->ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
     SSL_CTX_set_cipher_list (pc->ctx, tok->str);
 
   return PARSER_OK;
@@ -2868,7 +2854,7 @@ https_parse_calist (void *call_data, void *section_data)
   struct token *tok;
   POUND_CTX *pc;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error ("%s", "CAList may only be used after Cert");
       return PARSER_FAIL;
@@ -2884,7 +2870,7 @@ https_parse_calist (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  for (pc = lst->ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
     SSL_CTX_set_client_CA_list (pc->ctx, cert_names);
 
   return PARSER_OK;
@@ -2897,7 +2883,7 @@ https_parse_verifylist (void *call_data, void *section_data)
   struct token *tok;
   POUND_CTX *pc;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error ("%s", "VerifyList may only be used after Cert");
       return PARSER_FAIL;
@@ -2907,7 +2893,7 @@ https_parse_verifylist (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  for (pc = lst->ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
     if (SSL_CTX_load_verify_locations (pc->ctx, tok->str, NULL) != 1)
       {
 	conf_openssl_error ("SSL_CTX_load_verify_locations");
@@ -2926,7 +2912,7 @@ https_parse_crlist (void *call_data, void *section_data)
   X509_LOOKUP *lookup;
   POUND_CTX *pc;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error ("%s", "CRlist may only be used after Cert");
       return PARSER_FAIL;
@@ -2936,7 +2922,7 @@ https_parse_crlist (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  for (pc = lst->ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
     {
       store = SSL_CTX_get_cert_store (pc->ctx);
       if ((lookup = X509_STORE_add_lookup (store, X509_LOOKUP_file ())) == NULL)
@@ -2978,7 +2964,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
   { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
-  { "HeadRemove", parse_headremove, NULL, offsetof (LISTENER, head_off) },
+  { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
@@ -3000,24 +2986,14 @@ static PARSER_TABLE https_parsetab[] = {
 static int
 parse_listen_https (void *call_data, void *section_data)
 {
-  LISTENER *lst, **tail = call_data;
+  LISTENER *lst;
+  LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
   struct locus_range range;
   POUND_CTX *pc;
   struct stringbuf sb;
 
-  XZALLOC (lst);
-
-  lst->sock = -1;
-  lst->to = dfl->clnt_to;
-  lst->rewr_loc = 1;
-  lst->err413 = "Request too large.";
-  lst->err414 = "Request URI is too long.";
-  lst->err500 = "An internal server error occurred. Please try again later.";
-  lst->err501 = "This method may not be used.";
-  lst->err503 = "The service is not available. Please try again later.";
-  lst->log_level = dfl->log_level;
-  if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
+  if ((lst = listener_alloc (dfl)) == NULL)
     return PARSER_FAIL;
 
   lst->ssl_op_enable = SSL_OP_ALL;
@@ -3034,24 +3010,27 @@ parse_listen_https (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != PARSER_OK)
     return PARSER_FAIL;
 
-  if (!lst->ctx)
+  if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error_at_locus_range (&range, "Cert statement is missing");
       return PARSER_FAIL;
     }
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
-  if (lst->ctx->next &&
-      (!SSL_CTX_set_tlsext_servername_callback (lst->ctx->ctx, SNI_server_name)
-       || !SSL_CTX_set_tlsext_servername_arg (lst->ctx->ctx, lst->ctx)))
+  if (!SLIST_EMPTY (&lst->ctx_head))
     {
-      conf_openssl_error ("can't set SNI callback");
-      return PARSER_FAIL;
+      SSL_CTX *ctx = SLIST_FIRST (&lst->ctx_head)->ctx;
+      if (!SSL_CTX_set_tlsext_servername_callback (ctx, SNI_server_name)
+	  || !SSL_CTX_set_tlsext_servername_arg (ctx, &lst->ctx_head))
+	{
+	  conf_openssl_error ("can't set SNI callback");
+	  return PARSER_FAIL;
+	}
     }
 #endif
 
   stringbuf_init (&sb);
-  for (pc = lst->ctx; pc; pc = pc->next)
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
     {
       SSL_CTX_set_app_data (pc->ctx, lst);
       SSL_CTX_set_mode (pc->ctx, SSL_MODE_AUTO_RETRY);
@@ -3066,7 +3045,7 @@ parse_listen_https (void *call_data, void *section_data)
     }
   stringbuf_free (&sb);
 
-  LIST_APPEND (LISTENER, tail, lst);
+  SLIST_PUSH (list_head, lst, next);
   return PARSER_OK;
 }
 
@@ -3306,7 +3285,7 @@ config_parse (int argc, char **argv)
       exit (0);
     }
 
-  if (listeners == NULL)
+  if (SLIST_EMPTY (&listeners))
     {
       logmsg (LOG_ERR, "no listeners defined");
       exit (1);

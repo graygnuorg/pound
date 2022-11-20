@@ -180,10 +180,10 @@ EOT
 	    ;
 	} elsif (/^\s*(Daemon|LogFacility|LogLevel)/i) {
 	    $_ = "# Commented out: $_";
-	} elsif (/^(\s*)ListenHTTPS?/i) {
+	} elsif (/^(\s*)Listen(HTTPS?)/i) {
 	    unshift @state, ST_LISTENER;
 	    print $out "$_\n";
-	    my $lst = $listeners->create("$infile:$.");
+	    my $lst = $listeners->create("$infile:$.", $2);
 	    if ($verbose) {
 		print $lst->ident . ": Listener ".$lst->address."\n";
 	    }
@@ -281,7 +281,7 @@ sub send {
     my $self = shift;
     my $lst = $listeners->get($self->{server});
     my $host = delete $self->{REQ}{HEADERS}{host} || $lst->host;
-    my $url = $self->{REQ}{PROTO} . '://' .
+    my $url = $lst->proto . '://' .
 	      $host .
 	      ':' .
 	      $lst->port .
@@ -332,9 +332,19 @@ sub assert {
 		    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h not present in the response\n";
 		    return 0;
 		}
-		if ($self->{EXP}{HEADERS}{$h} ne $response->{headers}{$h}) {
-		    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h value mismatch\n";
-		    return 0;
+
+		if ($self->{EXP}{HEADERS}{$h} =~ m{^/(.+)/$}) {
+		    my $rx = qr($1);
+		    if ($response->{headers}{$h} !~ $rx) {
+			print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h value mismatch (regexp)\n";
+			return 0;
+		    }
+		} else {
+		    (my $v = $self->{EXP}{HEADERS}{$h}) =~ s{^\\}{};
+		    if ($v ne $response->{headers}{$h}) {
+			print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h value mismatch\n";
+			return 0;
+		    }
 		}
 	    }
 	}
@@ -607,7 +617,7 @@ if ($@) {
 }
 
 sub new {
-    my ($class, $number, $ident, $keepopen) = @_;
+    my ($class, $number, $ident, $keepopen, $proto) = @_;
     my $socket;
     socket($socket, PF_INET, SOCK_STREAM, 0)
 	or croak "socket: $!";
@@ -627,10 +637,12 @@ sub new {
 	ident => $ident,
 	socket => $socket,
 	host => inet_ntoa($ip),
-	port => $port
+	port => $port,
+	proto => lc($proto // "http")
     }, $class;
 }
 
+sub proto { shift->{proto} }
 sub number { shift->{number} }
 sub ident { shift->{ident} }
 sub socket_handle { shift->{socket} }
@@ -686,8 +698,8 @@ sub new {
 sub keepopen { shift->{keepopen} }
 sub count { scalar @{shift->{listeners}} }
 sub create {
-    my ($self, $ident) = @_;
-    my $lst = Listener->new($self->count(), $ident, $self->keepopen);
+    my ($self, $ident, $proto) = @_;
+    my $lst = Listener->new($self->count(), $ident, $self->keepopen, $proto);
     if ($self->keepopen) {
 	$lst->set_pass_fd("lst".$self->count().".sock");
     }

@@ -25,7 +25,8 @@
  * EMail: roseg@apsis.ch
  */
 
-#include    "pound.h"
+#include "pound.h"
+#include "extern.h"
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 # define TABNODE_GET_DOWN_LOAD(t) lh_TABNODE_get_down_load(t)
@@ -497,12 +498,14 @@ match_service (const SERVICE * svc, const char *request, char **const headers)
   int i, found;
 
   /* check for request */
-  for (m = svc->url; m; m = m->next)
-    if (regexec (&m->pat, request, 0, NULL, 0))
-      return 0;
+  SLIST_FOREACH (m, &svc->url, next)
+    {
+      if (regexec (&m->pat, request, 0, NULL, 0))
+	return 0;
+    }
 
   /* check for required headers */
-  for (m = svc->req_head; m; m = m->next)
+  SLIST_FOREACH (m, &svc->req_head, next)
     {
       for (found = i = 0; i < (MAXHEADERS - 1) && !found; i++)
 	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
@@ -512,7 +515,7 @@ match_service (const SERVICE * svc, const char *request, char **const headers)
     }
 
   /* check for forbidden headers */
-  for (m = svc->deny_head; m; m = m->next)
+  SLIST_FOREACH (m, &svc->deny_head, next)
     {
       for (found = i = 0; i < (MAXHEADERS - 1) && !found; i++)
 	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
@@ -532,7 +535,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers)
 {
   SERVICE *svc;
 
-  for (svc = lstn->services; svc; svc = svc->next)
+  SLIST_FOREACH (svc, &lstn->services, next)
     {
       if (svc->disabled)
 	continue;
@@ -541,7 +544,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers)
     }
 
   /* try global services */
-  for (svc = services; svc; svc = svc->next)
+  SLIST_FOREACH (svc, &services, next)
     {
       if (svc->disabled)
 	continue;
@@ -609,18 +612,15 @@ get_HEADERS (char *res, const SERVICE * svc, char **const headers)
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (BACKEND * be, int pri)
+rand_backend (BACKEND_HEAD *head, int pri)
 {
-  while (be)
+  BACKEND *be;
+  SLIST_FOREACH (be, head, next)
     {
       if (!be->alive || be->disabled)
-	{
-	  be = be->next;
-	  continue;
-	}
+	continue;
       if ((pri -= be->priority) < 0)
 	break;
-      be = be->next;
     }
   return be;
 }
@@ -633,7 +633,7 @@ rand_backend (BACKEND * be, int pri)
  * if the target back-end is disabled or not alive
  */
 static BACKEND *
-hash_backend (BACKEND * be, int abs_pri, char *key)
+hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
 {
   unsigned long hv;
   BACKEND *res, *tb;
@@ -643,7 +643,7 @@ hash_backend (BACKEND * be, int abs_pri, char *key)
   while (*key)
     hv = ((hv ^ *key++) * 16777619) & 0xFFFFFFFF;
   pri = hv % abs_pri;
-  for (tb = be; tb; tb = tb->next)
+  SLIST_FOREACH (tb, head, next)
     if ((pri -= tb->priority) < 0)
       break;
   if (!tb)
@@ -651,9 +651,9 @@ hash_backend (BACKEND * be, int abs_pri, char *key)
     return NULL;
   for (res = tb; !res->alive || res->disabled;)
     {
-      res = res->next;
+      res = SLIST_NEXT (res, next);
       if (res == NULL)
-	res = be;
+	res = SLIST_FIRST (head);
       if (res == tb)
 	/* NO back-end available */
 	return NULL;
@@ -682,7 +682,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
     {
     case SESS_NONE:
       /* choose one back-end randomly */
-      res = no_be ? svc->emergency : rand_backend (svc->backends,
+      res = no_be ? svc->emergency : rand_backend (&svc->backends,
 						   random () % svc->tot_pri);
       break;
 
@@ -690,7 +690,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       addr2str (key, KEY_SIZE, from_host, 1);
       if (svc->sess_ttl < 0)
 	res = no_be ? svc->emergency
-		     : hash_backend (svc->backends, svc->abs_pri, key);
+		     : hash_backend (&svc->backends, svc->abs_pri, key);
       else if ((vp = t_find (svc->sessions, key)) == NULL)
 	{
 	  if (no_be)
@@ -698,7 +698,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	  else
 	    {
 	      /* no session yet - create one */
-	      res = rand_backend (svc->backends, random () % svc->tot_pri);
+	      res = rand_backend (&svc->backends, random () % svc->tot_pri);
 	      t_add (svc->sessions, key, &res, sizeof (res));
 	    }
 	}
@@ -712,7 +712,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	{
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
-			: hash_backend (svc->backends, svc->abs_pri, key);
+			: hash_backend (&svc->backends, svc->abs_pri, key);
 	  else if ((vp = t_find (svc->sessions, key)) == NULL)
 	    {
 	      if (no_be)
@@ -720,7 +720,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	      else
 		{
 		  /* no session yet - create one */
-		  res = rand_backend (svc->backends, random () % svc->tot_pri);
+		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
 		  t_add (svc->sessions, key, &res, sizeof (res));
 		}
 	    }
@@ -730,7 +730,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       else
 	{
 	  res = no_be ? svc->emergency
-		      : rand_backend (svc->backends, random () % svc->tot_pri);
+		      : rand_backend (&svc->backends, random () % svc->tot_pri);
 	}
       break;
     default:
@@ -739,7 +739,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	{
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
-			: hash_backend (svc->backends, svc->abs_pri, key);
+			: hash_backend (&svc->backends, svc->abs_pri, key);
 	  else if ((vp = t_find (svc->sessions, key)) == NULL)
 	    {
 	      if (no_be)
@@ -747,7 +747,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	      else
 		{
 		  /* no session yet - create one */
-		  res = rand_backend (svc->backends, random () % svc->tot_pri);
+		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
 		  t_add (svc->sessions, key, &res, sizeof (res));
 		}
 	    }
@@ -757,7 +757,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       else
 	{
 	  res = no_be ? svc->emergency
-		      : rand_backend (svc->backends, random () % svc->tot_pri);
+		      : rand_backend (&svc->backends, random () % svc->tot_pri);
 	}
       break;
     }
@@ -804,7 +804,7 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
   if (ret_val = pthread_mutex_lock (&svc->mut))
     logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
   svc->tot_pri = 0;
-  for (b = svc->backends; b; b = b->next)
+  SLIST_FOREACH (b, &svc->backends, next)
     {
       if (b == be)
 	switch (disable_mode)
@@ -1001,7 +1001,8 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
 	  &&
 	  (memcmp (&be_addr.sin_port, &in_addr.sin_port,
 		   sizeof (in_addr.sin_port)) != 0
-	   || strcasecmp (proto, lstn->ctx ? "https" : "http")))
+	   || strcasecmp (proto,
+			  !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http")))
 	{
 	  free (addr.ai_addr);
 	  return 1;
@@ -1020,7 +1021,8 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
 	  &&
 	  (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
 		   sizeof (in6_addr.sin6_port)) != 0
-	   || strcasecmp (proto, lstn->ctx ? "https" : "http")))
+	   || strcasecmp (proto,
+			  !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http")))
 	{
 	  free (addr.ai_addr);
 	  return 1;
@@ -1141,9 +1143,9 @@ do_resurect (void)
 
   /* check hosts still alive - HAport */
   memset (&z_addr, 0, sizeof (z_addr));
-  for (lstn = listeners; lstn; lstn = lstn->next)
-    for (svc = lstn->services; svc; svc = svc->next)
-      for (be = svc->backends; be; be = be->next)
+  SLIST_FOREACH (lstn, &listeners, next)
+    SLIST_FOREACH (svc, &lstn->services, next)
+      SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  if (be->be_type)
 	    continue;
@@ -1184,8 +1186,8 @@ do_resurect (void)
 	  close (sock);
 	}
 
-  for (svc = services; svc; svc = svc->next)
-    for (be = svc->backends; be; be = be->next)
+  SLIST_FOREACH (svc, &services, next)
+    SLIST_FOREACH (be, &svc->backends, next)
       {
 	if (be->be_type)
 	  continue;
@@ -1227,17 +1229,19 @@ do_resurect (void)
       }
 
   /* check hosts alive again */
-  for (lstn = listeners; lstn; lstn = lstn->next)
-    for (svc = lstn->services; svc; svc = svc->next)
+  SLIST_FOREACH (lstn, &listeners, next)
+    SLIST_FOREACH (svc, &lstn->services, next)
       {
-	for (modified = 0, be = svc->backends; be; be = be->next)
+	modified = 0;
+
+	SLIST_FOREACH (be, &svc->backends, next)
 	  {
 	    be->resurrect = 0;
 	    if (be->be_type)
 	      continue;
 	    if (be->alive)
 	      continue;
-	    if (memcmp (&(be->ha_addr), &z_addr, sizeof (z_addr)) == 0)
+	    if (memcmp (&be->ha_addr, &z_addr, sizeof (z_addr)) == 0)
 	      {
 		switch (be->addr.ai_family)
 		  {
@@ -1299,7 +1303,7 @@ do_resurect (void)
 	      logmsg (LOG_WARNING, "do_resurect() lock: %s",
 		      strerror (ret_val));
 	    svc->tot_pri = 0;
-	    for (be = svc->backends; be; be = be->next)
+	    SLIST_FOREACH (be, &svc->backends, next)
 	      {
 		if (be->resurrect)
 		  {
@@ -1316,16 +1320,17 @@ do_resurect (void)
 	  }
       }
 
-  for (svc = services; svc; svc = svc->next)
+  SLIST_FOREACH (svc, &services, next)
     {
-      for (modified = 0, be = svc->backends; be; be = be->next)
+      modified = 0;
+      SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  be->resurrect = 0;
 	  if (be->be_type)
 	    continue;
 	  if (be->alive)
 	    continue;
-	  if (memcmp (&(be->ha_addr), &z_addr, sizeof (z_addr)) == 0)
+	  if (memcmp (&be->ha_addr, &z_addr, sizeof (z_addr)) == 0)
 	    {
 	      switch (be->addr.ai_family)
 		{
@@ -1387,7 +1392,7 @@ do_resurect (void)
 	    logmsg (LOG_WARNING, "do_resurect() lock: %s",
 		    strerror (ret_val));
 	  svc->tot_pri = 0;
-	  for (be = svc->backends; be; be = be->next)
+	  SLIST_FOREACH (be, &svc->backends, next)
 	    {
 	      if (be->resurrect)
 		{
@@ -1422,8 +1427,8 @@ do_expire (void)
   /* remove stale sessions */
   cur_time = time (NULL);
 
-  for (lstn = listeners; lstn; lstn = lstn->next)
-    for (svc = lstn->services; svc; svc = svc->next)
+  SLIST_FOREACH (lstn, &listeners, next)
+    SLIST_FOREACH (svc, &lstn->services, next)
       if (svc->sess_type != SESS_NONE)
 	{
 	  if (ret_val = pthread_mutex_lock (&svc->mut))
@@ -1438,7 +1443,7 @@ do_expire (void)
 		    strerror (ret_val));
 	}
 
-  for (svc = services; svc; svc = svc->next)
+  SLIST_FOREACH (svc, &services, next)
     if (svc->sess_type != SESS_NONE)
       {
 	if (ret_val = pthread_mutex_lock (&svc->mut))
@@ -1689,19 +1694,22 @@ thr_timer (void *arg)
 typedef struct
 {
   int control_sock;
-  BACKEND *backends;
+  BACKEND_HEAD *backends;
 } DUMP_ARG;
 
 static void
-t_dump_doall_arg (TABNODE * t, DUMP_ARG * arg)
+t_dump_doall_arg (TABNODE *t, DUMP_ARG *arg)
 {
-  BACKEND *be, *bep;
+  BACKEND *be, *bep = t->content;
   int n_be, sz;
 
-  memcpy (&bep, t->content, sizeof (bep));
-  for (n_be = 0, be = arg->backends; be; be = be->next, n_be++)
-    if (be == bep)
-      break;
+  n_be = 0;
+  SLIST_FOREACH (be, arg->backends, next)
+    {
+      if (be == bep)
+	break;
+      n_be++;
+    }
   if (!be)
     /* should NEVER happen */
     n_be = 0;
@@ -1747,7 +1755,7 @@ IMPLEMENT_LHASH_DOALL_ARG_FN (t_dump, TABNODE *, DUMP_ARG *)
  */
 static void
 dump_sess (const int control_sock, LHASH_OF (TABNODE) * const sess,
-	   BACKEND * const backends)
+	   BACKEND_HEAD * const backends)
 {
   DUMP_ARG a;
 
@@ -1770,13 +1778,16 @@ static LISTENER *
 sel_lstn (const CTRL_CMD * cmd)
 {
   LISTENER *lstn;
-  int i;
+  int i = 0;
 
   if (cmd->listener < 0)
     return NULL;
-  for (i = 0, lstn = listeners; lstn && i < cmd->listener;
-       i++, lstn = lstn->next)
-    ;
+  SLIST_FOREACH (lstn, &listeners, next)
+    {
+      if (i == cmd->listener)
+	return lstn;
+      i++;
+    }
   return lstn;
 }
 
@@ -1784,25 +1795,31 @@ sel_lstn (const CTRL_CMD * cmd)
  * given a command, select a service
  */
 static SERVICE *
-sel_svc (const CTRL_CMD * cmd)
+sel_svc (const CTRL_CMD *cmd)
 {
+  SERVICE_HEAD *head;
   SERVICE *svc;
   LISTENER *lstn;
   int i;
 
   if (cmd->listener < 0)
     {
-      svc = services;
+      head = &services;
     }
   else
     {
       if ((lstn = sel_lstn (cmd)) == NULL)
 	return NULL;
-      svc = lstn->services;
+      head = &lstn->services;
     }
-  for (i = 0; svc && i < cmd->service; i++, svc = svc->next)
-    ;
-  return svc;
+  i = 0;
+  SLIST_FOREACH (svc, head, next)
+    {
+      if (i == cmd->service)
+	return svc;
+      i++;
+    }
+  return NULL;
 }
 
 /*
@@ -1817,8 +1834,13 @@ sel_be (const CTRL_CMD * cmd)
 
   if ((svc = sel_svc (cmd)) == NULL)
     return NULL;
-  for (i = 0, be = svc->backends; be && i < cmd->backend; i++, be = be->next)
-    ;
+  i = 0;
+  SLIST_FOREACH (be, &svc->backends, next)
+    {
+      if (i == cmd->backend)
+	break;
+      i++;
+    }
   return be;
 }
 
@@ -1844,17 +1866,17 @@ do_list (int ctl)
   n = get_thr_qlen ();
   if (write (ctl, (void *) &n, sizeof (n)) == -1)
     return -1;
-  for (lstn = listeners; lstn; lstn = lstn->next)
+  SLIST_FOREACH (lstn, &listeners, next)
     {
       if (write (ctl, (void *) lstn, sizeof (LISTENER)) == -1)
 	return -1;
       if (write (ctl, lstn->addr.ai_addr, lstn->addr.ai_addrlen) == -1)
 	return -1;
-      for (svc = lstn->services; svc; svc = svc->next)
+      SLIST_FOREACH (svc, &lstn->services, next)
 	{
 	  if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
 	    return -1;
-	  for (be = svc->backends; be; be = be->next)
+	  SLIST_FOREACH (be, &svc->backends, next)
 	    {
 	      if (write (ctl, (void *) be, sizeof (BACKEND)) == -1)
 		return -1;
@@ -1870,7 +1892,7 @@ do_list (int ctl)
 	    logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
 	  else
 	    {
-	      dump_sess (ctl, svc->sessions, svc->backends);
+	      dump_sess (ctl, svc->sessions, &svc->backends);
 	      if (rc = pthread_mutex_unlock (&svc->mut))
 		logmsg (LOG_WARNING, "thr_control() unlock: %s",
 			strerror (rc));
@@ -1885,11 +1907,11 @@ do_list (int ctl)
   if (write (ctl, (void *) &dummy_lstn, sizeof (LISTENER)) == -1)
     return -1;
 
-  for (svc = services; svc; svc = svc->next)
+  SLIST_FOREACH (svc, &services, next)
     {
       if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
 	return -1;
-      for (be = svc->backends; be; be = be->next)
+      SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  if (write (ctl, (void *) be, sizeof (BACKEND)) == -1 ||
 	      write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
@@ -1905,7 +1927,7 @@ do_list (int ctl)
 	logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
       else
 	{
-	  dump_sess (ctl, svc->sessions, svc->backends);
+	  dump_sess (ctl, svc->sessions, &svc->backends);
 	  if (rc = pthread_mutex_unlock (&svc->mut))
 	    logmsg (LOG_WARNING, "thr_control() unlock: %s", strerror (rc));
 	}

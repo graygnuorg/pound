@@ -23,7 +23,6 @@
  * Switzerland
  * EMail: roseg@apsis.ch
  */
-#define NO_EXTERNALS 1
 #include    "pound.h"
 
 static int xml_out = 0;
@@ -462,11 +461,12 @@ main (const int argc, char **argv)
 	  if (xml_out)
 	    printf
 	      ("<listener index=\"%d\" protocol=\"%s\" address=\"%s\" status=\"%s\">\n",
-	       n_lstn++, lstn.ctx ? "HTTPS" : "http", prt_addr (&lstn.addr),
+	       n_lstn++,
+	       !SLIST_EMPTY (&lstn.ctx_head) ? "HTTPS" : "http", prt_addr (&lstn.addr),
 	       lstn.disabled ? "DISABLED" : "active");
 	  else
 	    printf ("%3d. %s Listener %s %s\n", n_lstn++,
-		    lstn.ctx ? "HTTPS" : "http", prt_addr (&lstn.addr),
+		    !SLIST_EMPTY (&lstn.ctx_head) ? "HTTPS" : "http", prt_addr (&lstn.addr),
 		    lstn.disabled ? "*D" : "a");
 	  if (svc_prt (sock))
 	    status = 1;
