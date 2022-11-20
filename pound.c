@@ -691,44 +691,47 @@ main (const int argc, char **argv)
   n_listeners = 0;
   SLIST_FOREACH (lstn, &listeners, next)
     {
-      /* prepare the socket */
-      int opt;
-      int domain;
-      char abuf[MAX_ADDR_BUFSIZE];
+      if (lstn->sock == -1)
+	{
+	  /* prepare the socket */
+	  int opt;
+	  int domain;
+	  char abuf[MAX_ADDR_BUFSIZE];
 
-      switch (lstn->addr.ai_family)
-	{
-	case AF_INET:
-	  domain = PF_INET;
-	  break;
-	case AF_INET6:
-	  domain = PF_INET6;
-	  break;
-	case AF_UNIX:
-	  domain = PF_UNIX;
-	  unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
-	  break;
-	default:
-	  abort ();
+	  switch (lstn->addr.ai_family)
+	    {
+	    case AF_INET:
+	      domain = PF_INET;
+	      break;
+	    case AF_INET6:
+	      domain = PF_INET6;
+	      break;
+	    case AF_UNIX:
+	      domain = PF_UNIX;
+	      unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
+	      break;
+	    default:
+	      abort ();
+	    }
+	  if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
+	    {
+	      logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted",
+		      addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		      strerror (errno));
+	      exit (1);
+	    }
+	  opt = 1;
+	  setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
+	  if (bind (lstn->sock, lstn->addr.ai_addr,
+		    (socklen_t) lstn->addr.ai_addrlen) < 0)
+	    {
+	      logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted",
+		      addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		      strerror (errno));
+	      exit (1);
+	    }
+	  listen (lstn->sock, 512);
 	}
-      if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
-	{
-	  logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted",
-		  addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		  strerror (errno));
-	  exit (1);
-	}
-      opt = 1;
-      setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
-      if (bind (lstn->sock, lstn->addr.ai_addr,
-		(socklen_t) lstn->addr.ai_addrlen) < 0)
-	{
-	  logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted",
-		  addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		  strerror (errno));
-	  exit (1);
-	}
-      listen (lstn->sock, 512);
       n_listeners++;
     }
 

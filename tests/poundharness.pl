@@ -229,10 +229,12 @@ sub runner {
     if ($pound_pid > 0) {
 	# Send all listener descriptors to pound
 	$listeners->send_fd;
-	# Wait for the things to settle
+
+	# Wait for the things to settle.
 	if ($verbose) {
 	    print "waiting for pound to start up\n";
 	}
+
 	$listeners->wait;
 	if ($verbose) {
 	    print "pound is ready\n";
@@ -622,14 +624,15 @@ sub new {
     socket($socket, PF_INET, SOCK_STREAM, 0)
 	or croak "socket: $!";
     setsockopt($socket, SOL_SOCKET, SO_REUSEADDR, 1);
-    if ($keepopen) {
-	    my $flags = fcntl($socket, F_GETFD, 0)
-		or croak "fcntl F_GETFD: $!";
-	    fcntl($socket, F_SETFD, $flags & ~FD_CLOEXEC)
-		or croak "fcntl F_SETFD: $!";
-    }
     bind($socket, pack_sockaddr_in(0, inet_aton('127.0.0.1')))
 	or die "bind: $!";
+    if ($keepopen) {
+	listen($socket, 128);
+	my $flags = fcntl($socket, F_GETFD, 0)
+	    or croak "fcntl F_GETFD: $!";
+	fcntl($socket, F_SETFD, $flags & ~FD_CLOEXEC)
+	    or croak "fcntl F_SETFD: $!";
+    }
     my $sa = getsockname($socket);
     my ($port, $ip) = sockaddr_in($sa);
     bless {
