@@ -2478,7 +2478,7 @@ is_class (int c, char *cls)
     {
       if (k == '-' && cls[0] != 0)
 	{
-	  if (cls[-2] <= c && cls[0] <= c)
+	  if (cls[-2] <= c && c <= cls[0])
 	    return 1;
 	  cls++;
 	}
@@ -2497,7 +2497,7 @@ extract_cn (char const *str, size_t *plen)
 	{
 	  size_t i;
 	  str += 3;
-	  for (i = 1; str[i] && is_class (str[i], "-*.A-Za-z0-9"); i++)
+	  for (i = 0; str[i] && is_class (str[i], "-*.A-Za-z0-9"); i++)
 	    ;
 	  if (str[i] == 0)
 	    {
