@@ -3232,7 +3232,7 @@ config_parse (int argc, char **argv)
 {
   int c;
   int check_only = 0;
-  char *conf_name = SYSCONFDIR "/" POUND_CONF;
+  char *conf_name = POUND_CONF;
 
   if ((progname = strrchr (argv[0], '/')) != NULL)
     progname++;
