@@ -50,7 +50,7 @@ t_add (LHASH_OF (TABNODE) * const tab, const char *key, const void *content,
 {
   TABNODE *t, *old;
 
-  if ((t = (TABNODE *) malloc (sizeof (TABNODE))) == NULL)
+  if ((t = malloc (sizeof (TABNODE))) == NULL)
     {
       logmsg (LOG_WARNING, "t_add() content malloc");
       return;

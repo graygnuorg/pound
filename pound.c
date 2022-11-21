@@ -79,9 +79,7 @@ l_init (void)
   int i, n_locks;
 
   n_locks = CRYPTO_num_locks ();
-  if ((l_array =
-       (pthread_mutex_t *) calloc (n_locks,
-				   sizeof (pthread_mutex_t))) == NULL)
+  if ((l_array = calloc (n_locks, sizeof (pthread_mutex_t))) == NULL)
     {
       logmsg (LOG_ERR, "lock init: out of memory - aborted...");
       exit (1);
@@ -308,7 +306,7 @@ thr_dispatch (void *unused)
 		      arg.sock = clnt;
 		      arg.lstn = lstn;
 
-		      if ((arg.from_host.ai_addr = (struct sockaddr *) malloc (clnt_length)) == NULL)
+		      if ((arg.from_host.ai_addr = malloc (clnt_length)) == NULL)
 			{
 			  logmsg (LOG_WARNING, "HTTP arg address: malloc");
 			  close (clnt);

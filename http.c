@@ -578,14 +578,14 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
       return NULL;
     }
 
-  if ((headers = (char **) calloc (MAXHEADERS, sizeof (char *))) == NULL)
+  if ((headers = calloc (MAXHEADERS, sizeof (char *))) == NULL)
     {
       logmsg (LOG_WARNING, "(%"PRItid") e500 headers: out of memory",
 	      POUND_TID ());
       err_reply (cl, h500, lstn->err500);
       return NULL;
     }
-  if ((headers[0] = (char *) malloc (MAXBUF)) == NULL)
+  if ((headers[0] = malloc (MAXBUF)) == NULL)
     {
       free_headers (headers);
       logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
@@ -610,7 +610,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
 	}
       if (!buf[0])
 	return headers;
-      if ((headers[n] = (char *) malloc (MAXBUF)) == NULL)
+      if ((headers[n] = malloc (MAXBUF)) == NULL)
 	{
 	  free_headers (headers);
 	  logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
