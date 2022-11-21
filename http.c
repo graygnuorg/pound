@@ -168,24 +168,26 @@ get_line (BIO * const in, char *const buf, const int bufsize)
 	return 1;
       default:
 	if (seen_cr)
-	  if (tmp != '\n')
-	    {
-	      /*
-	       * we have CR not followed by NL
-	       */
-	      do
-		{
-		  if (BIO_read (in, &tmp, 1) <= 0)
-		    return 1;
-		}
-	      while (tmp != '\n');
-	      return 1;
-	    }
-	  else
-	    {
-	      buf[i - 1] = '\0';
-	      return 0;
-	    }
+	  {
+	    if (tmp != '\n')
+	      {
+		/*
+		 * we have CR not followed by NL
+		 */
+		do
+		  {
+		    if (BIO_read (in, &tmp, 1) <= 0)
+		      return 1;
+		  }
+		while (tmp != '\n');
+		return 1;
+	      }
+	    else
+	      {
+		buf[i - 1] = '\0';
+		return 0;
+	      }
+	  }
 
 	if (!iscntrl (tmp) || tmp == '\t')
 	  {
@@ -265,7 +267,8 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
     {
       if ((res = get_line (cl, buf, MAXBUF)) < 0)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) chunked read error: %s", pthread_self (),
+	  logmsg (LOG_NOTICE, "(%"PRItid" chunked read error: %s",
+		  POUND_TID (),
 		  strerror (errno));
 	  return -1;
 	}
@@ -281,22 +284,23 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
 	  /*
 	   * not chunk header
 	   */
-	  logmsg (LOG_NOTICE, "(%lx) bad chunk header <%s>: %s",
-		  pthread_self (), buf, strerror (errno));
+	  logmsg (LOG_NOTICE, "(%"PRItid") bad chunk header <%s>: %s",
+		  POUND_TID (), buf, strerror (errno));
 	  return -2;
 	}
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
-	    logmsg (LOG_NOTICE, "(%lx) error write chunked: %s",
-		    pthread_self (), strerror (errno));
+	    logmsg (LOG_NOTICE, "(%"PRItid") error write chunked: %s",
+		    POUND_TID (), strerror (errno));
 	    return -3;
 	  }
 
       tot_size += cont;
       if (max_size > L0 && tot_size > max_size)
 	{
-	  logmsg (LOG_WARNING, "(%lx) chunk content too large", pthread_self);
+	  logmsg (LOG_WARNING, "(%"PRItid") chunk content too large",
+		  POUND_TID ());
 	  return -4;
 	}
 
@@ -305,8 +309,8 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
 	  if (copy_bin (cl, be, cont, res_bytes, no_write))
 	    {
 	      if (errno)
-		logmsg (LOG_NOTICE, "(%lx) error copy chunk cont: %s",
-			pthread_self (), strerror (errno));
+		logmsg (LOG_NOTICE, "(%"PRItid") error copy chunk cont: %s",
+			POUND_TID (), strerror (errno));
 	      return -4;
 	    }
 	}
@@ -317,24 +321,25 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
        */
       if ((res = get_line (cl, buf, MAXBUF)) < 0)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) error after chunk: %s", pthread_self (),
+	  logmsg (LOG_NOTICE, "(%"PRItid") error after chunk: %s",
+		  POUND_TID (),
 		  strerror (errno));
 	  return -5;
 	}
       else if (res > 0)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) unexpected EOF after chunk",
-		  pthread_self ());
+	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected EOF after chunk",
+		  POUND_TID ());
 	  return -5;
 	}
       if (buf[0])
-	logmsg (LOG_NOTICE, "(%lx) unexpected after chunk \"%s\"",
-		pthread_self (), buf);
+	logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
+		POUND_TID (), buf);
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
-	    logmsg (LOG_NOTICE, "(%lx) error after chunk write: %s",
-		    pthread_self (), strerror (errno));
+	    logmsg (LOG_NOTICE, "(%"PRItid") error after chunk write: %s",
+		    POUND_TID (), strerror (errno));
 	    return -6;
 	  }
     }
@@ -345,7 +350,8 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
     {
       if ((res = get_line (cl, buf, MAXBUF)) < 0)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) error post-chunk: %s", pthread_self (),
+	  logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk: %s",
+		  POUND_TID (),
 		  strerror (errno));
 	  return -7;
 	}
@@ -354,8 +360,8 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
-	    logmsg (LOG_NOTICE, "(%lx) error post-chunk write: %s",
-		    pthread_self (), strerror (errno));
+	    logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk write: %s",
+		    POUND_TID (), strerror (errno));
 	    return -8;
 	  }
       if (!buf[0])
@@ -364,8 +370,8 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
   if (!no_write)
     if (BIO_flush (be) != 1)
       {
-	logmsg (LOG_NOTICE, "(%lx) copy_chunks flush error: %s",
-		pthread_self (), strerror (errno));
+	logmsg (LOG_NOTICE, "(%"PRItid") copy_chunks flush error: %s",
+		POUND_TID (), strerror (errno));
 	return -4;
       }
   return 0;
@@ -574,16 +580,16 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
 
   if ((headers = (char **) calloc (MAXHEADERS, sizeof (char *))) == NULL)
     {
-      logmsg (LOG_WARNING, "(%lx) e500 headers: out of memory",
-	      pthread_self ());
+      logmsg (LOG_WARNING, "(%"PRItid") e500 headers: out of memory",
+	      POUND_TID ());
       err_reply (cl, h500, lstn->err500);
       return NULL;
     }
   if ((headers[0] = (char *) malloc (MAXBUF)) == NULL)
     {
       free_headers (headers);
-      logmsg (LOG_WARNING, "(%lx) e500 header: out of memory",
-	      pthread_self ());
+      logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
+	      POUND_TID ());
       err_reply (cl, h500, lstn->err500);
       return NULL;
     }
@@ -607,8 +613,8 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
       if ((headers[n] = (char *) malloc (MAXBUF)) == NULL)
 	{
 	  free_headers (headers);
-	  logmsg (LOG_WARNING, "(%lx) e500 header: out of memory",
-		  pthread_self ());
+	  logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
+		  POUND_TID ());
 	  err_reply (cl, h500, lstn->err500);
 	  return NULL;
 	}
@@ -617,7 +623,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
     }
 
   free_headers (headers);
-  logmsg (LOG_NOTICE, "(%lx) e500 too many headers", pthread_self ());
+  logmsg (LOG_NOTICE, "(%"PRItid") e500 too many headers", POUND_TID ());
   err_reply (cl, h500, lstn->err500);
   return NULL;
 }
@@ -781,7 +787,7 @@ do_http (THR_ARG *arg)
 
   if ((cl = BIO_new_socket (sock, 1)) == NULL)
     {
-      logmsg (LOG_WARNING, "(%lx) BIO_new_socket failed", pthread_self ());
+      logmsg (LOG_WARNING, "(%"PRItid") BIO_new_socket failed", POUND_TID ());
       shutdown (sock, 2);
       close (sock);
       return;
@@ -793,7 +799,7 @@ do_http (THR_ARG *arg)
     {
       if ((ssl = SSL_new (SLIST_FIRST (&lstn->ctx_head)->ctx)) == NULL)
 	{
-	  logmsg (LOG_WARNING, "(%lx) SSL_new: failed", pthread_self ());
+	  logmsg (LOG_WARNING, "(%"PRItid") SSL_new: failed", POUND_TID ());
 	  BIO_reset (cl);
 	  BIO_free_all (cl);
 	  return;
@@ -802,8 +808,8 @@ do_http (THR_ARG *arg)
       SSL_set_bio (ssl, cl, cl);
       if ((bb = BIO_new (BIO_f_ssl ())) == NULL)
 	{
-	  logmsg (LOG_WARNING, "(%lx) BIO_new(Bio_f_ssl()) failed",
-		  pthread_self ());
+	  logmsg (LOG_WARNING, "(%"PRItid") BIO_new(Bio_f_ssl()) failed",
+		  POUND_TID ());
 	  BIO_reset (cl);
 	  BIO_free_all (cl);
 	  return;
@@ -848,7 +854,7 @@ do_http (THR_ARG *arg)
 
   if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
     {
-      logmsg (LOG_WARNING, "(%lx) BIO_new(buffer) failed", pthread_self ());
+      logmsg (LOG_WARNING, "(%"PRItid") BIO_new(buffer) failed", POUND_TID ());
       if (x509 != NULL)
 	X509_free (x509);
       BIO_reset (cl);
@@ -874,8 +880,8 @@ do_http (THR_ARG *arg)
 	    {
 	      if (errno)
 		{
-		  logmsg (LOG_NOTICE, "(%lx) error read from %s: %s",
-			  pthread_self (),
+		  logmsg (LOG_NOTICE, "(%"PRItid") error read from %s: %s",
+			  POUND_TID (),
 			  addr2str (caddr, sizeof (caddr), &from_host, 1),
 			  strerror (errno));
 		  /*
@@ -911,8 +917,8 @@ do_http (THR_ARG *arg)
 	}
       else
 	{
-	  logmsg (LOG_WARNING, "(%lx) e501 bad request \"%s\" from %s",
-		  pthread_self (), request,
+	  logmsg (LOG_WARNING, "(%"PRItid") e501 bad request \"%s\" from %s",
+		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
@@ -928,8 +934,8 @@ do_http (THR_ARG *arg)
 	   * the URL probably contained a %00 aka NULL - which we don't
 	   * allow
 	   */
-	  logmsg (LOG_NOTICE, "(%lx) e501 URL \"%s\" (contains NULL) from %s",
-		  pthread_self (), url,
+	  logmsg (LOG_NOTICE, "(%"PRItid") e501 URL \"%s\" (contains NULL) from %s",
+		  POUND_TID (), url,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
@@ -938,8 +944,8 @@ do_http (THR_ARG *arg)
 	}
       if (lstn->has_pat && regexec (&lstn->url_pat, url, 0, NULL, 0))
 	{
-	  logmsg (LOG_NOTICE, "(%lx) e501 bad URL \"%s\" from %s",
-		  pthread_self (), url,
+	  logmsg (LOG_NOTICE, "(%"PRItid") e501 bad URL \"%s\" from %s",
+		  POUND_TID (), url,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h501, lstn->err501);
 	  free_headers (headers);
@@ -990,8 +996,8 @@ do_http (THR_ARG *arg)
 	      else
 		{
 		  logmsg (LOG_NOTICE,
-			  "(%lx) e400 multiple Transfer-encoding \"%s\" from %s",
-			  pthread_self (), url,
+			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
+			  POUND_TID (), url,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h400,
 			     "Bad request: multiple Transfer-encoding values");
@@ -1005,8 +1011,8 @@ do_http (THR_ARG *arg)
 	      if (cont != L_1 || strchr (buf, ','))
 		{
 		  logmsg (LOG_NOTICE,
-			  "(%lx) e400 multiple Content-length \"%s\" from %s",
-			  pthread_self (), url,
+			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
+			  POUND_TID (), url,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h400,
 			     "Bad request: multiple Content-length values");
@@ -1018,8 +1024,8 @@ do_http (THR_ARG *arg)
 		if (!isdigit (*mh))
 		  {
 		    logmsg (LOG_NOTICE,
-			    "(%lx) e400 Content-length bad value \"%s\" from %s",
-			    pthread_self (), url,
+			    "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
+			    POUND_TID (), url,
 			    addr2str (caddr, sizeof (caddr), &from_host, 1));
 		    err_reply (cl, h400,
 			       "Bad request: Content-length bad value");
@@ -1046,8 +1052,8 @@ do_http (THR_ARG *arg)
 	    case HEADER_ILLEGAL:
 	      if (lstn->log_level > 0)
 		{
-		  logmsg (LOG_NOTICE, "(%lx) bad header from %s (%s)",
-			  pthread_self (),
+		  logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
+			  POUND_TID (),
 			  addr2str (caddr, sizeof (caddr), &from_host, 1),
 			  headers[n]);
 		}
@@ -1075,14 +1081,14 @@ do_http (THR_ARG *arg)
 
 	      if ((bb = BIO_new (BIO_s_mem ())) == NULL)
 		{
-		  logmsg (LOG_WARNING, "(%lx) Can't alloc BIO_s_mem",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_s_mem",
+			  POUND_TID ());
 		  continue;
 		}
 	      if ((b64 = BIO_new (BIO_f_base64 ())) == NULL)
 		{
-		  logmsg (LOG_WARNING, "(%lx) Can't alloc BIO_f_base64",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_f_base64",
+			  POUND_TID ());
 		  BIO_free (bb);
 		  continue;
 		}
@@ -1092,16 +1098,16 @@ do_http (THR_ARG *arg)
 	      BIO_write (bb, "\n", 1);
 	      if ((inlen = BIO_read (b64, buf, MAXBUF - 1)) <= 0)
 		{
-		  logmsg (LOG_WARNING, "(%lx) Can't read BIO_f_base64",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") Can't read BIO_f_base64",
+			  POUND_TID ());
 		  BIO_free_all (b64);
 		  continue;
 		}
 	      BIO_free_all (b64);
 	      if ((mh = strchr (buf, ':')) == NULL)
 		{
-		  logmsg (LOG_WARNING, "(%lx) Unknown authentication",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") Unknown authentication",
+			  POUND_TID ());
 		  continue;
 		}
 	      *mh = '\0';
@@ -1115,8 +1121,8 @@ do_http (THR_ARG *arg)
       if (chunked != 0 && cont != L_1)
 	{
 	  logmsg (LOG_NOTICE,
-		  "(%lx) e501 Transfer-encoding and Content-length \"%s\" from %s",
-		  pthread_self (), url,
+		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
+		  POUND_TID (), url,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h400,
 		     "Bad request: Transfer-encoding and Content-length headers present");
@@ -1131,8 +1137,8 @@ do_http (THR_ARG *arg)
       if (lstn->max_req > L0 && cont > L0 && cont > lstn->max_req
 	  && is_rpc != 1)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) e413 request too large (%ld) from %s",
-		  pthread_self (), cont,
+	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRILONG") from %s",
+		  POUND_TID (), cont,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
 	  err_reply (cl, h413, lstn->err413);
 	  free_headers (headers);
@@ -1160,8 +1166,8 @@ do_http (THR_ARG *arg)
        */
       if ((svc = get_service (lstn, url, &headers[1])) == NULL)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) e503 no service \"%s\" from %s %s",
-		  pthread_self (), request,
+	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",
+		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  v_host[0] ? v_host : "-");
 	  err_reply (cl, h503, lstn->err503);
@@ -1171,8 +1177,8 @@ do_http (THR_ARG *arg)
 	}
       if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL)
 	{
-	  logmsg (LOG_NOTICE, "(%lx) e503 no back-end \"%s\" from %s %s",
-		  pthread_self (), request,
+	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s %s",
+		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  v_host[0] ? v_host : "-");
 	  err_reply (cl, h503, lstn->err503);
@@ -1204,8 +1210,8 @@ do_http (THR_ARG *arg)
 	      break;
 
 	    default:
-	      logmsg (LOG_WARNING, "(%lx) e503 backend: unknown family %d",
-		      pthread_self (), backend->addr.ai_family);
+	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
+		      POUND_TID (), backend->addr.ai_family);
 	      err_reply (cl, h503, lstn->err503);
 	      free_headers (headers);
 	      clean_all ();
@@ -1215,8 +1221,8 @@ do_http (THR_ARG *arg)
 	  if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
 	    {
 	      str_be (buf, MAXBUF - 1, backend);
-	      logmsg (LOG_WARNING, "(%lx) e503 backend %s socket create: %s",
-		      pthread_self (), buf, strerror (errno));
+	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
+		      POUND_TID (), buf, strerror (errno));
 	      err_reply (cl, h503, lstn->err503);
 	      free_headers (headers);
 	      clean_all ();
@@ -1225,8 +1231,8 @@ do_http (THR_ARG *arg)
 	  if (connect_nb (sock, &backend->addr, backend->conn_to) < 0)
 	    {
 	      str_be (buf, MAXBUF - 1, backend);
-	      logmsg (LOG_WARNING, "(%lx) backend %s connect: %s",
-		      pthread_self (), buf, strerror (errno));
+	      logmsg (LOG_WARNING, "(%"PRItid") backend %s connect: %s",
+		      POUND_TID (), buf, strerror (errno));
 	      shutdown (sock, 2);
 	      close (sock);
 	      /*
@@ -1244,8 +1250,8 @@ do_http (THR_ARG *arg)
 	      if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL
 		  || backend == old_backend)
 		{
-		  logmsg (LOG_NOTICE, "(%lx) e503 no back-end \"%s\" from %s",
-			  pthread_self (), request,
+		  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s",
+			  POUND_TID (), request,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
 		  err_reply (cl, h503, lstn->err503);
 		  free_headers (headers);
@@ -1275,8 +1281,8 @@ do_http (THR_ARG *arg)
 	    }
 	  if ((be = BIO_new_socket (sock, 1)) == NULL)
 	    {
-	      logmsg (LOG_WARNING, "(%lx) e503 BIO_new_socket server failed",
-		      pthread_self ());
+	      logmsg (LOG_WARNING, "(%"PRItid") e503 BIO_new_socket server failed",
+		      POUND_TID ());
 	      shutdown (sock, 2);
 	      close (sock);
 	      err_reply (cl, h503, lstn->err503);
@@ -1294,8 +1300,8 @@ do_http (THR_ARG *arg)
 	    {
 	      if ((be_ssl = SSL_new (backend->ctx)) == NULL)
 		{
-		  logmsg (LOG_WARNING, "(%lx) be SSL_new: failed",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") be SSL_new: failed",
+			  POUND_TID ());
 		  err_reply (cl, h503, lstn->err503);
 		  free_headers (headers);
 		  clean_all ();
@@ -1304,8 +1310,8 @@ do_http (THR_ARG *arg)
 	      SSL_set_bio (be_ssl, be, be);
 	      if ((bb = BIO_new (BIO_f_ssl ())) == NULL)
 		{
-		  logmsg (LOG_WARNING, "(%lx) BIO_new(Bio_f_ssl()) failed",
-			  pthread_self ());
+		  logmsg (LOG_WARNING, "(%"PRItid") BIO_new(Bio_f_ssl()) failed",
+			  POUND_TID ());
 		  err_reply (cl, h503, lstn->err503);
 		  free_headers (headers);
 		  clean_all ();
@@ -1327,8 +1333,8 @@ do_http (THR_ARG *arg)
 	    }
 	  if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
 	    {
-	      logmsg (LOG_WARNING, "(%lx) e503 BIO_new(buffer) server failed",
-		      pthread_self ());
+	      logmsg (LOG_WARNING, "(%"PRItid") e503 BIO_new(buffer) server failed",
+		      POUND_TID ());
 	      err_reply (cl, h503, lstn->err503);
 	      free_headers (headers);
 	      clean_all ();
@@ -1368,8 +1374,8 @@ do_http (THR_ARG *arg)
 		{
 		  if (regexec (&LOCATION, buf, 4, matches, 0))
 		    {
-		      logmsg (LOG_NOTICE, "(%lx) Can't parse Destination %s",
-			      pthread_self (), buf);
+		      logmsg (LOG_NOTICE, "(%"PRItid") Can't parse Destination %s",
+			      POUND_TID (), buf);
 		      break;
 		    }
 		  str_be (caddr, sizeof (caddr), cur_backend);
@@ -1380,8 +1386,8 @@ do_http (THR_ARG *arg)
 		  if ((headers[n] = strdup (buf)) == NULL)
 		    {
 		      logmsg (LOG_WARNING,
-			      "(%lx) rewrite Destination - out of memory: %s",
-			      pthread_self (), strerror (errno));
+			      "(%"PRItid") rewrite Destination - out of memory: %s",
+			      POUND_TID (), strerror (errno));
 		      free_headers (headers);
 		      clean_all ();
 		      return;
@@ -1392,8 +1398,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write to %s/%s: %s (%.3f sec)",
-			  pthread_self (), buf, request, strerror (errno),
+			  "(%"PRItid") e500 error write to %s/%s: %s (%.3f sec)",
+			  POUND_TID (), buf, request, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  free_headers (headers);
@@ -1410,8 +1416,8 @@ do_http (THR_ARG *arg)
 		str_be (buf, MAXBUF - 1, cur_backend);
 		end_req = cur_time ();
 		logmsg (LOG_WARNING,
-			"(%lx) e500 error write AddHeader to %s: %s (%.3f sec)",
-			pthread_self (), buf, strerror (errno),
+			"(%"PRItid") e500 error write AddHeader to %s: %s (%.3f sec)",
+			POUND_TID (), buf, strerror (errno),
 			(end_req - start_req) / 1000000.0);
 		err_reply (cl, h500, lstn->err500);
 		free_headers (headers);
@@ -1439,8 +1445,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-cipher to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-cipher to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  clean_all ();
@@ -1459,8 +1465,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-Subject to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-Subject to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1476,8 +1482,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-Issuer to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-Issuer to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1492,8 +1498,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-notBefore to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-notBefore to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1508,8 +1514,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-notAfter to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-notAfter to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1522,8 +1528,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-serial to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-serial to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1537,8 +1543,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1552,8 +1558,8 @@ do_http (THR_ARG *arg)
 		      str_be (buf, MAXBUF - 1, cur_backend);
 		      end_req = cur_time ();
 		      logmsg (LOG_WARNING,
-			      "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-			      pthread_self (), buf, strerror (errno),
+			      "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			      POUND_TID (), buf, strerror (errno),
 			      (end_req - start_req) / 1000000.0);
 		      err_reply (cl, h500, lstn->err500);
 		      BIO_free_all (bb);
@@ -1566,8 +1572,8 @@ do_http (THR_ARG *arg)
 		  str_be (buf, MAXBUF - 1, cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%lx) e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
-			  pthread_self (), buf, strerror (errno),
+			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
 		  err_reply (cl, h500, lstn->err500);
 		  BIO_free_all (bb);
@@ -1602,8 +1608,8 @@ do_http (THR_ARG *arg)
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%lx) e500 for %s copy_chunks to %s/%s (%.3f sec)",
-		      pthread_self (),
+		      "(%"PRItid") e500 for %s copy_chunks to %s/%s (%.3f sec)",
+		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request,
 		      (end_req - start_req) / 1000000.0);
@@ -1622,8 +1628,8 @@ do_http (THR_ARG *arg)
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%lx) e500 for %s error copy client cont to %s/%s: %s (%.3f sec)",
-		      pthread_self (),
+		      "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%.3f sec)",
+		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
@@ -1649,16 +1655,16 @@ do_http (THR_ARG *arg)
 	    {
 	      if (BIO_read (cl, &one, 1) != 1)
 		{
-		  logmsg (LOG_NOTICE, "(%lx) error read request pending: %s",
-			  pthread_self (), strerror (errno));
+		  logmsg (LOG_NOTICE, "(%"PRItid") error read request pending: %s",
+			  POUND_TID (), strerror (errno));
 		  clean_all ();
 		  pthread_exit (NULL);
 		}
 	      if (++res_bytes > cont)
 		{
 		  logmsg (LOG_NOTICE,
-			  "(%lx) error read request pending: max. RPC length exceeded",
-			  pthread_self ());
+			  "(%"PRItid") error read request pending: max. RPC length exceeded",
+			  POUND_TID ());
 		  clean_all ();
 		  pthread_exit (NULL);
 		}
@@ -1666,8 +1672,8 @@ do_http (THR_ARG *arg)
 		{
 		  if (errno)
 		    logmsg (LOG_NOTICE,
-			    "(%lx) error write request pending: %s",
-			    pthread_self (), strerror (errno));
+			    "(%"PRItid") error write request pending: %s",
+			    POUND_TID (), strerror (errno));
 		  clean_all ();
 		  pthread_exit (NULL);
 		}
@@ -1681,8 +1687,8 @@ do_http (THR_ARG *arg)
 					 SLIST_EMPTY (&lstn->ctx_head)
 					   ? BIO_TYPE_SOCKET : BIO_TYPE_SSL)) == NULL)
 	    {
-	      logmsg (LOG_WARNING, "(%lx) error get unbuffered: %s",
-		      pthread_self (), strerror (errno));
+	      logmsg (LOG_WARNING, "(%"PRItid") error get unbuffered: %s",
+		      POUND_TID (), strerror (errno));
 	      clean_all ();
 	      pthread_exit (NULL);
 	    }
@@ -1695,16 +1701,16 @@ do_http (THR_ARG *arg)
 	      if ((res_bytes += res) > cont)
 		{
 		  logmsg (LOG_NOTICE,
-			  "(%lx) error copy request body: max. RPC length exceeded",
-			  pthread_self ());
+			  "(%"PRItid") error copy request body: max. RPC length exceeded",
+			  POUND_TID ());
 		  clean_all ();
 		  pthread_exit (NULL);
 		}
 	      if (BIO_write (be, buf, res) != res)
 		{
 		  if (errno)
-		    logmsg (LOG_NOTICE, "(%lx) error copy request body: %s",
-			    pthread_self (), strerror (errno));
+		    logmsg (LOG_NOTICE, "(%"PRItid") error copy request body: %s",
+			    POUND_TID (), strerror (errno));
 		  clean_all ();
 		  pthread_exit (NULL);
 		}
@@ -1723,8 +1729,8 @@ do_http (THR_ARG *arg)
 	  str_be (buf, MAXBUF - 1, cur_backend);
 	  end_req = cur_time ();
 	  logmsg (LOG_NOTICE,
-		  "(%lx) e500 for %s error flush to %s/%s: %s (%.3f sec)",
-		  pthread_self (),
+		  "(%"PRItid") e500 for %s error flush to %s/%s: %s (%.3f sec)",
+		  POUND_TID (),
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  buf, request, strerror (errno),
 		  (end_req - start_req) / 1000000.0);
@@ -1878,8 +1884,8 @@ do_http (THR_ARG *arg)
 	      str_be (buf, MAXBUF - 1, cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%lx) e500 for %s response error read from %s/%s: %s (%.3f secs)",
-		      pthread_self (),
+		      "(%"PRItid") e500 for %s response error read from %s/%s: %s (%.3f secs)",
+		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
@@ -1957,8 +1963,8 @@ do_http (THR_ARG *arg)
 		      if ((headers[n] = strdup (buf)) == NULL)
 			{
 			  logmsg (LOG_WARNING,
-				  "(%lx) rewrite Location - out of memory: %s",
-				  pthread_self (), strerror (errno));
+				  "(%"PRItid") rewrite Location - out of memory: %s",
+				  POUND_TID (), strerror (errno));
 			  free_headers (headers);
 			  clean_all ();
 			  return;
@@ -1978,8 +1984,8 @@ do_http (THR_ARG *arg)
 		      if ((headers[n] = strdup (buf)) == NULL)
 			{
 			  logmsg (LOG_WARNING,
-				  "(%lx) rewrite Content-location - out of memory: %s",
-				  pthread_self (), strerror (errno));
+				  "(%"PRItid") rewrite Content-location - out of memory: %s",
+				  POUND_TID (), strerror (errno));
 			  free_headers (headers);
 			  clean_all ();
 			  return;
@@ -2005,8 +2011,8 @@ do_http (THR_ARG *arg)
 		  {
 		    if (errno)
 		      {
-			logmsg (LOG_NOTICE, "(%lx) error write to %s: %s",
-				pthread_self (),
+			logmsg (LOG_NOTICE, "(%"PRItid") error write to %s: %s",
+				POUND_TID (),
 				addr2str (caddr, sizeof (caddr), &from_host, 1),
 				strerror (errno));
 		      }
@@ -2026,8 +2032,8 @@ do_http (THR_ARG *arg)
 	    {
 	      if (errno)
 		{
-		  logmsg (LOG_NOTICE, "(%lx) error flush headers to %s: %s",
-			  pthread_self (),
+		  logmsg (LOG_NOTICE, "(%"PRItid") error flush headers to %s: %s",
+			  POUND_TID (),
 			  addr2str (caddr, sizeof (caddr), &from_host, 1),
 			  strerror (errno));
 		}
@@ -2065,8 +2071,8 @@ do_http (THR_ARG *arg)
 		    {
 		      if (errno)
 			logmsg (LOG_NOTICE,
-				"(%lx) error copy server cont: %s",
-				pthread_self (), strerror (errno));
+				"(%"PRItid") error copy server cont: %s",
+				POUND_TID (), strerror (errno));
 		      clean_all ();
 		      return;
 		    }
@@ -2091,8 +2097,8 @@ do_http (THR_ARG *arg)
 			  if (BIO_read (be, &one, 1) != 1)
 			    {
 			      logmsg (LOG_NOTICE,
-				      "(%lx) error read response pending: %s",
-				      pthread_self (), strerror (errno));
+				      "(%"PRItid") error read response pending: %s",
+				      POUND_TID (), strerror (errno));
 			      clean_all ();
 			      return;
 			    }
@@ -2100,8 +2106,8 @@ do_http (THR_ARG *arg)
 			    {
 			      if (errno)
 				logmsg (LOG_NOTICE,
-					"(%lx) error write response pending: %s",
-					pthread_self (), strerror (errno));
+					"(%"PRItid") error write response pending: %s",
+					POUND_TID (), strerror (errno));
 			      clean_all ();
 			      return;
 			    }
@@ -2116,8 +2122,8 @@ do_http (THR_ARG *arg)
 			   BIO_find_type (be, cur_backend->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
 			{
 			  logmsg (LOG_WARNING,
-				  "(%lx) error get unbuffered: %s",
-				  pthread_self (), strerror (errno));
+				  "(%"PRItid") error get unbuffered: %s",
+				  POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2130,10 +2136,9 @@ do_http (THR_ARG *arg)
 			  if (BIO_write (cl, buf, res) != res)
 			    {
 			      if (errno)
-				logmsg
-				  (LOG_NOTICE,
-				   "(%lx) error copy response body: %s",
-				   pthread_self (), strerror (errno));
+				logmsg (LOG_NOTICE,
+					"(%"PRItid") error copy response body: %s",
+					POUND_TID (), strerror (errno));
 			      clean_all ();
 			      return;
 			    }
@@ -2154,8 +2159,8 @@ do_http (THR_ARG *arg)
 		    break;
 		  if (errno)
 		    {
-		      logmsg (LOG_NOTICE, "(%lx) error final flush to %s: %s",
-			      pthread_self (),
+		      logmsg (LOG_NOTICE, "(%"PRItid") error final flush to %s: %s",
+			      POUND_TID (),
 			      addr2str (caddr, sizeof (caddr), &from_host, 1),
 			      strerror (errno));
 		    }
@@ -2193,8 +2198,8 @@ do_http (THR_ARG *arg)
 		      if (BIO_read (cl, &one, 1) != 1)
 			{
 			  logmsg (LOG_NOTICE,
-				  "(%lx) error read ws request pending: %s",
-				  pthread_self (), strerror (errno));
+				  "(%"PRItid") error read ws request pending: %s",
+				  POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2202,8 +2207,8 @@ do_http (THR_ARG *arg)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
-				    "(%lx) error write ws request pending: %s",
-				    pthread_self (), strerror (errno));
+				    "(%"PRItid") error write ws request pending: %s",
+				    POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2215,8 +2220,8 @@ do_http (THR_ARG *arg)
 		      if (BIO_read (be, &one, 1) != 1)
 			{
 			  logmsg (LOG_NOTICE,
-				  "(%lx) error read ws response pending: %s",
-				  pthread_self (), strerror (errno));
+				  "(%"PRItid") error read ws response pending: %s",
+				  POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2224,8 +2229,8 @@ do_http (THR_ARG *arg)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
-				    "(%lx) error write ws response pending: %s",
-				    pthread_self (), strerror (errno));
+				    "(%"PRItid") error write ws response pending: %s",
+				    POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2241,15 +2246,15 @@ do_http (THR_ARG *arg)
 				      SLIST_EMPTY (&lstn->ctx_head)
 				       ? BIO_TYPE_SOCKET : BIO_TYPE_SSL)) == NULL)
 		    {
-		      logmsg (LOG_WARNING, "(%lx) error get unbuffered: %s",
-			      pthread_self (), strerror (errno));
+		      logmsg (LOG_WARNING, "(%"PRItid") error get unbuffered: %s",
+			      POUND_TID (), strerror (errno));
 		      clean_all ();
 		      return;
 		    }
 		  if ((be_unbuf = BIO_find_type (be, cur_backend->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
 		    {
-		      logmsg (LOG_WARNING, "(%lx) error get unbuffered: %s",
-			      pthread_self (), strerror (errno));
+		      logmsg (LOG_WARNING, "(%"PRItid") error get unbuffered: %s",
+			      POUND_TID (), strerror (errno));
 		      clean_all ();
 		      return;
 		    }
@@ -2268,8 +2273,8 @@ do_http (THR_ARG *arg)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
-				    "(%lx) error copy ws request body: %s",
-				    pthread_self (), strerror (errno));
+				    "(%"PRItid") error copy ws request body: %s",
+				    POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}
@@ -2290,8 +2295,8 @@ do_http (THR_ARG *arg)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
-				    "(%lx) error copy ws response body: %s",
-				    pthread_self (), strerror (errno));
+				    "(%"PRItid") error copy ws response body: %s",
+				    POUND_TID (), strerror (errno));
 			  clean_all ();
 			  return;
 			}

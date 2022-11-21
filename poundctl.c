@@ -444,10 +444,12 @@ main (const int argc, char **argv)
       if (xml_out)
 	printf ("<pound>\n");
       if (read (sock, &n, sizeof (n)) == sizeof (n))
-	if (xml_out)
-	  printf ("<queue size=\"%d\"/>\n", n);
-	else
-	  printf ("Requests in queue: %d\n", n);
+	{
+	  if (xml_out)
+	    printf ("<queue size=\"%d\"/>\n", n);
+	  else
+	    printf ("Requests in queue: %d\n", n);
+	}
       while (read (sock, (void *) &lstn, sizeof (LISTENER)) == sizeof (LISTENER))
 	{
 	  if (lstn.disabled < 0)

@@ -673,7 +673,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
   int ret_val, no_be;
   void *vp;
 
-  if (ret_val = pthread_mutex_lock (&svc->mut))
+  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "get_backend() lock: %s", strerror (ret_val));
 
   no_be = (svc->tot_pri <= 0);
@@ -761,7 +761,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	}
       break;
     }
-  if (ret_val = pthread_mutex_unlock (&svc->mut))
+  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "get_backend() unlock: %s", strerror (ret_val));
 
   return res;
@@ -778,12 +778,12 @@ upd_session (SERVICE * const svc, char **const headers, BACKEND * const be)
 
   if (svc->sess_type != SESS_HEADER && svc->sess_type != SESS_COOKIE)
     return;
-  if (ret_val = pthread_mutex_lock (&svc->mut))
+  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() lock: %s", strerror (ret_val));
   if (get_HEADERS (key, svc, headers))
     if (t_find (svc->sessions, key) == NULL)
       t_add (svc->sessions, key, &be, sizeof (be));
-  if (ret_val = pthread_mutex_unlock (&svc->mut))
+  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() unlock: %s", strerror (ret_val));
   return;
 }
@@ -801,7 +801,7 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
   int ret_val;
   char buf[MAXBUF];
 
-  if (ret_val = pthread_mutex_lock (&svc->mut))
+  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
   svc->tot_pri = 0;
   SLIST_FOREACH (b, &svc->backends, next)
@@ -812,21 +812,23 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
 	  case BE_DISABLE:
 	    b->disabled = 1;
 	    str_be (buf, MAXBUF - 1, b);
-	    logmsg (LOG_NOTICE, "(%lx) BackEnd %s disabled", pthread_self (),
+	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
+		    POUND_TID (),
 		    buf);
 	    break;
 
 	  case BE_KILL:
 	    b->alive = 0;
 	    str_be (buf, MAXBUF - 1, b);
-	    logmsg (LOG_NOTICE, "(%lx) BackEnd %s dead (killed)",
-		    pthread_self (), buf);
+	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
+		    POUND_TID (), buf);
 	    t_clean (svc->sessions, &be, sizeof (be));
 	    break;
 
 	  case BE_ENABLE:
 	    str_be (buf, MAXBUF - 1, b);
-	    logmsg (LOG_NOTICE, "(%lx) BackEnd %s enabled", pthread_self (),
+	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
+		    POUND_TID (),
 		    buf);
 	    b->disabled = 0;
 	    break;
@@ -838,7 +840,7 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
       if (b->alive && !b->disabled)
 	svc->tot_pri += b->priority;
     }
-  if (ret_val = pthread_mutex_unlock (&svc->mut))
+  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() unlock: %s", strerror (ret_val));
   return;
 }
@@ -1046,14 +1048,14 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
 
   if ((flags = fcntl (sockfd, F_GETFL, 0)) < 0)
     {
-      logmsg (LOG_WARNING, "(%lx) connect_nb: fcntl GETFL failed: %s",
-	      pthread_self (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl GETFL failed: %s",
+	      POUND_TID (), strerror (errno));
       return -1;
     }
   if (fcntl (sockfd, F_SETFL, flags | O_NONBLOCK) < 0)
     {
-      logmsg (LOG_WARNING, "(%lx) connect_nb: fcntl SETFL failed: %s",
-	      pthread_self (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl SETFL failed: %s",
+	      POUND_TID (), strerror (errno));
       return -1;
     }
 
@@ -1061,8 +1063,8 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   if ((res = connect (sockfd, serv_addr->ai_addr, serv_addr->ai_addrlen)) < 0)
     if (errno != EINPROGRESS)
       {
-	logmsg (LOG_WARNING, "(%lx) connect_nb: connect failed: %s",
-		pthread_self (), strerror (errno));
+	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: connect failed: %s",
+		POUND_TID (), strerror (errno));
 	return (-1);
       }
 
@@ -1071,8 +1073,8 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       /* connect completed immediately (usually localhost) */
       if (fcntl (sockfd, F_SETFL, flags) < 0)
 	{
-	  logmsg (LOG_WARNING, "(%lx) connect_nb: fcntl reSETFL failed: %s",
-		  pthread_self (), strerror (errno));
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl reSETFL failed: %s",
+		  POUND_TID (), strerror (errno));
 	  return -1;
 	}
       return 0;
@@ -1086,13 +1088,13 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       if (res == 0)
 	{
 	  /* timeout */
-	  logmsg (LOG_WARNING, "(%lx) connect_nb: poll timed out",
-		  pthread_self ());
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: poll timed out",
+		  POUND_TID ());
 	  errno = ETIMEDOUT;
 	}
       else
-	logmsg (LOG_WARNING, "(%lx) connect_nb: poll failed: %s",
-		pthread_self (), strerror (errno));
+	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: poll failed: %s",
+		POUND_TID (), strerror (errno));
       return -1;
     }
 
@@ -1100,16 +1102,16 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   len = sizeof (error);
   if (getsockopt (sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0)
     {
-      logmsg (LOG_WARNING, "(%lx) connect_nb: getsockopt failed: %s",
-	      pthread_self (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: getsockopt failed: %s",
+	      POUND_TID (), strerror (errno));
       return -1;
     }
 
   /* restore file status flags */
   if (fcntl (sockfd, F_SETFL, flags) < 0)
     {
-      logmsg (LOG_WARNING, "(%lx) connect_nb: fcntl reSETFL failed: %s",
-	      pthread_self (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl reSETFL failed: %s",
+	      POUND_TID (), strerror (errno));
       return -1;
     }
 
@@ -1117,8 +1119,8 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
     {
       /* getsockopt() shows an error */
       errno = error;
-      logmsg (LOG_WARNING, "(%lx) connect_nb: error after getsockopt: %s",
-	      pthread_self (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: error after getsockopt: %s",
+	      POUND_TID (), strerror (errno));
       return -1;
     }
 
@@ -1299,7 +1301,7 @@ do_resurect (void)
 	  }
 	if (modified)
 	  {
-	    if (ret_val = pthread_mutex_lock (&svc->mut))
+	    if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
 	      logmsg (LOG_WARNING, "do_resurect() lock: %s",
 		      strerror (ret_val));
 	    svc->tot_pri = 0;
@@ -1314,7 +1316,7 @@ do_resurect (void)
 		if (be->alive && !be->disabled)
 		  svc->tot_pri += be->priority;
 	      }
-	    if (ret_val = pthread_mutex_unlock (&svc->mut))
+	    if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	      logmsg (LOG_WARNING, "do_resurect() unlock: %s",
 		      strerror (ret_val));
 	  }
@@ -1388,7 +1390,7 @@ do_resurect (void)
 	}
       if (modified)
 	{
-	  if (ret_val = pthread_mutex_lock (&svc->mut))
+	  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "do_resurect() lock: %s",
 		    strerror (ret_val));
 	  svc->tot_pri = 0;
@@ -1403,7 +1405,7 @@ do_resurect (void)
 	      if (be->alive && !be->disabled)
 		svc->tot_pri += be->priority;
 	    }
-	  if (ret_val = pthread_mutex_unlock (&svc->mut))
+	  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "do_resurect() unlock: %s",
 		    strerror (ret_val));
 	}
@@ -1431,14 +1433,14 @@ do_expire (void)
     SLIST_FOREACH (svc, &lstn->services, next)
       if (svc->sess_type != SESS_NONE)
 	{
-	  if (ret_val = pthread_mutex_lock (&svc->mut))
+	  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
 	    {
 	      logmsg (LOG_WARNING, "do_expire() lock: %s",
 		      strerror (ret_val));
 	      continue;
 	    }
 	  t_expire (svc->sessions, cur_time - svc->sess_ttl);
-	  if (ret_val = pthread_mutex_unlock (&svc->mut))
+	  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "do_expire() unlock: %s",
 		    strerror (ret_val));
 	}
@@ -1446,13 +1448,13 @@ do_expire (void)
   SLIST_FOREACH (svc, &services, next)
     if (svc->sess_type != SESS_NONE)
       {
-	if (ret_val = pthread_mutex_lock (&svc->mut))
+	if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
 	  {
 	    logmsg (LOG_WARNING, "do_expire() lock: %s", strerror (ret_val));
 	    continue;
 	  }
 	t_expire (svc->sessions, cur_time - svc->sess_ttl);
-	if (ret_val = pthread_mutex_unlock (&svc->mut))
+	if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	  logmsg (LOG_WARNING, "do_expire() unlock: %s", strerror (ret_val));
       }
 
@@ -1476,11 +1478,11 @@ RSA_tmp_callback ( /* not used */ SSL * ssl, /* not used */ int is_export,
   RSA *res;
   int ret_val;
 
-  if (ret_val = pthread_mutex_lock (&RSA_mut))
+  if ((ret_val = pthread_mutex_lock (&RSA_mut)) != 0)
     logmsg (LOG_WARNING, "RSA_tmp_callback() lock: %s", strerror (ret_val));
   res = (keylength <= 512) ? RSA512_keys[rand () % N_RSA_KEYS]
 			   : RSA1024_keys[rand () % N_RSA_KEYS];
-  if (ret_val = pthread_mutex_unlock (&RSA_mut))
+  if ((ret_val = pthread_mutex_unlock (&RSA_mut)) != 0)
     logmsg (LOG_WARNING, "RSA_tmp_callback() unlock: %s", strerror (ret_val));
   return res;
 }
@@ -1528,7 +1530,7 @@ do_RSAgen (void)
       generate_key (&t_RSA512_keys[n], 512);
       generate_key (&t_RSA1024_keys[n], 1024);
     }
-  if (ret_val = pthread_mutex_lock (&RSA_mut))
+  if ((ret_val = pthread_mutex_lock (&RSA_mut)) != 0)
     logmsg (LOG_WARNING, "thr_RSAgen() lock: %s", strerror (ret_val));
   for (n = 0; n < N_RSA_KEYS; n++)
     {
@@ -1537,7 +1539,7 @@ do_RSAgen (void)
       RSA_free (RSA1024_keys[n]);
       RSA1024_keys[n] = t_RSA1024_keys[n];
     }
-  if (ret_val = pthread_mutex_unlock (&RSA_mut))
+  if ((ret_val = pthread_mutex_unlock (&RSA_mut)) != 0)
     logmsg (LOG_WARNING, "thr_RSAgen() unlock: %s", strerror (ret_val));
 }
 
@@ -1715,26 +1717,26 @@ t_dump_doall_arg (TABNODE *t, DUMP_ARG *arg)
     n_be = 0;
   if (write (arg->control_sock, t, sizeof (TABNODE)) == -1)
     {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
   if (write (arg->control_sock, &n_be, sizeof (n_be)) == -1)
     {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
   sz = strlen (t->key);
   if (write (arg->control_sock, &sz, sizeof (sz)) == -1)
     {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
   if (write (arg->control_sock, t->key, sz))
     {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __func__, __FILE__, __LINE__,
+      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
@@ -1888,12 +1890,12 @@ do_list (int ctl)
 	    }
 	  if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
 	    return -1;
-	  if (rc = pthread_mutex_lock (&svc->mut))
+	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
 	  else
 	    {
 	      dump_sess (ctl, svc->sessions, &svc->backends);
-	      if (rc = pthread_mutex_unlock (&svc->mut))
+	      if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 		logmsg (LOG_WARNING, "thr_control() unlock: %s",
 			strerror (rc));
 	    }
@@ -1923,12 +1925,12 @@ do_list (int ctl)
       if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
 	return -1;
 
-      if (rc = pthread_mutex_lock (&svc->mut))
+      if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
       else
 	{
 	  dump_sess (ctl, svc->sessions, &svc->backends);
-	  if (rc = pthread_mutex_unlock (&svc->mut))
+	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() unlock: %s", strerror (rc));
 	}
       if (write (ctl, (void *) &dummy_sess, sizeof (TABNODE)) == -1)
@@ -2060,11 +2062,11 @@ thr_control (void *arg)
 		      cmd.listener, cmd.service);
 	      break;
 	    }
-	  if (rc = pthread_mutex_lock (&svc->mut))
+	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() add session lock: %s",
 		    strerror (rc));
 	  t_add (svc->sessions, cmd.key, &be, sizeof (be));
-	  if (rc = pthread_mutex_unlock (&svc->mut))
+	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING,
 		    "thoriginalfiler_control() add session unlock: %s",
 		    strerror (rc));
@@ -2077,11 +2079,11 @@ thr_control (void *arg)
 		      cmd.listener, cmd.service);
 	      break;
 	    }
-	  if (rc = pthread_mutex_lock (&svc->mut))
+	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session lock: %s",
 		    strerror (rc));
 	  t_remove (svc->sessions, cmd.key);
-	  if (rc = pthread_mutex_unlock (&svc->mut))
+	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session unlock: %s",
 		    strerror (rc));
 	  break;

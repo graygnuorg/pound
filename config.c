@@ -738,7 +738,7 @@ input_gettkn (struct input *input, struct token **tok)
   return input->token.type;
 }
 
-struct token *
+static void
 input_putback (struct input *input)
 {
   assert (input->ready == 0);

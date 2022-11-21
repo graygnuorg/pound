@@ -114,12 +114,14 @@
 # define L_1     -1LL
 # define STRTOL  strtoll
 # define ATOL    atoll
+# define PRILONG "lld"
 #else
 # define LONG    long
 # define L0      0L
 # define L_1     -1L
 # define STRTOL  strtol
 # define ATOL    atol
+# define PRILONG "ld"
 #endif
 
 #ifndef DEFAULT_NUMTHREADS
@@ -213,7 +215,9 @@
 #define SLIST_FIRST(head) ((head)->sl_first)
 #define SLIST_EMPTY(head) (SLIST_FIRST (head) == NULL)
 #define SLIST_NEXT(elt, field) ((elt)->field)
-
+
+#define POUND_TID() ((unsigned long)pthread_self ())
+#define PRItid "lx"
 
 /* matcher chain */
 typedef struct _matcher
