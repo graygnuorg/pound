@@ -1131,6 +1131,24 @@ assign_int (void *call_data, void *section_data)
 }
 
 static int
+assign_int_range (int *dst, int min, int max)
+{
+  int n;
+  int rc;
+
+  if ((rc = assign_int (&n, NULL)) != PARSER_OK)
+    return rc;
+
+  if (!(min <= n && n <= max))
+    {
+      conf_error ("value out of allowed range (%d..%d)", min, max);
+      return PARSER_FAIL;
+    }
+  *dst = n;
+  return PARSER_OK;
+}
+
+static int
 assign_LONG (void *call_data, void *section_data)
 {
   LONG n;
@@ -1616,6 +1634,12 @@ backend_assign_ciphers (void *call_data, void *section_data)
 }
 
 static int
+backend_assign_priority (void *call_data, void *section_data)
+{
+  return assign_int_range (call_data, 0, 9);
+}
+
+static int
 set_proto_opt (int *opt)
 {
   struct token *tok;
@@ -1691,7 +1715,7 @@ static PARSER_TABLE backend_parsetab[] = {
   },
   {
     .name = "Priority",
-    .parser = assign_int,
+    .parser = backend_assign_priority,
     .off = offsetof (BACKEND, priority)
   },
   {
@@ -2342,24 +2366,6 @@ listener_parse_socket_from (void *call_data, void *section_data)
 
   lst->sock = fd;
 
-  return PARSER_OK;
-}
-
-static int
-assign_int_range (int *dst, int min, int max)
-{
-  int n;
-  int rc;
-
-  if ((rc = assign_int (&n, NULL)) != PARSER_OK)
-    return rc;
-
-  if (!(min <= n && n <= max))
-    {
-      conf_error ("value out of allowed range (%d..%d)", min, max);
-      return PARSER_FAIL;
-    }
-  *dst = n;
   return PARSER_OK;
 }
 
