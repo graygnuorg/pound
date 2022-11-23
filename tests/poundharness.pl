@@ -137,7 +137,7 @@ $ps->parse;
 
 # Terminate
 
-$_->cancel() for threads->list();
+$_->join for threads->list();
 
 if ($statistics) {
     print "Total tests: ".$ps->tests. "\n";
