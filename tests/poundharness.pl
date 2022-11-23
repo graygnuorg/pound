@@ -136,6 +136,9 @@ my $ps = PoundScript->new($script_file, $transcript_file);
 $ps->parse;
 
 # Terminate
+
+$_->cancel() for threads->list();
+
 if ($statistics) {
     print "Total tests: ".$ps->tests. "\n";
     print "Failures: ".$ps->failures. "\n";
@@ -279,10 +282,8 @@ sub failures { shift->{failures} }
 
 sub http { shift->{http} }
 
-sub send {
-    my $self = shift;
-    my $lst = $listeners->get($self->{server});
-    my $host = delete $self->{REQ}{HEADERS}{host} || $lst->host;
+sub send_and_expect {
+    my ($self, $lst, $host, $stats) = @_;
     my $url = $lst->proto . '://' .
 	      $host .
 	      ':' .
@@ -310,15 +311,88 @@ sub send {
 
     $self->{tests}++;
     my $ok = $self->assert($response);
-    if (!$ok) {
+    if ($ok) {
+	if ($stats) {
+	    $stats->incr($response->{headers}{'x-backend-number'});
+	}
+    } else {
 	$self->{failures}++;
     }
     if (my $fh = $self->{xscript}) {
 	print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: " .
 		   ($ok ? "OK" : "FAIL")."\n";
     }
+    return $ok
+}
+
+sub check_expect {
+    my ($self, $value, $exp) = @_;
+    return $exp->{min} <= $value && $value <= $exp->{max};
+}
+
+sub send {
+    my $self = shift;
+    my $lst = $listeners->get($self->{server});
+    my $host = delete $self->{REQ}{HEADERS}{host} || $lst->host;
+
+    if ($self->{stats}) {
+	my $n = $self->{stats}{samples}{value};
+	my $s = Stats->new($backends->count);
+
+	for (my $i = 0; $i < $n; $i++) {
+	    $self->send_and_expect($lst, $host, $s) or goto end;
+	}
+
+	if (my $i = $self->{stats}{index}{value}) {
+	    $s = $s->elemstat($i);
+	}
+
+	# Assume success
+	my $ok = 1;
+
+	# Iterate over criterions applying them to the received statistics
+	# and correcting $ok accordingly.
+	foreach my $k (qw(min max avg stddev)) {
+	    if (exists($self->{stats}{$k})) {
+		unless ($self->check_expect($s->${ \$k }, $self->{stats}{$k})) {
+		    $ok = 0;
+		    if (my $fh = $self->{xscript}) {
+			print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: $k: expected value mismatch\n";
+		    }
+		}
+	    }
+	}
+
+	# Additionally, apply any individual element criteria.
+	if (exists($self->{stats}{expect})) {
+	    foreach my $i (sort keys %{$self->{stats}{expect}}) {
+		my $val = $s->sample($i);
+		unless ($self->check_expect($s->sample($i),
+					    $self->{stats}{expect}{$i})) {
+		    $ok = 0;
+		    if (my $fh = $self->{xscript}) {
+			print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: element $i: expected value mismatch\n";
+		    }
+		}
+	    }
+	}
+
+	$self->{failures}++ unless $ok;
+
+	if (my $fh = $self->{xscript}) {
+	    printf $fh "min=%f, avg=%f, max=%f, stddev=%f\n", $s->min, $s->avg, $s->max, $s->stddev;
+	    local $Data::Dumper::Sortkeys=1;
+	    print $fh Dumper([$s->samples]);
+	    print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: " .
+		($ok ? "OK" : "FAIL")."\n";
+	}
+    } else {
+	$self->send_and_expect($lst, $host);
+    }
+ end:
     delete $self->{REQ};
     delete $self->{EXP};
+    delete $self->{stats};
 }
 
 sub assert {
@@ -379,7 +453,7 @@ sub syntax_error {
     my ($self, $message) = @_;
     $message //= "syntax error\n";
     my $locus = $self->{filename} . ':' . $self->{line};
-#    confess "$locus: $message";
+    confess "$locus: $message";
 }
 
 sub parse_req {
@@ -395,6 +469,44 @@ sub parse_req {
 	}
 	if (/^server\s+(\d+)/) {
 	    $self->{server} = $1;
+	    next;
+	}
+	if (s/^stats//) {
+	    foreach my $k (qw(samples min max avg stddev index)) {
+		if (s{\s+$k = (?:
+				(?: (?<value>\d+(?:\.\d+)?)
+				    (?: % (?: (?<dev>\d+(?:\.\d+)?) ) )? ) |
+				(?: \[ \s* (?<min>\d+(?:\.\d+)?)
+				      \s* , \s*
+				      (?<max>\d+(?:\.\d+)?) \] )
+			      )}{}x) {
+		    if (defined($+{value})) {
+			my $v = $+{value};
+			$self->{stats}{$k}{value} = $v;
+			if (defined($+{dev})) {
+			    $self->{stats}{$k}{min} = $v - $+{dev} * $v / 100;
+			    $self->{stats}{$k}{max} = $v + $+{dev} * $v / 100;
+			} else {
+			    $self->{stats}{$k}{min} = $self->{stats}{$k}{max} = $v;
+			}
+		    } else {
+			$self->{stats}{$k}{min} = $+{min};
+			$self->{stats}{$k}{max} = $+{max};
+		    }
+		}
+	    }
+
+	    if (s/\s+expect\s+(?<i>\d+)\s+(?<value>\d+(?:\.\d+)?)(?:%(?<dev>\d+(?:\.\d+)?))?//) {
+		$self->{stats}{expect}{$+{i}}{value} = $+{value};
+		$self->{stats}{expect}{$+{i}}{dev} = $+{dev};
+	    }
+	    unless (/^\s*$/) {
+		$self->syntax_error("unrecognized keywords in stats statement: $_");
+	    }
+	    unless (exists($self->{stats}{samples})) {
+		$self->syntax_error("required keyword \"samples\" is missing");
+	    }
+
 	    next;
 	}
 	if (/^end$/) {
@@ -602,6 +714,101 @@ sub parse_expect_body {
     $self->syntax_error("unexpected end of file");
 }
 
+package Stats;
+use strict;
+use warnings;
+use Carp;
+
+sub new {
+    my ($class, $n) = @_;
+    bless { samples => [ (0) x ($n //= 0) ] }, $class;
+}
+
+sub incr {
+    my ($self, $n, $v) = @_;
+    $v //= 1;
+    $self->{samples}[$n] += $v;
+    $self->{total} += $v;
+    $self->clear;
+}
+
+sub clear { shift->{dirty} = 1 }
+
+sub total { shift->{total} }
+
+sub numsamples {
+    my $self = shift;
+    return 0 + @{$self->{samples}}
+}
+
+sub sample {
+    my ($self, $n) = @_;
+    if ($n < 0 || $n >= $self->numsamples) {
+	croak "n out of range";
+    }
+    return $self->{samples}[$n]
+}
+
+sub samples { @{shift->{samples}} }
+sub ratio {
+    my $self = shift;
+    return map { $_ / $self->avg } $self->samples
+}
+
+sub elemratio {
+    my ($self, $n) = @_;
+    my $v = $self->sample($n);
+    return map { $v / $_ } $self->samples;
+}
+
+sub elemstat {
+    my ($self, $n) = @_;
+    my $s = Stats->new();
+    my $i = 0;
+    my $j = 0;
+    foreach my $v ($self->elemratio($n)) {
+	next if ($i++ == $n);
+	$s->incr($j++, $v);
+    }
+    return $s;
+}
+
+sub _compute {
+    my ($self, $what) = @_;
+    if ($self->{dirty}) {
+	my $nsamples = $self->numsamples;
+	my $sum = 0;
+	my $sumq = 0;
+	my $min = $self->{samples}[0] // 0;
+	my $max = $self->{samples}[0] // 0;
+
+	foreach my $v (@{$self->{samples}}) {
+	    $v //= 0;
+	    $sum += $v;
+	    $sumq += $v * $v;
+	    if ($v < $min) {
+		$min = $v;
+	    }
+	    if ($v > $max) {
+		$max = $v;
+	    }
+	}
+
+	$self->{min} = $min;
+	$self->{max} = $max;
+	$self->{avg} = $sum / $nsamples;
+	$self->{stddev} = sqrt($sumq / $nsamples - $self->{avg} * $self->{avg});
+
+	$self->{dirty} = 0;
+    }
+    return $self->{$what}
+}
+
+sub min { shift->_compute('min') }
+sub max { shift->_compute('max') }
+sub avg { shift->_compute('avg') }
+sub stddev { shift->_compute('stddev') }
+
 #
 # Connection
 #

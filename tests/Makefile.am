@@ -62,6 +62,7 @@ check-local: atconfig atlocal $(TESTSUITE)
 TESTSUITE_AT = \
  testsuite.at \
  addheader.at\
+ balancing.at\
  checkurl.at\
  config.at\
  echo.at\
@@ -70,7 +71,14 @@ TESTSUITE_AT = \
  headrequire.at\
  https.at\
  maxrequest.at\
+ prio.at\
  rewriteloc.at\
+ sessauth.at\
+ sesscookie.at\
+ sesshdr.at\
+ sessip.at\
+ sessparm.at\
+ sessurl.at\
  url.at\
  virthost.at\
  xhttp.at
