@@ -3,7 +3,6 @@
 ChangeLog
 Makefile
 Makefile.in
-install-sh
 *.orig
 *.rej
 core
@@ -16,11 +15,6 @@ stamp-h1
 *.o
 *~
 *.bak
-dh.h
-dh2048.h
-dh512.h
-pound
-poundctl
 configure
 config.guess 
 config.h.in 
@@ -28,9 +22,7 @@ config.sub
 aclocal.m4
 autom4te.cache
 .deps/
-compile
-depcomp
-missing
+/build-aux
 *.tar.gz
 *.patch
 *.diff

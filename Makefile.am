@@ -14,58 +14,7 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-SUBDIRS = . tests
-
-AM_CFLAGS = @PTHREAD_CFLAGS@
-
-AM_CPPFLAGS = @SSL_CPPFLAGS@ \
- -DSYSCONFDIR=\"$(sysconfdir)\"\
- -DLOCALSTATEDIR=\"$(localstatedir)\"
-AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD=@PTHREAD_LIBS@
-
-sbin_PROGRAMS=pound
-pound_SOURCES=\
- config.c\
- http.c\
- pound.c\
- svc.c
-
-install-exec-hook:
-	-@if test "$${EUID:-65535}" -eq 0; then \
-		for program in $(sbin_PROGRAMS); do \
-			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(sbindir)/$$program$(EXEEXT); \
-		done; \
-		for program in $(bin_PROGRAMS); do \
-			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(bindir)/$$program$(EXEEXT); \
-		done; \
-	fi
-
-noinst_HEADERS=pound.h extern.h config.h
-
-if OPENSSL_V3
-DHSRC =
-else
-noinst_HEADERS += dh.h
-DHSRC = dh512.h dh@DH_LEN@.h
-
-dh512.h:
-	openssl dhparam -5 -C -noout 512 > dh512.h
-
-dh@DH_LEN@.h:
-	openssl dhparam -5 -C -noout @DH_LEN@ > dh@DH_LEN@.h
-
-dh.h: $(DHSRC)
-	cat $(DHSRC) > dh.h
-
-BUILT_SOURCES=dh.h $(DHSRC)
-DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h
-endif
-
-bin_PROGRAMS=poundctl
-poundctl_SOURCES=poundctl.c
-
-dist_man_MANS=pound.8 poundctl.8
+SUBDIRS = src tests doc
 
 EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README.md AUTHORS THANKS
 

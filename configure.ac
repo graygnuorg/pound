@@ -16,7 +16,8 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.69])
 AC_INIT([pound],[4.0-rc1],[gray+pound@gnu.org.ua],[pound],[https://github.com/graygnuorg/pound])
-AC_CONFIG_SRCDIR([pound.c])
+AC_CONFIG_AUX_DIR([build-aux])
+AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.15 foreign tar-ustar])
 
@@ -175,5 +176,7 @@ AC_CONFIG_TESTDIR(tests)
 AC_CONFIG_FILES([tests/Makefile tests/atlocal])
 AM_MISSING_PROG([AUTOM4TE], [autom4te])
 
-AC_CONFIG_FILES([Makefile])
+AC_CONFIG_FILES([Makefile
+                 src/Makefile
+		 doc/Makefile])
 AC_OUTPUT
