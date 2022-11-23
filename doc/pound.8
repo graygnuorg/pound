@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 19, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "November 23, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -315,9 +315,9 @@ logging, 2 for extended logging (show chosen backend server as well),
 3 for Apache-like format (Combined Log Format with Virtual Host), 4
 (same as 3 but without the virtual host information) and 5 (same as 4
 but with information about the
-.I Service
+.B Service
 and
-.I Backend
+.B Backend
 used).
 This value can be overridden for specific listeners.
 .TP
@@ -401,9 +401,9 @@ An HTTP listener defines an address and port that
 .B pound
 will listen on for HTTP requests. All configuration directives enclosed
 between
-.I ListenHTTP
+.B ListenHTTP
 and
-.I End
+.B End
 are specific to a single HTTP listener. At the very least you must specify
 and address and a port for each listener. The following directives are
 available:
@@ -427,7 +427,7 @@ will listen on.  This parameter must be present if the
 .B Address
 parameter contains an IPv4 or IPv6 address.
 .TP
-.B SocketFrom "/path/to/socket"
+\fBSocketFrom\fR "/path/to/socket"
 Read the socket to listen on from the UNIX socket given as argument.
 If this parameter is supplied, neither
 .B Address
@@ -439,22 +439,22 @@ may be used.  This parameter is intended for testing
 \fBxHTTP\fR \fIn\fR
 Defines which HTTP verbs are accepted. The possible values are:
 .IP
-.I 0
+.B 0
 (default) accept only standard HTTP requests (GET, POST, HEAD).
 .IP
-.I 1
+.B 1
 additionally allow extended HTTP requests (PUT, PATCH, DELETE).
 .IP
-.I 2
+.B 2
 additionally allow standard WebDAV verbs (LOCK, UNLOCK, PROPFIND,
 PROPPATCH, SEARCH, MKCOL, MOVE, COPY, OPTIONS, TRACE, MKACTIVITY,
 CHECKOUT, MERGE, REPORT).
 .IP
-.I 3
+.B 3
 additionally allow MS extensions WebDAV verbs (SUBSCRIBE, UNSUBSCRIBE,
 NOTIFY, BPROPFIND, BPROPPATCH, POLL, BMOVE, BCOPY, BDELETE, CONNECT).
 .IP
-.I 4
+.B 4
 additionally allow MS RPC extensions verbs (RPC_IN_DATA, RPC_OUT_DATA).
 .TP
 \fBClient\fR \fIn\fR
@@ -501,7 +501,7 @@ unlimited.
 \fBHeadRemove\fR "header pattern"
 Remove certain headers from the incoming requests. All occurrences of the
 matching specified header will be removed. Please note that this filtering
-is done prior to other checks (such as \fIHeadRequire\fR or \fIHeadDeny\fR),
+is done prior to other checks (such as \fBHeadRequire\fR or \fBHeadDeny\fR),
 so you should not try to check for these headers in later matches. Multiple
 directives may be specified in order to remove more than one header, and
 the header itself may be a regular pattern (though this should be used with
@@ -509,8 +509,8 @@ caution).
 .TP
 \fBAddHeader\fR "header: to add"
 Add the defined header to the request passed to the backend server. The header
-is added verbatim. Use multiple \fIAddHeader\fR directives if you need to add more
-than one header.
+is added verbatim. Use multiple \fBAddHeader\fR directives if you need
+to add more than one header.
 .TP
 \fBRewriteLocation\fR 0|1|2
 If set to 1, force
@@ -530,7 +530,7 @@ to the backend itself with the correct protocol. Default: \fIfalse\fR.
 .TP
 \fBLogLevel\fR value
 Override the global
-.I LogLevel
+.B LogLevel
 value.
 .TP
 \fBService\fR [ "name" ]
@@ -544,9 +544,9 @@ An HTTPS listener defines an address and port that
 .B pound
 will listen on for HTTPS requests. All configuration directives enclosed
 between
-.I ListenHTTPS
+.B ListenHTTPS
 and
-.I End
+.B End
 are specific to a single HTTPS listener. At the very least you must specify
 and address, a port and a server certificate for each listener. All directives
 defined for HTTP listeners are applicable to HTTPS listeners as well. The
@@ -561,7 +561,7 @@ for this server. This directive is
 for HTTPS listeners.
 .IP
 Please note that multiple
-.I Cert
+.B Cert
 directives are allowed if your OpenSSL version supports SNI. In such cases,
 the first directive is the default certificate, with additional certificates
 used if the client requests them.
@@ -572,7 +572,7 @@ most-specific-to-least specific order (i.e. wildcard certificates
 .B after
 host-specific certificates).
 .IP
-.I Cert
+.B Cert
 directives
 .B must
 precede all other SSL-specific directives.
@@ -650,9 +650,9 @@ will always try the private services in the order defined, followed by
 the global ones.
 .P
 All configuration directives enclosed between
-.I Service
+.B Service
 and
-.I End
+.B End
 are specific to a single service. The following directives are available:
 .TP
 \fBURL\fR "pattern"
@@ -660,11 +660,11 @@ Match the incoming request. If a request fails to match, then this service
 will be skipped and next one tried. If all services fail to match,
 .B pound
 returns an error. You may define multiple
-.I URL
+.B URL
 conditions per service, in which case
 .B all
 patterns must match. If no
-.I URL
+.B URL
 was defined, then all requests match. The matching is by default case-sensitive,
 but this can be overridden by specifying
 .BR IgnoreCase .
@@ -677,7 +677,7 @@ setting.
 \fBHeadRequire\fR "pattern"
 The request must contain at least on header matching the given pattern.
 Multiple
-.I HeadRequire
+.B HeadRequire
 directives may be defined per service, in which case all of them must
 be satisfied.
 .TP
@@ -685,12 +685,12 @@ be satisfied.
 The request may
 .B not
 contain any header matching the given pattern.  Multiple
-.I HeadDeny
+.B HeadDeny
 directives may be defined per service, in which case all of them must be satisfied.
 .IP
 .IR "Please note":
 if the listener defined a
-.I HeadRemove
+.B HeadRemove
 directive, the matching headers are removed
 .B before
 the service matching is attempted.
@@ -704,10 +704,10 @@ started as disabled, the service can be later enabled with
 .TP
 \fBBackend\fR
 Directives enclosed between a
-.I Backend
+.B Backend
 and
 the following
-.I End
+.B End
 directives define a single backend server (see below for details). You
 may define multiple backends per service, in which case
 .B pound
@@ -757,10 +757,10 @@ behaviour by specifying the \fIcode\fR to be used (301, 302 or 307).
 .TP
 \fBEmergency\fR
 Directives enclosed between an
-.I Emergency
+.B Emergency
 and
 the following
-.I End
+.B End
 directives define an emergency backend server (see below for details). You may define
 only one emergency server per service, which
 .B pound
@@ -768,19 +768,19 @@ will attempt to use if all backends are down.
 .TP
 \fBSession\fR
 Directives enclosed between a
-.I Session
+.B Session
 and
 the following
-.I End
+.B End
 directives define a session-tracking mechanism for the current service. See below
 for details.
 .SH "Backend"
 A backend is a definition of a single backend server
 .B pound
 will use to reply to incoming requests.  All configuration directives enclosed between
-.I Backend
+.B Backend
 and
-.I End
+.B End
 are specific to a single service. The following directives are available:
 .TP
 \fBAddress\fR \fIaddress\fR
@@ -841,17 +841,17 @@ define higher priorities for more capable servers.
 .TP
 \fBTimeOut\fR \fIn\fR
 Override the global
-.I TimeOut
+.B TimeOut
 value.
 .TP
 \fBConnTO\fR \fIn\fR
 Override the global
-.I ConnTO
+.B ConnTO
 value.
 .TP
 \fBWSTimeOut\fR \fIn\fR
 Override the global
-.I WSTimeOut
+.B WSTimeOut
 value.
 .TP
 \fBHAport\fR [ \fIaddress\fR ] \fIport\fR
@@ -870,9 +870,9 @@ backend can be later enabled with
 .SH "Emergency"
 The emergency server will be used once all existing backends are "dead".
 All configuration directives enclosed between
-.I Emergency
+.B Emergency
 and
-.I End
+.B End
 are specific to a single service. The following directives are available:
 .TP
 \fBAddress\fR \fIaddress\fR
@@ -907,9 +907,9 @@ section, which see.
 .SH "Session"
 Defines how a service deals with possible HTTP sessions.  All configuration
 directives enclosed between
-.I Session
+.B Session
 and
-.I End
+.B End
 are specific to a single service. Once a session is identified,
 .B pound
 will attempt to send all requests within that session to the same backend
@@ -945,7 +945,7 @@ servers that do not respond (though not necessarily dead: an overloaded server
 that
 .B pound
 cannot establish a connection to will be considered dead). However, every
-.I Alive
+.B Alive
 seconds, an attempt is made to connect to the dead servers in case they have become
 active again. If this attempt succeeds, connections will be initiated to them again.
 .PP
@@ -1037,23 +1037,32 @@ other web servers, so that if you want to use a log tool:
 .TP
     fgrep pound /var/log/messages | your_log_tool
 .PP
-Translating HTTPS to HTTP is an iffy proposition: no client information is passed to
-the server itself (certificates, etc) and the backend server may be misled if it
-uses absolute URLs. A patch for \fIZope\fR is included in the distribution to address
-this issue - for other Web servers you are on your own. May the source be with you.
+Translating HTTPS to HTTP is an iffy proposition: no client
+information is passed to the server itself (certificates, etc) and the
+backend server may be misled if it uses absolute URLs.  In most cases
+this can be dealt with by adding the
+.B X\-Forwarded\-Proto: https
+header (see the \fBAddHeader\fR directive).  Besides, \fBpound\fR
+itself adds a number of
+.B X\-SSL\-*
+certificates conveying information about the certificate used (see above,
+section
+.BR "HTTPS HEADERS" ).
 .PP
 .B Pound
-deals with (and sanitizes) HTTP/1.1 requests. Thus even if you have an HTTP/1.0 server,
-a single connection to an HTTP/1.1 client is kept, while the connection to the backend
-server is re-opened as necessary.
+deals with (and sanitizes) HTTP/1.1 requests. Thus even if you have an
+HTTP/1.0 server, a single connection to an HTTP/1.1 client is kept,
+while the connection to the backend server is re-opened as necessary.
 .PP
 .B Pound
-attempts to resolve the names of the hosts that appear in various requests and/or responses.
-That means it need a functioning resolver of some kind (be it /etc/hosts, DNS or something
-else).
+attempts to resolve the names of the hosts that appear in various
+requests and/or responses.  That means it needs a functioning resolver
+of some kind (be it
+.BR /etc/hosts ,
+DNS or something else).
 .SH EXAMPLES
-To translate HTTPS requests to a local HTTP server (assuming your network address
-is 192.0.2.1):
+To translate HTTPS requests to a local HTTP server (assuming your
+network address is 192.0.2.1):
 .PP
 .EX
 ListenHTTPS
@@ -1061,10 +1070,10 @@ ListenHTTPS
     Port    443
     Cert    "/etc/pound/server.pem"
     Service
-	Backend
-	    Address 127.0.0.1
-	    Port    80
-	End
+        Backend
+            Address 127.0.0.1
+            Port    80
+        End
     End
 End
 .EE
@@ -1086,19 +1095,19 @@ End
 
 Service
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Backend
-	Address 192.168.0.12
-	Port    80
-	Priority 3
+        Address 192.168.0.12
+        Port    80
+        Priority 3
     End
 End
 .EE
@@ -1116,8 +1125,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-	Address 192.168.0.12
-	Port    80
+        Address 192.168.0.12
+        Port    80
     End
 End
 
@@ -1131,18 +1140,18 @@ End
 # Catch-all server(s)
 Service
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Session
-	Type    BASIC
-	TTL     300
+        Type    BASIC
+        TTL     300
     End
 End
 .EE
@@ -1180,8 +1189,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 End
 
@@ -1190,35 +1199,35 @@ Service
     URL         ".*sessid=.*"
     HeadRequire "Host:.*www.myserver.com.*"
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Session
-	Type    URL
-	ID      "sessid"
-	TTL     120
+        Type    URL
+        ID      "sessid"
+        TTL     120
     End
 End
 
 # Everybody else
 Service
     Backend
-	Address 192.168.0.20
-	Port    80
-	Priority 5
+        Address 192.168.0.20
+        Port    80
+        Priority 5
     End
 
     Backend
-	Address 192.168.0.21
-	Port    80
-	Priority 4
+        Address 192.168.0.21
+        Port    80
+        Priority 4
     End
 
     Session
-	Type    COOKIE
-	ID      "userid"
-	TTL     180
+        Type    COOKIE
+        ID      "userid"
+        TTL     180
     End
 End
 .EE
