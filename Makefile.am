@@ -16,11 +16,12 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 SUBDIRS = src tests doc
 
-EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README.md AUTHORS THANKS
+EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README.md AUTHORS THANKS NEWS
 
 .PHONY: ChangeLog
 ChangeLog:
-	$(AM_V_GEN)if test -d .git; then                                    \
+	@if test -d .git; then                                              \
+           echo "Creating ChangeLog";                                       \
 	   (git log --pretty='format:%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
                     --date=short;                                           \
             echo "";                                                        \
@@ -28,7 +29,5 @@ ChangeLog:
             echo "mode: change-log";                                        \
             echo "version-control: never";                                  \
             echo "buffer-read-only: t";                                     \
-            echo "End:";                                                    \
-            echo "";                                                        \
-            sed -n -e '2,/^$$/s/^##//p' Makefile.am) > ChangeLog;           \
+            echo "End:") > ChangeLog;                                       \
 	fi
