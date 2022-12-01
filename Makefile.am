@@ -16,18 +16,22 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 SUBDIRS = src tests doc
 
-EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README.md AUTHORS THANKS NEWS
+EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README AUTHORS THANKS NEWS
+
+if FROM_GIT
+README: README.md
+	perl md2txt.pl -l 4 README.md > README
 
 .PHONY: ChangeLog
 ChangeLog:
-	@if test -d .git; then                                              \
-           echo "Creating ChangeLog";                                       \
-	   (git log --pretty='format:%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
-                    --date=short;                                           \
-            echo "";                                                        \
-            echo "Local Variables:";                                        \
-            echo "mode: change-log";                                        \
-            echo "version-control: never";                                  \
-            echo "buffer-read-only: t";                                     \
-            echo "End:") > ChangeLog;                                       \
-	fi
+	@echo "Creating ChangeLog";                                       \
+	 (git log --pretty='format:%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
+                  --date=short;                                           \
+          echo "";                                                        \
+          echo "Local Variables:";                                        \
+          echo "mode: change-log";                                        \
+          echo "version-control: never";                                  \
+          echo "buffer-read-only: t";                                     \
+          echo "End:") > ChangeLog
+endif
+

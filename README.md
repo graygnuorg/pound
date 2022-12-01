@@ -22,7 +22,7 @@ On 2022-09-19, Robert
 [announced](https://groups.google.com/g/pound_proxy/c/O8xaIIODw18)
 that he stops further development and maintenance of __pound__.  Following
 that, Sergey decided to continue development of the program starting
-from hist fork.
+from his fork.
 
 ## What Pound Is
 
@@ -46,6 +46,14 @@ does not access the hard-disk at all (except for reading certificate
 files on start, if required) and should thus pose no security threat
 to any machine.
 
+## What Pound Is Not
+
+1. __Pound__ is not a Web server: it serves no content itself, it only
+   passes requests and responses back an forth between clients and
+   actual web servers (*backends*).
+2. __Pound__ is not a Web accelerator: no caching is done --
+   every request is passed to a backend server "as is".
+
 ## Notice On Project Versioning
 
 I took over __pound__ development at its 2.x branch.  The branch 3.x
@@ -53,14 +61,6 @@ which emerged for a short time before the original project was
 abandoned I consider a failed experiment. To ensure consistent
 versioning and avoid confusion, my versioning of __pound__ starts with
 4.0.
-
-## What Pound Is Not:
-
-1. __Pound__ is not a Web server: it serves no content itself, it only
-   passes requests and responses back an forth between clients and
-   actual web servers (*backends*).
-2. __Pound__ is not a Web accelerator: no caching is done --
-   every request is passed to a backend server "as is".
 
 ## Documentation
 
@@ -171,7 +171,7 @@ Directory under which OpenSSL is installed.  You will seldom need this
 option.  Most of the time `configure` is able to detect that location
 automatically.
 
-* `--with-t_rsa=`*n*`
+* `--with-t_rsa=`*n*
 
 Sets default time interval for regeneration of RSA ephemeral keys.
 This option has no effect when compiling with OpenSSL 3.0.
@@ -221,7 +221,7 @@ something like that:
 
 ```
 ## -------------------------- ##
-## pound 2.8-gray test suite. ##
+## pound 4.0 test suite.      ##
 ## -------------------------- ##
   1: Configuration file syntax                       ok
   2: Basic request processing                        ok
@@ -434,7 +434,7 @@ session tracking is declared with the `Type` statement.
           TTL     300
   End
   ```
-  
+
   in configuration file to achieve this effect. The value indicates what
   period of inactivity is allowed before the session is discarded.
 
@@ -504,6 +504,7 @@ session tracking is declared with the `Type` statement.
           ID      "X-sess"
           TTL     300
   End
+  ```
 
   to your configuration file - the sessions will be tracked by the value of
   the `X-sess` header.

@@ -172,6 +172,15 @@ then
     egrep -s '^proxy' /etc/group > /dev/null && I_GRP=proxy
 fi
 
+AC_MSG_CHECKING([if building from git clone])
+if test -d .git; then
+    build_from_git=yes
+else
+    build_from_git=no
+fi
+AC_MSG_RESULT([$build_from_git])
+AM_CONDITIONAL([FROM_GIT],[test "$build_from_git" = yes])
+
 AC_CONFIG_TESTDIR(tests)
 AC_CONFIG_FILES([tests/Makefile tests/atlocal])
 AM_MISSING_PROG([AUTOM4TE], [autom4te])
