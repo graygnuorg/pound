@@ -16,7 +16,7 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 SUBDIRS = src tests doc
 
-EXTRA_DIST = COPYING ChangeLog ChangeLog.apsis README AUTHORS THANKS NEWS
+EXTRA_DIST = ChangeLog.apsis
 
 if FROM_GIT
 README: README.md

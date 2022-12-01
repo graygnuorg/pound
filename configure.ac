@@ -19,7 +19,7 @@ AC_INIT([pound],[4.0-rc1],[gray+pound@gnu.org.ua],[pound],[https://github.com/gr
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
-AM_INIT_AUTOMAKE([1.15 foreign tar-ustar])
+AM_INIT_AUTOMAKE([1.15 gnu tar-ustar])
 
 # Checks for programs.
 AC_PROG_CC
