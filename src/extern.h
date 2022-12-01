@@ -37,4 +37,10 @@ extern int SOL_TCP;
 extern LISTENER_HEAD listeners;	/* all available listeners */
 extern SERVICE_HEAD services;	/* global services (if any) */
 
+enum
+  {
+    FEATURE_DNS
+  };
+
+int feature_is_set (int f);
 

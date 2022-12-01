@@ -246,7 +246,7 @@ sub runner {
     }
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
-    exec 'pound', '-p', $pid_file, '-f', $config;
+    exec 'pound', '-p', $pid_file, '-f', $config, '-W', 'no-dns';
 }
 
 package PoundScript;

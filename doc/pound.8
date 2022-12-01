@@ -14,13 +14,14 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 23, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 1, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
 .TP
 .B pound
 [\fB\-chVv\fR]
+[\fB\-W [\fBno\-]\fIFEATURE\fR]
 [\fB\-f \fICONF-FILE\fR]
 [\fB\-p \fIPID-FILE\fR]
 .SH DESCRIPTION
@@ -185,6 +186,18 @@ Print version:
 .B pound
 will exit immediately after printing the current version, licensing
 terms, and configuration flags.
+.TP
+\fB\-W [\fBno\-]\fIFEATURE\fR
+Enable or disable (if prefixed with \fBno\-\fR) additional \fBpound\fR
+features.  As of this version, only one \fIFEATURE\fR is implemented:
+.RS
+.TP
+.RB [ no\- ] dns
+Resolve host names found in configuration file.  This is the default.
+You can disable it if your configuration file refers to backends only
+by their IP addresses, in order to suppress potentially lengthy
+network host address lookups.
+.RE
 .PP
 In general, any number of backend servers may be specified. Use the priority to
 affect the load distribution among unequal-performance servers.

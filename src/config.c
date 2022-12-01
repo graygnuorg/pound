@@ -1325,7 +1325,7 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
     }
 
   memset (&hints, 0, sizeof(hints));
-  hints.ai_flags = 0;
+  hints.ai_flags = feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST;
   hints.ai_family = addr->ai_family;
   hints.ai_socktype = addr->ai_socktype;
   hints.ai_protocol = addr->ai_protocol;
@@ -3110,6 +3110,76 @@ parse_config_file (char const *file)
   return res;
 }
 
+enum {
+	F_OFF,
+	F_ON,
+	F_DFL
+};
+
+struct pound_feature
+{
+  char *name;
+  char *descr;
+  int enabled;
+  void (*setfn) (int, char const *);
+};
+
+static struct pound_feature feature[] = {
+  [FEATURE_DNS] = {
+    .name = "dns",
+    .descr = "resolve host names found in configuration file (default)",
+    .enabled = F_ON
+  },
+  { NULL }
+};
+
+int
+feature_is_set (int f)
+{
+  return feature[f].enabled;
+}
+
+static int
+feature_set (char const *name)
+{
+  int i, enabled = F_ON;
+  size_t len;
+  char *val;
+
+  if ((val = strchr (name, '=')) != NULL)
+    {
+      len = val - name;
+      val++;
+    }
+  else
+    len = strlen (name);
+
+  if (val == NULL && strncmp (name, "no-", 3) == 0)
+    {
+      name += 3;
+      len -= 3;
+      enabled = F_OFF;
+    }
+
+  if (*name)
+    {
+      for (i = 0; feature[i].name; i++)
+	{
+	  if (strlen (feature[i].name) == len &&
+	      memcmp (feature[i].name, name, len) == 0)
+	    {
+	      if (feature[i].setfn)
+		feature[i].setfn (enabled, val);
+	      else if (val)
+		break;
+	      feature[i].enabled = enabled;
+	      return 0;
+	    }
+	}
+    }
+  return -1;
+}
+
 enum string_value_type
   {
     STRING_CONSTANT,
@@ -3216,7 +3286,9 @@ There is NO WARRANTY, to the extent permitted by law.\n\
 void
 print_help (void)
 {
-  printf ("usage: %s [-Vchv] [-f FILE] [-p FILE]\n", progname);
+  int i;
+
+  printf ("usage: %s [-Vchv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
   printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
   printf ("\nOptions are:\n\n");
   printf ("   -c        check configuration file syntax and exit\n");
@@ -3226,6 +3298,12 @@ print_help (void)
 	  POUND_PID);
   printf ("   -V        print program version, compilation settings, and exit\n");
   printf ("   -v        verbose mode\n");
+  printf ("   -W [no-]FEATURE\n");
+  printf ("             enable or disable optional feature\n");
+  printf ("\n");
+  printf ("FEATUREs are:\n");
+  for (i = 0; feature[i].name; i++)
+    printf ("  %-16s - %s\n", feature[i].name, feature[i].descr);
   printf ("\n");
   printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
 #ifdef PACKAGE_URL
@@ -3244,7 +3322,7 @@ config_parse (int argc, char **argv)
     progname++;
   else
     progname = argv[0];
-  while ((c = getopt (argc, argv, "cf:hp:Vv")) > 0)
+  while ((c = getopt (argc, argv, "cf:hp:VvW:")) > 0)
     switch (c)
       {
       case 'c':
@@ -3269,6 +3347,14 @@ config_parse (int argc, char **argv)
 
       case 'v':
 	print_log = 1;
+	break;
+
+      case 'W':
+	if (feature_set (optarg))
+	  {
+	    logmsg (LOG_ERR, "invalid feature name: %s", optarg);
+	    exit (1);
+	  }
 	break;
 
       default:

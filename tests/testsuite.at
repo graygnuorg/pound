@@ -20,7 +20,7 @@ m4_define([PT_CONF],
 [cat > pound.cfg <<_CONF
 $1
 _CONF
-AT_CHECK([pound -c -f pound.cfg],m4_shift($@))])
+AT_CHECK([pound -c -Wno-dns -f pound.cfg],m4_shift($@))])
 
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
 

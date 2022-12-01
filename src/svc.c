@@ -858,7 +858,8 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
   memset (&hints, 0, sizeof (hints));
   hints.ai_family = ai_family;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_CANONNAME;
+  hints.ai_flags = AI_CANONNAME |
+                    (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
   if ((ret_val = getaddrinfo (name, NULL, &hints, &chain)) == 0)
     {
       for (ap = chain; ap != NULL; ap = ap->ai_next)
