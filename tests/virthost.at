@@ -24,7 +24,7 @@ distinguished_name=req
 subjectAltName=DNS:www.example.org,DNS:example.com,DNS:www.example.com
 ]])
 
-openssl req -new -newkey rsa:1024 -days 365 -nodes -x509 \
+openssl req -new -newkey rsa:2048 -days 365 -nodes -x509 \
 	-subj "/CN=www.example.org" \
 	-extensions SAN \
 	-config openssl.cfg \

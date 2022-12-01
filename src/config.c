@@ -3291,19 +3291,18 @@ print_help (void)
   printf ("usage: %s [-Vchv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
   printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
   printf ("\nOptions are:\n\n");
-  printf ("   -c        check configuration file syntax and exit\n");
-  printf ("   -f FILE   read configuration from FILE (default: %s)\n",
-	  POUND_CONF);
-  printf ("   -p FILE   write PID to FILE (default: %s)\n",
-	  POUND_PID);
-  printf ("   -V        print program version, compilation settings, and exit\n");
-  printf ("   -v        verbose mode\n");
-  printf ("   -W [no-]FEATURE\n");
-  printf ("             enable or disable optional feature\n");
+  printf ("   -c               check configuration file syntax and exit\n");
+  printf ("   -f FILE          read configuration from FILE\n");
+  printf ("                    (default: %s)\n", POUND_CONF);
+  printf ("   -p FILE          write PID to FILE\n");
+  printf ("                    (default: %s)\n", POUND_PID);
+  printf ("   -V               print program version, compilation settings, and exit\n");
+  printf ("   -v               verbose mode\n");
+  printf ("   -W [no-]FEATURE  enable or disable optional feature\n");
   printf ("\n");
   printf ("FEATUREs are:\n");
   for (i = 0; feature[i].name; i++)
-    printf ("  %-16s - %s\n", feature[i].name, feature[i].descr);
+    printf ("   %-16s %s\n", feature[i].name, feature[i].descr);
   printf ("\n");
   printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
 #ifdef PACKAGE_URL

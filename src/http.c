@@ -819,7 +819,6 @@ do_http (THR_ARG *arg)
       cl = bb;
       if (BIO_do_handshake (cl) <= 0)
 	{
-	  logmsg (LOG_DEBUG, "NO CERT");
 	  /*
 	   * no need to log every client without a certificate...
 	   * addr2str(caddr, sizeof (caddr), &from_host, 1);

@@ -16,7 +16,7 @@
 AT_SETUP([HTTPS listener])
 AT_KEYWORDS([https])
 
-AT_CHECK([openssl req -new -newkey rsa:1024 -days 1 -nodes -x509 \
+AT_CHECK([openssl req -new -newkey rsa:2048 -days 1 -nodes -x509 \
  -subj "/CN=www.example.com" -keyout key.pem -out crt.pem || exit 77
 cat crt.pem key.pem > example.pem
 ],
@@ -45,7 +45,7 @@ end
 
 200
 x-orig-uri: /echo/foo/bar
-x-orig-header-x-ssl-cipher: /TLSv1.2/
+x-orig-header-x-ssl-cipher: /TLSv1\./
 end
 ])
 
