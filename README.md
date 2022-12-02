@@ -7,8 +7,8 @@ servers that do not offer it natively. __Pound__ is distributed under the
 GNU General Public License, Version 3, or (at your option) any later
 version.
 
-Original version of __pound__ was written by Robert Segall
-<roseg@apsis.ch>, of [Apsis GmbH](http://www.apsis.ch).  In 2018,
+The original version of __pound__ was written by Robert Segall
+<roseg@apsis.ch>, at [Apsis GmbH](http://www.apsis.ch).  In 2018,
 Sergey Poznyakoff added support for OpenSSL 1.x to the then current
 version of the program (2.8).  This version of __pound__, hosted on
 *github* was further modified by Rick O'Sullivan and Frank Schmirler,
@@ -260,7 +260,7 @@ so, run the following command as root:
 ## Configuration
 
 __Pound__ looks for its configuration file in a location defined at
-[compile time](#user-content-compilation], normally `/etc/pound.cfg`,
+[compile time](#user-content-compilation), normally `/etc/pound.cfg`,
 or `/usr/local/etc/pound.cfg`.  It's syntax is discussed in detail
 in the [manual](https://www.gnu.org.ua/software/pound/pound.html).
 Here we will describe some example configurations.

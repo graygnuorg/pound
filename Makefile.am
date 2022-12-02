@@ -20,7 +20,7 @@ EXTRA_DIST = ChangeLog.apsis
 
 if FROM_GIT
 README: README.md
-	perl md2txt.pl -l 4 README.md > README
+	perl md2txt.pl -o README -l 4 README.md
 
 .PHONY: ChangeLog
 ChangeLog:

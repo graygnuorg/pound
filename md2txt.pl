@@ -1,7 +1,26 @@
+# This file is part of pound.
+# Copyright (C) 2018-2022 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+
+# A simple markdown to text converter.  Use "perl md2txt.pl --help",
+# or "perldoc md2txt.pl", for a detailed info.
+
 use strict;
 use warnings;
 use Text::Wrap;
-use Getopt::Long;
+use Getopt::Long qw(:config gnu_getopt no_ignore_case);
 
 my $input_file;
 my $output_file;
@@ -23,7 +42,7 @@ use constant {
 GetOptions('numeric-refs|N' => \$numeric_refs,
 	   'left-margin|l=n' => \$left_margin,
 	   'page-width|w=n' => \$page_width,
-           'output|o=s' => \$output_file)
+	   'output|o=s' => \$output_file)
     or exit(1);
 
 $indent_tab = ' ' x $left_margin;
@@ -45,10 +64,11 @@ exit 0;
 sub expand_inline {
     $_ = join(' ', @_);
     s{\*([^*]+)\*}{$1}g;
-    s{__(.+?)__}{$1}g; 
+    s{__(.+?)__}{$1}g;
     s{\`([^`]+)\`}{$1}g;
-    s{\[(.*?)\]\((https?://.*?)\)}{external_ref($1, $2)}gex;
-    
+    s{\[([^]]+)\]\((https?://[^)]+)\)}{external_ref($1, $2)}gex;
+    s{\[(.*?)\]\(#user-content-.*?\)}{$1}g;
+
     return $_;
 }
 
@@ -62,10 +82,10 @@ sub external_ref {
 
     unless (defined($refs)) {
 	push @epilogue, { env => ENV_SECTION, level => 1, content => ["References"] };
-	$refs = { env => ENV_REFS, content => [] };	   
+	$refs = { env => ENV_REFS, content => [] };
 	push @epilogue, $refs;
     }
-    
+
     if (exists($refidx{$url})) {
 	$refname = $refs->{content}[$refidx{$url}]->{name}
     } else {
@@ -73,7 +93,7 @@ sub external_ref {
 	$refidx{$url} = @{$refs->{content}};
 	push @{$refs->{content}}, { name => $refname, url => $url }
     }
-	
+
     return "$name\[$refname\]";
 }
 
@@ -124,7 +144,7 @@ sub convert {
     local $Text::Wrap::columns = $page_width - $left_margin;
     local $Text::Wrap::huge = 'overflow';
     my $para;
-    
+
     while ($para = collect($para)) {
 	&{$envfun{$para->{env}}{format}}($para);
     }
@@ -135,7 +155,7 @@ sub convert {
 sub collect {
     my $prev = shift;
     my $res = { env => ENV_PARA, content => [] };
-    
+
     if (defined($prev) && exists($prev->{pushback})) {
 	$_ = $prev->{pushback};
     } else {
@@ -147,7 +167,7 @@ sub collect {
 	    return shift @epilogue;
 	}
     }
-    
+
     if (m{^#+\s+\S}) {
 	$res->{env} = ENV_SECTION;
     } elsif (m{^[0-9]+[.)]}) {
@@ -200,11 +220,11 @@ sub collect_itemized_env {
 	    if (m/^$/) {
 		$lookahead .= "\n";
 	    } elsif (s{$rx}{}) {
-	        push @{$res->{content}}, $text . $lookahead;
-	        $text = $_;
+		push @{$res->{content}}, $text . $lookahead;
+		$text = $_;
 		$lookahead = undef
 	    } else {
-	        push @{$res->{content}}, $text;
+		push @{$res->{content}}, $text;
 		#FIXME: pushback
 		$res->{pushback} = $_;
 		return $res;
@@ -254,7 +274,7 @@ sub format_section {
     print $delim x $len;
     print "\n\n";
 }
-       
+
 sub format_para {
     my $para = shift;
     my $text = fill($indent_tab, $indent_tab, expand_inline(@{$para->{content}}));
@@ -287,7 +307,7 @@ sub format_enum {
     }
     print "\n";
 }
-	
+
 sub format_itemize {
     my $para = shift;
     foreach my $elem (@{$para->{content}}) {
@@ -300,7 +320,57 @@ sub format_itemize {
     }
     print "\n";
 }
+__END__
+=head1 NAME
 
+md2txt.pl - a simple markdown to text converter
 
+=head1 SYNOPSIS
 
+B<perl md2txt.pl>
+[B<-N>]
+[B<-l> I<COLUMN>]
+[B<-o> I<FILE>]
+[B<-w> I<N>]
+[B<--left-margin=>I<COLUMN>]
+[B<--numeric-refs>]
+[B<--output=>I<FILE>]
+[B<--page-width=>I<N>]
+I<FILE>
 
+B<perl md2txt.pl> B<-?> | B<--help>
+
+=head1 DESCRIPTION
+
+B<md2txt.pl> converts I<FILE>, written in Markdown format, to a plain text.
+By default, the resulting text is written on standard output.
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-N>, B<--numeric-refs>
+
+Reserved for future use.
+
+=item B<-l>, B<--left-margin=>I<COLUMN>
+
+Sets left margin for the output.  Default is 1.
+
+=item B<-o>, B<--output=>I<FILE>
+
+Write output to I<FILE> instead of the standard output.
+
+=item B<-w>, B<--page-width=>I<N>
+
+Sets output page width.  Default is 72 columns.
+
+=back
+
+=head1 BUGS
+
+The program is rather ad-hoc.  It does not attempt to cover all possible
+subtleties of the markdown format.  It works neatly for the existing
+README.md of the pound project, however.  If you use any markup other than
+simple headers, references, enumerations and itemized lists, you'd
+probably have to modify it in order to handle your changes properly.
