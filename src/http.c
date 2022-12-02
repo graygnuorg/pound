@@ -64,8 +64,9 @@ err_reply (BIO * const c, const char *head, const char *txt)
 static void
 redirect_reply (BIO * const c, const char *url, const int code)
 {
-  char rep[MAXBUF], cont[MAXBUF], safe_url[MAXBUF], *code_msg;
-  int i, j;
+  char const *code_msg, *cont;
+  struct stringbuf cont_buf, url_buf;
+  int i;
 
   switch (code)
     {
@@ -81,36 +82,43 @@ redirect_reply (BIO * const c, const char *url, const int code)
       code_msg = "Found";
       break;
     }
+
   /*
    * Make sure to return a safe version of the URL (otherwise CSRF
    * becomes a possibility)
    */
-  memset (safe_url, 0, MAXBUF);
-  for (i = j = 0; i < MAXBUF && j < MAXBUF && url[i]; i++)
-    if (isalnum (url[i]) || url[i] == '_' || url[i] == '.'
-	|| url[i] == ':' || url[i] == '/' || url[i] == '?' || url[i] == '&'
-	|| url[i] == ';' || url[i] == '-' || url[i] == '=')
-      safe_url[j++] = url[i];
-    else
-      {
-	sprintf (safe_url + j, "%%%02x", url[i]);
-	j += 3;
-      }
-  snprintf (cont, sizeof (cont),
-	    "<html><head><title>Redirect</title></head>"
-	    "<body><h1>Redirect</h1>"
-	    "<p>You should go to <a href=\"%s\">%s</a></p></body></html>",
-	    safe_url, safe_url);
-  snprintf (rep, sizeof (rep),
-	    "HTTP/1.0 %d %s\r\n"
-	    "Location: %s\r\n"
-	    "Content-Type: text/html\r\n"
-	    "Content-Length: %d\r\n\r\n",
-	    code, code_msg, safe_url, (int) strlen (cont));
-  BIO_write (c, rep, strlen (rep));
-  BIO_write (c, cont, strlen (cont));
+  stringbuf_init (&url_buf);
+  for (i = 0; url[i]; i++)
+    {
+      if (isalnum (url[i]) || url[i] == '_' || url[i] == '.'
+	  || url[i] == ':' || url[i] == '/' || url[i] == '?' || url[i] == '&'
+	  || url[i] == ';' || url[i] == '-' || url[i] == '=')
+	stringbuf_add_char (&url_buf, url[i]);
+      else
+	stringbuf_printf (&url_buf, "%%%02x", url[i]);
+    }
+  url = stringbuf_finish (&url_buf);
+
+  stringbuf_init (&cont_buf);
+  stringbuf_printf (&cont_buf,
+		    "<html><head><title>Redirect</title></head>"
+		    "<body><h1>Redirect</h1>"
+		    "<p>You should go to <a href=\"%s\">%s</a></p>"
+		    "</body></html>",
+		    url, url);
+  cont = stringbuf_finish (&cont_buf);
+
+  BIO_printf (c,
+	      "HTTP/1.0 %d %s\r\n"
+	      "Location: %s\r\n"
+	      "Content-Type: text/html\r\n"
+	      "Content-Length: %zu\r\n\r\n"
+	      "%s",
+	      code, code_msg, url, strlen (cont), cont);
   BIO_flush (c);
-  return;
+
+  stringbuf_free (&cont_buf);
+  stringbuf_free (&url_buf);
 }
 
 /*
