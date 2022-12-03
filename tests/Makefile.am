@@ -72,6 +72,7 @@ TESTSUITE_AT = \
  https.at\
  maxrequest.at\
  prio.at\
+ redirect.at\
  rewriteloc.at\
  sessauth.at\
  sesscookie.at\

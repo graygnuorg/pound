@@ -112,9 +112,10 @@ redirect_reply (BIO * const c, const char *url, const int code)
 	      "HTTP/1.0 %d %s\r\n"
 	      "Location: %s\r\n"
 	      "Content-Type: text/html\r\n"
-	      "Content-Length: %zu\r\n\r\n"
+	      "Content-Length: %"PRILONG"\r\n\r\n"
 	      "%s",
-	      code, code_msg, url, strlen (cont), cont);
+	      code, code_msg, url, (LONG)strlen (cont), cont);
+
   BIO_flush (c);
 
   stringbuf_free (&cont_buf);
