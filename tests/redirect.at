@@ -29,6 +29,7 @@ end
 location: http://example.org/foo/bar
 end
 ])
+
 PT_CHECK([ListenHTTP
 	Service
 		Redirect 301 "http://example.org"
@@ -42,6 +43,7 @@ end
 location: http://example.org/foo/bar
 end
 ])
+
 PT_CHECK([ListenHTTP
 	Service
 		Redirect "http://example.org/"
@@ -55,4 +57,20 @@ end
 location: http://example.org
 end
 ])
+
+PT_CHECK([[ListenHTTP
+	Service
+		URL "^/([^/]+)/(.*)"
+		Redirect "http://example.org/$2/$1"
+	End
+End
+]],
+[GET /foo/bar
+end
+
+302
+location: http://example.org/bar/foo
+end
+])
+
 AT_CLEANUP

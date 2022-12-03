@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 1, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 3, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -734,13 +734,39 @@ redirectors in a service, as well as mixing them with regular backends.
 .IP
 The address the client is redirected to is determined by the actual
 .I url
-you specify: if it is a "pure" host (i.e. with no path) then the client will be
-redirected to the host you specified, with the original request path appended. If
-your
+you specify.  It can contain references to parethesized subexpressions
+in the most recently matched
+.B URL
+statement of the enclosing
+.BR Service .
+Syntactically, a reference is \fB$\fIN\fR, where \fIN\fR is the number
+of the parenthesized subexpression it refers to.  \fB$0\fR is replaced
+with the entire matching part.
+.sp
+To insert a literal dollar sign in
+.IR url ,
+use \fB$$\fR.
+.sp
+For compatibility with previous \fBpound\fR versions, if no
+\fB$\fIN\fR references are found in
+.IR url ,
+the following logic is used:
+if it is a "pure" host (i.e. with no path) then the client will be
+redirected to the host you specified, with the original request path
+appended. If your
 .I url
 does contain a path, then the request path is ignored.
 .IP
-Examples: if you specified
+Examples: the following reverts first two path components of the original URL:
+.IP
+.EX
+Service
+    URL "^/([^/]+)/([^/]+)(/.*)?"
+    Redirect "http://example.com/$2/$1$3"
+End
+.EE
+.IP
+Compatibility syntax: if you specified
 .IP
 .EX
 Redirect "http://abc.example"
@@ -1083,10 +1109,10 @@ ListenHTTPS
     Port    443
     Cert    "/etc/pound/server.pem"
     Service
-        Backend
-            Address 127.0.0.1
-            Port    80
-        End
+	Backend
+	    Address 127.0.0.1
+	    Port    80
+	End
     End
 End
 .EE
@@ -1108,19 +1134,19 @@ End
 
 Service
     Backend
-        Address 192.168.0.10
-        Port    80
+	Address 192.168.0.10
+	Port    80
     End
 
     Backend
-        Address 192.168.0.11
-        Port    80
+	Address 192.168.0.11
+	Port    80
     End
 
     Backend
-        Address 192.168.0.12
-        Port    80
-        Priority 3
+	Address 192.168.0.12
+	Port    80
+	Priority 3
     End
 End
 .EE
@@ -1138,8 +1164,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-        Address 192.168.0.12
-        Port    80
+	Address 192.168.0.12
+	Port    80
     End
 End
 
@@ -1153,18 +1179,18 @@ End
 # Catch-all server(s)
 Service
     Backend
-        Address 192.168.0.10
-        Port    80
+	Address 192.168.0.10
+	Port    80
     End
 
     Backend
-        Address 192.168.0.11
-        Port    80
+	Address 192.168.0.11
+	Port    80
     End
 
     Session
-        Type    BASIC
-        TTL     300
+	Type    BASIC
+	TTL     300
     End
 End
 .EE
@@ -1202,8 +1228,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-        Address 192.168.0.10
-        Port    80
+	Address 192.168.0.10
+	Port    80
     End
 End
 
@@ -1212,35 +1238,35 @@ Service
     URL         ".*sessid=.*"
     HeadRequire "Host:.*www.myserver.com.*"
     Backend
-        Address 192.168.0.11
-        Port    80
+	Address 192.168.0.11
+	Port    80
     End
 
     Session
-        Type    URL
-        ID      "sessid"
-        TTL     120
+	Type    URL
+	ID      "sessid"
+	TTL     120
     End
 End
 
 # Everybody else
 Service
     Backend
-        Address 192.168.0.20
-        Port    80
-        Priority 5
+	Address 192.168.0.20
+	Port    80
+	Priority 5
     End
 
     Backend
-        Address 192.168.0.21
-        Port    80
-        Priority 4
+	Address 192.168.0.21
+	Port    80
+	Priority 4
     End
 
     Session
-        Type    COOKIE
-        ID      "userid"
-        TTL     180
+	Type    COOKIE
+	ID      "userid"
+	TTL     180
     End
 End
 .EE

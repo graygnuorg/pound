@@ -343,11 +343,13 @@ stringbuf_add_char (struct stringbuf *sb, int c)
   sb->base[sb->len++] = c;
 }
 
-char *
-stringbuf_finish (struct stringbuf *sb)
+void
+stringbuf_add (struct stringbuf *sb, char const *str, size_t len)
 {
-  stringbuf_add_char (sb, 0);
-  return sb->base;
+  while (sb->len + len > sb->size)
+    sb->base = x2nrealloc (sb->base, &sb->size, 1);
+  memcpy (sb->base + sb->len, str, len);
+  sb->len += len;
 }
 
 void
@@ -357,6 +359,13 @@ stringbuf_add_string (struct stringbuf *sb, char const *str)
 
   while ((c = *str++) != 0)
     stringbuf_add_char (sb, c);
+}
+
+char *
+stringbuf_finish (struct stringbuf *sb)
+{
+  stringbuf_add_char (sb, 0);
+  return sb->base;
 }
 
 void
@@ -2168,11 +2177,18 @@ parse_service (void *call_data, void *section_data)
       SLIST_COPY (&svc->deny_head, &ext.svc.deny_head);
       SLIST_COPY (&svc->backends, &ext.svc.backends);
 
-      SLIST_FOREACH (be, &svc->backends, next)
+      if ((be = SLIST_FIRST (&svc->backends)) == NULL)
 	{
-	  if (!be->disabled)
-	    svc->tot_pri += be->priority;
-	  svc->abs_pri += be->priority;
+	  conf_error_at_locus_range (&range, "warning: no backends defined");
+	}
+      else
+	{
+	  SLIST_FOREACH (be, &svc->backends, next)
+	    {
+	      if (!be->disabled)
+		svc->tot_pri += be->priority;
+	      svc->abs_pri += be->priority;
+	    }
 	}
 
       while (!SLIST_EMPTY (&ext.url))

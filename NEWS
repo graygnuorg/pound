@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-02
+Pound -- history of user-visible changes. 2022-12-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,17 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.0.90 (git)
+
+* URL expansion in Redirect statement
+
+URL argument to the Redirect statement can contain references to
+parethesized subexpressions in the most recently matched URL statement
+of the enclosing Service.  References are of the form $N, where N
+is the number of the parenthesized subgroup.  To insert literal $
+sign, use $$.
+
 
 Version 4.0, 2022-12-02
 
@@ -38,5 +49,3 @@ time-stamp-start: "changes. "
 time-stamp-format: "%:y-%02m-%02d"
 time-stamp-end: "\n"
 end:
-
-

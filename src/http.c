@@ -58,13 +58,69 @@ err_reply (BIO * const c, const char *head, const char *txt)
   return;
 }
 
+static char *
+expand_url (char const *url, char const *orig_url, struct submatch *sm, int redir_req)
+{
+  struct stringbuf sb;
+  char *p;
+
+  stringbuf_init (&sb);
+  while (*url)
+    {
+      size_t len = strcspn (url, "$");
+      stringbuf_add (&sb, url, len);
+      url += len;
+      if (*url == 0)
+	break;
+      else if (url[1] == '$' || url[1] == 0)
+	{
+	  stringbuf_add_char (&sb, url[0]);
+	  url += 2;
+	}
+      else if (isdigit (url[1]))
+	{
+	  long n;
+	  errno = 0;
+	  n = strtoul (url + 1, &p, 10);
+	  if (errno)
+	    {
+	      stringbuf_add_char (&sb, url[0]);
+	      url++;
+	    }
+	  else
+	    {
+	      if (n < sm->matchn)
+		{
+		  stringbuf_add (&sb, orig_url + sm->matchv[n].rm_so,
+				 sm->matchv[n].rm_eo - sm->matchv[n].rm_so);
+		}
+	      else
+		{
+		  stringbuf_add (&sb, url, p - url);
+		}
+	      redir_req = 1;
+	      url = p;
+	    }
+	}
+    }
+
+  /* For compatibility with previous versions */
+  if (!redir_req)
+    stringbuf_add_string (&sb, orig_url);
+
+  return stringbuf_finish (&sb);
+}
+
 /*
  * Reply with a redirect
  */
 static void
-redirect_reply (BIO * const c, const char *url, const int code)
+redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
 {
+  int code = be->be_type;
   char const *code_msg, *cont;
+  char *xurl;
+  int expanded = 0;
   struct stringbuf cont_buf, url_buf;
   int i;
 
@@ -83,21 +139,24 @@ redirect_reply (BIO * const c, const char *url, const int code)
       break;
     }
 
+  xurl = expand_url (be->url, url, sm, be->redir_req);
+
   /*
    * Make sure to return a safe version of the URL (otherwise CSRF
    * becomes a possibility)
    */
   stringbuf_init (&url_buf);
-  for (i = 0; url[i]; i++)
+  for (i = 0; xurl[i]; i++)
     {
-      if (isalnum (url[i]) || url[i] == '_' || url[i] == '.'
-	  || url[i] == ':' || url[i] == '/' || url[i] == '?' || url[i] == '&'
-	  || url[i] == ';' || url[i] == '-' || url[i] == '=')
-	stringbuf_add_char (&url_buf, url[i]);
+      if (isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
+	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?' || xurl[i] == '&'
+	  || xurl[i] == ';' || xurl[i] == '-' || xurl[i] == '=')
+	stringbuf_add_char (&url_buf, xurl[i]);
       else
-	stringbuf_printf (&url_buf, "%%%02x", url[i]);
+	stringbuf_printf (&url_buf, "%%%02x", xurl[i]);
     }
   url = stringbuf_finish (&url_buf);
+  free (xurl);
 
   stringbuf_init (&cont_buf);
   stringbuf_printf (&cont_buf,
@@ -707,13 +766,34 @@ log_bytes (char *res, const LONG cnt)
 	if(ssl != NULL) { ERR_clear_error(); ERR_remove_state(0); }
 #endif
 
-#define clean_all() {   \
-    if(ssl != NULL) { BIO_ssl_shutdown(cl); } \
-    if(be != NULL) { BIO_flush(be); BIO_reset(be); BIO_free_all(be); be = NULL; } \
-    if(cl != NULL) { BIO_flush(cl); BIO_reset(cl); BIO_free_all(cl); cl = NULL; } \
-    if(x509 != NULL) { X509_free(x509); x509 = NULL; } \
-    clear_error(); \
-}
+#define clean_all()                                                     \
+  do                                                                    \
+    {                                                                   \
+      if (ssl != NULL)                                                  \
+	BIO_ssl_shutdown (cl);                                          \
+      if (be != NULL)                                                   \
+	{                                                               \
+	  BIO_flush (be);                                               \
+	  BIO_reset(be);                                                \
+	  BIO_free_all(be);                                             \
+	  be = NULL;                                                    \
+	}                                                               \
+      if (cl != NULL)                                                   \
+	{                                                               \
+	  BIO_flush (cl);                                               \
+	  BIO_reset (cl);                                               \
+	  BIO_free_all (cl);                                            \
+	  cl = NULL;                                                    \
+	}                                                               \
+      if (x509 != NULL)                                                 \
+	{                                                               \
+	  X509_free (x509);                                             \
+	  x509 = NULL;                                                  \
+	}                                                               \
+      clear_error ();                                                   \
+      submatch_free (&sm);						\
+    }                                                                   \
+  while (0)
 
 /*
  * handle an HTTP request
@@ -760,6 +840,7 @@ do_http (THR_ARG *arg)
       | WSS_REQ_HEADER_UPGRADE_WEBSOCKET | WSS_RESP_101 |
       WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
   };
+  struct submatch sm = SUBMATCH_INITIALIZER;
 
   reneg_state = RENEG_INIT;
   ba1.reneg_state = &reneg_state;
@@ -1172,7 +1253,7 @@ do_http (THR_ARG *arg)
        * check that the requested URL still fits the old back-end (if
        * any)
        */
-      if ((svc = get_service (lstn, url, &headers[1])) == NULL)
+      if ((svc = get_service (lstn, url, &headers[1], &sm)) == NULL)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",
 		  POUND_TID (), request,
@@ -1774,12 +1855,7 @@ do_http (THR_ARG *arg)
        */
       if (cur_backend->be_type)
 	{
-	  memset (buf, 0, sizeof (buf));
-	  if (!cur_backend->redir_req)
-	    snprintf (buf, sizeof (buf) - 1, "%s%s", cur_backend->url, url);
-	  else
-	    strncpy (buf, cur_backend->url, sizeof (buf) - 1);
-	  redirect_reply (cl, buf, cur_backend->be_type);
+	  redirect_reply (cl, url, cur_backend, &sm);
 	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  switch (lstn->log_level)
 	    {

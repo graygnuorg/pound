@@ -435,8 +435,19 @@ char *addr2str (char *, int, const struct addrinfo *, int);
 /* Return a string representation for a back-end address */
 #define str_be(BUF, LEN, BE)    addr2str((BUF), (LEN), &(BE)->addr, 0)
 
+struct submatch
+{
+  size_t matchn;
+  size_t matchmax;
+  regmatch_t *matchv;
+};
+
+#define SUBMATCH_INITIALIZER { 0, 0, NULL }
+
+void submatch_free (struct submatch *sm);
+
 /* Find the right service for a request */
-SERVICE *get_service (const LISTENER *, const char *, char **const);
+SERVICE *get_service (const LISTENER *, const char *, char **const, struct submatch *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
@@ -553,6 +564,7 @@ void stringbuf_init (struct stringbuf *sb);
 void stringbuf_reset (struct stringbuf *sb);
 char *stringbuf_finish (struct stringbuf *sb);
 void stringbuf_free (struct stringbuf *sb);
+void stringbuf_add (struct stringbuf *sb, char const *str, size_t len);
 void stringbuf_add_char (struct stringbuf *sb, int c);
 void stringbuf_add_string (struct stringbuf *sb, char const *str);
 void stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);

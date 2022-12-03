@@ -491,23 +491,68 @@ check_header (const char *header, char *const content)
     return HEADER_ILLEGAL;
 }
 
+static void
+submatch_init (struct submatch *sm)
+{
+  sm->matchn = 0;
+  sm->matchmax = 0;
+  sm->matchv = NULL;
+}
+
 static int
-match_service (const SERVICE * svc, const char *request, char **const headers)
+submatch_realloc (struct submatch *sm, regex_t *re)
+{
+  size_t n = re->re_nsub + 1;
+  if (n > sm->matchmax)
+    {
+      regmatch_t *p = realloc (sm->matchv, n * sizeof (p[0]));
+      if (!p)
+	return -1;
+      sm->matchmax = n;
+      sm->matchv = p;
+    }
+  sm->matchn = n;
+  return 0;
+}
+
+void
+submatch_free (struct submatch *sm)
+{
+  free (sm->matchv);
+  submatch_init (sm);
+}
+
+static void
+submatch_reset (struct submatch *sm)
+{
+  sm->matchn = 0;
+}
+
+static int
+match_service (const SERVICE *svc, const char *request, char **const headers,
+	       struct submatch *sm)
 {
   MATCHER *m;
   int i, found;
 
+  submatch_reset (sm);
+
   /* check for request */
   SLIST_FOREACH (m, &svc->url, next)
     {
-      if (regexec (&m->pat, request, 0, NULL, 0))
+      if (submatch_realloc (sm, &m->pat))
+	{
+	  logmsg (LOG_ERR, "memory allocation failed");
+	  return 0;
+	}
+      if (regexec (&m->pat, request, sm->matchn, sm->matchv, 0))
 	return 0;
     }
 
   /* check for required headers */
   SLIST_FOREACH (m, &svc->req_head, next)
     {
-      for (found = i = 0; i < (MAXHEADERS - 1) && !found; i++)
+      for (found = i = 0; i < MAXHEADERS && !found; i++)
 	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
 	  found = 1;
       if (!found)
@@ -531,7 +576,8 @@ match_service (const SERVICE * svc, const char *request, char **const headers)
  * Find the right service for a request
  */
 SERVICE *
-get_service (const LISTENER * lstn, const char *request, char **const headers)
+get_service (const LISTENER * lstn, const char *request, char **const headers,
+	     struct submatch *sm)
 {
   SERVICE *svc;
 
@@ -539,7 +585,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers)
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, request, headers))
+      if (match_service (svc, request, headers, sm))
 	return svc;
     }
 
@@ -548,7 +594,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers)
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, request, headers))
+      if (match_service (svc, request, headers, sm))
 	return svc;
     }
 
@@ -859,7 +905,7 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
   hints.ai_family = ai_family;
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_flags = AI_CANONNAME |
-                    (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
+		    (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
   if ((ret_val = getaddrinfo (name, NULL, &hints, &chain)) == 0)
     {
       for (ap = chain; ap != NULL; ap = ap->ai_next)
