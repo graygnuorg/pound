@@ -133,7 +133,7 @@ copy_bin (BIO * const cl, BIO * const be, LONG cont, LONG * res_bytes,
 
   while (cont > L0)
     {
-      if ((res = BIO_read (cl, buf, cont > MAXBUF ? MAXBUF : cont)) < 0)
+      if ((res = BIO_read (cl, buf, cont > sizeof (buf) ? sizeof (buf) : cont)) < 0)
 	return -1;
       else if (res == 0)
 	return -2;
@@ -273,7 +273,7 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
 
   for (tot_size = 0L;;)
     {
-      if ((res = get_line (cl, buf, MAXBUF)) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid" chunked read error: %s",
 		  POUND_TID (),
@@ -327,7 +327,7 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
       /*
        * final CRLF
        */
-      if ((res = get_line (cl, buf, MAXBUF)) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error after chunk: %s",
 		  POUND_TID (),
@@ -356,7 +356,7 @@ copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
    */
   for (;;)
     {
-      if ((res = get_line (cl, buf, MAXBUF)) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk: %s",
 		  POUND_TID (),
@@ -570,8 +570,8 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
   /*
    * HTTP/1.1 allows leading CRLF
    */
-  memset (buf, 0, MAXBUF);
-  while ((res = get_line (in, buf, MAXBUF)) == 0)
+  memset (buf, 0, sizeof (buf));
+  while ((res = get_line (in, buf, sizeof (buf))) == 0)
     if (buf[0])
       break;
 
@@ -606,7 +606,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
 
   for (n = 1; n < MAXHEADERS; n++)
     {
-      if (get_line (in, buf, MAXBUF))
+      if (get_line (in, buf, sizeof (buf)))
 	{
 	  free_headers (headers);
 	  /*
@@ -1103,7 +1103,7 @@ do_http (THR_ARG *arg)
 	      BIO_write (bb, headers[n] + matches[1].rm_so,
 			 matches[1].rm_eo - matches[1].rm_so);
 	      BIO_write (bb, "\n", 1);
-	      if ((inlen = BIO_read (b64, buf, MAXBUF - 1)) <= 0)
+	      if ((inlen = BIO_read (b64, buf, sizeof (buf))) <= 0)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") Can't read BIO_f_base64",
 			  POUND_TID ());
@@ -1111,7 +1111,7 @@ do_http (THR_ARG *arg)
 		  continue;
 		}
 	      BIO_free_all (b64);
-	      if ((mh = strchr (buf, ':')) == NULL)
+	      if ((mh = memchr (buf, ':', inlen)) == NULL)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") Unknown authentication",
 			  POUND_TID ());
@@ -1227,7 +1227,7 @@ do_http (THR_ARG *arg)
 
 	  if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
 	    {
-	      str_be (buf, MAXBUF - 1, backend);
+	      str_be (buf, sizeof (buf), backend);
 	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
 		      POUND_TID (), buf, strerror (errno));
 	      err_reply (cl, h503, lstn->err503);
@@ -1237,7 +1237,7 @@ do_http (THR_ARG *arg)
 	    }
 	  if (connect_nb (sock, &backend->addr, backend->conn_to) < 0)
 	    {
-	      str_be (buf, MAXBUF - 1, backend);
+	      str_be (buf, sizeof (buf), backend);
 	      logmsg (LOG_WARNING, "(%"PRItid") backend %s connect: %s",
 		      POUND_TID (), buf, strerror (errno));
 	      shutdown (sock, 2);
@@ -1329,7 +1329,7 @@ do_http (THR_ARG *arg)
 	      be = bb;
 	      if (BIO_do_handshake (be) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, backend);
+		  str_be (buf, sizeof (buf), backend);
 		  logmsg (LOG_NOTICE, "BIO_do_handshake with %s failed: %s",
 			  buf, ERR_error_string (ERR_get_error (), NULL));
 		  err_reply (cl, h503, lstn->err503);
@@ -1387,7 +1387,8 @@ do_http (THR_ARG *arg)
 		    }
 		  str_be (caddr, sizeof (caddr), cur_backend);
 		  strcpy (loc_path, buf + matches[3].rm_so);
-		  snprintf (buf, MAXBUF, "Destination: http://%s%s", caddr,
+		  snprintf (buf, sizeof (buf),
+			    "Destination: http://%s%s", caddr,
 			    loc_path);
 		  free (headers[n]);
 		  if ((headers[n] = strdup (buf)) == NULL)
@@ -1402,7 +1403,7 @@ do_http (THR_ARG *arg)
 		}
 	      if (BIO_printf (be, "%s\r\n", headers[n]) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write to %s/%s: %s (%.3f sec)",
@@ -1420,7 +1421,7 @@ do_http (THR_ARG *arg)
 	  if (lstn->add_head != NULL)
 	    if (BIO_printf (be, "%s\r\n", lstn->add_head) <= 0)
 	      {
-		str_be (buf, MAXBUF - 1, cur_backend);
+		str_be (buf, sizeof (buf), cur_backend);
 		end_req = cur_time ();
 		logmsg (LOG_WARNING,
 			"(%"PRItid") e500 error write AddHeader to %s: %s (%.3f sec)",
@@ -1443,13 +1444,13 @@ do_http (THR_ARG *arg)
 
 	  if ((cipher = SSL_get_current_cipher (ssl)) != NULL)
 	    {
-	      SSL_CIPHER_description (cipher, buf, MAXBUF - 1);
+	      SSL_CIPHER_description (cipher, buf, sizeof (buf));
 	      strip_eol (buf);
 	      if (BIO_printf (be, "X-SSL-cipher: %s/%s\r\n",
 			      SSL_get_version (ssl),
 			      buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-cipher to %s: %s (%.3f sec)",
@@ -1466,10 +1467,10 @@ do_http (THR_ARG *arg)
 	    {
 	      X509_NAME_print_ex (bb, X509_get_subject_name (x509), 8,
 				  XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
-	      get_line (bb, buf, MAXBUF);
+	      get_line (bb, buf, sizeof (buf));
 	      if (BIO_printf (be, "X-SSL-Subject: %s\r\n", buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-Subject to %s: %s (%.3f sec)",
@@ -1483,10 +1484,10 @@ do_http (THR_ARG *arg)
 
 	      X509_NAME_print_ex (bb, X509_get_issuer_name (x509), 8,
 				  XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
-	      get_line (bb, buf, MAXBUF);
+	      get_line (bb, buf, sizeof (buf));
 	      if (BIO_printf (be, "X-SSL-Issuer: %s\r\n", buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-Issuer to %s: %s (%.3f sec)",
@@ -1499,10 +1500,10 @@ do_http (THR_ARG *arg)
 		}
 
 	      ASN1_TIME_print (bb, X509_get_notBefore (x509));
-	      get_line (bb, buf, MAXBUF);
+	      get_line (bb, buf, sizeof (buf));
 	      if (BIO_printf (be, "X-SSL-notBefore: %s\r\n", buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-notBefore to %s: %s (%.3f sec)",
@@ -1515,10 +1516,10 @@ do_http (THR_ARG *arg)
 		}
 
 	      ASN1_TIME_print (bb, X509_get_notAfter (x509));
-	      get_line (bb, buf, MAXBUF);
+	      get_line (bb, buf, sizeof (buf));
 	      if (BIO_printf (be, "X-SSL-notAfter: %s\r\n", buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-notAfter to %s: %s (%.3f sec)",
@@ -1532,7 +1533,7 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-serial: %ld\r\n",
 			      ASN1_INTEGER_get (X509_get_serialNumber (x509))) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-serial to %s: %s (%.3f sec)",
@@ -1544,10 +1545,10 @@ do_http (THR_ARG *arg)
 		  return;
 		}
 	      PEM_write_bio_X509 (bb, x509);
-	      get_line (bb, buf, MAXBUF);
+	      get_line (bb, buf, sizeof (buf));
 	      if (BIO_printf (be, "X-SSL-certificate: %s", buf) <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
@@ -1558,11 +1559,11 @@ do_http (THR_ARG *arg)
 		  clean_all ();
 		  return;
 		}
-	      while (get_line (bb, buf, MAXBUF) == 0)
+	      while (get_line (bb, buf, sizeof (buf)) == 0)
 		{
 		  if (BIO_printf (be, "%s", buf) <= 0)
 		    {
-		      str_be (buf, MAXBUF - 1, cur_backend);
+		      str_be (buf, sizeof (buf), cur_backend);
 		      end_req = cur_time ();
 		      logmsg (LOG_WARNING,
 			      "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
@@ -1576,7 +1577,7 @@ do_http (THR_ARG *arg)
 		}
 	      if (BIO_printf (be, "\r\n") <= 0)
 		{
-		  str_be (buf, MAXBUF - 1, cur_backend);
+		  str_be (buf, sizeof (buf), cur_backend);
 		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
 			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
@@ -1612,7 +1613,7 @@ do_http (THR_ARG *arg)
 	   */
 	  if (copy_chunks (cl, be, NULL, cur_backend->be_type, lstn->max_req))
 	    {
-	      str_be (buf, MAXBUF - 1, cur_backend);
+	      str_be (buf, sizeof (buf), cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
 		      "(%"PRItid") e500 for %s copy_chunks to %s/%s (%.3f sec)",
@@ -1632,7 +1633,7 @@ do_http (THR_ARG *arg)
 	   */
 	  if (copy_bin (cl, be, cont, NULL, cur_backend->be_type))
 	    {
-	      str_be (buf, MAXBUF - 1, cur_backend);
+	      str_be (buf, sizeof (buf), cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
 		      "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%.3f sec)",
@@ -1703,7 +1704,7 @@ do_http (THR_ARG *arg)
 	  /*
 	   * copy till EOF
 	   */
-	  while ((res = BIO_read (cl_unbuf, buf, MAXBUF)) > 0)
+	  while ((res = BIO_read (cl_unbuf, buf, sizeof (buf))) > 0)
 	    {
 	      if ((res_bytes += res) > cont)
 		{
@@ -1733,7 +1734,7 @@ do_http (THR_ARG *arg)
        */
       if (cur_backend->be_type == 0 && BIO_flush (be) != 1)
 	{
-	  str_be (buf, MAXBUF - 1, cur_backend);
+	  str_be (buf, sizeof (buf), cur_backend);
 	  end_req = cur_time ();
 	  logmsg (LOG_NOTICE,
 		  "(%"PRItid") e500 for %s error flush to %s/%s: %s (%.3f sec)",
@@ -1826,7 +1827,7 @@ do_http (THR_ARG *arg)
 	   */
 	  log_bytes (s_res_bytes, res_bytes);
 	  addr2str (caddr, sizeof (caddr), &from_host, 1);
-	  str_be (buf, MAXBUF - 1, cur_backend);
+	  str_be (buf, sizeof (buf), cur_backend);
 	  switch (lstn->log_level)
 	    {
 	    case 0:
@@ -1888,7 +1889,7 @@ do_http (THR_ARG *arg)
 	{
 	  if ((headers = get_headers (be, cl, lstn)) == NULL)
 	    {
-	      str_be (buf, MAXBUF - 1, cur_backend);
+	      str_be (buf, sizeof (buf), cur_backend);
 	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
 		      "(%"PRItid") e500 for %s response error read from %s/%s: %s (%.3f secs)",
@@ -1901,7 +1902,7 @@ do_http (THR_ARG *arg)
 	      return;
 	    }
 
-	  strncpy (response, headers[0], MAXBUF);
+	  strncpy (response, headers[0], sizeof (response));
 	  be_11 = (response[7] == '1');
 	  /*
 	   * responses with code 100 are never passed back to the client
@@ -1963,7 +1964,7 @@ do_http (THR_ARG *arg)
 		      && need_rewrite (lstn->rewr_loc, buf, loc_path, v_host,
 				       lstn, cur_backend))
 		    {
-		      snprintf (buf, MAXBUF, "Location: %s://%s/%s",
+		      snprintf (buf, sizeof (buf), "Location: %s://%s/%s",
 				(ssl == NULL ? "http" : "https"), v_host,
 				loc_path);
 		      free (headers[n]);
@@ -1984,7 +1985,8 @@ do_http (THR_ARG *arg)
 		      && need_rewrite (lstn->rewr_loc, buf, loc_path, v_host,
 				       lstn, cur_backend))
 		    {
-		      snprintf (buf, MAXBUF, "Content-location: %s://%s/%s",
+		      snprintf (buf, sizeof (buf),
+				"Content-location: %s://%s/%s",
 				(ssl == NULL ? "http" : "https"), v_host,
 				loc_path);
 		      free (headers[n]);
@@ -2138,7 +2140,7 @@ do_http (THR_ARG *arg)
 		      /*
 		       * copy till EOF
 		       */
-		      while ((res = BIO_read (be_unbuf, buf, MAXBUF)) > 0)
+		      while ((res = BIO_read (be_unbuf, buf, sizeof (buf))) > 0)
 			{
 			  if (BIO_write (cl, buf, res) != res)
 			    {
@@ -2271,7 +2273,7 @@ do_http (THR_ARG *arg)
 		   */
 		  if (p[0].revents)
 		    {
-		      res = BIO_read (cl_unbuf, buf, MAXBUF);
+		      res = BIO_read (cl_unbuf, buf, sizeof (buf));
 		      if (res <= 0)
 			{
 			  break;
@@ -2293,7 +2295,7 @@ do_http (THR_ARG *arg)
 		    }
 		  if (p[1].revents)
 		    {
-		      res = BIO_read (be_unbuf, buf, MAXBUF);
+		      res = BIO_read (be_unbuf, buf, sizeof (buf));
 		      if (res <= 0)
 			{
 			  break;
@@ -2333,7 +2335,7 @@ do_http (THR_ARG *arg)
 	      || (last = strrchr (caddr, ':')) != NULL)
 	    strcpy (++last, "0");
 	}
-      str_be (buf, MAXBUF - 1, cur_backend);
+      str_be (buf, sizeof (buf), cur_backend);
       switch (lstn->log_level)
 	{
 	case 0:

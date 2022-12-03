@@ -687,7 +687,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       break;
 
     case SESS_IP:
-      addr2str (key, KEY_SIZE, from_host, 1);
+      addr2str (key, sizeof (key), from_host, 1);
       if (svc->sess_ttl < 0)
 	res = no_be ? svc->emergency
 		     : hash_backend (&svc->backends, svc->abs_pri, key);
@@ -811,7 +811,7 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
 	  {
 	  case BE_DISABLE:
 	    b->disabled = 1;
-	    str_be (buf, MAXBUF - 1, b);
+	    str_be (buf, sizeof (buf), b);
 	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
 		    POUND_TID (),
 		    buf);
@@ -819,14 +819,14 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
 
 	  case BE_KILL:
 	    b->alive = 0;
-	    str_be (buf, MAXBUF - 1, b);
+	    str_be (buf, sizeof (buf), b);
 	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
 		    POUND_TID (), buf);
 	    t_clean (svc->sessions, &be, sizeof (be));
 	    break;
 
 	  case BE_ENABLE:
-	    str_be (buf, MAXBUF - 1, b);
+	    str_be (buf, sizeof (buf), b);
 	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
 		    POUND_TID (),
 		    buf);
@@ -987,8 +987,8 @@ need_rewrite (const int rewr_loc, char *const location, char *const path,
       free (addr.ai_addr);
       return 0;
     }
-  memset (buf, '\0', MAXBUF);
-  strncpy (buf, v_host, MAXBUF - 1);
+  memset (buf, '\0', sizeof (buf));
+  strncpy (buf, v_host, sizeof (buf) - 1);
   if ((cp = strchr (buf, ':')) != NULL)
     *cp = '\0';
   if (addr.ai_family == AF_INET)
@@ -1182,7 +1182,7 @@ do_resurect (void)
 	  if (connect_nb (sock, &be->ha_addr, be->conn_to) != 0)
 	    {
 	      kill_be (svc, be, BE_KILL);
-	      str_be (buf, MAXBUF - 1, be);
+	      str_be (buf, sizeof (buf), be);
 	      logmsg (LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
 	    }
 	  shutdown (sock, 2);
@@ -1224,7 +1224,7 @@ do_resurect (void)
 	if (connect_nb (sock, &be->ha_addr, be->conn_to) != 0)
 	  {
 	    kill_be (svc, be, BE_KILL);
-	    str_be (buf, MAXBUF - 1, be);
+	    str_be (buf, sizeof (buf), be);
 	    logmsg (LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
 	  }
 	shutdown (sock, 2);
@@ -1311,7 +1311,7 @@ do_resurect (void)
 		if (be->resurrect)
 		  {
 		    be->alive = 1;
-		    str_be (buf, MAXBUF - 1, be);
+		    str_be (buf, sizeof (buf), be);
 		    logmsg (LOG_NOTICE, "BackEnd %s resurrect", buf);
 		  }
 		if (be->alive && !be->disabled)
@@ -1400,7 +1400,7 @@ do_resurect (void)
 	      if (be->resurrect)
 		{
 		  be->alive = 1;
-		  str_be (buf, MAXBUF - 1, be);
+		  str_be (buf, sizeof (buf), be);
 		  logmsg (LOG_NOTICE, "BackEnd %s resurrect", buf);
 		}
 	      if (be->alive && !be->disabled)
