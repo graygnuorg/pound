@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-03
+Pound -- history of user-visible changes. 2022-12-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -17,6 +17,23 @@ of the enclosing Service.  References are of the form $N, where N
 is the number of the parenthesized subgroup.  To insert literal $
 sign, use $$.
 
+* New statement: ACME
+
+The ACME statement creates a service specially crafted for answering
+ACME HTTP-01 challenge requests.  It takes a single argument,
+specifying a directory where ACME challenges are stored.  It is
+supposed that another program is started periodically, which checks
+for certificates approaching their expiration, issues renewal requests
+and stores the obtained ACME challenges in that directory.
+
+The statement can appear in ListenHTTP block.
+
+Example usage:
+
+  ListenHTTP
+    ACME "/var/www/acme"
+    ...
+  End
 
 Version 4.0, 2022-12-02
 

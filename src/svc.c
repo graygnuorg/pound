@@ -1196,7 +1196,7 @@ do_resurect (void)
     SLIST_FOREACH (svc, &lstn->services, next)
       SLIST_FOREACH (be, &svc->backends, next)
 	{
-	  if (be->be_type)
+	  if (be->be_type != BE_BACKEND)
 	    continue;
 	  if (!be->alive)
 	    /* already dead */
@@ -1238,7 +1238,7 @@ do_resurect (void)
   SLIST_FOREACH (svc, &services, next)
     SLIST_FOREACH (be, &svc->backends, next)
       {
-	if (be->be_type)
+	if (be->be_type != BE_BACKEND)
 	  continue;
 	if (!be->alive)
 	  /* already dead */
@@ -1286,7 +1286,7 @@ do_resurect (void)
 	SLIST_FOREACH (be, &svc->backends, next)
 	  {
 	    be->resurrect = 0;
-	    if (be->be_type)
+	    if (be->be_type != BE_BACKEND)
 	      continue;
 	    if (be->alive)
 	      continue;
@@ -1375,7 +1375,7 @@ do_resurect (void)
       SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  be->resurrect = 0;
-	  if (be->be_type)
+	  if (be->be_type != BE_BACKEND)
 	    continue;
 	  if (be->alive)
 	    continue;

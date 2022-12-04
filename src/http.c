@@ -35,6 +35,7 @@ static char *h500 = "500 Internal Server Error",
 	    *h501 = "501 Not Implemented",
 	    *h503 = "503 Service Unavailable",
 	    *h400 = "400 Bad Request",
+	    *h404 = "404 Not Found",
 	    *h413 = "413 Payload Too Large";
 
 static char *err_response =
@@ -114,10 +115,10 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 /*
  * Reply with a redirect
  */
-static void
+static int
 redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
 {
-  int code = be->be_type;
+  int code = be->redir_code;
   char const *code_msg, *cont;
   char *xurl;
   int expanded = 0;
@@ -179,6 +180,8 @@ redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm
 
   stringbuf_free (&cont_buf);
   stringbuf_free (&url_buf);
+
+  return code;
 }
 
 /*
@@ -208,6 +211,59 @@ copy_bin (BIO * const cl, BIO * const be, LONG cont, LONG * res_bytes,
     if (BIO_flush (be) != 1)
       return -4;
   return 0;
+}
+
+static int
+acme_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
+{
+  int fd;
+  struct stat st;
+  BIO *bin;
+  char *file_name;
+  int rc = 200;
+
+  file_name = expand_url (be->url, url, sm, 1);
+
+  if ((fd = open (file_name, O_RDONLY)) == -1)
+    {
+      if (errno == ENOENT)
+	{
+	  rc = 404;
+	}
+      else
+	{
+	  logmsg (LOG_ERR, "can't open %s: %s", file_name, strerror (errno));
+	  rc = 500;
+	}
+    }
+  else if (fstat (fd, &st))
+    {
+      logmsg (LOG_ERR, "can't stat %s: %s", file_name, strerror (errno));
+      close (fd);
+      rc = 500;
+    }
+  else
+    {
+      bin = BIO_new_fd (fd, BIO_CLOSE);
+
+      BIO_printf (c,
+		  "HTTP/1.0 %d %s\r\n"
+		  "Content-Type: text/plain\r\n"
+		  "Content-Length: %"PRILONG"\r\n\r\n",
+		  200, "OK", (LONG) st.st_size);
+
+      if (copy_bin (bin, c, st.st_size, NULL, 0))
+	{
+	  if (errno)
+	    logmsg (LOG_NOTICE, "(%"PRItid") error copying file %s: %s",
+		    POUND_TID (), file_name, strerror (errno));
+	}
+
+      BIO_free (bin);
+      BIO_flush (c);
+    }
+  free (file_name);
+  return rc;
 }
 
 /*
@@ -1282,7 +1338,7 @@ do_http (THR_ARG *arg)
 	  BIO_free_all (be);
 	  be = NULL;
 	}
-      while (be == NULL && backend->be_type == 0)
+      while (be == NULL && backend->be_type == BE_BACKEND)
 	{
 	  switch (backend->addr.ai_family)
 	    {
@@ -1438,7 +1494,7 @@ do_http (THR_ARG *arg)
       /*
        * if we have anything but a BACK_END we close the channel
        */
-      if (be != NULL && cur_backend->be_type)
+      if (be != NULL && cur_backend->be_type != BE_BACKEND)
 	{
 	  BIO_reset (be);
 	  BIO_free_all (be);
@@ -1448,7 +1504,7 @@ do_http (THR_ARG *arg)
       /*
        * send the request
        */
-      if (cur_backend->be_type == 0)
+      if (cur_backend->be_type == BE_BACKEND)
 	{
 	  for (n = 0; n < MAXHEADERS && headers[n]; n++)
 	    {
@@ -1520,7 +1576,7 @@ do_http (THR_ARG *arg)
       /*
        * if SSL put additional headers for client certificate
        */
-      if (cur_backend->be_type == 0 && ssl != NULL)
+      if (cur_backend->be_type == BE_BACKEND && ssl != NULL)
 	{
 	  const SSL_CIPHER *cipher;
 
@@ -1676,7 +1732,7 @@ do_http (THR_ARG *arg)
       /*
        * put additional client IP header
        */
-      if (cur_backend->be_type == 0)
+      if (cur_backend->be_type == BE_BACKEND)
 	{
 	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  BIO_printf (be, "X-Forwarded-For: %s\r\n", caddr);
@@ -1693,7 +1749,8 @@ do_http (THR_ARG *arg)
 	   * had Transfer-encoding: chunked so read/write all the chunks
 	   * (HTTP/1.1 only)
 	   */
-	  if (copy_chunks (cl, be, NULL, cur_backend->be_type, lstn->max_req))
+	  if (copy_chunks (cl, be, NULL, cur_backend->be_type != BE_BACKEND,
+			   lstn->max_req))
 	    {
 	      str_be (buf, sizeof (buf), cur_backend);
 	      end_req = cur_time ();
@@ -1713,7 +1770,7 @@ do_http (THR_ARG *arg)
 	  /*
 	   * had Content-length, so do raw reads/writes for the length
 	   */
-	  if (copy_bin (cl, be, cont, NULL, cur_backend->be_type))
+	  if (copy_bin (cl, be, cont, NULL, cur_backend->be_type != BE_BACKEND))
 	    {
 	      str_be (buf, sizeof (buf), cur_backend);
 	      end_req = cur_time ();
@@ -1814,7 +1871,7 @@ do_http (THR_ARG *arg)
       /*
        * flush to the back-end
        */
-      if (cur_backend->be_type == 0 && BIO_flush (be) != 1)
+      if (cur_backend->be_type == BE_BACKEND && BIO_flush (be) != 1)
 	{
 	  str_be (buf, sizeof (buf), cur_backend);
 	  end_req = cur_time ();
@@ -1853,9 +1910,37 @@ do_http (THR_ARG *arg)
       /*
        * if we have a redirector
        */
-      if (cur_backend->be_type)
+      if (cur_backend->be_type != BE_BACKEND)
 	{
-	  redirect_reply (cl, url, cur_backend, &sm);
+	  int code;
+	  char const *what;
+
+	  if (cur_backend->be_type == BE_REDIRECT)
+	    {
+	      code = redirect_reply (cl, url, cur_backend, &sm);
+	      what = "REDIRECT";
+	    }
+	  else /* BE_ACME */
+	    {
+	      code = acme_reply (cl, url, cur_backend, &sm);
+	      what = "ACME";
+	    }
+
+	  switch (code)
+	    {
+	    case 200:
+	      /* ok */
+	      break;
+
+	    case 404:
+	      err_reply (cl, h404, lstn->err404);
+	      break;
+
+	    case 500:
+	      err_reply (cl, h500, lstn->err500);
+	      break;
+	    }
+
 	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  switch (lstn->log_level)
 	    {
@@ -1864,7 +1949,7 @@ do_http (THR_ARG *arg)
 
 	    case 1:
 	    case 2:
-	      logmsg (LOG_INFO, "%s %s - REDIRECT %s", caddr, request, buf);
+	      logmsg (LOG_INFO, "%s %s - %s %s", caddr, request, what, buf);
 	      break;
 
 	    case 3:
@@ -1872,12 +1957,12 @@ do_http (THR_ARG *arg)
 		logmsg (LOG_INFO,
 			"%s %s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 			v_host, caddr, u_name[0] ? u_name : "-", req_time,
-			request, cur_backend->be_type, referer, u_agent);
+			request, cur_backend->redir_code, referer, u_agent);
 	      else
 		logmsg (LOG_INFO,
 			"%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 			caddr, u_name[0] ? u_name : "-", req_time, request,
-			cur_backend->be_type, referer, u_agent);
+			cur_backend->redir_code, referer, u_agent);
 	      break;
 
 	    case 4:
@@ -1885,7 +1970,7 @@ do_http (THR_ARG *arg)
 	      logmsg (LOG_INFO,
 		      "%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 		      caddr, u_name[0] ? u_name : "-", req_time, request,
-		      cur_backend->be_type, referer, u_agent);
+		      cur_backend->redir_code, referer, u_agent);
 	      break;
 	    }
 	  if (!cl_11 || conn_closed || force_10)

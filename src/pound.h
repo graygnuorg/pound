@@ -193,6 +193,7 @@
       else						\
 	(head)->sl_first = (elt);			\
       (head)->sl_last = (elt);				\
+      (elt)->field = NULL;				\
     }							\
   while (0)
 
@@ -241,10 +242,18 @@ typedef enum
   }
   SESS_TYPE;
 
+typedef enum
+  {
+    BE_BACKEND,
+    BE_REDIRECT,
+    BE_ACME
+  }
+  BACKEND_TYPE;
+
 /* back-end definition */
 typedef struct _backend
 {
-  int be_type;			/* 0 if real back-end, otherwise code (301, 302/default, 307) */
+  BACKEND_TYPE be_type;         /* Backend type */
   struct addrinfo addr;		/* IPv4/6 address */
   int priority;			/* priority */
   unsigned to;			/* read/write time-out */
@@ -252,6 +261,7 @@ typedef struct _backend
   unsigned ws_to;		/* websocket time-out */
   struct addrinfo ha_addr;	/* HA address/port */
   char *url;			/* for redirectors */
+  int redir_code;               /* Redirection code (301, 302, or 307) */
   int redir_req;		/* the redirect should include the request path */
   SSL_CTX *ctx;			/* CTX for SSL connections */
   pthread_mutex_t mut;		/* mutex for this back-end */
@@ -335,7 +345,7 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
-  char *err413, *err414, *err500, *err501, *err503;
+  char *err404, *err413, *err414, *err500, *err501, *err503;
 				/* error messages */
   LONG max_req;			/* max. request size */
   MATCHER_HEAD head_off;	/* headers to remove */

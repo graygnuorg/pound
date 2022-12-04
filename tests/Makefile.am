@@ -61,6 +61,7 @@ check-local: atconfig atlocal $(TESTSUITE)
 
 TESTSUITE_AT = \
  testsuite.at \
+ acme.at\
  addheader.at\
  balancing.at\
  checkurl.at\

@@ -1807,7 +1807,7 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
   struct locus_range range;
 
   XZALLOC (be);
-  be->be_type = 0;
+  be->be_type = BE_BACKEND;
   be->addr.ai_socktype = SOCK_STREAM;
   be->to = dfl->be_to;
   be->conn_to = dfl->be_connto;
@@ -1928,7 +1928,8 @@ assign_redirect (void *call_data, void *section_data)
     }
 
   XZALLOC (be);
-  be->be_type = code;
+  be->be_type = BE_REDIRECT;
+  be->redir_code = code;
   be->priority = 1;
   be->alive = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -2216,6 +2217,84 @@ parse_service (void *call_data, void *section_data)
     }
   return PARSER_OK;
 }
+
+static int
+parse_acme (void *call_data, void *section_data)
+{
+  SERVICE_HEAD *head = call_data;
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE *svc;
+  MATCHER *m;
+  BACKEND *be;
+  struct token *tok;
+  struct stat st;
+  size_t len;
+  int rc;
+  static char re_acme[] = "^/\\.well-known/acme-challenge/(.+)";
+  static char suf_acme[] = "/$1";
+  static size_t suf_acme_size = sizeof (suf_acme) - 1;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if (stat (tok->str, &st))
+    {
+      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  if (!S_ISDIR (st.st_mode))
+    {
+      conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  /* Create service */
+  XZALLOC (svc);
+  SLIST_INIT (&svc->url);
+  SLIST_INIT (&svc->req_head);
+  SLIST_INIT (&svc->deny_head);
+  SLIST_INIT (&svc->backends);
+
+  /* Create a URL matcher */
+  XZALLOC (m);
+  rc = regcomp (&m->pat, re_acme, REG_EXTENDED);
+  if (rc)
+    {
+      conf_regcomp_error (rc, &m->pat, NULL);
+      return PARSER_FAIL;
+    }
+  SLIST_PUSH (&svc->url, m, next);
+
+  svc->sess_type = SESS_NONE;
+  pthread_mutex_init (&svc->mut, NULL);
+
+  svc->tot_pri = 1;
+  svc->abs_pri = 1;
+
+  /* Create ACME backend */
+  XZALLOC (be);
+  be->be_type = BE_ACME;
+  be->priority = 1;
+  be->alive = 1;
+  pthread_mutex_init (&be->mut, NULL);
+
+  len = strlen (tok->str);
+  if (tok->str[len-1] == '/')
+    len--;
+
+  be->url = xmalloc (len + suf_acme_size + 1);
+  memcpy (be->url, tok->str, len);
+  strcpy (be->url + len, suf_acme);
+
+  /* Register backend in service */
+  SLIST_PUSH (&svc->backends, be, next);
+
+  /* Register service in the listener */
+  SLIST_PUSH (head, svc, next);
+
+  return PARSER_OK;
+}
+
 
 static char *xhttp[] = {
   "^(GET|POST|HEAD) ([^ ]+) HTTP/1.[01]$",
@@ -2423,6 +2502,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, err404) },
   { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
@@ -2435,6 +2515,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
   { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
+  { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { NULL }
 };
 
@@ -2448,6 +2529,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
+  lst->err404 = "Not Found.";
   lst->err413 = "Request too large.";
   lst->err414 = "Request URI is too long.";
   lst->err500 = "An internal server error occurred. Please try again later.";
@@ -2980,6 +3062,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, err404) },
   { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },

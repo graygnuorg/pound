@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 3, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 4, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -92,7 +92,7 @@ mechanism: if defined, future requests from a given client will always
 be answered by the same
 .IR backend .
 .TP
-\fBbackends\fR
+\fBBackends\fR
 The
 .I backends
 are the actual servers for the content requested. By itself,
@@ -486,6 +486,10 @@ only to the request path -
 .B pound
 will still check that the request is syntactically correct.
 .TP
+\fBErr404\fR "filename"
+A file with the text to be displayed if an Error 404 occurs.
+Default: "Not Found.".
+.TP
 \fBErr413\fR "filename"
 A file with the text to be displayed if an Error 413 occurs.
 Default: "Request too large.".
@@ -552,6 +556,13 @@ service will be used only by this listener. The service may be optionally
 named, with the name showing in the
 .BR poundctl (8)
 listings.
+.TP
+\fBACME\fR "directory"
+Serve ACME challenge requests from the given
+.IR directory .
+See the section
+.B ACME
+below.
 .SH "HTTPS Listener"
 An HTTPS listener defines an address and port that
 .B pound
@@ -813,6 +824,15 @@ the following
 .B End
 directives define a session-tracking mechanism for the current service. See below
 for details.
+.SH "ACME"
+This statement creates a \fIservice\fR specially crafted for answering
+ACME HTTP-01 challenge requests (see
+.BR https://letsencrypt.org/docs/challenge-types/#http-01-challenge ).
+It takes a single argument specifying a directory where ACME
+challenges are stored.  It is supposed that another program is started
+periodically, which checks for certificates approaching their
+expiration, issues renewal requests and stores the obtained ACME
+challenges in that directory.
 .SH "Backend"
 A backend is a definition of a single backend server
 .B pound
