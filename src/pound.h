@@ -220,6 +220,25 @@
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
 
+struct cidr;
+
+typedef struct acl
+{
+  char *name;                 /* ACL name (optional) */
+  SLIST_HEAD (,cidr) head;    /* List of CIDRs */
+} ACL;
+
+typedef struct acl_ref
+{
+  ACL *acl;
+  int negate;                 /* Negated match */
+  SLIST_ENTRY (acl_ref) next;
+} ACL_REF;
+
+typedef SLIST_HEAD (,acl_ref) ACL_HEAD;
+
+int acl_list_match (ACL_HEAD const *head, struct sockaddr *sa);
+
 /* matcher chain */
 typedef struct _matcher
 {
@@ -298,6 +317,7 @@ DECLARE_LHASH_OF (TABNODE);
 typedef struct _service
 {
   char name[KEY_SIZE + 1];	/* symbolic name */
+  ACL_HEAD acl;                 /* access control lists */
   MATCHER_HEAD url;		/* request matcher */
   MATCHER_HEAD req_head;	/* required headers */
   MATCHER_HEAD deny_head;	/* forbidden headers */
@@ -457,7 +477,8 @@ struct submatch
 void submatch_free (struct submatch *sm);
 
 /* Find the right service for a request */
-SERVICE *get_service (const LISTENER *, const char *, char **const, struct submatch *);
+SERVICE *get_service (const LISTENER *, struct sockaddr *,
+		      const char *, char **const, struct submatch *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (SERVICE * const, const struct addrinfo *,

@@ -1309,7 +1309,7 @@ do_http (THR_ARG *arg)
        * check that the requested URL still fits the old back-end (if
        * any)
        */
-      if ((svc = get_service (lstn, url, &headers[1], &sm)) == NULL)
+      if ((svc = get_service (lstn, from_host.ai_addr, url, &headers[1], &sm)) == NULL)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",
 		  POUND_TID (), request,

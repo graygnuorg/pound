@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 4, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 5, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -409,6 +409,24 @@ Include the file as though it were part of the configuration file.
 (alternative spelling \fBAnonymize\fR also accepted) Replace the last
 byte of the client address with 0 for logging purposes.
 Default: log the client address in full.
+.TP
+\fBACL\fR "name"
+Define a \fInamed access control list\fR (\fIACL\fR).  An ACL is a
+list of network addresses in CIDR notation, terminated with an
+.B End
+directive on a line by itself.  E.g.:
+.sp
+.RS
+.EX
+ACL "secure"
+   "192.0.2.0/26"
+   "203.0.113.0/24"
+End
+.EE
+.sp
+Named ACLs can be used in \fBService\fR definitions to make services
+available from certain IP addresses only.
+.RE
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
 .B pound
@@ -677,7 +695,31 @@ All configuration directives enclosed between
 .B Service
 and
 .B End
-are specific to a single service. The following directives are available:
+are specific to a single service. The following directives are
+available:
+.TP
+\fBACL\fR [\fBnot\fR] "name"
+Match the source IP address against the named ACL.  The ACL must have
+been defined earlier (see the
+.B ACL
+statement in
+.B "GLOBAL DIRECTIVES"
+section above).  If the IP doesn't match, then this service will be
+skipped and next one tried.  If the \fBnot\fR keyword is used, the
+sense of comparison is reverted: the service will be used if the IP
+doesn't match and skipped otherwise.
+.TP
+\fBACL\fR [\fBnot\fR]
+This statement defines an unnamed ACL to match the source IP against.
+This line must be followed by one or more lines defining CIDRs, as
+described in the 
+.B "GLOBAL DIRECTIVES"
+section above.
+The ACL definition is finished with a
+.B End
+keyword on a line by itself.
+.sp
+Semantically it is equivalent to the named ACL reference described above.
 .TP
 \fBURL\fR "pattern"
 Match the incoming request. If a request fails to match, then this service

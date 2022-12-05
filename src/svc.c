@@ -529,11 +529,16 @@ submatch_reset (struct submatch *sm)
 }
 
 static int
-match_service (const SERVICE *svc, const char *request, char **const headers,
+match_service (const SERVICE *svc, struct sockaddr *srcaddr,
+	       const char *request, char **const headers,
 	       struct submatch *sm)
 {
   MATCHER *m;
   int i, found;
+
+  /* Check ACLs */
+  if (acl_list_match (&svc->acl, srcaddr))
+    return 0;
 
   submatch_reset (sm);
 
@@ -576,7 +581,8 @@ match_service (const SERVICE *svc, const char *request, char **const headers,
  * Find the right service for a request
  */
 SERVICE *
-get_service (const LISTENER * lstn, const char *request, char **const headers,
+get_service (const LISTENER * lstn, struct sockaddr *srcaddr,
+	     const char *request, char **const headers,
 	     struct submatch *sm)
 {
   SERVICE *svc;
@@ -585,7 +591,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers,
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, request, headers, sm))
+      if (match_service (svc, srcaddr, request, headers, sm))
 	return svc;
     }
 
@@ -594,7 +600,7 @@ get_service (const LISTENER * lstn, const char *request, char **const headers,
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, request, headers, sm))
+      if (match_service (svc, srcaddr, request, headers, sm))
 	return svc;
     }
 

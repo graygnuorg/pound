@@ -1387,7 +1387,349 @@ assign_port (void *call_data, void *section_data)
 
   return assign_port_internal (call_data, gettkn_any ());
 }
+
+/*
+ * ACL support
+ */
 
+/* Max. number of bytes in an inet address (suitable for both v4 and v6) */
+#define MAX_INADDR_BYTES 16
+
+typedef struct cidr
+{
+  int family;                           /* Address family */
+  int len;                              /* Address length */
+  unsigned char addr[MAX_INADDR_BYTES]; /* Network address */
+  unsigned char mask[MAX_INADDR_BYTES]; /* Address mask */
+  SLIST_ENTRY (cidr) next;              /* Link to next CIDR */
+} CIDR;
+
+/* Create a new ACL and append it to head. */
+static ACL *
+new_acl (ACL_HEAD *head, char const *name, int negate)
+{
+  ACL *acl;
+  ACL_REF *ref;
+
+  XZALLOC (acl);
+  if (name)
+    acl->name = xstrdup (name);
+  else
+    acl->name = NULL;
+  SLIST_INIT (&acl->head);
+
+  XZALLOC (ref);
+  ref->acl = acl;
+  ref->negate = negate;
+  SLIST_PUSH (head, ref, next);
+
+  return acl;
+}
+
+/* Match cidr against inet address ap/len.  Return 0 on match, 1 otherwise. */
+static int
+cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
+{
+  unsigned char *cp = (unsigned char *)&cidr->addr;
+  unsigned char *mp = (unsigned char *)&cidr->mask;
+  size_t i;
+
+  if (cidr->len == len)
+    {
+      for (i = 0; i < len; i++)
+	{
+	  if (cidr->addr[i] != (ap[i] & cidr->mask[i]))
+	    return 1;
+	}
+    }
+  return 0;
+}
+
+/*
+ * Split the inet address of SA to address pointer and length, suitable
+ * for use with the above functions.  Store pointer in RET_PTR.  Return
+ * address length in bytes, or -1 if SA has invalid address family.
+ */
+static int
+sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
+{
+  switch (sa->sa_family)
+    {
+    case AF_INET:
+      *ret_ptr = (unsigned char *) &(((struct sockaddr_in*)sa)->sin_addr.s_addr);
+      return 4;
+
+    case AF_INET6:
+      *ret_ptr = (unsigned char *) &(((struct sockaddr_in6*)sa)->sin6_addr);
+      return 16;
+
+    default:
+      break;
+    }
+  return -1;
+}
+
+/*
+ * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
+ * and -1 on error (invalid address family).
+ */
+static int
+acl_match (ACL *acl, struct sockaddr *sa)
+{
+  CIDR *cidr;
+  unsigned char *ap;
+  size_t len;
+  int res = 1;
+
+  if ((len = sockaddr_bytes (sa, &ap)) == -1)
+    return -1;
+
+  SLIST_FOREACH (cidr, &acl->head, next)
+    {
+      if (cidr->family == sa->sa_family && cidr_match (cidr, ap, len) == 0)
+	return 0;
+    }
+
+  return 1;
+}
+
+/*
+ * Match sockaddr SA against a list of ACLs HEAD.  Return 0 if all ACLs in
+ * the list matched, 1, if some of them didn't and -1 on error (unsupported
+ * address family).
+ */
+int
+acl_list_match (ACL_HEAD const *head, struct sockaddr *sa)
+{
+  ACL_REF *ref;
+
+  if (SLIST_EMPTY (head))
+    return 0;
+
+  SLIST_FOREACH (ref, head, next)
+    {
+      int res = acl_match (ref->acl, sa);
+      if (ref->negate)
+	res = ! res;
+      if (res)
+	return 1;
+    }
+  return 0;
+}
+
+static void
+masklen_to_netmask (unsigned char *buf, size_t len, size_t masklen)
+{
+  int i, cnt;
+
+  cnt = masklen / 8;
+  for (i = 0; i < cnt; i++)
+    buf[i] = 0xff;
+  if (i == MAX_INADDR_BYTES)
+    return;
+  cnt = 8 - masklen % 8;
+  buf[i++] = (0xff >> cnt) << cnt;
+  for (; i < MAX_INADDR_BYTES; i++)
+    buf[i] = 0;
+}
+
+/* Parse CIDR at the current point of the input. */
+static int
+parse_cidr (ACL *acl)
+{
+  struct token *tok;
+  char *mask;
+  struct addrinfo hints, *res;
+  unsigned long masklen;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if ((mask = strchr (tok->str, '/')) != NULL)
+    {
+      char *p;
+
+      *mask++ = 0;
+
+      errno = 0;
+      masklen = strtoul (mask, &p, 10);
+      if (errno || *p)
+	{
+	  conf_error ("%s", "invalid netmask");
+	  return PARSER_FAIL;
+	}
+    }
+
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = PF_UNSPEC;
+  hints.ai_flags = AI_NUMERICHOST;
+
+  if ((rc = getaddrinfo (tok->str, NULL, &hints, &res)) == 0)
+    {
+      CIDR *cidr;
+      int len, i;
+      unsigned char *p;
+
+      if ((len = sockaddr_bytes (res->ai_addr, &p)) == -1)
+	{
+	  conf_error ("%s", "unsupported address family");
+	  return PARSER_FAIL;
+	}
+      XZALLOC (cidr);
+      cidr->family = res->ai_family;
+      cidr->len = len;
+      memcpy (cidr->addr, p, len);
+      if (!mask)
+	masklen = len * 8;
+      masklen_to_netmask (cidr->mask, cidr->len, masklen);
+      /* Fix-up network address, just in case */
+      for (i = 0; i < len; i++)
+	cidr->addr[i] &= cidr->mask[i];
+      SLIST_PUSH (&acl->head, cidr, next);
+      freeaddrinfo (res);
+    }
+  else
+    {
+      conf_error ("%s", "invalid IP address: %s", gai_strerror (rc));
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
+/*
+ * List of named ACLs.
+ * There shouldn't be many of them so it's perhaps no use in implementing
+ * more sophisticated data structures than a mere singly-linked list.
+ */
+static ACL_HEAD acl_list = SLIST_HEAD_INITIALIZER (acl_list);
+
+/*
+ * Return a pointer to the named ACL or NULL if no ACL with such name is found.
+ */
+static ACL *
+acl_by_name (char const *name)
+{
+  ACL_REF *ref;
+  SLIST_FOREACH (ref, &acl_list, next)
+    {
+      if (strcmp (ref->acl->name, name) == 0)
+	return ref->acl;
+    }
+  return NULL;
+}
+
+/*
+ * Parse ACL definition.
+ * On entry, input must be positioned on the next token after ACL ["name"].
+ */
+static int
+parse_acl (ACL *acl)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type != '\n')
+    {
+      conf_error ("expected newline, but found %s", token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+
+  for (;;)
+    {
+      int rc;
+      if ((tok = gettkn_any ()) == NULL)
+	return PARSER_FAIL;
+      if (tok->type == '\n')
+	continue;
+      if (tok->type == T_IDENT && strcasecmp (tok->str, "end") == 0)
+	break;
+      putback_tkn ();
+      if ((rc = parse_cidr (acl)) != PARSER_OK)
+	return rc;
+    }
+  return PARSER_OK;
+}
+
+/*
+ * Parse a named ACL.
+ * Input is positioned after the "ACL" keyword.
+ */
+static int
+parse_named_acl (void *call_data, void *section_data)
+{
+  ACL *acl;
+  struct token *tok;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if (acl_by_name (tok->str))
+    {
+      conf_error ("%s", "ACL with that name already defined");
+      return PARSER_FAIL;
+    }
+  acl = new_acl (&acl_list, tok->str, 0);
+  return parse_acl (acl);
+}
+
+/*
+ * Parse ACL reference.  Two forms are accepted:
+ * ACL [not] "name"
+ *   References a named ACL.
+ * ACL [not] "\n" ... End
+ *   Creates and references an unnamed ACL.
+ */
+static int
+parse_acl_ref (void *call_data, void *section_data)
+{
+  ACL_HEAD *head = call_data;
+  struct token *tok;
+  int negate = 0;
+  ACL *acl;
+  ACL_REF *ref;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type == T_IDENT && strcasecmp (tok->str, "not") == 0)
+    {
+      negate = 1;
+      if ((tok = gettkn_any ()) == NULL)
+	return PARSER_FAIL;
+    }
+
+  if (tok->type == '\n')
+    {
+      putback_tkn ();
+      acl = new_acl (head, NULL, negate);
+      return parse_acl (acl);
+    }
+  else if (tok->type == T_STRING)
+    {
+      if ((acl = acl_by_name (tok->str)) == NULL)
+	{
+	  conf_error ("no such ACL: %s", tok->str);
+	  return PARSER_FAIL;
+	}
+
+      XZALLOC (ref);
+      ref->acl = acl;
+      ref->negate = negate;
+      SLIST_PUSH (head, ref, next);
+    }
+  else
+    {
+      conf_error ("expected ACL name or definition, but found %s",
+		  token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
 static int
 parse_ECDHCurve (void *call_data, void *section_data)
 {
@@ -2107,6 +2449,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
   { "Session", parse_session },
+  { "ACL", parse_acl_ref, NULL, offsetof (SERVICE, acl) },
   { NULL }
 };
 
@@ -2122,6 +2465,7 @@ parse_service (void *call_data, void *section_data)
 
   memset (&ext, 0, sizeof (ext));
   SLIST_INIT (&ext.url);
+  SLIST_INIT (&ext.svc.acl);
   /*
    * No use to do SLIST_INIT (&ext.svc.url), since no keywords in
    * service_parsetab attempt to modify it. Its counterpart in svc
@@ -3179,6 +3523,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "Service", parse_service, &services },
   { "ListenHTTP", parse_listen_http, &listeners },
   { "ListenHTTPS", parse_listen_https, &listeners },
+  { "ACL", parse_named_acl, NULL },
   { NULL }
 };
 

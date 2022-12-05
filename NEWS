@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-04
+Pound -- history of user-visible changes. 2022-12-05
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -34,6 +34,58 @@ Example usage:
     ACME "/var/www/acme"
     ...
   End
+
+* ACLs
+
+Access control lists (ACLs) allow you to make some services available
+for users coming from certain IP ranges.  There are two kinds of ACLs:
+named and unnamed.  Named ACLs are defined in the global scope, using
+the following syntax:
+
+  ACL "name"
+     "CIDR"
+     ...
+  End
+
+where ... denotes more CIDR lines.  A CIDR is an IPv4 or IPv6 address,
+optionally followed by a slash and network mask length.  Named ACLs
+can be referred to in Service sections using the following syntax:
+
+  Service
+     ACL "name"
+     ...
+  End
+
+This service will be used only if the request comes from IP address
+that matches the given ACL.
+
+A word "not" can be placed after ACL to indicate a negated match:
+
+  Service
+     ACL not "name"
+     ...
+  End
+
+This service will be used for requests that come from IP addresses not
+in ACL "name".
+
+Unnamed ACLs are defined within the service itself, as shown in the
+following example
+
+  Service
+     ACL
+        "127.0.0.1"
+        "192.0.2.0/26"
+        "203.0.113.0/24"
+     End
+     ...
+  End
+
+Semantically they are entirely equivalent to named ACLs.
+
+If multiple ACLs are used within a single Service, it will be used
+only if IP matches all of them.
+
 
 Version 4.0, 2022-12-02
 
