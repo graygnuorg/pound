@@ -68,6 +68,7 @@ TESTSUITE_AT = \
  config.at\
  echo.at\
  errfile.at\
+ headdeny.at\
  headrem.at\
  headrequire.at\
  https.at\

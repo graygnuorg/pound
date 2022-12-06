@@ -567,7 +567,7 @@ match_service (const SERVICE *svc, struct sockaddr *srcaddr,
   /* check for forbidden headers */
   SLIST_FOREACH (m, &svc->deny_head, next)
     {
-      for (found = i = 0; i < (MAXHEADERS - 1) && !found; i++)
+      for (found = i = 0; i < MAXHEADERS && !found; i++)
 	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
 	  found = 1;
       if (found)
