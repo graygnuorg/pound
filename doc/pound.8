@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 5, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 6, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -533,19 +533,25 @@ Request maximal size. All requests will be limited to these many bytes. If
 a request contains more data than allowed, an error 413 is returned. Default:
 unlimited.
 .TP
-\fBHeadRemove\fR "header pattern"
+\fBHeaderRemove\fR "header pattern"
 Remove certain headers from the incoming requests. All occurrences of the
 matching specified header will be removed. Please note that this filtering
-is done prior to other checks (such as \fBHeadRequire\fR or \fBHeadDeny\fR),
+is done prior to other checks (such as \fBHeaderRequire\fR or \fBHeaderDeny\fR),
 so you should not try to check for these headers in later matches. Multiple
 directives may be specified in order to remove more than one header, and
 the header itself may be a regular pattern (though this should be used with
 caution).
 .TP
-\fBAddHeader\fR "header: to add"
+\fBHeadRemove\fR "header pattern"
+Same as \fBHeaderRemove\fR.
+.TP
+\fBHeaderAdd\fR "header: to add"
 Add the defined header to the request passed to the backend server. The header
-is added verbatim. Use multiple \fBAddHeader\fR directives if you need
+is added verbatim. Use multiple \fBHeaderAdd\fR directives if you need
 to add more than one header.
+.TP
+\fBAddHeader\fR "header: to add"
+Same as \fBHeaderAdd\fR.
 .TP
 \fBRewriteLocation\fR 0|1|2
 If set to 1, force
@@ -740,26 +746,32 @@ Override the global
 .B IgnoreCase
 setting.
 .TP
-\fBHeadRequire\fR "pattern"
+\fBHeaderRequire\fR "pattern"
 The request must contain at least on header matching the given pattern.
 Multiple
-.B HeadRequire
+.B HeaderRequire
 directives may be defined per service, in which case all of them must
 be satisfied.
 .TP
-\fBHeadDeny\fR "pattern"
+\fBHeadRequire\fR "pattern"
+Same as \fBHeaderRequire\fR.
+.TP
+\fBHeaderDeny\fR "pattern"
 The request may
 .B not
 contain any header matching the given pattern.  Multiple
-.B HeadDeny
+.B HeaderDeny
 directives may be defined per service, in which case all of them must be satisfied.
 .IP
 .IR "Please note":
 if the listener defined a
-.B HeadRemove
+.B HeaderRemove
 directive, the matching headers are removed
 .B before
 the service matching is attempted.
+.TP
+\fBHeadDeny\fR "pattern"
+Same as \fBHeaderDeny\fR.
 .TP
 \fBDisabled\fR \fIbool\fR
 Start
@@ -1143,7 +1155,7 @@ information is passed to the server itself (certificates, etc) and the
 backend server may be misled if it uses absolute URLs.  In most cases
 this can be dealt with by adding the
 .B X\-Forwarded\-Proto: https
-header (see the \fBAddHeader\fR directive).  Besides, \fBpound\fR
+header (see the \fBHeaderAdd\fR directive).  Besides, \fBpound\fR
 itself adds a number of
 .B X\-SSL\-*
 certificates conveying information about the certificate used (see above,
@@ -1298,7 +1310,7 @@ End
 # Virtual host www.myserver.com
 Service
     URL         ".*sessid=.*"
-    HeadRequire "Host:.*www.myserver.com.*"
+    HeaderRequire "Host:.*www.myserver.com.*"
     Backend
 	Address 192.168.0.11
 	Port    80

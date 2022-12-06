@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-05
+Pound -- history of user-visible changes. 2022-12-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -86,6 +86,19 @@ Semantically they are entirely equivalent to named ACLs.
 If multiple ACLs are used within a single Service, it will be used
 only if IP matches all of them.
 
+* Alternative spelling for header matching/manipulation directives
+
+For consistency, the following configuration directives have been 
+provided as alternatives for existing header manipulation directives:
+
+  Old name        New name          Where
+  --------        --------          -------
+  HeadRequire     HeaderRequire     Service section
+  HeadDeny        HeaderDeny        Service section
+  HeadRemove      HeaderRemove      ListenHTTP and ListenHTTPS sections
+  AddHeader       HeaderAdd         ListenHTTP and ListenHTTPS sections
+
+The use of new names is preferred.
 
 Version 4.0, 2022-12-02
 
