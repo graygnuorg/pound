@@ -500,7 +500,7 @@ submatch_init (struct submatch *sm)
 }
 
 static int
-submatch_realloc (struct submatch *sm, regex_t *re)
+submatch_realloc (struct submatch *sm, regex_t const *re)
 {
   size_t n = re->re_nsub + 1;
   if (n > sm->matchmax)
@@ -529,7 +529,7 @@ submatch_reset (struct submatch *sm)
 }
 
 static int
-match_headers (char **const headers, regex_t *re)
+match_headers (char **const headers, regex_t const *re)
 {
   int i, found;
 
@@ -552,7 +552,7 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
   switch (cond->type)
     {
     case COND_ACL:
-      res = acl_list_match (&cond->acl, srcaddr) == 0;
+      res = acl_match (cond->acl, srcaddr) == 0;
       break;
 
     case COND_URL:
@@ -580,6 +580,11 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	  if ((cond->compound.op == BOOL_AND) ? (res == 0) : (res == 1))
 	    break;
 	}
+      break;
+
+    case COND_NEGATE:
+      res = ! match_cond (cond->cond, srcaddr, request, headers, sm);
+      break;
     }
 
   return res;

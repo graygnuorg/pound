@@ -912,7 +912,8 @@ parser_find (PARSER_TABLE *tab, char const *name)
 }
 
 static int
-parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data, struct locus_range *retrange)
+parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
+		 int single_statement, struct locus_range *retrange)
 {
   struct token *tok;
   size_t i;
@@ -961,6 +962,8 @@ parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data, struct loc
 		      conf_error ("unexpected %s", token_type_str (type));
 		      return PARSER_FAIL;
 		    }
+		  if (single_statement)
+		    return PARSER_OK_NONL;
 		  break;
 
 		case PARSER_OK_NONL:
@@ -987,6 +990,14 @@ parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data, struct loc
  end:
   return PARSER_OK;
 }
+
+static int
+parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data,
+	     struct locus_range *retrange)
+{
+  return parse_statement (ptab, call_data, section_data, 0, retrange);
+}
+
 
 typedef struct
 {
@@ -1404,12 +1415,11 @@ typedef struct cidr
   SLIST_ENTRY (cidr) next;              /* Link to next CIDR */
 } CIDR;
 
-/* Create a new ACL and append it to head. */
+/* Create a new ACL. */
 static ACL *
-new_acl (ACL_HEAD *head, char const *name, int negate)
+new_acl (char const *name)
 {
   ACL *acl;
-  ACL_REF *ref;
 
   XZALLOC (acl);
   if (name)
@@ -1417,11 +1427,6 @@ new_acl (ACL_HEAD *head, char const *name, int negate)
   else
     acl->name = NULL;
   SLIST_INIT (&acl->head);
-
-  XZALLOC (ref);
-  ref->acl = acl;
-  ref->negate = negate;
-  SLIST_PUSH (head, ref, next);
 
   return acl;
 }
@@ -1473,7 +1478,7 @@ sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
  * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
  * and -1 on error (invalid address family).
  */
-static int
+int
 acl_match (ACL *acl, struct sockaddr *sa)
 {
   CIDR *cidr;
@@ -1491,30 +1496,6 @@ acl_match (ACL *acl, struct sockaddr *sa)
     }
 
   return 1;
-}
-
-/*
- * Match sockaddr SA against a list of ACLs HEAD.  Return 0 if all ACLs in
- * the list matched, 1, if some of them didn't and -1 on error (unsupported
- * address family).
- */
-int
-acl_list_match (ACL_HEAD const *head, struct sockaddr *sa)
-{
-  ACL_REF *ref;
-
-  if (SLIST_EMPTY (head))
-    return 0;
-
-  SLIST_FOREACH (ref, head, next)
-    {
-      int res = acl_match (ref->acl, sa);
-      if (ref->negate)
-	res = ! res;
-      if (res)
-	return 1;
-    }
-  return 0;
 }
 
 static void
@@ -1610,13 +1591,13 @@ static ACL_HEAD acl_list = SLIST_HEAD_INITIALIZER (acl_list);
 static ACL *
 acl_by_name (char const *name)
 {
-  ACL_REF *ref;
-  SLIST_FOREACH (ref, &acl_list, next)
+  ACL *acl;
+  SLIST_FOREACH (acl, &acl_list, next)
     {
-      if (strcmp (ref->acl->name, name) == 0)
-	return ref->acl;
+      if (strcmp (acl->name, name) == 0)
+	break;
     }
-  return NULL;
+  return acl;
 }
 
 /*
@@ -1672,39 +1653,34 @@ parse_named_acl (void *call_data, void *section_data)
       conf_error ("%s", "ACL with that name already defined");
       return PARSER_FAIL;
     }
-  acl = new_acl (&acl_list, tok->str, 0);
+
+  acl = new_acl (tok->str);
+  SLIST_PUSH (&acl_list, acl, next);
+
   return parse_acl (acl);
 }
 
 /*
  * Parse ACL reference.  Two forms are accepted:
- * ACL [not] "name"
+ * ACL "name"
  *   References a named ACL.
- * ACL [not] "\n" ... End
+ * ACL "\n" ... End
  *   Creates and references an unnamed ACL.
  */
 static int
-parse_acl_ref (ACL_HEAD *head)
+parse_acl_ref (ACL **ret_acl)
 {
   struct token *tok;
-  int negate = 0;
   ACL *acl;
-  ACL_REF *ref;
 
   if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
 
-  if (tok->type == T_IDENT && strcasecmp (tok->str, "not") == 0)
-    {
-      negate = 1;
-      if ((tok = gettkn_any ()) == NULL)
-	return PARSER_FAIL;
-    }
-
   if (tok->type == '\n')
     {
       putback_tkn ();
-      acl = new_acl (head, NULL, negate);
+      acl = new_acl (NULL);
+      *ret_acl = acl;
       return parse_acl (acl);
     }
   else if (tok->type == T_STRING)
@@ -1714,11 +1690,7 @@ parse_acl_ref (ACL_HEAD *head)
 	  conf_error ("no such ACL: %s", tok->str);
 	  return PARSER_FAIL;
 	}
-
-      XZALLOC (ref);
-      ref->acl = acl;
-      ref->negate = negate;
-      SLIST_PUSH (head, ref, next);
+      *ret_acl = acl;
     }
   else
     {
@@ -2225,11 +2197,21 @@ service_cond_append (SERVICE_COND *cond, int type)
 {
   SERVICE_COND *sc;
 
-  assert (cond->type == COND_COMPOUND);
-
   XZALLOC (sc);
   service_cond_init (sc, type);
-  SLIST_PUSH (&cond->compound.head, sc, next);
+  switch (cond->type)
+    {
+    case COND_COMPOUND:
+      SLIST_PUSH (&cond->compound.head, sc, next);
+      break;
+
+    case COND_NEGATE:
+      cond->cond = sc;
+      break;
+
+    default:
+      abort ();
+    }
 
   return sc;
 }
@@ -2513,6 +2495,29 @@ parse_match (void *call_data, void *section_data)
   return parse_cond (op, call_data, section_data);
 }
 
+static int parse_not_cond (void *call_data, void *section_data);
+
+static PARSER_TABLE negate_parsetab[] = {
+  { "ACL", parse_cond_acl },
+  { "URL", parse_cond_url_matcher },
+  { "HeaderRequire", parse_cond_req_head_matcher },
+  { "HeadRequire", parse_cond_req_head_matcher },
+  { "HeaderDeny", parse_cond_deny_head_matcher },
+  { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Match", parse_match },
+  { "AND", parse_and_cond, },
+  { "OR", parse_or_cond, },
+  { "NOT", parse_not_cond, },
+  { NULL }
+};
+
+static int
+parse_not_cond (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_NEGATE);
+  return parse_statement (negate_parsetab, cond, section_data, 1, NULL);
+}
+
 static PARSER_TABLE logcon_parsetab[] = {
   { "End", parse_end },
   { "ACL", parse_cond_acl },
@@ -2524,19 +2529,17 @@ static PARSER_TABLE logcon_parsetab[] = {
   { "Match", parse_match },
   { "AND", parse_and_cond, },
   { "OR", parse_or_cond, },
+  { "NOT", parse_not_cond, },
   { NULL }
 };
 
 static int
 parse_cond (int op, SERVICE_COND *cond, void *section_data)
 {
-  SERVICE_COND *subcond;
+  SERVICE_COND *subcond = service_cond_append (cond, COND_COMPOUND);
   struct locus_range range;
 
-  XZALLOC (subcond);
-  service_cond_init (subcond, COND_COMPOUND);
   subcond->compound.op = op;
-  SLIST_PUSH (&cond->compound.head, subcond, next);
   return parser_loop (logcon_parsetab, subcond, section_data, &range);
 }
 
@@ -2551,6 +2554,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Match", parse_match, NULL, offsetof (SERVICE, cond) },
   { "AND", parse_and_cond, NULL, offsetof (SERVICE, cond) },
   { "OR", parse_or_cond, NULL, offsetof (SERVICE, cond) },
+  { "NOT", parse_not_cond, NULL, offsetof (SERVICE, cond) },
   { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
   { "Redirect", assign_redirect, NULL, offsetof (SERVICE, backends) },

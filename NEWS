@@ -59,16 +59,6 @@ can be referred to in Service sections using the following syntax:
 This service will be used only if the request comes from IP address
 that matches the given ACL.
 
-A word "not" can be placed after ACL to indicate a negated match:
-
-  Service
-     ACL not "name"
-     ...
-  End
-
-This service will be used for requests that come from IP addresses not
-in ACL "name".
-
 Unnamed ACLs are defined within the service itself, as shown in the
 following example
 
@@ -83,10 +73,7 @@ following example
 
 Semantically they are entirely equivalent to named ACLs.
 
-If multiple ACLs are used within a single Service, it will be used
-only if IP matches all of them.
-
-* Joining request matching directives
+* Boolean operations over request matching directives
 
 By default, request matching directives are joined with an implicit
 boolean "AND".  This can be changed using the new "Match" directive,
@@ -98,6 +85,9 @@ e.g.:
   End
 
 Match directives can be nested to any depth.
+
+Any request matching directive (including "Match") can be prefixed
+with "not", to invert its result (boolean negation).
 
 * Alternative spelling for header matching/manipulation directives
 

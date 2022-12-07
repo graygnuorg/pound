@@ -73,6 +73,7 @@ TESTSUITE_AT = \
  headrequire.at\
  https.at\
  maxrequest.at\
+ not.at\
  or.at\
  prio.at\
  redirect.at\

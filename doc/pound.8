@@ -716,18 +716,16 @@ directives are joined by a boolean \fBAND\fR.
 .PP
 A service with no matching directives always matches.
 .TP
-\fBACL\fR [\fBnot\fR] "name"
+\fBACL\fR "name"
 Match the source IP address against the named ACL.  The ACL must have
 been defined earlier (see the
 .B ACL
 statement in
 .B "GLOBAL DIRECTIVES"
 section above).  If the IP doesn't match, then this service will be
-skipped and next one tried.  If the \fBnot\fR keyword is used, the
-sense of comparison is reverted: the service will be used if the IP
-doesn't match and skipped otherwise.
+skipped and next one tried.
 .TP
-\fBACL\fR [\fBnot\fR]
+\fBACL\fR
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
 described in the 
@@ -764,6 +762,24 @@ the service matching is attempted.
 .TP
 \fBHeadDeny\fR "pattern"
 Same as \fBHeaderDeny\fR.
+.SS Negation
+Prefixing any of the directive discussed above with \fBnot\fR will
+revert the sense of comparison.  For example,
+.PP
+.EX
+not url "^/static/"
+.EE
+.PP
+will match any request, whose URL \fIdoes not\fR begin with "/static".
+.PP
+Negating compound statements is allowed as well, e.g.:
+.PP
+.EX
+not ACL
+   "192.0.2.0/26"
+   "203.0.113.0/24"
+End
+.EE
 .SS Match statement
 A \fBMatch\fR statement allows you to group matching directives using
 arbitrary boolean operations.  The syntax is:
@@ -779,10 +795,12 @@ where \fIOP\fR is \fBAND\fR to use boolean and, and \fBOR\fR
 any number of matching directives discussed above (including the
 \fBMatch\fR directive).
 .PP
+Prefixing \fBMatch\fR directive with a word \fBnot\fR reverts its result.
+.PP
 \fBMatch\fR directives can be nested to any depth.
 .PP
 Techically, an implicit \fBMatch AND\fR block is created around
-unenclosed matching directives in the top level of a \fBService\fR block.
+unenclosed matching directives on the top level of a \fBService\fR block.
 .SS Backend definitions
 .TP
 \fBBackend\fR

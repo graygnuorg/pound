@@ -227,18 +227,12 @@ typedef struct acl
 {
   char *name;                 /* ACL name (optional) */
   SLIST_HEAD (,cidr) head;    /* List of CIDRs */
+  SLIST_ENTRY (acl) next;
 } ACL;
 
-typedef struct acl_ref
-{
-  ACL *acl;
-  int negate;                 /* Negated match */
-  SLIST_ENTRY (acl_ref) next;
-} ACL_REF;
+typedef SLIST_HEAD (,acl) ACL_HEAD;
 
-typedef SLIST_HEAD (,acl_ref) ACL_HEAD;
-
-int acl_list_match (ACL_HEAD const *head, struct sockaddr *sa);
+int acl_match (ACL *acl, struct sockaddr *sa);
 
 /* matcher chain */
 typedef struct _matcher
@@ -314,14 +308,6 @@ DEFINE_LHASH_OF (TABNODE);
 DECLARE_LHASH_OF (TABNODE);
 #endif
 
-struct simple_service_cond
-{
-  ACL_HEAD acl;                 /* access control lists */
-  MATCHER_HEAD url;		/* request matcher */
-  MATCHER_HEAD req_head;	/* required headers */
-  MATCHER_HEAD deny_head;	/* forbidden headers */
-};
-
 enum
   {
     BOOL_AND,
@@ -340,7 +326,8 @@ enum service_cond_type
     COND_URL,
     COND_HDR_REQ,
     COND_HDR_DENY,
-    COND_COMPOUND
+    COND_COMPOUND,
+    COND_NEGATE
   };
 
 typedef struct _service_cond
@@ -348,9 +335,10 @@ typedef struct _service_cond
   enum service_cond_type type;
   union
   {
-    ACL_HEAD acl;
+    ACL *acl;
     regex_t re;
     struct compound_service_cond compound;
+    struct _service_cond *cond;
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -362,9 +350,6 @@ service_cond_init (SERVICE_COND *cond, int type)
   switch (type)
     {
     case COND_ACL:
-      SLIST_INIT (&cond->acl);
-      break;
-
     case COND_URL:
     case COND_HDR_REQ:
     case COND_HDR_DENY:
@@ -373,6 +358,10 @@ service_cond_init (SERVICE_COND *cond, int type)
     case COND_COMPOUND:
       cond->compound.op = BOOL_AND;
       SLIST_INIT (&cond->compound.head);
+      break;
+
+    case COND_NEGATE:
+      cond->cond = NULL;
     }
 }
 
