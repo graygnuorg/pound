@@ -71,6 +71,7 @@ TESTSUITE_AT = \
  headdeny.at\
  headrem.at\
  headrequire.at\
+ host.at\
  https.at\
  maxrequest.at\
  not.at\

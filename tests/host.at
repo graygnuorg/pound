@@ -13,56 +13,39 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Backend Priorities])
-AT_KEYWORDS([prio])
-PT_CHECK(
-[ListenHTTP
+AT_SETUP([Host])
+AT_KEYWORDS([host])
+PT_CHECK([ListenHTTP
 	Service
+		Host "example.org"
 		Backend
 			Address
 			Port
-			Priority 1
 		End
+	End
+	Service
+		Host "example.com"
 		Backend
 			Address
 			Port
-			Priority 8
 		End
 	End
 End
 ],
-[stats samples=1000 index=1 avg=8%20
-
-GET /echo/foo
+[GET /echo/foo
+Host: example.org
 end
 
 200
+x-backend-number: 0
 end
-])
-
-PT_CHECK(
-[ListenHTTP
-	Service
-		Backend
-			Address
-			Port
-		End
-		Backend
-			Address
-			Port
-			Priority 8
-		End
-	End
-End
-],
-[# Default priority is 5, 8/5=1.6
-stats samples=1000 index=1 avg=1.6%25
 
 GET /echo/foo
+Host: example.com
 end
 
 200
+x-backend-number: 1
 end
 ])
-
 AT_CLEANUP

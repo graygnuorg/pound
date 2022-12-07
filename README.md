@@ -350,15 +350,13 @@ End
 
 To implement virtual hosts, one needs to instruct __pound__ to
 route requests to different services depending on the value of
-their `Host:` headers.  To do so, the `HeadRequire` directive is
-used.  The directive takes as argument a regular expression, applied
-to each header line.  If the regular expression matches a single
-header line, the `Service` section it appears in is used to process
-the request.
+their `Host:` headers.  In previous versions of __pound__ it
+was achieved using the `HeadRequire` directive.  Since version
+4.1 __pound__ provides the `Host` directive for this purpose.
 
 Let's assume that you have internal server 192.168.0.10 that is supposed to
 serve the needs of virtual host *www.server0.com* and 192.168.0.11
-that serves *www.server1.com*.  You want Pound to listen on address
+that serves *www.server1.com*.  You want __pound__ to listen on address
 192.0.2.1 and separate the requests to each host.  The configuration file
 would look like this:
 
@@ -368,7 +366,7 @@ ListenHTTP
         Port    80
 	
         Service
-		HeadRequire "Host:[[:space:]]*www.server0.com"
+		Host "www.server0.com"
                 Backend
 			Address 192.168.0.10
 			Port    80
@@ -376,7 +374,7 @@ ListenHTTP
         End
 
         Service
-                HeadRequire "Host:[[:space:]]*www.server1.com"
+                Host "www.server1.com"
                 Backend
 			Address 192.168.0.11
 			Port    80
@@ -386,6 +384,22 @@ End
 ```
 
 The same can be done using `ListenHTTPS`.
+
+If you want to use the same service for both the hostname and the
+hostname prefixed with `www.`, use the `Match` statement, as in:
+
+```
+        Service
+		Match OR
+			Host "server0.com"
+			Host "www.server0.com"
+		End
+                Backend
+			Address 192.168.0.10
+			Port    80
+                End
+        End
+```
 
 ### Sessions
 

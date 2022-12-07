@@ -748,6 +748,20 @@ The request must contain at least one header matching the given pattern.
 \fBHeadRequire\fR "pattern"
 Same as \fBHeaderRequire\fR.
 .TP
+\fBHost\fR "hostname"
+This is a shortcut for:
+.IP
+\fBHeadRequire\fR "Host:[[:space:]]*\fIqhost\fR"
+.IP
+where \fIqhost\fR is the "hostname" argument in quoted form, i.e. with
+all characters that have special meaning in regular expressions
+escaped.
+.IP
+This statement is provided to facilitate handling of \fIvirtual
+hosts\fR.  See the
+.B EXAMPLES
+section.
+.TP
 \fBHeaderDeny\fR "pattern"
 The request may
 .B not
@@ -1346,7 +1360,7 @@ End
 # Virtual host www.myserver.com
 Service
     URL         ".*sessid=.*"
-    HeaderRequire "Host:.*www.myserver.com.*"
+    Host        "www.myserver.com"
     Backend
 	Address 192.168.0.11
 	Port    80

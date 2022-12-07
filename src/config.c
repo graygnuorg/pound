@@ -2247,6 +2247,48 @@ parse_cond_deny_head_matcher (void *call_data, void *section_data)
 }
 
 static int
+parse_cond_host (void *call_data, void *section_data)
+{
+  struct token *tok;
+  struct stringbuf sb;
+  char *p;
+  int rc;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_REQ);
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  stringbuf_init (&sb);
+  stringbuf_add_string (&sb, "Host:[[:space:]]*");
+  p = tok->str;
+  while (*p)
+    {
+      size_t len = strcspn (p, "\\[]{}().*+?");
+      if (len > 0)
+	stringbuf_add (&sb, p, len);
+      p += len;
+      if (*p)
+	{
+	  stringbuf_add_char (&sb, '\\');
+	  stringbuf_add_char (&sb, *p);
+	  p++;
+	}
+    }
+
+  p = stringbuf_finish (&sb);
+
+  rc = regcomp (&cond->re, p, REG_EXTENDED | REG_ICASE);
+  stringbuf_free (&sb);
+  if (rc)
+    {
+      conf_regcomp_error (rc, &cond->re, NULL);
+      return PARSER_FAIL;
+    }
+
+  return PARSER_OK;
+}
+
+static int
 assign_redirect (void *call_data, void *section_data)
 {
   BACKEND_HEAD *head = call_data;
@@ -2504,6 +2546,7 @@ static PARSER_TABLE negate_parsetab[] = {
   { "HeadRequire", parse_cond_req_head_matcher },
   { "HeaderDeny", parse_cond_deny_head_matcher },
   { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Host", parse_cond_host },
   { "Match", parse_match },
   { "AND", parse_and_cond, },
   { "OR", parse_or_cond, },
@@ -2526,6 +2569,7 @@ static PARSER_TABLE logcon_parsetab[] = {
   { "HeadRequire", parse_cond_req_head_matcher },
   { "HeaderDeny", parse_cond_deny_head_matcher },
   { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Host", parse_cond_host },
   { "Match", parse_match },
   { "AND", parse_and_cond, },
   { "OR", parse_or_cond, },
@@ -2551,6 +2595,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "HeadRequire", parse_cond_req_head_matcher, NULL, offsetof (SERVICE, cond) },
   { "HeaderDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
   { "HeadDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "Host", parse_cond_host, NULL, offsetof (SERVICE, cond) },
   { "Match", parse_match, NULL, offsetof (SERVICE, cond) },
   { "AND", parse_and_cond, NULL, offsetof (SERVICE, cond) },
   { "OR", parse_or_cond, NULL, offsetof (SERVICE, cond) },
