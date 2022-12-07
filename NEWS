@@ -35,6 +35,17 @@ Example usage:
     ...
   End
 
+* New statement: Host
+
+The "Host" statement is provided to facilitate handling of virtual
+services.  The statement:
+
+  Host "example.com"
+
+is equivalent to:
+
+  HeadRequire "Host:[[:space:]]*example\\.com"
+
 * ACLs
 
 Access control lists (ACLs) allow you to make some services available

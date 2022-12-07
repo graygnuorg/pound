@@ -1222,8 +1222,11 @@ static struct kwtab facility_table[] = {
 static int
 assign_log_facility (void *call_data, void *section_data)
 {
-  struct token *tok = gettkn_expect_mask (T_UNQ);
   int n;
+  struct token *tok = gettkn_expect_mask (T_UNQ);
+
+  if (!tok)
+    return PARSER_FAIL;
 
   if (strcmp (tok->str, "-") == 0)
     n = -1;

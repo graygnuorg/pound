@@ -1957,12 +1957,12 @@ do_http (THR_ARG *arg)
 		logmsg (LOG_INFO,
 			"%s %s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 			v_host, caddr, u_name[0] ? u_name : "-", req_time,
-			request, cur_backend->redir_code, referer, u_agent);
+			request, code, referer, u_agent);
 	      else
 		logmsg (LOG_INFO,
 			"%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 			caddr, u_name[0] ? u_name : "-", req_time, request,
-			cur_backend->redir_code, referer, u_agent);
+			code, referer, u_agent);
 	      break;
 
 	    case 4:
@@ -1970,7 +1970,7 @@ do_http (THR_ARG *arg)
 	      logmsg (LOG_INFO,
 		      "%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
 		      caddr, u_name[0] ? u_name : "-", req_time, request,
-		      cur_backend->redir_code, referer, u_agent);
+		      code, referer, u_agent);
 	      break;
 	    }
 	  if (!cl_11 || conn_closed || force_10)
