@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 6, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 7, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -701,8 +701,20 @@ All configuration directives enclosed between
 .B Service
 and
 .B End
-are specific to a single service. The following directives are
-available:
+are specific to a single service. They can be subdivided into two
+categories: \fIservice matching directives\fR and \fIbackend definitions\fR.
+.SS Service Matching Directives
+These directives determine whether a particular request should be
+handled by this service.  When a request arrives, each service is
+considered in turn (first services defined within the listener that
+received the request, then the ones defined in global scope).  First
+service that matches the request will be used.  If no service matches,
+a 503 "Service unavailable" error is returned.
+.PP
+Unless explicitly stated in the configuration file, all matching
+directives are joined by a boolean \fBAND\fR.
+.PP
+A service with no matching directives always matches.
 .TP
 \fBACL\fR [\fBnot\fR] "name"
 Match the source IP address against the named ACL.  The ACL must have
@@ -728,30 +740,12 @@ keyword on a line by itself.
 Semantically it is equivalent to the named ACL reference described above.
 .TP
 \fBURL\fR "pattern"
-Match the incoming request. If a request fails to match, then this service
-will be skipped and next one tried. If all services fail to match,
-.B pound
-returns an error. You may define multiple
-.B URL
-conditions per service, in which case
-.B all
-patterns must match. If no
-.B URL
-was defined, then all requests match. The matching is by default case-sensitive,
+Match the URL of the incoming request. The matching is by default case-sensitive,
 but this can be overridden by specifying
 .BR IgnoreCase .
 .TP
-\fBIgnoreCase\fR \fIbool\fR
-Override the global
-.B IgnoreCase
-setting.
-.TP
 \fBHeaderRequire\fR "pattern"
 The request must contain at least one header matching the given pattern.
-Multiple
-.B HeaderRequire
-directives may be defined per service, in which case all of them must
-be satisfied.
 .TP
 \fBHeadRequire\fR "pattern"
 Same as \fBHeaderRequire\fR.
@@ -759,9 +753,7 @@ Same as \fBHeaderRequire\fR.
 \fBHeaderDeny\fR "pattern"
 The request may
 .B not
-contain any header matching the given pattern.  Multiple
-.B HeaderDeny
-directives may be defined per service, in which case all of them must be satisfied.
+contain any header matching the given pattern.
 .IP
 .IR "Please note":
 if the listener defined a
@@ -772,13 +764,26 @@ the service matching is attempted.
 .TP
 \fBHeadDeny\fR "pattern"
 Same as \fBHeaderDeny\fR.
-.TP
-\fBDisabled\fR \fIbool\fR
-Start
-.B pound
-with this service disabled (\fItrue\fR) or enabled (\fIfalse\fR). If
-started as disabled, the service can be later enabled with
-.BR poundctl (8).
+.SS Match statement
+A \fBMatch\fR statement allows you to group matching directives using
+arbitrary boolean operations.  The syntax is:
+.PP
+.EX
+Match \fIOP\fR
+  \fIdirectives\fR...
+End
+.EE
+.PP
+where \fIOP\fR is \fBAND\fR to use boolean and, and \fBOR\fR
+(case-insensitive) to use boolean or, and \fIdirectives\fR stand for
+any number of matching directives discussed above (including the
+\fBMatch\fR directive).
+.PP
+\fBMatch\fR directives can be nested to any depth.
+.PP
+Techically, an implicit \fBMatch AND\fR block is created around
+unenclosed matching directives in the top level of a \fBService\fR block.
+.SS Backend definitions
 .TP
 \fBBackend\fR
 Directives enclosed between a
@@ -878,6 +883,19 @@ the following
 .B End
 directives define a session-tracking mechanism for the current service. See below
 for details.
+.SS Other directives
+.TP
+\fBIgnoreCase\fR \fIbool\fR
+Override the global
+.B IgnoreCase
+setting.
+.TP
+\fBDisabled\fR \fIbool\fR
+Start
+.B pound
+with this service disabled (\fItrue\fR) or enabled (\fIfalse\fR). If
+started as disabled, the service can be later enabled with
+.BR poundctl (8).
 .SH "ACME"
 This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see

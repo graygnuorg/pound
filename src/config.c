@@ -1684,9 +1684,8 @@ parse_named_acl (void *call_data, void *section_data)
  *   Creates and references an unnamed ACL.
  */
 static int
-parse_acl_ref (void *call_data, void *section_data)
+parse_acl_ref (ACL_HEAD *head)
 {
-  ACL_HEAD *head = call_data;
   struct token *tok;
   int negate = 0;
   ACL *acl;
@@ -1825,32 +1824,6 @@ static
 IMPLEMENT_LHASH_COMP_FN (t_cmp, const TABNODE *)
 # endif
 #endif
-
-struct token_ent
-{
-  struct token tok;
-  SLIST_ENTRY (token_ent) next;
-};
-
-typedef SLIST_HEAD (,token_ent) TOKEN_HEAD;
-
-static int
-assign_token_list (void *call_data, void *section_data)
-{
-  TOKEN_HEAD *head = call_data;
-  struct token_ent *ent;
-  struct token *tok = gettkn_expect (T_STRING);
-
-  if (!tok)
-    return PARSER_FAIL;
-
-  XZALLOC (ent);
-  ent->tok = *tok;
-  ent->tok.str = xstrdup (ent->tok.str);
-  SLIST_PUSH (head, ent, next);
-
-  return PARSER_OK;
-}
 
 static int
 backend_parse_haport (void *call_data, void *section_data)
@@ -2204,20 +2177,31 @@ parse_emergency (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
-
 
-struct service_ext
+static int
+parse_regex (regex_t *re, int flags)
 {
-  SERVICE svc;
-  TOKEN_HEAD url;
-  int ignore_case;
-};
+  int rc;
+
+  struct token *tok = gettkn_expect (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+
+  rc = regcomp (re, tok->str, flags);
+  if (rc)
+    {
+      conf_regcomp_error (rc, re, NULL);
+      return PARSER_FAIL;
+    }
+
+  return PARSER_OK;
+}
 
 static int
 assign_matcher (void *call_data, void *section_data)
 {
-  MATCHER *m;
   MATCHER_HEAD *head = call_data;
+  MATCHER *m;
   int rc;
 
   struct token *tok = gettkn_expect (T_STRING);
@@ -2234,6 +2218,50 @@ assign_matcher (void *call_data, void *section_data)
   SLIST_PUSH (head, m, next);
 
   return PARSER_OK;
+}
+
+static SERVICE_COND *
+service_cond_append (SERVICE_COND *cond, int type)
+{
+  SERVICE_COND *sc;
+
+  assert (cond->type == COND_COMPOUND);
+
+  XZALLOC (sc);
+  service_cond_init (sc, type);
+  SLIST_PUSH (&cond->compound.head, sc, next);
+
+  return sc;
+}
+
+static int
+parse_cond_acl (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_ACL);
+  return parse_acl_ref (&cond->acl);
+}
+
+static int
+parse_cond_url_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_URL);
+  int flags = REG_NEWLINE | REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  return parse_regex (&cond->re, flags);
+}
+
+static int
+parse_cond_req_head_matcher (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_REQ);
+  return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
+}
+
+static int
+parse_cond_deny_head_matcher (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_DENY);
+  return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
 }
 
 static int
@@ -2438,20 +2466,97 @@ parse_session (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static int
+assign_dfl_ignore_case (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  return assign_bool (&dfl->ignore_case, NULL);
+}
+
+static int parse_cond (int op, SERVICE_COND *cond, void *section_data);
+
+static int
+parse_and_cond (void *call_data, void *section_data)
+{
+  return parse_cond (BOOL_AND, call_data, section_data);
+}
+
+static int
+parse_or_cond (void *call_data, void *section_data)
+{
+  return parse_cond (BOOL_OR, call_data, section_data);
+}
+
+static int
+parse_match (void *call_data, void *section_data)
+{
+  struct token *tok;
+  int op = BOOL_AND;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  if (tok->type == T_IDENT)
+    {
+      if (strcasecmp (tok->str, "and") == 0)
+	op = BOOL_AND;
+      else if (strcasecmp (tok->str, "or") == 0)
+	op = BOOL_OR;
+      else
+	{
+	  conf_error ("expected AND or OR, but found %s", tok->str);
+	  return PARSER_FAIL;
+	}
+    }
+  else
+    putback_tkn ();
+
+  return parse_cond (op, call_data, section_data);
+}
+
+static PARSER_TABLE logcon_parsetab[] = {
+  { "End", parse_end },
+  { "ACL", parse_cond_acl },
+  { "URL", parse_cond_url_matcher },
+  { "HeaderRequire", parse_cond_req_head_matcher },
+  { "HeadRequire", parse_cond_req_head_matcher },
+  { "HeaderDeny", parse_cond_deny_head_matcher },
+  { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Match", parse_match },
+  { "AND", parse_and_cond, },
+  { "OR", parse_or_cond, },
+  { NULL }
+};
+
+static int
+parse_cond (int op, SERVICE_COND *cond, void *section_data)
+{
+  SERVICE_COND *subcond;
+  struct locus_range range;
+
+  XZALLOC (subcond);
+  service_cond_init (subcond, COND_COMPOUND);
+  subcond->compound.op = op;
+  SLIST_PUSH (&cond->compound.head, subcond, next);
+  return parser_loop (logcon_parsetab, subcond, section_data, &range);
+}
+
 static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
-  { "URL", assign_token_list, NULL, offsetof (struct service_ext, url) },
-  { "IgnoreCase", assign_bool, NULL, offsetof (struct service_ext, ignore_case) },
-  { "HeaderRequire", assign_matcher, NULL, offsetof (SERVICE, req_head) },
-  { "HeadRequire", assign_matcher, NULL, offsetof (SERVICE, req_head) },
-  { "HeaderDeny", assign_matcher, NULL, offsetof (SERVICE, deny_head) },
-  { "HeadDeny", assign_matcher, NULL, offsetof (SERVICE, deny_head) },
+  { "ACL", parse_cond_acl, NULL, offsetof (SERVICE, cond) },
+  { "URL", parse_cond_url_matcher, NULL, offsetof (SERVICE, cond) },
+  { "HeaderRequire", parse_cond_req_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "HeadRequire", parse_cond_req_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "HeaderDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "HeadDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "Match", parse_match, NULL, offsetof (SERVICE, cond) },
+  { "AND", parse_and_cond, NULL, offsetof (SERVICE, cond) },
+  { "OR", parse_or_cond, NULL, offsetof (SERVICE, cond) },
+  { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
   { "Redirect", assign_redirect, NULL, offsetof (SERVICE, backends) },
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
   { "Session", parse_session },
-  { "ACL", parse_acl_ref, NULL, offsetof (SERVICE, acl) },
   { NULL }
 };
 
@@ -2459,49 +2564,40 @@ static int
 parse_service (void *call_data, void *section_data)
 {
   SERVICE_HEAD *head = call_data;
-  POUND_DEFAULTS *dfl = section_data;
+  POUND_DEFAULTS dfl = *(POUND_DEFAULTS*) section_data;
   struct token *tok;
   SERVICE *svc;
-  struct service_ext ext;
   struct locus_range range;
 
-  memset (&ext, 0, sizeof (ext));
-  SLIST_INIT (&ext.url);
-  SLIST_INIT (&ext.svc.acl);
-  /*
-   * No use to do SLIST_INIT (&ext.svc.url), since no keywords in
-   * service_parsetab attempt to modify it. Its counterpart in svc
-   * will be initialized after it is allocated (see below).
-   */
-  SLIST_INIT (&ext.svc.req_head);
-  SLIST_INIT (&ext.svc.deny_head);
-  SLIST_INIT (&ext.svc.backends);
+  XZALLOC (svc);
+  service_cond_init (&svc->cond, COND_COMPOUND);
+  SLIST_INIT (&svc->backends);
+
+  svc->sess_type = SESS_NONE;
+  pthread_mutex_init (&svc->mut, NULL);
 
   tok = gettkn_any ();
 
   if (!tok)
     return PARSER_FAIL;
 
-  ext.svc.sess_type = SESS_NONE;
-  pthread_mutex_init (&ext.svc.mut, NULL);
-
   if (tok->type == T_STRING)
     {
-      if (strlen (tok->str) > sizeof (ext.svc.name) - 1)
+      if (strlen (tok->str) > sizeof (svc->name) - 1)
 	{
 	  conf_error ("%s", "service name too long: truncated");
 	}
-      strncpy (ext.svc.name, tok->str, sizeof (ext.svc.name) - 1);
+      strncpy (svc->name, tok->str, sizeof (svc->name) - 1);
     }
   else
     putback_tkn ();
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((ext.svc.sessions = lh_TABNODE_new (t_hash, t_cmp)) == NULL)
+  if ((svc->sessions = lh_TABNODE_new (t_hash, t_cmp)) == NULL)
 #elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((ext.svc.sessions = LHM_lh_new (TABNODE, t)) == NULL)
+  if ((svc->sessions = LHM_lh_new (TABNODE, t)) == NULL)
 #else
-  if ((ext.svc.sessions =
+  if ((svc->sessions =
 	 lh_new (LHASH_HASH_FN (t_hash), LHASH_COMP_FN (t_cmp))) == NULL)
 #endif
     {
@@ -2509,20 +2605,11 @@ parse_service (void *call_data, void *section_data)
       return -1;
     }
 
-  ext.ignore_case = dfl->ignore_case;
-  if (parser_loop (service_parsetab, &ext, section_data, &range))
+  if (parser_loop (service_parsetab, svc, &dfl, &range))
     return PARSER_FAIL;
   else
     {
       BACKEND *be;
-      int flags = REG_NEWLINE | REG_EXTENDED | (ext.ignore_case ? REG_ICASE : 0);
-
-      XZALLOC (svc);
-      *svc = ext.svc;
-      SLIST_INIT (&svc->url);
-      SLIST_COPY (&svc->req_head, &ext.svc.req_head);
-      SLIST_COPY (&svc->deny_head, &ext.svc.deny_head);
-      SLIST_COPY (&svc->backends, &ext.svc.backends);
 
       if ((be = SLIST_FIRST (&svc->backends)) == NULL)
 	{
@@ -2538,27 +2625,6 @@ parse_service (void *call_data, void *section_data)
 	    }
 	}
 
-      while (!SLIST_EMPTY (&ext.url))
-	{
-	  MATCHER *m;
-	  int rc;
-	  struct token_ent *te = SLIST_FIRST (&ext.url);
-	  SLIST_SHIFT (&ext.url, next);
-
-	  XZALLOC (m);
-	  rc = regcomp (&m->pat, te->tok.str, flags);
-	  if (rc)
-	    {
-	      regcomp_error_at_locus_range (&te->tok.locus, rc, &m->pat, NULL);
-	      return PARSER_FAIL;
-	    }
-
-	  SLIST_PUSH (&svc->url, m, next);
-
-	  free (te->tok.str);
-	  free (te);
-	}
-
       SLIST_PUSH (head, svc, next);
     }
   return PARSER_OK;
@@ -2572,6 +2638,7 @@ parse_acme (void *call_data, void *section_data)
   SERVICE *svc;
   MATCHER *m;
   BACKEND *be;
+  SERVICE_COND *cond;
   struct token *tok;
   struct stat st;
   size_t len;
@@ -2596,20 +2663,17 @@ parse_acme (void *call_data, void *section_data)
 
   /* Create service */
   XZALLOC (svc);
-  SLIST_INIT (&svc->url);
-  SLIST_INIT (&svc->req_head);
-  SLIST_INIT (&svc->deny_head);
+  service_cond_init (&svc->cond, COND_COMPOUND);
   SLIST_INIT (&svc->backends);
 
   /* Create a URL matcher */
-  XZALLOC (m);
-  rc = regcomp (&m->pat, re_acme, REG_EXTENDED);
+  cond = service_cond_append (&svc->cond, COND_URL);
+  rc = regcomp (&cond->re, re_acme, REG_EXTENDED);
   if (rc)
     {
-      conf_regcomp_error (rc, &m->pat, NULL);
+      conf_regcomp_error (rc, &cond->re, NULL);
       return PARSER_FAIL;
     }
-  SLIST_PUSH (&svc->url, m, next);
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);

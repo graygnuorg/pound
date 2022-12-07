@@ -529,52 +529,68 @@ submatch_reset (struct submatch *sm)
 }
 
 static int
-match_service (const SERVICE *svc, struct sockaddr *srcaddr,
-	       const char *request, char **const headers,
-	       struct submatch *sm)
+match_headers (char **const headers, regex_t *re)
 {
-  MATCHER *m;
   int i, found;
 
-  /* Check ACLs */
-  if (acl_list_match (&svc->acl, srcaddr))
-    return 0;
-
-  submatch_reset (sm);
-
-  /* check for request */
-  SLIST_FOREACH (m, &svc->url, next)
+  for (i = found = 0; i < MAXHEADERS-1 && !found; i++)
     {
-      if (submatch_realloc (sm, &m->pat))
+      if (headers[i])
+	found = regexec (re, headers[i], 0, NULL, 0) == 0;
+    }
+  return found;
+}
+
+static int
+match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
+	    const char *request, char **const headers,
+	    struct submatch *sm)
+{
+  int res = 1;
+  SERVICE_COND *subcond;
+
+  switch (cond->type)
+    {
+    case COND_ACL:
+      res = acl_list_match (&cond->acl, srcaddr) == 0;
+      break;
+
+    case COND_URL:
+      if (submatch_realloc (sm, &cond->re))
 	{
 	  logmsg (LOG_ERR, "memory allocation failed");
 	  return 0;
 	}
-      if (regexec (&m->pat, request, sm->matchn, sm->matchv, 0))
-	return 0;
+      res = regexec (&cond->re, request, sm->matchn, sm->matchv, 0) == 0;
+      break;
+
+    case COND_HDR_REQ:
+      res = match_headers (headers, &cond->re);
+      break;
+
+    case COND_HDR_DENY:
+      res = match_headers (headers, &cond->re) == 0;
+      break;
+
+    case COND_COMPOUND:
+      submatch_reset (sm);
+      SLIST_FOREACH (subcond, &cond->compound.head, next)
+	{
+	  res = match_cond (subcond, srcaddr, request, headers, sm);
+	  if ((cond->compound.op == BOOL_AND) ? (res == 0) : (res == 1))
+	    break;
+	}
     }
 
-  /* check for required headers */
-  SLIST_FOREACH (m, &svc->req_head, next)
-    {
-      for (found = i = 0; i < MAXHEADERS-1 && !found; i++)
-	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
-	  found = 1;
-      if (!found)
-	return 0;
-    }
+  return res;
+}
 
-  /* check for forbidden headers */
-  SLIST_FOREACH (m, &svc->deny_head, next)
-    {
-      for (found = i = 0; i < MAXHEADERS-1 && !found; i++)
-	if (headers[i] && !regexec (&m->pat, headers[i], 0, NULL, 0))
-	  found = 1;
-      if (found)
-	return 0;
-    }
-
-  return 1;
+static int
+match_service (const SERVICE *svc, struct sockaddr *srcaddr,
+	       const char *request, char **const headers,
+	       struct submatch *sm)
+{
+  return match_cond (&svc->cond, srcaddr, request, headers, sm);
 }
 
 /*

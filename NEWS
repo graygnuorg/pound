@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-06
+Pound -- history of user-visible changes. 2022-12-07
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -85,6 +85,19 @@ Semantically they are entirely equivalent to named ACLs.
 
 If multiple ACLs are used within a single Service, it will be used
 only if IP matches all of them.
+
+* Joining request matching directives
+
+By default, request matching directives are joined with an implicit
+boolean "AND".  This can be changed using the new "Match" directive,
+e.g.:
+
+  Match OR
+      HeadRequire "Host:[[:space:]]*example\\.org"
+      HeadRequire "Host:[[:space:]]*example\\.net"
+  End
+
+Match directives can be nested to any depth.
 
 * Alternative spelling for header matching/manipulation directives
 

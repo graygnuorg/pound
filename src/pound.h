@@ -214,6 +214,7 @@
   *dst = *src
 
 #define SLIST_FIRST(head) ((head)->sl_first)
+#define SLIST_LAST(head) ((head)->sl_last)
 #define SLIST_EMPTY(head) (SLIST_FIRST (head) == NULL)
 #define SLIST_NEXT(elt, field) ((elt)->field)
 
@@ -313,14 +314,73 @@ DEFINE_LHASH_OF (TABNODE);
 DECLARE_LHASH_OF (TABNODE);
 #endif
 
-/* service definition */
-typedef struct _service
+struct simple_service_cond
 {
-  char name[KEY_SIZE + 1];	/* symbolic name */
   ACL_HEAD acl;                 /* access control lists */
   MATCHER_HEAD url;		/* request matcher */
   MATCHER_HEAD req_head;	/* required headers */
   MATCHER_HEAD deny_head;	/* forbidden headers */
+};
+
+enum
+  {
+    BOOL_AND,
+    BOOL_OR
+  };
+
+struct compound_service_cond
+{
+  int op;
+  SLIST_HEAD(,_service_cond) head;
+};
+
+enum service_cond_type
+  {
+    COND_ACL,
+    COND_URL,
+    COND_HDR_REQ,
+    COND_HDR_DENY,
+    COND_COMPOUND
+  };
+
+typedef struct _service_cond
+{
+  enum service_cond_type type;
+  union
+  {
+    ACL_HEAD acl;
+    regex_t re;
+    struct compound_service_cond compound;
+  };
+  SLIST_ENTRY (_service_cond) next;
+} SERVICE_COND;
+
+static inline void
+service_cond_init (SERVICE_COND *cond, int type)
+{
+  cond->type = type;
+  switch (type)
+    {
+    case COND_ACL:
+      SLIST_INIT (&cond->acl);
+      break;
+
+    case COND_URL:
+    case COND_HDR_REQ:
+    case COND_HDR_DENY:
+      break;
+
+    case COND_COMPOUND:
+      cond->compound.op = BOOL_AND;
+      SLIST_INIT (&cond->compound.head);
+    }
+}
+
+/* service definition */
+typedef struct _service
+{
+  char name[KEY_SIZE + 1];	/* symbolic name */
+  SERVICE_COND cond;
   BACKEND_HEAD backends;
   BACKEND *emergency;
   int abs_pri;			/* abs total priority for all back-ends */
