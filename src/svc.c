@@ -564,26 +564,26 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       res = regexec (&cond->re, request, sm->matchn, sm->matchv, 0) == 0;
       break;
 
-    case COND_HDR_REQ:
+    case COND_HDR:
       res = match_headers (headers, &cond->re);
       break;
 
-    case COND_HDR_DENY:
-      res = match_headers (headers, &cond->re) == 0;
-      break;
-
-    case COND_COMPOUND:
+    case COND_BOOL:
       submatch_reset (sm);
-      SLIST_FOREACH (subcond, &cond->compound.head, next)
+      if (cond->bool.op == BOOL_NOT)
 	{
-	  res = match_cond (subcond, srcaddr, request, headers, sm);
-	  if ((cond->compound.op == BOOL_AND) ? (res == 0) : (res == 1))
-	    break;
+	  subcond = SLIST_FIRST (&cond->bool.head);
+	  res = ! match_cond (subcond, srcaddr, request, headers, sm);
 	}
-      break;
-
-    case COND_NEGATE:
-      res = ! match_cond (cond->cond, srcaddr, request, headers, sm);
+      else
+	{
+	  SLIST_FOREACH (subcond, &cond->bool.head, next)
+	    {
+	      res = match_cond (subcond, srcaddr, request, headers, sm);
+	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
+		break;
+	    }
+	}
       break;
     }
 

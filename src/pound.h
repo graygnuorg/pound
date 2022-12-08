@@ -311,10 +311,11 @@ DECLARE_LHASH_OF (TABNODE);
 enum
   {
     BOOL_AND,
-    BOOL_OR
+    BOOL_OR,
+    BOOL_NOT
   };
 
-struct compound_service_cond
+struct bool_service_cond
 {
   int op;
   SLIST_HEAD(,_service_cond) head;
@@ -324,10 +325,8 @@ enum service_cond_type
   {
     COND_ACL,
     COND_URL,
-    COND_HDR_REQ,
-    COND_HDR_DENY,
-    COND_COMPOUND,
-    COND_NEGATE
+    COND_HDR,
+    COND_BOOL,
   };
 
 typedef struct _service_cond
@@ -337,7 +336,7 @@ typedef struct _service_cond
   {
     ACL *acl;
     regex_t re;
-    struct compound_service_cond compound;
+    struct bool_service_cond bool;
     struct _service_cond *cond;
   };
   SLIST_ENTRY (_service_cond) next;
@@ -351,17 +350,13 @@ service_cond_init (SERVICE_COND *cond, int type)
     {
     case COND_ACL:
     case COND_URL:
-    case COND_HDR_REQ:
-    case COND_HDR_DENY:
+    case COND_HDR:
       break;
 
-    case COND_COMPOUND:
-      cond->compound.op = BOOL_AND;
-      SLIST_INIT (&cond->compound.head);
+    case COND_BOOL:
+      cond->bool.op = BOOL_AND;
+      SLIST_INIT (&cond->bool.head);
       break;
-
-    case COND_NEGATE:
-      cond->cond = NULL;
     }
 }
 

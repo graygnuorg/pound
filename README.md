@@ -49,16 +49,16 @@ to any machine.
 ## What Pound Is Not
 
 1. __Pound__ is not a Web server: it serves no content itself, it only
-   passes requests and responses back an forth between clients and
+   passes requests and responses back and forth between clients and
    actual web servers (*backends*).
 2. __Pound__ is not a Web accelerator: no caching is done --
    every request is passed to a backend server "as is".
 
 ## Notice On Project Versioning
 
-I took over __pound__ development at its 2.x branch.  The branch 3.x
+I took over __pound__ development at its 2.x branch.  The branch 3.x,
 which emerged for a short time before the original project was
-abandoned I consider a failed experiment. To ensure consistent
+abandoned, I consider to be a failed experiment. To ensure consistent
 versioning and avoid confusion, my versioning of __pound__ starts with
 4.0.
 
@@ -148,15 +148,17 @@ You will probably not want to change it.
 
 * `--with-owner=`*user*
 
-Name of the system user who will own the file.  When not supplied, the
-first name from the following list that exists in the `/etc/passwd`
-file will be used: `proxy`, `www`, `daemon`, `bin`, `sys`, `root`.
+Name of the system user who will own the __pound__ executable file.  When
+not supplied, the first name from the following list that exists in
+the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
+`sys`, `root`.
 
 * `--with-group=`*group*
 
-Name of the system group who will own the file.  When not supplied, the
-first name from the following list that exists in the `/etc/passwd`
-file will be used: `proxy`, `www`, `daemon`, `bin`, `sys`, `root`.
+Name of the system group who will own the __pound__ executable.  When
+not supplied, the first name from the following list that exists in
+the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
+`sys`, `root`.
 
 * `--with-dh=`*n*
 
@@ -182,14 +184,14 @@ When configuration is finished, run
  make
 ```
 
-The first time you run this command, it can take considerable time, if
-you are compiling with `OpenSSL` 1.1 or earlier.  That's because it
-involves generating DH parameters.  This step is not necessary for
-`OpenSSL` 3.0.
+When building from a git clone, the first run of this command can take
+considerable time, if you are compiling with `OpenSSL` 1.1 or earlier.
+That's because it involves generating DH parameters.  This step is not
+necessary for `OpenSSL` 3.0.
 
 ## Testing
 
-Testing a reverse proxy in general, and __pound__ in particular is not
+Testing a reverse proxy in general, and __pound__ in particular, is not
 a trivial task.  Testsuite in __pound__ was implemented quite recently
 and is still somewhat experimental.  Notwithstanding this, it has
 already helped to discover several important bugs that lurked in the
@@ -267,12 +269,15 @@ Here we will describe some example configurations.
 
 Any __pound__ configuration must contain at least two parts:
 a `ListenHTTP` (or `ListenHTTPS`) section, that declares a *frontend*,
-i.e. part of the proxy responsible for connection with the outside
-world, and `Service` section with one or more `Backend` sections
+i.e. the end of the proxy that is responsible for connection with the
+outside world, and `Service` section with one or more `Backend` sections
 within, which declares where the incoming requests should go.  The
 `Service` section can be global or it can be located within the
 `ListenHTTP` block.  Global `Service` sections can be shared between
-two or more `ListenHTTP` sections.
+two or more `ListenHTTP` sections.  Multiple `Service` sections can
+be supplied, in which case the `Service` to use when handling a
+particular HTTP request will be selected using the supplied criteria,
+such as source IP address, URL, request header or the like.
 
 ### Simplest configuration
 
@@ -297,7 +302,7 @@ End
 Notice, that the two statements `Address`, and `Port` are in general
 mandatory both in `ListenHTTP` and in `Backend`.  There are two
 exceptions, however: if `Address` is a file name of a UNIX socket
-file, of if an already opened socket is passed to __pound__ via the
+file, or if an already opened socket is passed to __pound__ via the
 `SocketFrom` statement.  These two cases are discussed below.
 
 Argument to the `Address` statement can be an IPv4 or IPv6 address,
@@ -525,9 +530,9 @@ session tracking is declared with the `Type` statement.
 
 Please note the following restrictions on session tracking:
 
-* Session tracking is always associated with a certain `Service`. Thus each
+* Session tracking is always associated with a certain `Service`. Thus, each
   group may have other methods and parameters.
-* There is no default session: if you have not defined any sessions no
+* There is no default session: if you have not defined any sessions, no
   session tracking will be done.
 * Only one session definition is allowed per `Service`. If your application
   has alternative methods for sessions you will have to define a separate
@@ -617,8 +622,8 @@ added to the request:
 * `X-SSL-cipher`: the cipher currently in use
 * `X-SSL-certificate`: the full client certificate (multi-line)
 
-3. Any additions and removals requested by the `AddHeader` and
-`HeadRemove` configuration statements in the listener section.
+3. Any additions and removals requested by the `HeaderAdd` and
+`HeaderRemove` configuration statements in the listener section.
 
 ## Using `RootJail`
 

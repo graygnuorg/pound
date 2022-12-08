@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-07
+Pound -- history of user-visible changes. 2022-12-08
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -105,10 +105,10 @@ with "not", to invert its result (boolean negation).
 For consistency, the following configuration directives have been 
 provided as alternatives for existing header manipulation directives:
 
-  Old name        New name          Where
+  Old name        New name          Comment
   --------        --------          -------
-  HeadRequire     HeaderRequire     Service section
-  HeadDeny        HeaderDeny        Service section
+  HeadRequire     Header            Service section
+  HeadDeny        Not Header        Service section.  See "Boolean operations".
   HeadRemove      HeaderRemove      ListenHTTP and ListenHTTPS sections
   AddHeader       HeaderAdd         ListenHTTP and ListenHTTPS sections
 

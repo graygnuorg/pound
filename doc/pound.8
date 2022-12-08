@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 7, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 8, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -742,16 +742,16 @@ Match the URL of the incoming request. The matching is by default case-sensitive
 but this can be overridden by specifying
 .BR IgnoreCase .
 .TP
-\fBHeaderRequire\fR "pattern"
+\fBHeader\fR "pattern"
 The request must contain at least one header matching the given pattern.
 .TP
 \fBHeadRequire\fR "pattern"
-Same as \fBHeaderRequire\fR.
+Same as \fBHeader\fR.
 .TP
 \fBHost\fR "hostname"
 This is a shortcut for:
 .IP
-\fBHeadRequire\fR "Host:[[:space:]]*\fIqhost\fR"
+\fBHeader\fR "Host:[[:space:]]*\fIqhost\fR"
 .IP
 where \fIqhost\fR is the "hostname" argument in quoted form, i.e. with
 all characters that have special meaning in regular expressions
@@ -762,22 +762,29 @@ hosts\fR.  See the
 .B EXAMPLES
 section.
 .TP
-\fBHeaderDeny\fR "pattern"
-The request may
-.B not
-contain any header matching the given pattern.
+\fBHeadDeny\fR "pattern"
+A shortcut for
 .IP
+\fBNot header\fR "pattern"
+.IP
+In other words: the request may
+.B not
+contain any header matching the given pattern.  See the
+.B Negation
+section, below.
+.IP
+This form is retained for backward compatibility with older versions
+of
+.BR pound .
+.PP
 .IR "Please note":
 if the listener defined a
 .B HeaderRemove
 directive, the matching headers are removed
 .B before
 the service matching is attempted.
-.TP
-\fBHeadDeny\fR "pattern"
-Same as \fBHeaderDeny\fR.
 .SS Negation
-Prefixing any of the directive discussed above with \fBnot\fR will
+Prefixing any of the directives discussed above with \fBnot\fR will
 revert the sense of comparison.  For example,
 .PP
 .EX

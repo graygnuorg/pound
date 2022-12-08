@@ -2200,21 +2200,10 @@ service_cond_append (SERVICE_COND *cond, int type)
 {
   SERVICE_COND *sc;
 
+  assert (cond->type == COND_BOOL);
   XZALLOC (sc);
   service_cond_init (sc, type);
-  switch (cond->type)
-    {
-    case COND_COMPOUND:
-      SLIST_PUSH (&cond->compound.head, sc, next);
-      break;
-
-    case COND_NEGATE:
-      cond->cond = sc;
-      break;
-
-    default:
-      abort ();
-    }
+  SLIST_PUSH (&cond->bool.head, sc, next);
 
   return sc;
 }
@@ -2236,16 +2225,18 @@ parse_cond_url_matcher (void *call_data, void *section_data)
 }
 
 static int
-parse_cond_req_head_matcher (void *call_data, void *section_data)
+parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_REQ);
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
   return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
 }
 
 static int
-parse_cond_deny_head_matcher (void *call_data, void *section_data)
+parse_cond_head_deny_matcher (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_DENY);
+  SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
+  cond->bool.op = BOOL_NOT;
+  cond = service_cond_append (cond, COND_HDR);
   return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
 }
 
@@ -2256,7 +2247,7 @@ parse_cond_host (void *call_data, void *section_data)
   struct stringbuf sb;
   char *p;
   int rc;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR_REQ);
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -2545,10 +2536,9 @@ static int parse_not_cond (void *call_data, void *section_data);
 static PARSER_TABLE negate_parsetab[] = {
   { "ACL", parse_cond_acl },
   { "URL", parse_cond_url_matcher },
-  { "HeaderRequire", parse_cond_req_head_matcher },
-  { "HeadRequire", parse_cond_req_head_matcher },
-  { "HeaderDeny", parse_cond_deny_head_matcher },
-  { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Header", parse_cond_hdr_matcher },
+  { "HeadRequire", parse_cond_hdr_matcher },    /* compatibility keyword */
+  { "HeadDeny", parse_cond_head_deny_matcher }, /* compatibility keyword */
   { "Host", parse_cond_host },
   { "Match", parse_match },
   { "AND", parse_and_cond, },
@@ -2560,7 +2550,8 @@ static PARSER_TABLE negate_parsetab[] = {
 static int
 parse_not_cond (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_NEGATE);
+  SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
+  cond->bool.op = BOOL_NOT;
   return parse_statement (negate_parsetab, cond, section_data, 1, NULL);
 }
 
@@ -2568,10 +2559,9 @@ static PARSER_TABLE logcon_parsetab[] = {
   { "End", parse_end },
   { "ACL", parse_cond_acl },
   { "URL", parse_cond_url_matcher },
-  { "HeaderRequire", parse_cond_req_head_matcher },
-  { "HeadRequire", parse_cond_req_head_matcher },
-  { "HeaderDeny", parse_cond_deny_head_matcher },
-  { "HeadDeny", parse_cond_deny_head_matcher },
+  { "Header", parse_cond_hdr_matcher },
+  { "HeadRequire", parse_cond_hdr_matcher },    /* compatibility keyword */
+  { "HeadDeny", parse_cond_head_deny_matcher }, /* compatibility keyword */
   { "Host", parse_cond_host },
   { "Match", parse_match },
   { "AND", parse_and_cond, },
@@ -2583,10 +2573,10 @@ static PARSER_TABLE logcon_parsetab[] = {
 static int
 parse_cond (int op, SERVICE_COND *cond, void *section_data)
 {
-  SERVICE_COND *subcond = service_cond_append (cond, COND_COMPOUND);
+  SERVICE_COND *subcond = service_cond_append (cond, COND_BOOL);
   struct locus_range range;
 
-  subcond->compound.op = op;
+  subcond->bool.op = op;
   return parser_loop (logcon_parsetab, subcond, section_data, &range);
 }
 
@@ -2594,10 +2584,11 @@ static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
   { "ACL", parse_cond_acl, NULL, offsetof (SERVICE, cond) },
   { "URL", parse_cond_url_matcher, NULL, offsetof (SERVICE, cond) },
-  { "HeaderRequire", parse_cond_req_head_matcher, NULL, offsetof (SERVICE, cond) },
-  { "HeadRequire", parse_cond_req_head_matcher, NULL, offsetof (SERVICE, cond) },
-  { "HeaderDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
-  { "HeadDeny", parse_cond_deny_head_matcher, NULL, offsetof (SERVICE, cond) },
+  { "Header", parse_cond_hdr_matcher, NULL, offsetof (SERVICE, cond) },
+  /* compatibility keyword: */
+  { "HeadRequire", parse_cond_hdr_matcher, NULL, offsetof (SERVICE, cond) },
+  /* compatibility keyword: */
+  { "HeadDeny", parse_cond_head_deny_matcher, NULL, offsetof (SERVICE, cond) },
   { "Host", parse_cond_host, NULL, offsetof (SERVICE, cond) },
   { "Match", parse_match, NULL, offsetof (SERVICE, cond) },
   { "AND", parse_and_cond, NULL, offsetof (SERVICE, cond) },
@@ -2622,7 +2613,7 @@ parse_service (void *call_data, void *section_data)
   struct locus_range range;
 
   XZALLOC (svc);
-  service_cond_init (&svc->cond, COND_COMPOUND);
+  service_cond_init (&svc->cond, COND_BOOL);
   SLIST_INIT (&svc->backends);
 
   svc->sess_type = SESS_NONE;
@@ -2715,7 +2706,7 @@ parse_acme (void *call_data, void *section_data)
 
   /* Create service */
   XZALLOC (svc);
-  service_cond_init (&svc->cond, COND_COMPOUND);
+  service_cond_init (&svc->cond, COND_BOOL);
   SLIST_INIT (&svc->backends);
 
   /* Create a URL matcher */
