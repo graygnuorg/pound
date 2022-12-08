@@ -45,7 +45,7 @@ unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
 unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */
 
 SERVICE_HEAD services = SLIST_HEAD_INITIALIZER (services);
-                                /* global services (if any) */
+				/* global services (if any) */
 LISTENER_HEAD listeners = SLIST_HEAD_INITIALIZER (listeners);
 				/* all available listeners */
 int n_listeners;                /* Number of listeners */
@@ -788,9 +788,16 @@ main (const int argc, char **argv)
       setsid ();
     }
 
+  pidfile_create ();
+
   /* chroot if necessary */
   if (root_jail)
     {
+      unsigned char random;
+
+      /* Make sure openssl opens /dev/urandom before the chroot. */
+      RAND_bytes (&random, 1);
+
       if (chroot (root_jail))
 	{
 	  logmsg (LOG_ERR, "chroot: %s - aborted", strerror (errno));
@@ -815,8 +822,6 @@ main (const int argc, char **argv)
 	logmsg (LOG_ERR, "setuid: %s - aborted", strerror (errno));
 	exit (1);
       }
-
-  pidfile_create ();
 
 #if SUPERVISOR
   if (enable_supervisor && daemonize)

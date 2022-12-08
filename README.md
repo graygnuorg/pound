@@ -34,12 +34,12 @@ from his fork.
 3. an *SSL wrapper*: it decrypts HTTPS requests from client browsers and
    passes them as plain HTTP to the back-end servers.
 4. an *HTTP/HTTPS sanitizer*: it verifies requests for correctness and
-   accepts only well-formed ones. 
+   accepts only well-formed ones.
 5. a *fail-over server*: should a backend server fail, *pound* will take
    note of the fact and stop passing requests to it until it recovers.
 6. a *request redirector*: requests may be distributed among servers
    according to the requested URL.
-   
+
 *Pound* is a very small program, easily audited for security
 problems. It can run as setuid/setgid and/or in a chroot jail. *Pound*
 does not access the hard-disk at all (except for reading certificate
@@ -73,7 +73,7 @@ To build, __pound__ needs [OpenSSL](https://www.openssl.org/) version
 1.1.x or 3.0.x.
 
 As of current release, __pound__ still supports OpenSSL 0.9.8, but
-this support will soon be discontinued. 
+this support will soon be discontinued.
 
 If you compile it on a Debian-based system, you need to install the
 `libssl-dev` package prior to building __pound__:
@@ -296,7 +296,7 @@ ListenHTTP
 			Port 8080
 		End
 	End
-End	
+End
 ```
 
 Notice, that the two statements `Address`, and `Port` are in general
@@ -334,7 +334,7 @@ ListenHTTPS
 	Address 192.0.2.1
 	Port 443
 	# Certificate file must contain the certificate, optional
-        # certificate chain and the signature, in that order.
+	# certificate chain and the signature, in that order.
 	Cert "/etc/ssl/priv/example.pem"
 	# List of certificate authority certificates.
 	CAlist /etc/ssl/acme/lets-encrypt-root.pem"
@@ -342,13 +342,13 @@ ListenHTTPS
 	Disable TLSv1
 	# Inform backend that it's HTTPS
 	AddHeader "X-Forwarded-Proto: https"
-	Service	
+	Service
 		Backend
 			Address 10.10.0.1
 			Port 8080
 		End
 	End
-End	
+End
 ```
 
 ### Virtual Hosts
@@ -368,23 +368,23 @@ would look like this:
 ```
 ListenHTTP
 	Address 192.0.2.1
-        Port    80
-	
-        Service
+	Port    80
+
+	Service
 		Host "www.server0.com"
-                Backend
+		Backend
 			Address 192.168.0.10
 			Port    80
-                End
-        End
+		End
+	End
 
-        Service
-                Host "www.server1.com"
-                Backend
+	Service
+		Host "www.server1.com"
+		Backend
 			Address 192.168.0.11
 			Port    80
-                End
-        End
+		End
+	End
 End
 ```
 
@@ -394,16 +394,16 @@ If you want to use the same service for both the hostname and the
 hostname prefixed with `www.`, use the `Match` statement, as in:
 
 ```
-        Service
+	Service
 		Match OR
 			Host "server0.com"
 			Host "www.server0.com"
 		End
-                Backend
+		Backend
 			Address 192.168.0.10
 			Port    80
-                End
-        End
+		End
+	End
 ```
 
 ### Sessions
@@ -420,7 +420,7 @@ be directed to the same back-end server.
 Six possible ways of detecting a session have been implemented in
 __pound__ (hopefully the most useful ones): by client address, by Basic
 authentication (user id/password), by URL parameter, by cookie, by
-HTTP parameter and by header value. 
+HTTP parameter and by header value.
 
 Session tracking is declared using the `Session` block in `Service`
 section.  Only one `Session` can be used per `Service`.  The type of
@@ -433,11 +433,11 @@ session tracking is declared with the `Type` statement.
 
   ```
   Session
-          Type    IP
-          TTL     300
+	  Type    IP
+	  TTL     300
   End
   ```
-  
+
   in the configuration file to achieve this effect. The value indicates
   what period of inactivity is allowed before the session is discarded.
 
@@ -449,8 +449,8 @@ session tracking is declared with the `Type` statement.
 
   ```
   Session
-          Type    Basic
-          TTL     300
+	  Type    Basic
+	  TTL     300
   End
   ```
 
@@ -467,17 +467,17 @@ session tracking is declared with the `Type` statement.
 * `Type URL`: by URL parameter
 
   Quite often session information is passed through URL parameters
-  (the browser is pointed to something like `http://xxx?id=123`). 
+  (the browser is pointed to something like `http://xxx?id=123`).
   Put the lines
 
   ```
   Session
-          Type    URL
-          ID      "id"
-          TTL     300
+	  Type    URL
+	  ID      "id"
+	  TTL     300
   End
   ```
-  
+
   to support this scheme and the sessions will be tracked based on the value
   of the `id` parameter.
 
@@ -488,12 +488,12 @@ session tracking is declared with the `Type` statement.
 
   ```
   Session
-          Type    Cookie
-          ID      "sess"
-          TTL     300
+	  Type    Cookie
+	  ID      "sess"
+	  TTL     300
   End
   ```
-  
+
   to your configuration file - the sessions will be tracked by the value of
   the `sess` cookie.
 
@@ -504,24 +504,24 @@ session tracking is declared with the `Type` statement.
 
   ```
   Session
-          Type    PARM
-          TTL     300
+	  Type    PARM
+	  TTL     300
   End
   ```
-  
+
   To your configuration file - sessions will be tracked by the value of
   the parameter.
 
 * `Type Header`: by header value
 
   Applications that use this method pass a certain header back and
-  forth. Add the lines 
+  forth. Add the lines
 
   ```
   Session
-          Type    Header
-          ID      "X-sess"
-          TTL     300
+	  Type    Header
+	  ID      "X-sess"
+	  TTL     300
   End
   ```
 
@@ -628,47 +628,29 @@ added to the request:
 ## Using `RootJail`
 
 The `RootJail` configuration directive instructs __pound__ to chroot
-to the given directory at startup.  This means that this directory
-must provide certain system files needed for normal functioning of the
-program.  If you have
+to the given directory at startup.  Normally, its use should be quite
+straightforward:
 
 ```
 RootJail "/var/pound"
 ```
 
-in your configuration file, you will need to do the following prior to
-starting pound:
+Several points to note:
 
-```sh
-mkdir /var/pound/dev
-mknod /var/pound/dev/urandom c 1 9
-```
+When using `RootJail`, __pound__ does not remove its PID file
+before shutting down.
 
-To communicate with the syslog daemon, __pound__ will need `/dev/log`
-file.  This means that the syslog daemon must be configured to listen
-on an extra socket in __pound__ chroot directory,
-e.g. `/var/pound/dev/log` in the above setup.  If you use traditional
-syslog, specify the additional socket with the `-a` option:
-
-```sh
-syslogd -a /var/pound/dev/log
-```
-
-If you use __rsyslog__, add the following to your `rsyslog.conf`:
-
-```
-input(type="imuxsock" Socket="/var/pound/dev/log")
-```
-
-Depending on the compiler used, you may also need some libraries in
-that directory.  For example, if you get the following message when
+__Pound__ tries to open all files and devices it needs before
+chrooting.  There might be cases, however, when it is not enough
+and you would need to copy certain system files to the chroot
+directory.  In particular, if you get the following message when
 stopping __pound__:
 
 ```
 libgcc_s.so.1 must be installed for pthread_cancel to work
 ```
 
-you need to copy that library to the RootJail directory, e.g.:
+then you need to copy that library to the RootJail directory, e.g.:
 
 ```sh
 mkdir /var/pound/lib64
@@ -681,5 +663,3 @@ If you think you found a bug in __pound__ or in its documentation,
 please send a mail to Sergey Poznyakoff <gray@gnu.org> (or
 <gray+pound@gnu.org.ua>), or use the
 [github issue tracker](https://github.com/graygnuorg/pound/issues).
-
-
