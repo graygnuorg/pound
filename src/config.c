@@ -3637,6 +3637,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "ListenHTTP", parse_listen_http, &listeners },
   { "ListenHTTPS", parse_listen_https, &listeners },
   { "ACL", parse_named_acl, NULL },
+  { "PidFile", assign_string, &pid_name },
   { NULL }
 };
 
@@ -3873,6 +3874,7 @@ config_parse (int argc, char **argv)
   int c;
   int check_only = 0;
   char *conf_name = POUND_CONF;
+  char *pid_file_option = NULL;
 
   if ((progname = strrchr (argv[0], '/')) != NULL)
     progname++;
@@ -3894,7 +3896,7 @@ config_parse (int argc, char **argv)
 	exit (0);
 
       case 'p':
-	pid_name = optarg;
+	pid_file_option = optarg;
 	break;
 
       case 'V':
@@ -3938,4 +3940,7 @@ config_parse (int argc, char **argv)
       logmsg (LOG_ERR, "no listeners defined");
       exit (1);
     }
+
+  if (pid_file_option)
+    pid_name = pid_file_option;
 }

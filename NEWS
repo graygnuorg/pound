@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-08
+Pound -- history of user-visible changes. 2022-12-09
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -16,6 +16,11 @@ parethesized subexpressions in the most recently matched URL statement
 of the enclosing Service.  References are of the form $N, where N
 is the number of the parenthesized subgroup.  To insert literal $
 sign, use $$.
+
+* New statement: PIDFile
+
+Defines the name of the PID file.  The -p command line option
+overrides this setting.
 
 * New statement: ACME
 
@@ -75,9 +80,9 @@ following example
 
   Service
      ACL
-        "127.0.0.1"
-        "192.0.2.0/26"
-        "203.0.113.0/24"
+	"127.0.0.1"
+	"192.0.2.0/26"
+	"203.0.113.0/24"
      End
      ...
   End
@@ -102,7 +107,7 @@ with "not", to invert its result (boolean negation).
 
 * Alternative spelling for header matching/manipulation directives
 
-For consistency, the following configuration directives have been 
+For consistency, the following configuration directives have been
 provided as alternatives for existing header manipulation directives:
 
   Old name        New name          Comment

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 8, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 9, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -167,12 +167,15 @@ or
 Print short command line usage summary and exit.
 .TP
 \fB\-p\fR pid_file
-Location of the pid file.
+Location of the PID file.
 .B Pound
-will write its own pid into this file. Normally this is used for shell
-scripts that control starting and stopping of the daemon.
-Default:
-.I /var/run/pound.pid
+will write its own PID into this file. Normally this is used for shell
+scripts that control starting and stopping of the daemon. See the
+description of
+.B PIDFile
+statement in the
+.B GLOBAL DIRECTIVES
+section below, for a detailed discussion of this file.
 .TP
 \fB\-v\fR
 Verbose mode: error messages will be sent to stdout even if
@@ -426,6 +429,35 @@ End
 .sp
 Named ACLs can be used in \fBService\fR definitions to make services
 available from certain IP addresses only.
+.RE
+.TP
+\fBPIDFile\fR "filename"
+Sets the name of the file where to store program PID.  It can be
+overridden by the
+.B \-p
+command line option.
+.IP
+.I Notice
+the following:
+.RS
+.nr step 1 1
+.IP \n[step].
+PID file is used only in daemon mode (\fBDaemon on\fR in the
+configuration file).
+.IP \n+[step].
+When running with a supervisor, this file holds PID of the supervisor
+process.  Otherwise, it holds PID of the main
+.B pound
+process.  This means it is always suitable for signalling the program
+using the traditional \fBkill `cat filename`\fR technique.
+.IP \n+[step].
+Before shutting down,
+.B pound
+removes this file.  This may be not possible in two cases: if it
+switches to another user privileges after startup (at least one of
+\fBUser\fR or \fBGroup\fR used in the configuration file), or if it
+runs in a chrooted environment (\fBRootJail\fR used).  In these cases,
+the PID file will remain on disk after termination of the program.
 .RE
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
@@ -728,7 +760,7 @@ skipped and next one tried.
 \fBACL\fR
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
-described in the 
+described in the
 .B "GLOBAL DIRECTIVES"
 section above.
 The ACL definition is finished with a
