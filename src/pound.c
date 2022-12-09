@@ -270,12 +270,12 @@ active_threads_wait (void)
   struct timespec ts;
 
   pthread_mutex_lock (&arg_mut);
-  ts.tv_sec += grace;
   if (active_threads > 0)
     {
       logmsg (LOG_NOTICE, "waiting for %u active threads to terminate",
 	      active_threads);
       clock_gettime (CLOCK_REALTIME, &ts);
+      ts.tv_sec += grace;
       while (active_threads > 0 &&
 	     pthread_cond_timedwait (&active_cond, &arg_mut, &ts) == 0)
 	;
