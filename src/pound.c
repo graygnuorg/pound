@@ -475,9 +475,21 @@ server (void)
   /* FIXME: pause to make sure the service threads were started */
   sleep (1);
 
-  /* create the worker threads */
-  while (worker_count < worker_min_count)
-    worker_start ();
+  /*
+   * Create the worker threads
+   */
+
+  /*
+   * Initialize worker_count to minimum to prevent get_thr_arg from
+   * counting idle timeout.
+   */
+  worker_count = worker_min_count;
+  for (i = 0; i < worker_min_count; i++)
+    {
+      worker_start ();
+      /* Adjust worker_count */
+      worker_count--;
+    }
 
   pthread_create (&thr, NULL, thr_dispatch, NULL);
 
