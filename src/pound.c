@@ -123,9 +123,30 @@ static THR_ARG_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
 static pthread_cond_t arg_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t active_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t arg_mut = PTHREAD_MUTEX_INITIALIZER;
-unsigned numthreads = DEFAULT_NUMTHREADS; /* Max. number of threads */
-unsigned active_threads; /* Number of threads currently active, i.e processing
-			    some requests. */
+
+static unsigned active_threads; /* Number of threads currently active,
+				   i.e processing requests. */
+
+static unsigned worker_count = 0;
+static pthread_attr_t attr;
+
+unsigned worker_min_count = DEFAULT_WORKER_MIN;
+unsigned worker_max_count = DEFAULT_WORKER_MAX;
+unsigned worker_idle_timeout = DEFAULT_WORKER_IDLE_TIMEOUT;
+
+static void
+worker_start (void)
+{
+  pthread_t thr;
+  int rc;
+
+  if ((rc = pthread_create (&thr, &attr, thr_http, NULL)) != 0)
+    {
+      logmsg (LOG_ERR, "create thr_http: %s - aborted", strerror (rc));
+      exit (1);
+    }
+  worker_count++;
+}
 
 /*
  * add a request to the queue
@@ -143,6 +164,10 @@ put_thr_arg (THR_ARG *arg)
   memcpy (res, arg, sizeof (*res));
   pthread_mutex_lock (&arg_mut);
   SLIST_PUSH (&thr_head, res, next);
+  if (worker_count == active_threads)
+    {
+      worker_start ();
+    }
   pthread_cond_signal (&arg_cond);
   pthread_mutex_unlock (&arg_mut);
   return 0;
@@ -155,15 +180,43 @@ THR_ARG *
 get_thr_arg (void)
 {
   THR_ARG *res;
+  struct timespec ts;
 
   pthread_mutex_lock (&arg_mut);
+
+  clock_gettime (CLOCK_REALTIME, &ts);
+  ts.tv_sec += worker_idle_timeout;
 
   /*
    * Wait until something becomes available in the queue.  Spurious wakeups
    * from pthread_cond_wait can occur, hence the need for a loop.
    */
   while (SLIST_EMPTY (&thr_head))
-    pthread_cond_wait (&arg_cond, &arg_mut);
+    {
+      int rc;
+
+      if (worker_count == worker_min_count)
+	pthread_cond_wait (&arg_cond, &arg_mut);
+      else if ((rc = pthread_cond_timedwait (&arg_cond, &arg_mut, &ts)) != 0)
+	{
+	  if (rc == ETIMEDOUT)
+	    {
+	      /*
+	       * If there are more workers than the predefined minimum,
+	       * decrease worker_count and return NULL.  The calling thread
+	       * will then terminate.
+	       */
+	      worker_count--;
+	      res = NULL;
+	      goto end;
+	    }
+	  else
+	    {
+	      logmsg (LOG_ERR, "pthread_cond_timedwait: %s", strerror (rc));
+	      exit (1);
+	    }
+	}
+    }
 
   /* Dequeue the head element */
   res = SLIST_FIRST (&thr_head);
@@ -180,6 +233,7 @@ get_thr_arg (void)
     pthread_cond_signal (&arg_cond);
 
   active_threads++;
+ end:
   pthread_mutex_unlock (&arg_mut);
   return res;
 }
@@ -374,13 +428,12 @@ static void
 server (void)
 {
   int i;
-  pthread_attr_t attr;
   pthread_t thr;
   struct sigaction act;
   sigset_t sigs;
   void *res;
 
-  sigemptyset(&sigs);
+  sigemptyset (&sigs);
 
   act.sa_flags = 0;
   sigemptyset (&act.sa_mask);
@@ -423,12 +476,8 @@ server (void)
   sleep (1);
 
   /* create the worker threads */
-  for (i = 0; i < numthreads; i++)
-    if (pthread_create (&thr, &attr, thr_http, NULL))
-      {
-	logmsg (LOG_ERR, "create thr_http: %s - aborted", strerror (errno));
-	exit (1);
-      }
+  while (worker_count < worker_min_count)
+    worker_start ();
 
   pthread_create (&thr, NULL, thr_dispatch, NULL);
 

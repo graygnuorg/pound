@@ -3611,6 +3611,20 @@ parse_listen_https (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static int
+parse_threads_compat (void *call_data, void *section_data)
+{
+  int rc;
+  unsigned n;
+
+  if ((rc = assign_unsigned (&n, section_data)) != PARSER_OK)
+    return rc;
+
+  worker_min_count = worker_max_count = n;
+
+  return PARSER_OK;
+}
+
 static PARSER_TABLE top_level_parsetab[] = {
   { "Include", parse_include },
   { "User", assign_string, &user },
@@ -3618,7 +3632,10 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "RootJail", assign_string, &root_jail },
   { "Daemon", assign_bool, &daemonize },
   { "Supervisor", assign_bool, &enable_supervisor },
-  { "Threads", assign_unsigned, &numthreads },
+  { "WorkerMinCount", assign_unsigned, &worker_min_count },
+  { "WorkerMaxCount", assign_unsigned, &worker_max_count },
+  { "Threads", parse_threads_compat },
+  { "WorkerIdleTimeout", assign_timeout, &worker_idle_timeout },
   { "Grace", assign_timeout, &grace },
   { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },
   { "LogLevel", assign_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
@@ -3662,6 +3679,11 @@ parse_config_file (char const *file)
 	{
 	  if (cur_input)
 	    exit (1);
+	  if (worker_min_count > worker_max_count)
+	    {
+	      logmsg (LOG_ERR, "WorkerMinCount is greater than WorkerMaxCount");
+	      exit (1);
+	    }
 	  log_facility = pound_defaults.facility;
 	}
     }

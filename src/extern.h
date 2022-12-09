@@ -10,8 +10,11 @@ extern char *user,		/* user to run as */
  *pid_name,			/* file to record pid in */
  *ctrl_name;			/* control socket name */
 
-extern unsigned numthreads,	/* number of worker threads */
-  grace;			/* grace period before shutdown */
+extern unsigned worker_min_count; /* min. number of worker threads */
+extern unsigned worker_max_count; /* max. number of worker threads */
+extern unsigned worker_idle_timeout;
+
+extern unsigned grace;		/* grace period before shutdown */
 
 extern int anonymise;		/* anonymise client address */
 extern unsigned alive_to;	/* check interval for resurrection */
@@ -43,4 +46,3 @@ enum
   };
 
 int feature_is_set (int f);
-

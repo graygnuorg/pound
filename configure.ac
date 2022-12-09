@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.69])
-AC_INIT([pound],[4.0],[gray@gnu.org],[pound],[https://github.com/graygnuorg/pound])
+AC_INIT([pound],[4.0.90],[gray@gnu.org],[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
@@ -174,13 +174,13 @@ AC_MSG_CHECKING([for default pound owner group name])
 if test -z "${I_GRP}"; then
     I_GRP=$(id -n -g $I_OWNER)
     if test -z $I_GRP; then
-        for g in proxy www daemon bin sys root
-        do
+	for g in proxy www daemon bin sys root
+	do
 	    if grep "^$g:" /etc/group >/dev/null 2>&1; then
-	        I_GRP=$g
-	        break
+		I_GRP=$g
+		break
 	    fi
-        done
+	done
     fi
 fi
 AC_MSG_RESULT([$I_GRP])
@@ -228,6 +228,6 @@ AC_CONFIG_FILES([tests/Makefile tests/atlocal])
 AM_MISSING_PROG([AUTOM4TE], [autom4te])
 
 AC_CONFIG_FILES([Makefile
-                 src/Makefile
+		 src/Makefile
 		 doc/Makefile])
 AC_OUTPUT

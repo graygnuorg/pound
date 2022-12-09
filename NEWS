@@ -9,6 +9,29 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.0.90 (git)
 
+* Worker Model
+
+Each incoming request is processed by a specific worker, i.e. a
+thread in the running program.  The number of running workers is
+controlled by three configuration parameters.  WorkerMinCount
+defines the minimum number of workers that should always be running
+(5, by default). Another parameter, WorkerMaxCount sets the
+upper limit on the number of running workers (defaults to 128).
+
+At each given moment, a worker can be in one of two states: idle
+or active (processing a request).  If an incoming request
+arrives when all running workers are active, and total number of
+workers is less than maximum, a new thread is started and the new
+request is handed to it.  If the number of active workers has already
+reached maximum, the new request is added to the request queue, where
+it will wait for a worker to become available to process it.
+
+The third parameter, WorkerIdleTimeout, specifies maximum time
+a thread is allowed to spend in the idle state.  If a worker
+remains idle longer than that and total number of workers is greater
+than the allotted minimum, the idle worker is terminated.  Default
+value for WorkerIdleTimeout is 30 seconds.
+
 * URL expansion in Redirect statement
 
 URL argument to the Redirect statement can contain references to

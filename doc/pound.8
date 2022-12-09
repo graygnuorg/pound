@@ -144,6 +144,28 @@ Normally, the connection between
 and
 .I backends
 is via plain HTTP.  It is, however, possible to use HTTPS as well.
+.SH WORKER MODEL
+Each incoming request is processed by a specific \fIworker\fR, i.e. a
+thread in the running program.  The number of running workers is
+controlled by three configuration parameters.  \fBWorkerMinCount\fR
+defines the minimum number of workers that should always be running
+(5, by default). Another parameter, \fBWorkerMaxCount\fR sets the
+upper limit on the number of running workers (it defaults to 128).
+.PP
+At each given moment, a worker can be in one of two states: \fIidle\fR
+or \fIactive\fR (processing a request).  If an incoming request
+arrives when all running workers are active, and total number of
+workers is less than \fBWorkerMaxCount\fR, a new thread is started and
+the new request is handed to it.  If the number of active workers has
+already reached maximum, the new request is added to the \fIrequest
+queue\fR, where it will wait for a worker to become available to
+process it.
+.PP
+The third parameter, \fBWorkerIdleTimeout\fR, specifies maximum time
+a thread is allowed to spend in the \fIidle\fR state.  If a worker
+remains idle longer than that and total number of workers is greater
+than the allotted minimum (\fBWorkerMinCount\fR), the idle worker is
+terminated.
 .SH OPTIONS
 The following command line options are available:
 .TP
@@ -290,15 +312,37 @@ When running in daemon mode, start a \fIsupervisor\fR process first.
 This process will monitor the subordinate \fBpound\fR process, restarting
 it if it fails.
 .TP
-\fBThreads\fR \fInnn\fR
-How many worker threads
-.B pound
-should use. Default: 128. Tune this parameter to improve performance.
-If you set it too high,
-.B pound
-will use a lot of memory, and some CPU will be wasted on context switches.
-If you set it too low, requests may be served with some delay. Experiment
-to find the optimal value for your installation.
+\fBWorkerMinCount\fR \fIN\fR
+Sets minimum number of worker threads that must always be running.
+The default is 5.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.TP
+\fBWorkerMaxCount\fR \fIN\fR
+Sets maximum number of worker threads.  The default is 128.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.TP
+\fBWorkerIdleTimeout\fR \fISEC\fR
+Sets idle timeout for a worker thread.  Default is 30 seconds.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.TP
+\fBThreads\fR \fIN\fR
+This statement, retained for backward compatibility with previous
+versions of
+.BR pound ,
+is equivalent to:
+.IP
+.RS
+.EX
+WorkerMinCount \fIN\fR
+WorkerMaxCount \fIN\fR
+.EE
+.RE
 .TP
 \fBLogFacility\fR \fIident\fR
 Specify the log facility to use.  The

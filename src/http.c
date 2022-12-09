@@ -2583,10 +2583,12 @@ thr_http (void *dummy)
 {
   THR_ARG *arg;
 
-  for (;;)
+  while ((arg = get_thr_arg ()) != NULL)
     {
-      arg = get_thr_arg ();
       do_http (arg);
       active_threads_decr ();
     }
+  logmsg (LOG_NOTICE, "thread %"PRItid" terminating on idle timeout",
+	  POUND_TID ());
+  return NULL;
 }
