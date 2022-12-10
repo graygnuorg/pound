@@ -2053,6 +2053,11 @@ static PARSER_TABLE backend_parsetab[] = {
     .parser = disable_proto,
     .off = offsetof (BACKEND, ctx)
   },
+  {
+    .name = "Disabled",
+    .parser = assign_bool,
+    .off = offsetof (BACKEND, disabled)
+  },
   { NULL }
 };
 
