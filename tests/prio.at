@@ -31,7 +31,7 @@ PT_CHECK(
 	End
 End
 ],
-[stats samples=1000 index=1 avg=8%20
+[stats samples=1000 index=1 avg=8%25
 
 GET /echo/foo
 end

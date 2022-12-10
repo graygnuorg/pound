@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-09
+Pound -- history of user-visible changes. 2022-12-10
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.0.90 (git)
+Version 4.1, 2022-12-10
 
 * Worker Model
 
@@ -29,7 +29,7 @@ it will wait for a worker to become available to process it.
 The third parameter, WorkerIdleTimeout, specifies maximum time
 a thread is allowed to spend in the idle state.  If a worker
 remains idle longer than that and total number of workers is greater
-than the allotted minimum, the idle worker is terminated.  Default
+than the allotted minimum, the idle worker is terminated.  The default
 value for WorkerIdleTimeout is 30 seconds.
 
 * URL expansion in Redirect statement
