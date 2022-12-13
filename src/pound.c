@@ -58,8 +58,6 @@ regex_t HEADER,			/* Allowed header */
   LOCATION,			/* the host we are redirected to */
   AUTHORIZATION;		/* the Authorisation header */
 
-static int shut_down = 0;
-
 #ifndef  SOL_TCP
 /* for systems without the definition */
 int SOL_TCP;
@@ -98,12 +96,12 @@ l_lock (const int mode, const int n, /* unused */ const char *file,
 
   if (mode & CRYPTO_LOCK)
     {
-      if (ret_val = pthread_mutex_lock (&l_array[n]))
+      if ((ret_val = pthread_mutex_lock (&l_array[n])) != 0)
 	logmsg (LOG_ERR, "l_lock lock(): %s", strerror (ret_val));
     }
   else
     {
-      if (ret_val = pthread_mutex_unlock (&l_array[n]))
+      if ((ret_val = pthread_mutex_unlock (&l_array[n])) != 0)
 	logmsg (LOG_ERR, "l_lock unlock(): %s", strerror (ret_val));
     }
   return;
@@ -528,7 +526,6 @@ supervisor (void)
   int i;
   struct sigaction act;
   sigset_t sigs;
-  pid_t child_pid = 0;
   int status;
 
   enum supervisor_state
@@ -641,7 +638,6 @@ supervisor (void)
 int
 main (const int argc, char **argv)
 {
-  int i;
   LISTENER *lstn;
   uid_t user_id;
   gid_t group_id;

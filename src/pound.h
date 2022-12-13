@@ -192,6 +192,26 @@
     }							\
   while (0)
 
+/* Insert elt at the head of the list. */
+#define SLIST_INSERT_FIRST(elt, head, field)			\
+  do								\
+    {								\
+      if (((elt)->field = (head)->sl_first) == NULL)		\
+	(head)->sl_last = (elt);				\
+      (head)->sl_first = (elt);					\
+    }								\
+  while (0)
+
+/* Insert elt after given element (anchor). */
+#define SLIST_INSERT_AFTER(elt, anchor, head, field)		\
+  do								\
+    {								\
+      if (((elt)->field = (anchor)->field) == NULL)		\
+	(head)->sl_last = (elt);				\
+      (anchor)->field = (elt);					\
+    }								\
+  while (0)
+
 /* Append elt to the tail of the list. */
 #define SLIST_PUSH(head, elt, field)			\
   do							\

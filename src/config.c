@@ -766,15 +766,6 @@ last_token_locus_range (void)
     return NULL;
 }
 
-static struct locus_point *
-current_locus_point (void)
-{
-  if (cur_input)
-    return &cur_input->locus;
-  else
-    return NULL;
-}
-
 #define conf_error(fmt, ...) \
   conf_error_at_locus_range (last_token_locus_range (), fmt, __VA_ARGS__)
 
@@ -916,8 +907,6 @@ parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
 		 int single_statement, struct locus_range *retrange)
 {
   struct token *tok;
-  size_t i;
-  int res = PARSER_OK;
 
   if (retrange)
     {
@@ -1081,7 +1070,6 @@ assign_string_from_file (void *call_data, void *section_data)
 static int
 assign_bool (void *call_data, void *section_data)
 {
-  char *s;
   struct token *tok = gettkn_expect_mask (T_UNQ);
 
   if (!tok)
@@ -1438,8 +1426,6 @@ new_acl (char const *name)
 static int
 cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
 {
-  unsigned char *cp = (unsigned char *)&cidr->addr;
-  unsigned char *mp = (unsigned char *)&cidr->mask;
   size_t i;
 
   if (cidr->len == len)
@@ -1487,7 +1473,6 @@ acl_match (ACL *acl, struct sockaddr *sa)
   CIDR *cidr;
   unsigned char *ap;
   size_t len;
-  int res = 1;
 
   if ((len = sockaddr_bytes (sa, &ap)) == -1)
     return -1;
@@ -1646,7 +1631,6 @@ parse_named_acl (void *call_data, void *section_data)
 {
   ACL *acl;
   struct token *tok;
-  int rc;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -1764,8 +1748,6 @@ backend_parse_haport (void *call_data, void *section_data)
 {
   BACKEND *be = call_data;
   struct token *tok, saved_tok;
-  int rc;
-  char *s;
 
   if (ADDRINFO_HAS_ADDRESS (&be->ha_addr))
     {
@@ -1939,7 +1921,6 @@ static int
 disable_proto (void *call_data, void *section_data)
 {
   SSL_CTX *ctx = call_data;
-  struct token *tok;
   int n = 0;
 
   if (ctx == NULL)
@@ -2367,7 +2348,6 @@ parse_session (void *call_data, void *section_data)
   SERVICE *svc = call_data;
   struct service_session sess;
   struct stringbuf sb;
-  int rc;
   struct locus_range range;
 
   memset (&sess, 0, sizeof (sess));
@@ -2634,9 +2614,7 @@ static int
 parse_acme (void *call_data, void *section_data)
 {
   SERVICE_HEAD *head = call_data;
-  POUND_DEFAULTS *dfl = section_data;
   SERVICE *svc;
-  MATCHER *m;
   BACKEND *be;
   SERVICE_COND *cond;
   struct token *tok;

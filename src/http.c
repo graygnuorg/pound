@@ -121,7 +121,6 @@ redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm
   int code = be->redir_code;
   char const *code_msg, *cont;
   char *xurl;
-  int expanded = 0;
   struct stringbuf cont_buf, url_buf;
   int i;
 
@@ -760,7 +759,7 @@ static void
 log_time (char *res)
 {
   time_t now;
-  struct tm *t_now, t_res;
+  struct tm *t_now;
 
   now = time (NULL);
 #ifdef  HAVE_LOCALTIME_R

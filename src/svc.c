@@ -1488,8 +1488,6 @@ do_expire (void)
   return;
 }
 
-static time_t last_alive, last_expire;
-
 #if ! SET_DH_AUTO
 static pthread_mutex_t RSA_mut;	/* mutex for RSA keygen */
 static RSA *RSA512_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
@@ -1565,18 +1563,6 @@ do_RSAgen (void)
     logmsg (LOG_WARNING, "thr_RSAgen() unlock: %s", strerror (ret_val));
 }
 
-static time_t last_RSA;
-
-static inline void
-run_RSAgen (time_t t)
-{
-  if ((t - last_RSA) >= T_RSA_KEYS)
-    {
-      last_RSA = time (NULL);
-      do_RSAgen ();
-    }
-}
-
 #include    "dh.h"
 static DH *DH512_params, *DHALT_params;
 
@@ -1588,15 +1574,12 @@ DH_tmp_callback ( /* not used */ SSL * s, /* not used */ int is_export,
 }
 
 /*
- * initialise the timer functions:
- *  - RSA_mut and keys
+ * initialise RSA_mut and keys
  */
 void
-init_timer (void)
+init_rsa (void)
 {
   int n;
-
-  last_RSA = last_alive = last_expire = time (NULL);
 
   /*
    * Pre-generate ephemeral RSA keys
@@ -1661,60 +1644,126 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
 }
 #else /* SET_DH_AUTO == 1 */
 void
-init_timer (void)
-{
-  last_alive = last_expire = time (NULL);
-}
-# define run_RSAgen(t)
-void
 POUND_SSL_CTX_init (SSL_CTX *ctx)
 {
   SSL_CTX_set_dh_auto (ctx, 1);
 }
 #endif
+
+/* Struct timespec operations */
+static inline int
+timespec_cmp (struct timespec const *a, struct timespec const *b)
+{
+  if (a->tv_sec < b->tv_sec)
+    return -1;
+  if (a->tv_sec > b->tv_sec)
+    return 1;
+  if (a->tv_nsec < b->tv_nsec)
+    return -1;
+  if (a->tv_nsec > b->tv_nsec)
+    return 1;
+  return 0;
+}
+
+enum { NANOSEC_IN_SEC = 1000000000 };
+
+static inline void
+timespec_add (struct timespec const *a, struct timespec const *b,
+	      struct timespec *res)
+{
+  res->tv_sec = a->tv_sec + b->tv_sec;
+  res->tv_nsec = a->tv_nsec + b->tv_nsec;
+  if (res->tv_nsec >= NANOSEC_IN_SEC)
+    {
+      ++res->tv_sec;
+      res->tv_nsec -= NANOSEC_IN_SEC;
+    }
+}
+
+/* Periodic jobs */
+typedef struct job
+{
+  struct timespec ts;
+  struct timespec interval;
+  void (*func) ();
+  SLIST_ENTRY (job) next;
+} JOB;
+
+typedef SLIST_HEAD (,job) JOB_HEAD;
+
+static void
+job_enqueue (JOB_HEAD *jh, JOB *job)
+{
+  struct timespec nts;
+
+  clock_gettime (CLOCK_MONOTONIC, &nts);
+  timespec_add (&nts, &job->interval, &job->ts);
+
+  if (SLIST_EMPTY (jh))
+    SLIST_INSERT_FIRST (job, jh, next);
+  else
+    {
+      JOB *t, *prev = NULL;
+
+      SLIST_FOREACH (t, jh, next)
+	{
+	  if (timespec_cmp (&job->ts, &t->ts) < 0)
+	    {
+	      if (prev)
+		break;
+	      else
+		{
+		  SLIST_INSERT_FIRST (job, jh, next);
+		  return;
+		}
+	    }
+	  prev = t;
+	}
+      SLIST_INSERT_AFTER (job, prev, jh, next);
+    }
+}
+
+static JOB *
+job_alloc (void (*func) (void), unsigned n)
+{
+  JOB *job;
+
+  XZALLOC (job);
+  job->interval.tv_sec = n;
+  job->interval.tv_nsec = 0;
+  job->func = func;
+  return job;
+}
 
 /*
  * run timed functions:
- *  - RSAgen every T_RSA_KEYS seconds
  *  - resurect every alive_to seconds
  *  - expire every EXPIRE_TO seconds
+ *  - RSAgen every T_RSA_KEYS seconds (for older OpenSSL)
  */
 void *
 thr_timer (void *arg)
 {
-  time_t last_time, cur_time;
-  int n_wait, n_remain;
+  JOB_HEAD jh = SLIST_HEAD_INITIALIZER (jh);
 
-  init_timer ();
+  /* Seed job queue */
+  job_enqueue (&jh, job_alloc (do_resurect, alive_to));
+  job_enqueue (&jh, job_alloc (do_expire, EXPIRE_TO));
+#if ! SET_DH_AUTO
+  init_rsa ();
+  job_enqueue (&jh, job_alloc (do_RSAgen, T_RSA_KEYS));
+#endif
 
-  n_wait = EXPIRE_TO;
-  if (n_wait > alive_to)
-    n_wait = alive_to;
-  if (n_wait > T_RSA_KEYS)
-    n_wait = T_RSA_KEYS;
-  for (last_time = time (NULL) - n_wait;;)
+  for (;;)
     {
-      cur_time = time (NULL);
-      if ((n_remain = n_wait - (cur_time - last_time)) > 0)
-	sleep (n_remain);
-      last_time = time (NULL);
-
-      run_RSAgen(last_time);
-
-      if ((last_time - last_alive) >= alive_to)
-	{
-	  last_alive = time (NULL);
-	  do_resurect ();
-	}
-
-      if ((last_time - last_expire) >= EXPIRE_TO)
-	{
-	  last_expire = time (NULL);
-	  do_expire ();
-	}
+      JOB *job = SLIST_FIRST (&jh);
+      clock_nanosleep (CLOCK_MONOTONIC, TIMER_ABSTIME, &job->ts, NULL);
+      SLIST_SHIFT (&jh, next);
+      job->func ();
+      job_enqueue (&jh, job);
     }
 }
-
+
 typedef struct
 {
   int control_sock;
