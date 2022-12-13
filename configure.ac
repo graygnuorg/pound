@@ -141,6 +141,16 @@ AC_CHECK_LIB([crypto],[BIO_new],[],
 AC_CHECK_LIB([ssl],[SSL_CTX_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lssl) - aborted])])
 
+AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <openssl/ssl.h>],
+[SSL_CTX *ctx = NULL;
+SSL_CTX_set_dh_auto (ctx, 1);
+])],
+[SET_DH_AUTO=1],[SET_DH_AUTO=0])
+
+AM_CONDITIONAL([SET_DH_AUTO],[test "$SET_DH_AUTO" = 1])
+AC_DEFINE_UNQUOTED([SET_DH_AUTO],[$SET_DH_AUTO],
+  [Define to 1 of *set_dh_auto macros are available])
+
 if test "$status_pcreposix" != no; then
   AC_CHECK_LIB([pcre],[pcre_compile])
   AC_CHECK_LIB([pcreposix],[regcomp])

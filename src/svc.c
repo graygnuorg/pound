@@ -1490,7 +1490,7 @@ do_expire (void)
 
 static time_t last_alive, last_expire;
 
-#if OPENSSL_VERSION_MAJOR < 3
+#if ! SET_DH_AUTO
 static pthread_mutex_t RSA_mut;	/* mutex for RSA keygen */
 static RSA *RSA512_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
 static RSA *RSA1024_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
@@ -1644,23 +1644,27 @@ set_ECDHCurve (char *name)
 void
 POUND_SSL_CTX_init (SSL_CTX *ctx)
 {
-	  SSL_CTX_set_tmp_rsa_callback (ctx, RSA_tmp_callback);
-	  SSL_CTX_set_tmp_dh_callback (ctx, DH_tmp_callback);
+  SSL_CTX_set_tmp_rsa_callback (ctx, RSA_tmp_callback);
+  SSL_CTX_set_tmp_dh_callback (ctx, DH_tmp_callback);
 #ifndef OPENSSL_NO_ECDH
-	  /* This generates a EC_KEY structure with no key, but a group defined */
-	  EC_KEY *ecdh;
-	  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-	    {
-	      logmsg (LOG_ERR, "Unable to generate temp ECDH key");
-	      exit (1);
-	    }
-	  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
-	  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
-	  EC_KEY_free (ecdh);
+  /* This generates a EC_KEY structure with no key, but a group defined */
+  EC_KEY *ecdh;
+  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
+    {
+      logmsg (LOG_ERR, "Unable to generate temp ECDH key");
+      exit (1);
+    }
+  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
+  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
+  EC_KEY_free (ecdh);
 #endif
 }
-#else /* OPENSSL_VERSION_MAJOR >= 3 */
-# define init_timer()
+#else /* SET_DH_AUTO == 1 */
+void
+init_timer (void)
+{
+  last_alive = last_expire = time (NULL);
+}
 # define run_RSAgen(t)
 void
 POUND_SSL_CTX_init (SSL_CTX *ctx)

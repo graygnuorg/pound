@@ -165,7 +165,7 @@ the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
 Default DH parameter length.  Allowed values for *n* are 2048 (the
 default) and 1024.
 
-This option has no effect when compiling with OpenSSL 3.0.
+This option has no effect when compiling with OpenSSL 1.1 or later.
 
 * `--with-ssl=`*directory*
 
@@ -176,7 +176,8 @@ automatically.
 * `--with-t_rsa=`*n*
 
 Sets default time interval for regeneration of RSA ephemeral keys.
-This option has no effect when compiling with OpenSSL 3.0.
+
+This option has no effect when compiling with OpenSSL 1.1 or later.
 
 When configuration is finished, run
 
@@ -185,9 +186,8 @@ When configuration is finished, run
 ```
 
 When building from a git clone, the first run of this command can take
-considerable time, if you are compiling with `OpenSSL` 1.1 or earlier.
-That's because it involves generating DH parameters.  This step is not
-necessary for `OpenSSL` 3.0.
+considerable time, if you are compiling with `OpenSSL` 1.0.  That's because
+it involves generating DH parameters.
 
 ## Testing
 

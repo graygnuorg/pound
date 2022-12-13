@@ -1710,7 +1710,7 @@ parse_ECDHCurve (void *call_data, void *section_data)
   struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
-#if OPENSSL_VERSION_MAJOR < 3 && !defined OPENSSL_NO_ECDH
+#if SET_DH_AUTO == 0 && !defined OPENSSL_NO_ECDH
   if (set_ECDHCurve (tok->str) == 0)
     {
       conf_error ("%s", "ECDHCurve: invalid curve name");
@@ -3797,7 +3797,7 @@ struct string_value pound_settings[] = {
   { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
   { "Supervisor", STRING_FUNCTION, { .s_func = supervisor_status } },
   { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
-#if OPENSSL_VERSION_MAJOR < 3
+#if ! SET_DH_AUTO
   { "DH bits",         STRING_INT, { .s_int = DH_LEN } },
   { "RSA regeneration interval", STRING_INT, { .s_int = T_RSA_KEYS } },
 #endif

@@ -42,7 +42,7 @@ install-exec-hook:
 
 noinst_HEADERS=pound.h extern.h
 
-if OPENSSL_V3
+if SET_DH_AUTO
 DHSRC =
 else
 noinst_HEADERS += dh.h
@@ -58,7 +58,6 @@ dh.h: $(DHSRC)
 	cat $(DHSRC) > dh.h
 
 BUILT_SOURCES=dh.h $(DHSRC)
-EXTRA_DIST = $(DHSRC)
 DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h
 endif
 
