@@ -1759,47 +1759,6 @@ parse_SSLEngine (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
-/*
- * basic hashing function, based on fmv
- */
-static unsigned long
-t_hash (const TABNODE * e)
-{
-  unsigned long res;
-  char *k;
-
-  k = e->key;
-  res = 2166136261;
-  while (*k)
-    res = ((res ^ *k++) * 16777619) & 0xFFFFFFFF;
-  return res;
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-# if OPENSSL_VERSION_NUMBER >= 0x10000000L
-static
-IMPLEMENT_LHASH_HASH_FN (t, TABNODE)
-# else
-static
-IMPLEMENT_LHASH_HASH_FN (t_hash, const TABNODE *)
-# endif
-#endif
-static int
-t_cmp (const TABNODE * d1, const TABNODE * d2)
-{
-  return strcmp (d1->key, d2->key);
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-# if OPENSSL_VERSION_NUMBER >= 0x10000000L
-static
-IMPLEMENT_LHASH_COMP_FN (t, TABNODE)
-# else
-static
-IMPLEMENT_LHASH_COMP_FN (t_cmp, const TABNODE *)
-# endif
-#endif
-
 static int
 backend_parse_haport (void *call_data, void *section_data)
 {
@@ -2640,16 +2599,9 @@ parse_service (void *call_data, void *section_data)
   else
     putback_tkn ();
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((svc->sessions = lh_TABNODE_new (t_hash, t_cmp)) == NULL)
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((svc->sessions = LHM_lh_new (TABNODE, t)) == NULL)
-#else
-  if ((svc->sessions =
-	 lh_new (LHASH_HASH_FN (t_hash), LHASH_COMP_FN (t_cmp))) == NULL)
-#endif
+  if ((svc->sessions = session_table_new ()) == NULL)
     {
-      conf_error ("%s", "lh_new failed");
+      conf_error ("%s", "session_table_new failed");
       return -1;
     }
 

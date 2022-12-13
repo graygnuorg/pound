@@ -156,15 +156,15 @@ be_prt (const int sock)
 static int
 sess_prt (const int sock)
 {
-  TABNODE sess;
+  SESSION sess;
   int n_be, n_sess, cont_len;
   char buf[KEY_SIZE + 1];
   ssize_t n;
 
   n_sess = 0;
-  while ((n = read (sock, (void *) &sess, sizeof (TABNODE))) == sizeof (TABNODE))
+  while ((n = read (sock, (void *) &sess, sizeof (SESSION))) == sizeof (SESSION))
     {
-      if (sess.content == NULL)
+      if (sess.backend == NULL)
 	break;
       if (read (sock, &n_be, sizeof (n_be)) == -1 ||
 	  read (sock, &cont_len, sizeof (cont_len)) == -1)

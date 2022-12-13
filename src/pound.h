@@ -298,23 +298,32 @@ typedef struct _backend
 
 typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
 
-typedef struct _tn
+typedef struct session
 {
   char *key;
-  void *content;
+  BACKEND *backend;
   time_t last_acc;
-} TABNODE;
-
-#define n_children(N)   ((N)? (N)->children: 0)
+  struct session *prev, *next;
+} SESSION;
 
 /* maximal session key size */
 #define KEY_SIZE    127
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-DEFINE_LHASH_OF (TABNODE);
+DEFINE_LHASH_OF (SESSION);
 #elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-DECLARE_LHASH_OF (TABNODE);
+DECLARE_LHASH_OF (SESSION);
 #endif
+
+typedef LHASH_OF (SESSION) SESSION_HASH;
+
+typedef struct
+{
+  SESSION_HASH *hash;
+  SESSION *head, *tail;
+} SESSION_TABLE;
+
+SESSION_TABLE *session_table_new (void);
 
 enum
   {
@@ -382,11 +391,7 @@ typedef struct _service
   unsigned sess_ttl;		/* session time-to-live */
   regex_t sess_start;		/* pattern to identify the session data */
   regex_t sess_pat;		/* pattern to match the session data */
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-  LHASH_OF (TABNODE) * sessions;	/* currently active sessions */
-#else
-  LHASH *sessions;		/* currently active sessions */
-#endif
+  SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
   SLIST_ENTRY (_service) next;
 } SERVICE;
@@ -565,7 +570,7 @@ int check_header (const char *, char *);
  * mark a backend host as dead;
  * do nothing if no resurection code is active
  */
-void kill_be (SERVICE * const, const BACKEND *, const int);
+void kill_be (SERVICE * const, BACKEND *, const int);
 
 /*
  * Update the number of requests and time to answer for a given back-end

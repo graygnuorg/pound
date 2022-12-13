@@ -28,89 +28,140 @@
 #include "pound.h"
 #include "extern.h"
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define TABNODE_GET_DOWN_LOAD(t) lh_TABNODE_get_down_load(t)
-# define TABNODE_SET_DOWN_LOAD(t,n) lh_TABNODE_set_down_load(t,n)
-#else
-#ifndef LHASH_OF
-#define LHASH_OF(x) LHASH
-#define CHECKED_LHASH_OF(type, h) h
-#endif
-# define TABNODE_GET_DOWN_LOAD(t) (CHECKED_LHASH_OF(TABNODE, t)->down_load)
-# define TABNODE_SET_DOWN_LOAD(t,n) (CHECKED_LHASH_OF(TABNODE, t)->down_load = n)
+/*
+ * basic hashing function, based on fmv
+ */
+static unsigned long
+session_hash (const SESSION *e)
+{
+  unsigned long res;
+  char *k;
+
+  k = e->key;
+  res = 2166136261;
+  while (*k)
+    res = ((res ^ *k++) * 16777619) & 0xFFFFFFFF;
+  return res;
+}
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static IMPLEMENT_LHASH_HASH_FN (session, SESSION)
 #endif
 
+static int
+session_cmp (const SESSION *d1, const SESSION *d2)
+{
+  return strcmp (d1->key, d2->key);
+}
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static IMPLEMENT_LHASH_COMP_FN (session, SESSION)
+#endif
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+# define SESSION_HASH_NEW() lh_SESSION_new (session_hash, session_cmp)
+# define SESSION_INSERT(tab, node) lh_SESSION_insert (tab, node)
+# define SESSION_RETRIEVE(tab, node) lh_SESSION_retrieve (tab, node)
+# define SESSION_DELETE(tab, node) lh_SESSION_delete (tab, node)
+#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
+# define SESSION_HASH_NEW() LHM_lh_new (SESSION, session)
+# define SESSION_INSERT(tab, node) LHM_lh_insert (SESSION, tab, node)
+# define SESSION_RETRIEVE(tab, node) LHM_lh_retrieve (SESSION, tab, node)
+# define SESSION_DELETE(tab, node) LHM_lh_delete (SESSION, tab, node)
+#endif
+
+SESSION_TABLE *
+session_table_new (void)
+{
+  SESSION_TABLE *st;
+  XZALLOC (st);
+  if ((st->hash = SESSION_HASH_NEW ()) == NULL)
+    xnomem ();
+  st->head = st->tail = NULL;
+  return st;
+}
+
+static void
+session_link_at_tail (SESSION_TABLE *tab, SESSION *sess)
+{
+  sess->next = NULL;
+  if ((sess->prev = tab->tail) == NULL)
+    tab->head = sess;
+  else
+    tab->tail->next = sess;
+  tab->tail = sess;
+}
+
+static void
+session_unlink (SESSION_TABLE *tab, SESSION *sess)
+{
+  if (sess->prev)
+    sess->prev->next = sess->next;
+  else
+    tab->head = sess->next;
+
+  if (sess->next)
+    sess->next->prev = sess->prev;
+  else
+    tab->tail = sess->prev;
+}
+
+static void
+session_promote (SESSION_TABLE *tab, SESSION *sess)
+{
+  sess->last_acc = time (NULL);
+  session_unlink (tab, sess);
+  session_link_at_tail (tab, sess);
+}
+
+static void
+session_free (SESSION *sess)
+{
+  free (sess);
+}
+
 /*
- * Add a new key/content pair to a hash table
+ * Add a new key/backend pair to a hash table
  * the table should be already locked
  */
 static void
-t_add (LHASH_OF (TABNODE) * const tab, const char *key, const void *content,
-       const size_t cont_len)
+session_add (SESSION_TABLE *const tab, const char *key, BACKEND *be)
 {
-  TABNODE *t, *old;
+  SESSION *t, *old;
+  size_t keylen = strlen (key);
 
-  if ((t = malloc (sizeof (TABNODE))) == NULL)
+  if ((t = malloc (sizeof (SESSION) + keylen + 1)) == NULL)
     {
-      logmsg (LOG_WARNING, "t_add() content malloc");
+      logmsg (LOG_WARNING, "session_add() content malloc");
       return;
     }
-  if ((t->key = strdup (key)) == NULL)
-    {
-      free (t);
-      logmsg (LOG_WARNING, "t_add() strdup");
-      return;
-    }
-  if ((t->content = malloc (cont_len)) == NULL)
-    {
-      free (t->key);
-      free (t);
-      logmsg (LOG_WARNING, "t_add() content malloc");
-      return;
-    }
-  memcpy (t->content, content, cont_len);
+  t->key = (char*)(t + 1);
+  strcpy (t->key, key);
+  t->backend = be;
   t->last_acc = time (NULL);
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((old = lh_TABNODE_insert (tab, t)) != NULL)
+  if ((old = SESSION_INSERT (tab->hash, t)) != NULL)
     {
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((old = LHM_lh_insert (TABNODE, tab, t)) != NULL)
-    {
-#else
-  if ((old = (TABNODE *) lh_insert (tab, t)) != NULL)
-    {
-#endif
-      free (old->key);
-      free (old->content);
-      free (old);
-      logmsg (LOG_WARNING, "t_add() DUP");
+      session_free (old);
+      logmsg (LOG_WARNING, "session_add() DUP");
     }
-  return;
+  session_link_at_tail (tab, t);
 }
 
 /*
  * Find a key
- * returns the content in the parameter
+ * returns the backend in the parameter
  * side-effect: update the time of last access
  */
-static void *
-t_find (LHASH_OF (TABNODE) * const tab, char *const key)
+static BACKEND *
+session_find (SESSION_TABLE *const tab, char *const key)
 {
-  TABNODE t, *res;
+  SESSION t, *res;
 
   t.key = key;
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((res = lh_TABNODE_retrieve (tab, &t)) != NULL)
+  if ((res = SESSION_RETRIEVE (tab->hash, &t)) != NULL)
     {
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((res = (TABNODE *) LHM_lh_retrieve (TABNODE, tab, &t)) != NULL)
-    {
-#else
-  if ((res = (TABNODE *) lh_retrieve (tab, &t)) != NULL)
-    {
-#endif
-      res->last_acc = time (NULL);
-      return res->content;
+      session_promote (tab, res);
+      return res->backend;
     }
   return NULL;
 }
@@ -119,145 +170,54 @@ t_find (LHASH_OF (TABNODE) * const tab, char *const key)
  * Delete a key
  */
 static void
-t_remove (LHASH_OF (TABNODE) * const tab, char *const key)
+session_remove_by_key (SESSION_TABLE *tab, char *const key)
 {
-  TABNODE t, *res;
+  SESSION t, *res;
 
   t.key = key;
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  if ((res = lh_TABNODE_delete (tab, &t)) != NULL)
+  if ((res = SESSION_DELETE (tab->hash, &t)) != NULL)
     {
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  if ((res = LHM_lh_delete (TABNODE, tab, &t)) != NULL)
-    {
-#else
-  if ((res = (TABNODE *) lh_delete (tab, &t)) != NULL)
-    {
-#endif
-      free (res->key);
-      free (res->content);
-      free (res);
+      session_unlink (tab, res);
+      session_free (res);
     }
   return;
 }
-
-typedef struct
-{
-  LHASH_OF (TABNODE) * tab;
-  time_t lim;
-  void *content;
-  int cont_len;
-} ALL_ARG;
-
-static void
-t_old_doall_arg (TABNODE * t, ALL_ARG * a)
-{
-  TABNODE *res;
-
-  if (t->last_acc < a->lim)
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-    if ((res = lh_TABNODE_delete (a->tab, t)) != NULL)
-      {
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-    if ((res = LHM_lh_delete (TABNODE, a->tab, t)) != NULL)
-      {
-#else
-    if ((res = lh_delete (a->tab, t)) != NULL)
-      {
-#endif
-	free (res->key);
-	free (res->content);
-	free (res);
-      }
-  return;
-}
-
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_old, TABNODE, ALL_ARG)
-#else
-#define t_old t_old_doall_arg
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_old, TABNODE *, ALL_ARG *)
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  IMPLEMENT_LHASH_DOALL_ARG (TABNODE, ALL_ARG);
-#endif
 
 /*
  * Expire all old nodes
  */
 static void
-t_expire (LHASH_OF (TABNODE) * const tab, const time_t lim)
+session_expire (SESSION_TABLE *tab, const time_t lim)
 {
-  ALL_ARG a;
-  int down_load;
-
-  a.tab = tab;
-  a.lim = lim;
-  down_load = TABNODE_GET_DOWN_LOAD (tab);
-  TABNODE_SET_DOWN_LOAD (tab, 0);
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  lh_TABNODE_doall_ALL_ARG (tab, t_old_doall_arg, &a);
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  LHM_lh_doall_arg (TABNODE, tab, LHASH_DOALL_ARG_FN (t_old), ALL_ARG, &a);
-#else
-  lh_doall_arg (tab, LHASH_DOALL_ARG_FN (t_old), &a);
-#endif
-  TABNODE_SET_DOWN_LOAD (tab, down_load);
-  return;
+  SESSION *sess, *res;
+  while ((sess = tab->head) != NULL && sess->last_acc < lim)
+    {
+      if ((res = SESSION_DELETE (tab->hash, sess)) == NULL)
+	break;
+      session_unlink (tab, res);
+      session_free (res);
+    }
 }
-
-static void
-t_cont_doall_arg (TABNODE * t, ALL_ARG * arg)
-{
-  TABNODE *res;
-
-  if (memcmp (t->content, arg->content, arg->cont_len) == 0)
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-    if ((res = lh_TABNODE_delete (arg->tab, t)) != NULL)
-      {
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-    if ((res = LHM_lh_delete (TABNODE, arg->tab, t)) != NULL)
-      {
-#else
-    if ((res = lh_delete (arg->tab, t)) != NULL)
-      {
-#endif
-	free (res->key);
-	free (res->content);
-	free (res);
-      }
-  return;
-}
-
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_cont, TABNODE, ALL_ARG)
-#else
-#define t_cont t_cont_doall_arg
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_cont, TABNODE *, ALL_ARG *)
-#endif
+
 /*
- * Remove all nodes with the given content
+ * Remove all sessions with the given backend
  */
-     static void
-       t_clean (LHASH_OF (TABNODE) * const tab, void *const content,
-		const size_t cont_len)
+static void
+session_remove_by_backend (SESSION_TABLE *tab, BACKEND *be)
 {
-  ALL_ARG a;
-  int down_load;
+  SESSION *sess, *res;
 
-  a.tab = tab;
-  a.content = content;
-  a.cont_len = cont_len;
-  down_load = TABNODE_GET_DOWN_LOAD (tab);
-  TABNODE_SET_DOWN_LOAD (tab, 0);
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  lh_TABNODE_doall_ALL_ARG (tab, t_cont_doall_arg, &a);
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  LHM_lh_doall_arg (TABNODE, tab, LHASH_DOALL_ARG_FN (t_cont), ALL_ARG, &a);
-#else
-  lh_doall_arg (tab, LHASH_DOALL_ARG_FN (t_cont), &a);
-#endif
-  TABNODE_SET_DOWN_LOAD (tab, down_load);
+  for (sess = tab->head; sess; )
+    {
+      SESSION *next = sess->next;
+      if (sess->backend == be &&
+	  (res = SESSION_DELETE (tab->hash, sess)) != NULL)
+	{
+	  session_unlink (tab, res);
+	  session_free (res);
+	}
+      sess = next;
+    }
 }
 
 /*
@@ -744,7 +704,6 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
   BACKEND *res;
   char key[KEY_SIZE + 1];
   int ret_val, no_be;
-  void *vp;
 
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "get_backend() lock: %s", strerror (ret_val));
@@ -764,7 +723,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       if (svc->sess_ttl < 0)
 	res = no_be ? svc->emergency
 		     : hash_backend (&svc->backends, svc->abs_pri, key);
-      else if ((vp = t_find (svc->sessions, key)) == NULL)
+      else if ((res = session_find (svc->sessions, key)) == NULL)
 	{
 	  if (no_be)
 	    res = svc->emergency;
@@ -772,11 +731,9 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	    {
 	      /* no session yet - create one */
 	      res = rand_backend (&svc->backends, random () % svc->tot_pri);
-	      t_add (svc->sessions, key, &res, sizeof (res));
+	      session_add (svc->sessions, key, res);
 	    }
 	}
-      else
-	memcpy (&res, vp, sizeof (res));
       break;
 
     case SESS_URL:
@@ -786,7 +743,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
 			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((vp = t_find (svc->sessions, key)) == NULL)
+	  else if ((res = session_find (svc->sessions, key)) == NULL)
 	    {
 	      if (no_be)
 		res = svc->emergency;
@@ -794,11 +751,9 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 		{
 		  /* no session yet - create one */
 		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  t_add (svc->sessions, key, &res, sizeof (res));
+		  session_add (svc->sessions, key, res);
 		}
 	    }
-	  else
-	    memcpy (&res, vp, sizeof (res));
 	}
       else
 	{
@@ -813,7 +768,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
 			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((vp = t_find (svc->sessions, key)) == NULL)
+	  else if ((res = session_find (svc->sessions, key)) == NULL)
 	    {
 	      if (no_be)
 		res = svc->emergency;
@@ -821,11 +776,9 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 		{
 		  /* no session yet - create one */
 		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  t_add (svc->sessions, key, &res, sizeof (res));
+		  session_add (svc->sessions, key, res);
 		}
 	    }
-	  else
-	    memcpy (&res, vp, sizeof (res));
 	}
       else
 	{
@@ -844,7 +797,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
  * (for cookies/header only) possibly create session based on response headers
  */
 void
-upd_session (SERVICE * const svc, char **const headers, BACKEND * const be)
+upd_session (SERVICE *const svc, char **const headers, BACKEND * const be)
 {
   char key[KEY_SIZE + 1];
   int ret_val;
@@ -854,8 +807,8 @@ upd_session (SERVICE * const svc, char **const headers, BACKEND * const be)
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() lock: %s", strerror (ret_val));
   if (get_HEADERS (key, svc, headers))
-    if (t_find (svc->sessions, key) == NULL)
-      t_add (svc->sessions, key, &be, sizeof (be));
+    if (session_find (svc->sessions, key) == NULL)
+      session_add (svc->sessions, key, be);
   if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() unlock: %s", strerror (ret_val));
   return;
@@ -868,7 +821,7 @@ upd_session (SERVICE * const svc, char **const headers, BACKEND * const be)
  *  disable_only == -1:  mark as enabled
  */
 void
-kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
+kill_be (SERVICE * const svc, BACKEND *be, const int disable_mode)
 {
   BACKEND *b;
   int ret_val;
@@ -895,7 +848,7 @@ kill_be (SERVICE * const svc, const BACKEND * be, const int disable_mode)
 	    str_be (buf, sizeof (buf), b);
 	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
 		    POUND_TID (), buf);
-	    t_clean (svc->sessions, &be, sizeof (be));
+	    session_remove_by_backend (svc->sessions, be);
 	    break;
 
 	  case BE_ENABLE:
@@ -1513,7 +1466,7 @@ do_expire (void)
 		      strerror (ret_val));
 	      continue;
 	    }
-	  t_expire (svc->sessions, cur_time - svc->sess_ttl);
+	  session_expire (svc->sessions, cur_time - svc->sess_ttl);
 	  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "do_expire() unlock: %s",
 		    strerror (ret_val));
@@ -1527,7 +1480,7 @@ do_expire (void)
 	    logmsg (LOG_WARNING, "do_expire() lock: %s", strerror (ret_val));
 	    continue;
 	  }
-	t_expire (svc->sessions, cur_time - svc->sess_ttl);
+	session_expire (svc->sessions, cur_time - svc->sess_ttl);
 	if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
 	  logmsg (LOG_WARNING, "do_expire() unlock: %s", strerror (ret_val));
       }
@@ -1564,7 +1517,6 @@ RSA_tmp_callback ( /* not used */ SSL * ssl, /* not used */ int is_export,
 static int
 generate_key (RSA ** ret_rsa, unsigned long bits)
 {
-#if OPENSSL_VERSION_NUMBER > 0x00908000L
   int rc = 0;
   RSA *rsa;
 
@@ -1581,10 +1533,6 @@ generate_key (RSA ** ret_rsa, unsigned long bits)
 	RSA_free (rsa);
     }
   return rc;
-#else
-  *ret_rsa = RSA_generate_key (bits, RSA_F4, NULL, NULL);
-  return *ret_rsa != NULL;
-#endif
 }
 
 /*
@@ -1678,10 +1626,8 @@ init_timer (void)
   return;
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
 #ifndef OPENSSL_NO_ECDH
 static int EC_nid = NID_X9_62_prime256v1;
-#endif
 #endif
 
 int
@@ -1700,7 +1646,6 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
 {
 	  SSL_CTX_set_tmp_rsa_callback (ctx, RSA_tmp_callback);
 	  SSL_CTX_set_tmp_dh_callback (ctx, DH_tmp_callback);
-#if OPENSSL_VERSION_NUMBER >= 0x0090800fL
 #ifndef OPENSSL_NO_ECDH
 	  /* This generates a EC_KEY structure with no key, but a group defined */
 	  EC_KEY *ecdh;
@@ -1712,7 +1657,6 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
 	  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
 	  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
 	  EC_KEY_free (ecdh);
-#endif
 #endif
 }
 #else /* OPENSSL_VERSION_MAJOR >= 3 */
@@ -1774,13 +1718,13 @@ typedef struct
 } DUMP_ARG;
 
 static void
-t_dump_doall_arg (TABNODE *t, DUMP_ARG *arg)
+dump_session (int control_sock, SESSION *t, BACKEND_HEAD * const backends)
 {
-  BACKEND *be, *bep = t->content;
+  BACKEND *be, *bep = t->backend;
   int n_be, sz;
 
   n_be = 0;
-  SLIST_FOREACH (be, arg->backends, next)
+  SLIST_FOREACH (be, backends, next)
     {
       if (be == bep)
 	break;
@@ -1789,26 +1733,26 @@ t_dump_doall_arg (TABNODE *t, DUMP_ARG *arg)
   if (!be)
     /* should NEVER happen */
     n_be = 0;
-  if (write (arg->control_sock, t, sizeof (TABNODE)) == -1)
+  if (write (control_sock, t, sizeof (SESSION)) == -1)
     {
       logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
-  if (write (arg->control_sock, &n_be, sizeof (n_be)) == -1)
+  if (write (control_sock, &n_be, sizeof (n_be)) == -1)
     {
       logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
   sz = strlen (t->key);
-  if (write (arg->control_sock, &sz, sizeof (sz)) == -1)
+  if (write (control_sock, &sz, sizeof (sz)) == -1)
     {
       logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
       return;
     }
-  if (write (arg->control_sock, t->key, sz))
+  if (write (control_sock, t->key, sz) == -1)
     {
       logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
 	      strerror (errno));
@@ -1816,35 +1760,17 @@ t_dump_doall_arg (TABNODE *t, DUMP_ARG *arg)
     }
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x10000000L
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_dump, TABNODE, DUMP_ARG)
-#else
-#define t_dump t_dump_doall_arg
-IMPLEMENT_LHASH_DOALL_ARG_FN (t_dump, TABNODE *, DUMP_ARG *)
-#endif
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  IMPLEMENT_LHASH_DOALL_ARG (TABNODE, DUMP_ARG);
-#endif
-
 /*
  * write sessions to the control socket
  */
 static void
-dump_sess (const int control_sock, LHASH_OF (TABNODE) * const sess,
-	   BACKEND_HEAD * const backends)
+dump_session_table (const int control_sock, SESSION_TABLE *const tab,
+		    BACKEND_HEAD * const backends)
 {
-  DUMP_ARG a;
+  SESSION *sess;
 
-  a.control_sock = control_sock;
-  a.backends = backends;
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  lh_TABNODE_doall_DUMP_ARG (sess, t_dump_doall_arg, &a);
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
-  LHM_lh_doall_arg (TABNODE, sess, LHASH_DOALL_ARG_FN (t_dump), DUMP_ARG, &a);
-#else
-  lh_doall_arg (sess, LHASH_DOALL_ARG_FN (t_dump), &a);
-#endif
-  return;
+  for (sess = tab->head; sess; sess = sess->next)
+    dump_session (control_sock, sess, backends);
 }
 
 /*
@@ -1927,7 +1853,7 @@ do_list (int ctl)
   LISTENER *lstn, dummy_lstn;
   SERVICE *svc, dummy_svc;
   BACKEND *be, dummy_be;
-  TABNODE dummy_sess;
+  SESSION dummy_sess;
   int rc;
 
   memset (&dummy_lstn, 0, sizeof (dummy_lstn));
@@ -1937,7 +1863,7 @@ do_list (int ctl)
   memset (&dummy_be, 0, sizeof (dummy_be));
   dummy_be.disabled = -1;
   memset (&dummy_sess, 0, sizeof (dummy_sess));
-  dummy_sess.content = NULL;
+  dummy_sess.backend = NULL;
 
   n = get_thr_qlen ();
   if (write (ctl, (void *) &n, sizeof (n)) == -1)
@@ -1968,12 +1894,12 @@ do_list (int ctl)
 	    logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
 	  else
 	    {
-	      dump_sess (ctl, svc->sessions, &svc->backends);
+	      dump_session_table (ctl, svc->sessions, &svc->backends);
 	      if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 		logmsg (LOG_WARNING, "thr_control() unlock: %s",
 			strerror (rc));
 	    }
-	  if (write (ctl, (void *) &dummy_sess, sizeof (TABNODE)) == -1)
+	  if (write (ctl, (void *) &dummy_sess, sizeof (SESSION)) == -1)
 	    return -1;
 	}
       if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
@@ -2003,11 +1929,11 @@ do_list (int ctl)
 	logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
       else
 	{
-	  dump_sess (ctl, svc->sessions, &svc->backends);
+	  dump_session_table (ctl, svc->sessions, &svc->backends);
 	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() unlock: %s", strerror (rc));
 	}
-      if (write (ctl, (void *) &dummy_sess, sizeof (TABNODE)) == -1)
+      if (write (ctl, (void *) &dummy_sess, sizeof (SESSION)) == -1)
 	return -1;
     }
   if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
@@ -2139,7 +2065,7 @@ thr_control (void *arg)
 	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() add session lock: %s",
 		    strerror (rc));
-	  t_add (svc->sessions, cmd.key, &be, sizeof (be));
+	  session_add (svc->sessions, cmd.key, be);
 	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING,
 		    "thoriginalfiler_control() add session unlock: %s",
@@ -2156,7 +2082,7 @@ thr_control (void *arg)
 	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session lock: %s",
 		    strerror (rc));
-	  t_remove (svc->sessions, cmd.key);
+	  session_remove_by_key (svc->sessions, cmd.key);
 	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session unlock: %s",
 		    strerror (rc));

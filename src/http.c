@@ -814,12 +814,9 @@ log_bytes (char *res, const LONG cnt)
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 #  define clear_error()
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
+#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
 #  define clear_error() \
 	if(ssl != NULL) { ERR_clear_error(); ERR_remove_thread_state(NULL); }
-#else
-#  define clear_error() \
-	if(ssl != NULL) { ERR_clear_error(); ERR_remove_state(0); }
 #endif
 
 #define clean_all()                                                     \

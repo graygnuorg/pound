@@ -660,27 +660,6 @@ main (const int argc, char **argv)
   CRYPTO_set_id_callback (l_id);
   CRYPTO_set_locking_callback (l_lock);
 
-  /*
-   * Disable SSL Compression for OpenSSL pre-1.0.  1.0 is handled with an
-   * option in config.c
-   */
-#if OPENSSL_VERSION_NUMBER >= 0x00907000L
-#ifndef SSL_OP_NO_COMPRESSION
-  {
-    int i, n;
-    STACK_OF (SSL_COMP) * ssl_comp_methods;
-
-    ssl_comp_methods = SSL_COMP_get_compression_methods ();
-    n = sk_SSL_COMP_num (ssl_comp_methods);
-
-    for (i = n - 1; i >= 0; i--)
-      {
-	sk_SSL_COMP_delete (ssl_comp_methods, i);
-      }
-  }
-#endif
-#endif
-
   /* prepare regular expressions */
   if (regcomp
       (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",

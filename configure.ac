@@ -130,10 +130,11 @@ elif test $status_hoard != no; then
     memory_allocator=hoard
   fi
 fi
-AC_CHECK_LIB([dl],[dlopen])
+AC_CHECK_LIB([rt], [clock_gettime])
+AC_CHECK_LIB([dl], [dlopen])
 AC_CHECK_LIB([nsl], [gethostbyaddr])
-AC_CHECK_LIB([socket],[socket])
-AC_CHECK_LIB([resolv],[hstrerror])
+AC_CHECK_LIB([socket], [socket])
+AC_CHECK_LIB([resolv], [hstrerror])
 
 AC_CHECK_LIB([crypto],[BIO_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lcrypto) - aborted],[1])])
