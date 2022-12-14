@@ -77,33 +77,20 @@ session_table_new (void)
   XZALLOC (st);
   if ((st->hash = SESSION_HASH_NEW ()) == NULL)
     xnomem ();
-  st->head = st->tail = NULL;
+  DLIST_INIT (&st->head);
   return st;
 }
 
-static void
+static inline void
 session_link_at_tail (SESSION_TABLE *tab, SESSION *sess)
 {
-  sess->next = NULL;
-  if ((sess->prev = tab->tail) == NULL)
-    tab->head = sess;
-  else
-    tab->tail->next = sess;
-  tab->tail = sess;
+  DLIST_INSERT_TAIL (&tab->head, sess, link);
 }
 
-static void
+static inline void
 session_unlink (SESSION_TABLE *tab, SESSION *sess)
 {
-  if (sess->prev)
-    sess->prev->next = sess->next;
-  else
-    tab->head = sess->next;
-
-  if (sess->next)
-    sess->next->prev = sess->prev;
-  else
-    tab->tail = sess->prev;
+  DLIST_REMOVE (&tab->head, sess, link);
 }
 
 static void
@@ -189,13 +176,13 @@ session_remove_by_key (SESSION_TABLE *tab, char *const key)
 static void
 session_expire (SESSION_TABLE *tab, const time_t lim)
 {
-  SESSION *sess, *res;
-  while ((sess = tab->head) != NULL && sess->last_acc < lim)
+  SESSION *sess;
+  while ((sess = DLIST_FIRST (&tab->head)) != NULL && sess->last_acc < lim)
     {
-      if ((res = SESSION_DELETE (tab->hash, sess)) == NULL)
+      if ((SESSION_DELETE (tab->hash, sess)) == NULL)
 	break;
-      session_unlink (tab, res);
-      session_free (res);
+      session_unlink (tab, sess);
+      session_free (sess);
     }
 }
 
@@ -205,18 +192,16 @@ session_expire (SESSION_TABLE *tab, const time_t lim)
 static void
 session_remove_by_backend (SESSION_TABLE *tab, BACKEND *be)
 {
-  SESSION *sess, *res;
+  SESSION *sess, *tmp;
 
-  for (sess = tab->head; sess; )
+  DLIST_FOREACH_SAFE (sess, tmp, &tab->head, link)
     {
-      SESSION *next = sess->next;
-      if (sess->backend == be &&
-	  (res = SESSION_DELETE (tab->hash, sess)) != NULL)
+      if (sess->backend == be)
 	{
-	  session_unlink (tab, res);
-	  session_free (res);
+	  SESSION_DELETE (tab->hash, sess);
+	  session_unlink (tab, sess);
+	  session_free (sess);
 	}
-      sess = next;
     }
 }
 
@@ -1092,7 +1077,7 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       {
 	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: connect failed: %s",
 		POUND_TID (), strerror (errno));
-	return (-1);
+	return -1;
       }
 
   if (res == 0)
@@ -1155,106 +1140,122 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   return 0;
 }
 
+enum
+  {
+    BACKEND_OK,
+    BACKEND_DEAD,
+    BACKEND_ERR,
+    BACKEND_NOADDR
+  };
+
+static int
+backend_probe (BACKEND *be, int ha)
+{
+  int sock;
+  const struct addrinfo *addr;
+  int family;
+  int rc;
+
+  addr = &be->ha_addr;
+  if (addr->ai_addrlen == 0)
+    {
+      if (ha)
+	return BACKEND_NOADDR;
+      addr = &be->addr;
+    }
+
+  switch (addr->ai_family)
+    {
+    case AF_INET:
+      family = PF_INET;
+      break;
+
+    case AF_INET6:
+      family = PF_INET6;
+      break;
+
+    case AF_UNIX:
+      family = PF_UNIX;
+      break;
+
+    default:
+      errno = EINVAL;
+      return BACKEND_ERR;
+    }
+
+  if ((sock = socket (family, SOCK_STREAM, 0)) < 0)
+    return BACKEND_ERR;
+
+  rc = connect_nb (sock, addr, be->conn_to);
+  shutdown (sock, 2);
+  close (sock);
+
+  return rc == 0 ? BACKEND_OK : BACKEND_DEAD;
+}
+
+static void
+service_update_pri (SERVICE *svc)
+{
+  BACKEND *be;
+  char buf[MAXBUF];
+
+  pthread_mutex_lock (&svc->mut);
+
+  svc->tot_pri = 0;
+  SLIST_FOREACH (be, &svc->backends, next)
+    {
+      if (be->resurrect)
+	{
+	  be->alive = 1;
+	  str_be (buf, sizeof (buf), be);
+	  logmsg (LOG_NOTICE, "Backend %s resurrect", buf);
+	}
+      if (be->alive && !be->disabled)
+	svc->tot_pri += be->priority;
+    }
+
+  pthread_mutex_unlock (&svc->mut);
+}
+
 /*
  * Check if dead hosts returned to life;
  * runs every alive seconds
  */
 static void
-do_resurect (void)
+do_resurrect (void)
 {
   LISTENER *lstn;
   SERVICE *svc;
   BACKEND *be;
-  struct addrinfo z_addr, *addr;
-  int sock, modified;
+  int modified;
   char buf[MAXBUF];
-  int ret_val;
 
   /* check hosts still alive - HAport */
-  memset (&z_addr, 0, sizeof (z_addr));
   SLIST_FOREACH (lstn, &listeners, next)
     SLIST_FOREACH (svc, &lstn->services, next)
       SLIST_FOREACH (be, &svc->backends, next)
 	{
-	  if (be->be_type != BE_BACKEND)
-	    continue;
-	  if (!be->alive)
-	    /* already dead */
-	    continue;
-	  if (memcmp (&(be->ha_addr), &z_addr, sizeof (z_addr)) == 0)
-	    /* no HA port */
-	    continue;
-	  /* try connecting */
-	  switch (be->ha_addr.ai_family)
-	    {
-	    case AF_INET:
-	      if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-		continue;
-	      break;
-
-	    case AF_INET6:
-	      if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-		continue;
-	      break;
-
-	    case AF_UNIX:
-	      if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-		continue;
-	      break;
-
-	    default:
-	      continue;
-	    }
-	  if (connect_nb (sock, &be->ha_addr, be->conn_to) != 0)
+	  if (be->be_type == BE_BACKEND &&
+	      be->alive &&
+	      backend_probe (be, 1) == BACKEND_DEAD)
 	    {
 	      kill_be (svc, be, BE_KILL);
 	      str_be (buf, sizeof (buf), be);
-	      logmsg (LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
+	      logmsg (LOG_NOTICE, "Backend %s is dead (HA)", buf);
 	    }
-	  shutdown (sock, 2);
-	  close (sock);
 	}
 
   SLIST_FOREACH (svc, &services, next)
     SLIST_FOREACH (be, &svc->backends, next)
       {
-	if (be->be_type != BE_BACKEND)
-	  continue;
-	if (!be->alive)
-	  /* already dead */
-	  continue;
-	if (memcmp (&(be->ha_addr), &z_addr, sizeof (z_addr)) == 0)
-	  /* no HA port */
-	  continue;
-	/* try connecting */
-	switch (be->ha_addr.ai_family)
-	  {
-	  case AF_INET:
-	    if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-	      continue;
-	    break;
-
-	  case AF_INET6:
-	    if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-	      continue;
-	    break;
-
-	  case AF_UNIX:
-	    if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-	      continue;
-	    break;
-
-	  default:
-	    continue;
-	  }
-	if (connect_nb (sock, &be->ha_addr, be->conn_to) != 0)
+	if (be->be_type == BE_BACKEND &&
+	    be->alive &&
+	    backend_probe (be, 1) == BACKEND_DEAD)
 	  {
 	    kill_be (svc, be, BE_KILL);
 	    str_be (buf, sizeof (buf), be);
-	    logmsg (LOG_NOTICE, "BackEnd %s is dead (HA)", buf);
+	    logmsg (LOG_NOTICE, "Backend %s is dead (HA)", buf);
 	  }
-	shutdown (sock, 2);
-	close (sock);
       }
 
   /* check hosts alive again */
@@ -1266,87 +1267,17 @@ do_resurect (void)
 	SLIST_FOREACH (be, &svc->backends, next)
 	  {
 	    be->resurrect = 0;
-	    if (be->be_type != BE_BACKEND)
-	      continue;
-	    if (be->alive)
-	      continue;
-	    if (memcmp (&be->ha_addr, &z_addr, sizeof (z_addr)) == 0)
-	      {
-		switch (be->addr.ai_family)
-		  {
-		  case AF_INET:
-		    if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  case AF_INET6:
-		    if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  case AF_UNIX:
-		    if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  default:
-		    continue;
-		  }
-		addr = &be->addr;
-	      }
-	    else
-	      {
-		switch (be->ha_addr.ai_family)
-		  {
-		  case AF_INET:
-		    if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  case AF_INET6:
-		    if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  case AF_UNIX:
-		    if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-		      continue;
-		    break;
-
-		  default:
-		    continue;
-		  }
-		addr = &be->ha_addr;
-	      }
-	    if (connect_nb (sock, addr, be->conn_to) == 0)
+	    if (be->be_type == BE_BACKEND &&
+		!be->alive &&
+		backend_probe (be, 0) == BACKEND_OK)
 	      {
 		be->resurrect = 1;
 		modified = 1;
 	      }
-	    shutdown (sock, 2);
-	    close (sock);
 	  }
+
 	if (modified)
-	  {
-	    if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-	      logmsg (LOG_WARNING, "do_resurect() lock: %s",
-		      strerror (ret_val));
-	    svc->tot_pri = 0;
-	    SLIST_FOREACH (be, &svc->backends, next)
-	      {
-		if (be->resurrect)
-		  {
-		    be->alive = 1;
-		    str_be (buf, sizeof (buf), be);
-		    logmsg (LOG_NOTICE, "BackEnd %s resurrect", buf);
-		  }
-		if (be->alive && !be->disabled)
-		  svc->tot_pri += be->priority;
-	      }
-	    if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-	      logmsg (LOG_WARNING, "do_resurect() unlock: %s",
-		      strerror (ret_val));
-	  }
+	  service_update_pri (svc);
       }
 
   SLIST_FOREACH (svc, &services, next)
@@ -1355,90 +1286,18 @@ do_resurect (void)
       SLIST_FOREACH (be, &svc->backends, next)
 	{
 	  be->resurrect = 0;
-	  if (be->be_type != BE_BACKEND)
-	    continue;
-	  if (be->alive)
-	    continue;
-	  if (memcmp (&be->ha_addr, &z_addr, sizeof (z_addr)) == 0)
-	    {
-	      switch (be->addr.ai_family)
-		{
-		case AF_INET:
-		  if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		case AF_INET6:
-		  if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		case AF_UNIX:
-		  if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		default:
-		  continue;
-		}
-	      addr = &be->addr;
-	    }
-	  else
-	    {
-	      switch (be->ha_addr.ai_family)
-		{
-		case AF_INET:
-		  if ((sock = socket (PF_INET, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		case AF_INET6:
-		  if ((sock = socket (PF_INET6, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		case AF_UNIX:
-		  if ((sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-		    continue;
-		  break;
-
-		default:
-		  continue;
-		}
-	      addr = &be->ha_addr;
-	    }
-	  if (connect_nb (sock, addr, be->conn_to) == 0)
+	  if (be->be_type == BE_BACKEND &&
+	      !be->alive &&
+	      backend_probe (be, 0) == BACKEND_OK)
 	    {
 	      be->resurrect = 1;
 	      modified = 1;
 	    }
-	  shutdown (sock, 2);
-	  close (sock);
 	}
-      if (modified)
-	{
-	  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "do_resurect() lock: %s",
-		    strerror (ret_val));
-	  svc->tot_pri = 0;
-	  SLIST_FOREACH (be, &svc->backends, next)
-	    {
-	      if (be->resurrect)
-		{
-		  be->alive = 1;
-		  str_be (buf, sizeof (buf), be);
-		  logmsg (LOG_NOTICE, "BackEnd %s resurrect", buf);
-		}
-	      if (be->alive && !be->disabled)
-		svc->tot_pri += be->priority;
-	    }
-	  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "do_resurect() unlock: %s",
-		    strerror (ret_val));
-	}
-    }
 
-  return;
+      if (modified)
+	service_update_pri (svc);
+    }
 }
 
 /*
@@ -1695,32 +1554,22 @@ static void
 job_enqueue (JOB_HEAD *jh, JOB *job)
 {
   struct timespec nts;
+  JOB *t, *prev = NULL;
 
   clock_gettime (CLOCK_MONOTONIC, &nts);
   timespec_add (&nts, &job->interval, &job->ts);
 
-  if (SLIST_EMPTY (jh))
-    SLIST_INSERT_FIRST (job, jh, next);
-  else
+  SLIST_FOREACH (t, jh, next)
     {
-      JOB *t, *prev = NULL;
-
-      SLIST_FOREACH (t, jh, next)
-	{
-	  if (timespec_cmp (&job->ts, &t->ts) < 0)
-	    {
-	      if (prev)
-		break;
-	      else
-		{
-		  SLIST_INSERT_FIRST (job, jh, next);
-		  return;
-		}
-	    }
-	  prev = t;
-	}
-      SLIST_INSERT_AFTER (job, prev, jh, next);
+      if (timespec_cmp (&job->ts, &t->ts) < 0)
+	break;
+      prev = t;
     }
+
+  if (prev)
+    SLIST_INSERT_AFTER (jh, prev, job, next);
+  else
+    SLIST_INSERT_HEAD (job, jh, next);
 }
 
 static JOB *
@@ -1747,7 +1596,7 @@ thr_timer (void *arg)
   JOB_HEAD jh = SLIST_HEAD_INITIALIZER (jh);
 
   /* Seed job queue */
-  job_enqueue (&jh, job_alloc (do_resurect, alive_to));
+  job_enqueue (&jh, job_alloc (do_resurrect, alive_to));
   job_enqueue (&jh, job_alloc (do_expire, EXPIRE_TO));
 #if ! SET_DH_AUTO
   init_rsa ();
@@ -1822,7 +1671,7 @@ dump_session_table (const int control_sock, SESSION_TABLE *const tab,
 {
   SESSION *sess;
 
-  for (sess = tab->head; sess; sess = sess->next)
+  DLIST_FOREACH (sess, &tab->head, link)
     dump_session (control_sock, sess, backends);
 }
 

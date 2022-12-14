@@ -85,7 +85,7 @@
 #  endif
 # else
 #  ifndef THREADS
-#   error  "Pound requires OpenSSL with thread support"
+#   error "Pound requires OpenSSL with thread support"
 #  endif
 # endif
 #else
@@ -168,83 +168,8 @@
 #define ATTR_PRINTFLIKE(fmt,narg)                               \
     __attribute__ ((__format__ (__printf__, fmt, narg)))
 
-/*
- * Singly-linked list macros.
- */
-
-#define SLIST_HEAD(name, type)			\
-  struct name					\
-    {						\
-      struct type *sl_first;			\
-      struct type *sl_last;			\
-    }
-
-#define SLIST_HEAD_INITIALIZER(head)		\
-  { NULL, NULL }
-
-#define SLIST_ENTRY(type)			\
-  struct type *
-
-#define SLIST_INIT(head)				\
-  do							\
-    {							\
-      (head)->sl_first = (head)->sl_last = NULL;	\
-    }							\
-  while (0)
-
-/* Insert elt at the head of the list. */
-#define SLIST_INSERT_FIRST(elt, head, field)			\
-  do								\
-    {								\
-      if (((elt)->field = (head)->sl_first) == NULL)		\
-	(head)->sl_last = (elt);				\
-      (head)->sl_first = (elt);					\
-    }								\
-  while (0)
-
-/* Insert elt after given element (anchor). */
-#define SLIST_INSERT_AFTER(elt, anchor, head, field)		\
-  do								\
-    {								\
-      if (((elt)->field = (anchor)->field) == NULL)		\
-	(head)->sl_last = (elt);				\
-      (anchor)->field = (elt);					\
-    }								\
-  while (0)
-
-/* Append elt to the tail of the list. */
-#define SLIST_PUSH(head, elt, field)			\
-  do							\
-    {							\
-      if ((head)->sl_last)				\
-	(head)->sl_last->field = (elt);			\
-      else						\
-	(head)->sl_first = (elt);			\
-      (head)->sl_last = (elt);				\
-      (elt)->field = NULL;				\
-    }							\
-  while (0)
-
-/* Remove element from the head of the list. */
-#define SLIST_SHIFT(head, field)					\
-  do									\
-    {									\
-      if ((head)->sl_first != NULL &&					\
-	  ((head)->sl_first = (head)->sl_first->field) == NULL)		\
-	(head)->sl_last = NULL;						\
-    }									\
-  while (0)
-
-#define SLIST_FOREACH(var, head, field)		\
-  for ((var) = (head)->sl_first; (var); (var) = (var)->field)
-
-#define SLIST_COPY(dst, src)			\
-  *dst = *src
-
-#define SLIST_FIRST(head) ((head)->sl_first)
-#define SLIST_LAST(head) ((head)->sl_last)
-#define SLIST_EMPTY(head) (SLIST_FIRST (head) == NULL)
-#define SLIST_NEXT(elt, field) ((elt)->field)
+/* List definitions. */
+#include "list.h"
 
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
@@ -323,7 +248,7 @@ typedef struct session
   char *key;
   BACKEND *backend;
   time_t last_acc;
-  struct session *prev, *next;
+  DLIST_ENTRY (session) link;
 } SESSION;
 
 /* maximal session key size */
@@ -340,7 +265,7 @@ typedef LHASH_OF (SESSION) SESSION_HASH;
 typedef struct
 {
   SESSION_HASH *hash;
-  SESSION *head, *tail;
+  DLIST_HEAD (,session) head;
 } SESSION_TABLE;
 
 SESSION_TABLE *session_table_new (void);

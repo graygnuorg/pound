@@ -40,7 +40,7 @@ install-exec-hook:
 		done; \
 	fi
 
-noinst_HEADERS=pound.h extern.h
+noinst_HEADERS=pound.h extern.h list.h
 
 if SET_DH_AUTO
 DHSRC =
@@ -63,4 +63,3 @@ endif
 
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c
-
