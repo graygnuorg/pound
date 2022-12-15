@@ -858,7 +858,7 @@ do_http (THR_ARG *arg)
   LISTENER *lstn;
   SERVICE *svc;
   BACKEND *backend, *cur_backend, *old_backend;
-  struct addrinfo from_host, z_addr;
+  struct addrinfo from_host;
   struct sockaddr_storage from_host_addr;
   BIO *cl, *be, *bb, *b64;
   X509 *x509;
@@ -1380,8 +1380,7 @@ do_http (THR_ARG *arg)
 	       * kill the back-end only if no HAport is defined for it
 	       * otherwise allow the HAport mechanism to do its job
 	       */
-	      memset (&z_addr, 0, sizeof (z_addr));
-	      if (memcmp (&(backend->ha_addr), &(z_addr), sizeof (z_addr)) == 0)
+	      if (backend->ha_addr.ai_addrlen == 0)
 		kill_be (svc, backend, BE_KILL);
 	      /*
 	       * ...but make sure we don't get into a loop with the same
