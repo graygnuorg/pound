@@ -1672,8 +1672,9 @@ dump_session_table (const int control_sock, SESSION_TABLE *const tab,
 {
   SESSION *sess;
 
-  DLIST_FOREACH (sess, &tab->head, link)
-    dump_session (control_sock, sess, backends);
+  if (tab)
+    DLIST_FOREACH (sess, &tab->head, link)
+      dump_session (control_sock, sess, backends);
 }
 
 /*
