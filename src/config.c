@@ -1744,45 +1744,6 @@ parse_SSLEngine (void *call_data, void *section_data)
 }
 
 static int
-backend_parse_haport (void *call_data, void *section_data)
-{
-  BACKEND *be = call_data;
-  struct token *tok, saved_tok;
-
-  if (ADDRINFO_HAS_ADDRESS (&be->ha_addr))
-    {
-      conf_error ("%s", "Duplicate HAport statement");
-      return PARSER_FAIL;
-    }
-
-  if ((tok = gettkn_any ()) == NULL)
-    return PARSER_FAIL;
-
-  saved_tok = *tok;
-  saved_tok.str = strdup (tok->str);
-
-  if ((tok = gettkn_any ()) == NULL)
-    return PARSER_FAIL;
-
-  if (tok->type == '\n')
-    {
-      be->ha_addr = be->addr;
-      tok = &saved_tok;
-      putback_tkn ();
-    }
-  else if (assign_address_internal (&be->ha_addr, &saved_tok))
-    return PARSER_FAIL;
-
-  if (assign_port_internal (&be->ha_addr, tok))
-    return PARSER_FAIL;
-
-  ADDRINFO_SET_ADDRESS (&be->ha_addr);
-
-  free (saved_tok.str);
-  return PARSER_OK;
-}
-
-static int
 backend_parse_https (void *call_data, void *section_data)
 {
   BACKEND *be = call_data;
@@ -1973,10 +1934,6 @@ static PARSER_TABLE backend_parsetab[] = {
     .off = offsetof (BACKEND, conn_to)
   },
   {
-    .name = "HAport",
-    .parser = backend_parse_haport
-  },
-  {
     .name = "HTTPS",
     .parser = backend_parse_https
   },
@@ -2050,7 +2007,6 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
   be->alive = 1;
   memset (&be->addr, 0, sizeof (be->addr));
   be->priority = 5;
-  memset (&be->ha_addr, 0, sizeof (be->ha_addr));
   be->url = NULL;
   pthread_mutex_init (&be->mut, NULL);
 
@@ -2599,6 +2555,7 @@ parse_service (void *call_data, void *section_data)
 	{
 	  SLIST_FOREACH (be, &svc->backends, next)
 	    {
+	      be->service = svc;
 	      if (!be->disabled)
 		svc->tot_pri += be->priority;
 	      svc->abs_pri += be->priority;

@@ -29,6 +29,23 @@
 #include "extern.h"
 
 /*
+ * Compare two timespecs
+ */
+static inline int
+timespec_cmp (struct timespec const *a, struct timespec const *b)
+{
+  if (a->tv_sec < b->tv_sec)
+    return -1;
+  if (a->tv_sec > b->tv_sec)
+    return 1;
+  if (a->tv_nsec < b->tv_nsec)
+    return -1;
+  if (a->tv_nsec > b->tv_nsec)
+    return 1;
+  return 0;
+}
+
+/*
  * basic hashing function, based on fmv
  */
 static unsigned long
@@ -94,106 +111,162 @@ session_unlink (SESSION_TABLE *tab, SESSION *sess)
 }
 
 static void
-session_promote (SESSION_TABLE *tab, SESSION *sess)
-{
-  sess->last_acc = time (NULL);
-  session_unlink (tab, sess);
-  session_link_at_tail (tab, sess);
-}
-
-static void
 session_free (SESSION *sess)
 {
   free (sess);
 }
-
+
 /*
- * Add a new key/backend pair to a hash table
- * the table should be already locked
+ * Periodic job to remove expired sessions within the given service (passed
+ * as the DATA argument),  Sessions within the session table are ordered
+ * by their expiration time.  The expire_sessions cronjob is normally scheduled
+ * to the expiration time of the first session in the list, i.e. the least
+ * recently used one.
+ *
+ * Before returning, the function rearms the periodic job if necessary.
  */
 static void
-session_add (SESSION_TABLE *const tab, const char *key, BACKEND *be)
+expire_sessions (void *data)
 {
+  SERVICE *svc = data;
+  SESSION_TABLE *tab = svc->sessions;
+  SESSION *sess = DLIST_FIRST (&tab->head);
+
+  if (sess)
+    {
+      pthread_mutex_lock (&svc->mut);
+      SESSION_DELETE (tab->hash, sess);
+      session_unlink (tab, sess);
+      session_free (sess);
+
+      if (!DLIST_EMPTY (&tab->head))
+	job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
+      pthread_mutex_unlock (&svc->mut);
+    }
+}
+
+static void
+service_rearm_expire_sessions (SERVICE *svc)
+{
+  SESSION *sess = DLIST_FIRST (&svc->sessions->head);
+  if (sess)
+    job_rearm (&sess->expire, expire_sessions, svc);
+  /*
+   * If the session list is empty, the scheduled job remains unchanged.
+   * It will eventually fire, call expire_sessions, which will do nothing
+   * and be removed from the queue.
+   */
+}
+
+/*
+ * Promote the given session by updating its expiration time and
+ * moving it to the end of the session list.  Re-schedule the expiration
+ * periodic job accordingly.
+ *
+ * The service mutex must be locked.
+ */
+static void
+service_session_promote (SERVICE *svc, SESSION *sess)
+{
+  SESSION_TABLE *tab = svc->sessions;
+  session_unlink (tab, sess);
+  clock_gettime (CLOCK_REALTIME, &sess->expire);
+  sess->expire.tv_sec += svc->sess_ttl;
+  session_link_at_tail (tab, sess);
+  service_rearm_expire_sessions (svc);
+}
+
+/*
+ * Add a new key/backend pair to the session table of SVC.  If this is
+ * going to be the the first session in the session list, schedule the
+ * expiration job.
+ *
+ * The service mutex must be locked.
+ */
+static void
+service_session_add (SERVICE *svc, const char *key, BACKEND *be)
+{
+  SESSION_TABLE *tab = svc->sessions;
   SESSION *t, *old;
   size_t keylen = strlen (key);
 
   if ((t = malloc (sizeof (SESSION) + keylen + 1)) == NULL)
     {
-      logmsg (LOG_WARNING, "session_add() content malloc");
+      logmsg (LOG_WARNING, "service_session_add() content malloc");
       return;
     }
   t->key = (char*)(t + 1);
   strcpy (t->key, key);
   t->backend = be;
-  t->last_acc = time (NULL);
+  clock_gettime (CLOCK_REALTIME, &t->expire);
+  t->expire.tv_sec += svc->sess_ttl;
   if ((old = SESSION_INSERT (tab->hash, t)) != NULL)
     {
       session_free (old);
-      logmsg (LOG_WARNING, "session_add() DUP");
+      logmsg (LOG_WARNING, "service_session_add() DUP");
     }
   session_link_at_tail (tab, t);
+  if (DLIST_NEXT (DLIST_FIRST (&tab->head), link) == 0)
+    job_enqueue (&t->expire, expire_sessions, svc);
 }
 
 /*
- * Find a key
- * returns the backend in the parameter
- * side-effect: update the time of last access
+ * Look up the service session table for the given key.  If found,
+ * return the corresponding backend and promote the session.
+ *
+ * The service mutex must be locked.
  */
 static BACKEND *
-session_find (SESSION_TABLE *const tab, char *const key)
+service_session_find (SERVICE *svc, char *const key)
 {
+  SESSION_TABLE *tab = svc->sessions;
   SESSION t, *res;
 
   t.key = key;
   if ((res = SESSION_RETRIEVE (tab->hash, &t)) != NULL)
     {
-      session_promote (tab, res);
+      service_session_promote (svc, res);
       return res->backend;
     }
   return NULL;
 }
 
 /*
- * Delete a key
+ * Delete from the service session table a session corresponding to the
+ * given key.
+ *
+ * The service mutex must be locked.
  */
 static void
-session_remove_by_key (SESSION_TABLE *tab, char *const key)
+service_session_remove_by_key (SERVICE *svc, char *const key)
 {
+  SESSION_TABLE *tab = svc->sessions;
   SESSION t, *res;
 
   t.key = key;
   if ((res = SESSION_DELETE (tab->hash, &t)) != NULL)
     {
+      int first = DLIST_FIRST (&tab->head) == res;
       session_unlink (tab, res);
       session_free (res);
+      if (first)
+	service_rearm_expire_sessions (svc);
     }
   return;
 }
 
 /*
- * Expire all old nodes
+ * Remove from the service session table all sessions with the given backend
+ *
+ * The service mutex must be locked.
  */
 static void
-session_expire (SESSION_TABLE *tab, const time_t lim)
+service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 {
-  SESSION *sess;
-  while ((sess = DLIST_FIRST (&tab->head)) != NULL && sess->last_acc < lim)
-    {
-      if ((SESSION_DELETE (tab->hash, sess)) == NULL)
-	break;
-      session_unlink (tab, sess);
-      session_free (sess);
-    }
-}
-
-/*
- * Remove all sessions with the given backend
- */
-static void
-session_remove_by_backend (SESSION_TABLE *tab, BACKEND *be)
-{
-  SESSION *sess, *tmp;
+  SESSION_TABLE *tab = svc->sessions;
+  SESSION *sess, *tmp, *first;
 
+  first = DLIST_FIRST (&tab->head);
   DLIST_FOREACH_SAFE (sess, tmp, &tab->head, link)
     {
       if (sess->backend == be)
@@ -203,8 +276,10 @@ session_remove_by_backend (SESSION_TABLE *tab, BACKEND *be)
 	  session_free (sess);
 	}
     }
+  if (first != DLIST_FIRST (&tab->head))
+    service_rearm_expire_sessions (svc);
 }
-
+
 /*
  * Log an error to the syslog or to stderr
  */
@@ -708,7 +783,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
       if (svc->sess_ttl < 0)
 	res = no_be ? svc->emergency
 		     : hash_backend (&svc->backends, svc->abs_pri, key);
-      else if ((res = session_find (svc->sessions, key)) == NULL)
+      else if ((res = service_session_find (svc, key)) == NULL)
 	{
 	  if (no_be)
 	    res = svc->emergency;
@@ -716,7 +791,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	    {
 	      /* no session yet - create one */
 	      res = rand_backend (&svc->backends, random () % svc->tot_pri);
-	      session_add (svc->sessions, key, res);
+	      service_session_add (svc, key, res);
 	    }
 	}
       break;
@@ -728,7 +803,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
 			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((res = session_find (svc->sessions, key)) == NULL)
+	  else if ((res = service_session_find (svc, key)) == NULL)
 	    {
 	      if (no_be)
 		res = svc->emergency;
@@ -736,7 +811,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 		{
 		  /* no session yet - create one */
 		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  session_add (svc->sessions, key, res);
+		  service_session_add (svc, key, res);
 		}
 	    }
 	}
@@ -753,7 +828,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 	  if (svc->sess_ttl < 0)
 	    res = no_be ? svc->emergency
 			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((res = session_find (svc->sessions, key)) == NULL)
+	  else if ((res = service_session_find (svc, key)) == NULL)
 	    {
 	      if (no_be)
 		res = svc->emergency;
@@ -761,7 +836,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
 		{
 		  /* no session yet - create one */
 		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  session_add (svc->sessions, key, res);
+		  service_session_add (svc, key, res);
 		}
 	    }
 	}
@@ -792,12 +867,14 @@ upd_session (SERVICE *const svc, char **const headers, BACKEND * const be)
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() lock: %s", strerror (ret_val));
   if (get_HEADERS (key, svc, headers))
-    if (session_find (svc->sessions, key) == NULL)
-      session_add (svc->sessions, key, be);
+    if (service_session_find (svc, key) == NULL)
+      service_session_add (svc, key, be);
   if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "upd_session() unlock: %s", strerror (ret_val));
   return;
 }
+
+static void touch_be (void *data);
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
@@ -806,7 +883,7 @@ upd_session (SERVICE *const svc, char **const headers, BACKEND * const be)
  *  disable_only == -1:  mark as enabled
  */
 void
-kill_be (SERVICE * const svc, BACKEND *be, const int disable_mode)
+kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 {
   BACKEND *b;
   int ret_val;
@@ -818,36 +895,39 @@ kill_be (SERVICE * const svc, BACKEND *be, const int disable_mode)
   SLIST_FOREACH (b, &svc->backends, next)
     {
       if (b == be)
-	switch (disable_mode)
-	  {
-	  case BE_DISABLE:
-	    b->disabled = 1;
-	    str_be (buf, sizeof (buf), b);
-	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
-		    POUND_TID (),
-		    buf);
-	    break;
+	{
+	  switch (disable_mode)
+	    {
+	    case BE_DISABLE:
+	      b->disabled = 1;
+	      str_be (buf, sizeof (buf), b);
+	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
+		      POUND_TID (),
+		      buf);
+	      break;
 
-	  case BE_KILL:
-	    b->alive = 0;
-	    str_be (buf, sizeof (buf), b);
-	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
-		    POUND_TID (), buf);
-	    session_remove_by_backend (svc->sessions, be);
-	    break;
+	    case BE_KILL:
+	      b->alive = 0;
+	      str_be (buf, sizeof (buf), b);
+	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
+		      POUND_TID (), buf);
+	      service_session_remove_by_backend (svc, be);
+	      job_enqueue_after (alive_to, touch_be, be);
+	      break;
 
-	  case BE_ENABLE:
-	    str_be (buf, sizeof (buf), b);
-	    logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
-		    POUND_TID (),
-		    buf);
-	    b->disabled = 0;
-	    break;
+	    case BE_ENABLE:
+	      str_be (buf, sizeof (buf), b);
+	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
+		      POUND_TID (),
+		      buf);
+	      b->disabled = 0;
+	      break;
 
-	  default:
-	    logmsg (LOG_WARNING, "kill_be(): unknown mode %d", disable_mode);
-	    break;
-	  }
+	    default:
+	      logmsg (LOG_WARNING, "kill_be(): unknown mode %d", disable_mode);
+	      break;
+	    }
+	}
       if (b->alive && !b->disabled)
 	svc->tot_pri += b->priority;
     }
@@ -1145,26 +1225,16 @@ enum
     BACKEND_OK,
     BACKEND_DEAD,
     BACKEND_ERR,
-    BACKEND_NOADDR
   };
 
 static int
-backend_probe (BACKEND *be, int ha)
+backend_probe (BACKEND *be)
 {
   int sock;
-  const struct addrinfo *addr;
   int family;
   int rc;
 
-  addr = &be->ha_addr;
-  if (addr->ai_addrlen == 0)
-    {
-      if (ha)
-	return BACKEND_NOADDR;
-      addr = &be->addr;
-    }
-
-  switch (addr->ai_family)
+  switch (be->addr.ai_family)
     {
     case AF_INET:
       family = PF_INET;
@@ -1186,165 +1256,41 @@ backend_probe (BACKEND *be, int ha)
   if ((sock = socket (family, SOCK_STREAM, 0)) < 0)
     return BACKEND_ERR;
 
-  rc = connect_nb (sock, addr, be->conn_to);
+  rc = connect_nb (sock, &be->addr, be->conn_to);
   shutdown (sock, 2);
   close (sock);
 
   return rc == 0 ? BACKEND_OK : BACKEND_DEAD;
 }
 
+/*
+ * Periodic job: check if the backend passed as argument is alive.
+ * If so, return it to the pool of backends.  Otherwise, reschedule
+ * itself for alive_to seconds later.
+ */
 static void
-service_update_pri (SERVICE *svc)
+touch_be (void *data)
 {
-  BACKEND *be;
+  BACKEND *be = data;
   char buf[MAXBUF];
 
-  pthread_mutex_lock (&svc->mut);
-
-  svc->tot_pri = 0;
-  SLIST_FOREACH (be, &svc->backends, next)
+  if (!be->alive)
     {
-      if (be->resurrect)
+      if (backend_probe (be) == BACKEND_OK)
 	{
 	  be->alive = 1;
 	  str_be (buf, sizeof (buf), be);
 	  logmsg (LOG_NOTICE, "Backend %s resurrect", buf);
+	  if (!be->disabled)
+	    {
+	      pthread_mutex_lock (&be->service->mut);
+	      be->service->tot_pri += be->priority;
+	      pthread_mutex_unlock (&be->service->mut);
+	    }
 	}
-      if (be->alive && !be->disabled)
-	svc->tot_pri += be->priority;
+      else
+	job_enqueue_after_unlocked (alive_to, touch_be, be);
     }
-
-  pthread_mutex_unlock (&svc->mut);
-}
-
-/*
- * Check if dead hosts returned to life;
- * runs every alive seconds
- */
-static void
-do_resurrect (void)
-{
-  LISTENER *lstn;
-  SERVICE *svc;
-  BACKEND *be;
-  int modified;
-  char buf[MAXBUF];
-
-  /* check hosts still alive - HAport */
-  SLIST_FOREACH (lstn, &listeners, next)
-    SLIST_FOREACH (svc, &lstn->services, next)
-      SLIST_FOREACH (be, &svc->backends, next)
-	{
-	  if (be->be_type == BE_BACKEND &&
-	      be->alive &&
-	      backend_probe (be, 1) == BACKEND_DEAD)
-	    {
-	      kill_be (svc, be, BE_KILL);
-	      str_be (buf, sizeof (buf), be);
-	      logmsg (LOG_NOTICE, "Backend %s is dead (HA)", buf);
-	    }
-	}
-
-  SLIST_FOREACH (svc, &services, next)
-    SLIST_FOREACH (be, &svc->backends, next)
-      {
-	if (be->be_type == BE_BACKEND &&
-	    be->alive &&
-	    backend_probe (be, 1) == BACKEND_DEAD)
-	  {
-	    kill_be (svc, be, BE_KILL);
-	    str_be (buf, sizeof (buf), be);
-	    logmsg (LOG_NOTICE, "Backend %s is dead (HA)", buf);
-	  }
-      }
-
-  /* check hosts alive again */
-  SLIST_FOREACH (lstn, &listeners, next)
-    SLIST_FOREACH (svc, &lstn->services, next)
-      {
-	modified = 0;
-
-	SLIST_FOREACH (be, &svc->backends, next)
-	  {
-	    be->resurrect = 0;
-	    if (be->be_type == BE_BACKEND &&
-		!be->alive &&
-		backend_probe (be, 0) == BACKEND_OK)
-	      {
-		be->resurrect = 1;
-		modified = 1;
-	      }
-	  }
-
-	if (modified)
-	  service_update_pri (svc);
-      }
-
-  SLIST_FOREACH (svc, &services, next)
-    {
-      modified = 0;
-      SLIST_FOREACH (be, &svc->backends, next)
-	{
-	  be->resurrect = 0;
-	  if (be->be_type == BE_BACKEND &&
-	      !be->alive &&
-	      backend_probe (be, 0) == BACKEND_OK)
-	    {
-	      be->resurrect = 1;
-	      modified = 1;
-	    }
-	}
-
-      if (modified)
-	service_update_pri (svc);
-    }
-}
-
-/*
- * Remove expired sessions
- * runs every EXPIRE_TO seconds
- */
-static void
-do_expire (void)
-{
-  LISTENER *lstn;
-  SERVICE *svc;
-  time_t cur_time;
-  int ret_val;
-
-  /* remove stale sessions */
-  cur_time = time (NULL);
-
-  SLIST_FOREACH (lstn, &listeners, next)
-    SLIST_FOREACH (svc, &lstn->services, next)
-      if (svc->sess_type != SESS_NONE)
-	{
-	  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-	    {
-	      logmsg (LOG_WARNING, "do_expire() lock: %s",
-		      strerror (ret_val));
-	      continue;
-	    }
-	  session_expire (svc->sessions, cur_time - svc->sess_ttl);
-	  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "do_expire() unlock: %s",
-		    strerror (ret_val));
-	}
-
-  SLIST_FOREACH (svc, &services, next)
-    if (svc->sess_type != SESS_NONE)
-      {
-	if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-	  {
-	    logmsg (LOG_WARNING, "do_expire() lock: %s", strerror (ret_val));
-	    continue;
-	  }
-	session_expire (svc->sessions, cur_time - svc->sess_ttl);
-	if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-	  logmsg (LOG_WARNING, "do_expire() unlock: %s", strerror (ret_val));
-      }
-
-  return;
 }
 
 #if ! SET_DH_AUTO
@@ -1397,11 +1343,14 @@ generate_key (RSA ** ret_rsa, unsigned long bits)
  * runs every T_RSA_KEYS seconds
  */
 static void
-do_RSAgen (void)
+do_RSAgen (void *unused)
 {
   int n, ret_val;
   RSA *t_RSA512_keys[N_RSA_KEYS];
   RSA *t_RSA1024_keys[N_RSA_KEYS];
+
+  /* Re-arm the job */
+  job_enqueue_after_unlocked (T_RSA_KEYS, do_RSAgen, NULL);
 
   for (n = 0; n < N_RSA_KEYS; n++)
     {
@@ -1509,108 +1458,160 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
 }
 #endif
 
-/* Struct timespec operations */
-static inline int
-timespec_cmp (struct timespec const *a, struct timespec const *b)
-{
-  if (a->tv_sec < b->tv_sec)
-    return -1;
-  if (a->tv_sec > b->tv_sec)
-    return 1;
-  if (a->tv_nsec < b->tv_nsec)
-    return -1;
-  if (a->tv_nsec > b->tv_nsec)
-    return 1;
-  return 0;
-}
-
-enum { NANOSEC_IN_SEC = 1000000000 };
-
-static inline void
-timespec_add (struct timespec const *a, struct timespec const *b,
-	      struct timespec *res)
-{
-  res->tv_sec = a->tv_sec + b->tv_sec;
-  res->tv_nsec = a->tv_nsec + b->tv_nsec;
-  if (res->tv_nsec >= NANOSEC_IN_SEC)
-    {
-      ++res->tv_sec;
-      res->tv_nsec -= NANOSEC_IN_SEC;
-    }
-}
-
 /* Periodic jobs */
 typedef struct job
 {
   struct timespec ts;
-  struct timespec interval;
-  void (*func) ();
-  SLIST_ENTRY (job) next;
+  void (*func) (void *);
+  void *data;
+  DLIST_ENTRY (job) link;
 } JOB;
 
-typedef SLIST_HEAD (,job) JOB_HEAD;
-
-static void
-job_enqueue (JOB_HEAD *jh, JOB *job)
-{
-  struct timespec nts;
-  JOB *t, *prev = NULL;
-
-  clock_gettime (CLOCK_MONOTONIC, &nts);
-  timespec_add (&nts, &job->interval, &job->ts);
-
-  SLIST_FOREACH (t, jh, next)
-    {
-      if (timespec_cmp (&job->ts, &t->ts) < 0)
-	break;
-      prev = t;
-    }
-
-  if (prev)
-    SLIST_INSERT_AFTER (jh, prev, job, next);
-  else
-    SLIST_INSERT_HEAD (job, jh, next);
-}
+typedef DLIST_HEAD (,job) JOB_HEAD;
+static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
+static pthread_mutex_t job_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
 
 static JOB *
-job_alloc (void (*func) (void), unsigned n)
+job_alloc (struct timespec const *ts, void (*func) (void *), void *data)
 {
   JOB *job;
 
   XZALLOC (job);
-  job->interval.tv_sec = n;
-  job->interval.tv_nsec = 0;
+  job->ts = *ts;
   job->func = func;
+  job->data = data;
   return job;
 }
 
+static void
+job_arm_unlocked (JOB *job)
+{
+  JOB *t;
+
+  DLIST_FOREACH (t, &job_head, link)
+    {
+      if (timespec_cmp (&job->ts, &t->ts) < 0)
+	break;
+    }
+
+  DLIST_INSERT_BEFORE (&job_head, t, job, link);
+
+  if (DLIST_PREV (job, link) == NULL)
+    pthread_cond_broadcast (&job_cond);
+}
+
+void
+job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data)
+{
+  job_arm_unlocked (job_alloc (ts, func, data));
+}
+
+void
+job_enqueue (struct timespec const *ts, void (*func) (void *), void *data)
+{
+  pthread_mutex_lock (&job_mutex);
+  job_enqueue_unlocked (ts, func, data);
+  pthread_mutex_unlock (&job_mutex);
+}
+
+void
+job_enqueue_after_unlocked (unsigned t, void (*func) (void *), void *data)
+{
+  struct timespec ts;
+  clock_gettime (CLOCK_REALTIME, &ts);
+  ts.tv_sec += t;
+  job_enqueue_unlocked (&ts, func, data);
+}
+
+void
+job_enqueue_after (unsigned t, void (*func) (void *), void *data)
+{
+  pthread_mutex_lock (&job_mutex);
+  job_enqueue_after_unlocked (t, func, data);
+  pthread_mutex_unlock (&job_mutex);
+}
+
+void
+job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data)
+{
+  JOB *job, *tmp;
+
+  DLIST_FOREACH_SAFE (job, tmp, &job_head, link)
+    {
+      if (job->func == func && job->data == data)
+	{
+	  DLIST_REMOVE (&job_head, job, link);
+	  job->ts = *ts;
+	  job_arm_unlocked (job);
+	  return;
+	}
+    }
+  job_arm_unlocked (job_alloc (ts, func, data));
+}
+
+void
+job_rearm (struct timespec *ts, void (*func) (void *), void *data)
+{
+  pthread_mutex_lock (&job_mutex);
+  job_rearm_unlocked (ts, func, data);
+  pthread_mutex_unlock (&job_mutex);
+}
+
+static void
+timer_cleanup (void *ptr)
+{
+  pthread_mutex_unlock (&job_mutex);
+}
+
 /*
- * run timed functions:
- *  - resurect every alive_to seconds
- *  - expire every EXPIRE_TO seconds
- *  - RSAgen every T_RSA_KEYS seconds (for older OpenSSL)
+ * run periodic functions:
  */
 void *
 thr_timer (void *arg)
 {
-  JOB_HEAD jh = SLIST_HEAD_INITIALIZER (jh);
-
-  /* Seed job queue */
-  job_enqueue (&jh, job_alloc (do_resurrect, alive_to));
-  job_enqueue (&jh, job_alloc (do_expire, EXPIRE_TO));
+  /* Seed the job queue */
 #if ! SET_DH_AUTO
   init_rsa ();
-  job_enqueue (&jh, job_alloc (do_RSAgen, T_RSA_KEYS));
+  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 #endif
+
+  pthread_mutex_lock (&job_mutex);
+  pthread_cleanup_push (timer_cleanup, NULL);
 
   for (;;)
     {
-      JOB *job = SLIST_FIRST (&jh);
-      clock_nanosleep (CLOCK_MONOTONIC, TIMER_ABSTIME, &job->ts, NULL);
-      SLIST_SHIFT (&jh, next);
-      job->func ();
-      job_enqueue (&jh, job);
+      int rc;
+      JOB *job;
+
+      if (DLIST_EMPTY (&job_head))
+	{
+	  pthread_cond_wait (&job_cond, &job_mutex);
+	  continue;
+	}
+
+      job = DLIST_FIRST (&job_head);
+
+      rc = pthread_cond_timedwait (&job_cond, &job_mutex, &job->ts);
+      if (rc == 0)
+	continue;
+      if (rc != ETIMEDOUT)
+	{
+	  logmsg (LOG_CRIT, "unexpected error from pthread_cond_timedwait: %s",
+		  strerror (errno));
+	  exit (1);
+	}
+
+      if (job != DLIST_FIRST (&job_head))
+	/* Job was removed or its time changed */
+	continue;
+
+      DLIST_SHIFT (&job_head, link);
+
+      job->func (job->data);
+      free (job);
     }
+  pthread_cleanup_pop (1);
 }
 
 typedef struct
@@ -1786,9 +1787,6 @@ do_list (int ctl)
 		return -1;
 	      if (write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
 		return -1;
-	      if (be->ha_addr.ai_addrlen > 0 &&
-		  write (ctl, be->ha_addr.ai_addr, be->ha_addr.ai_addrlen) == -1)
-		return -1;
 	    }
 	  if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
 	    return -1;
@@ -1819,9 +1817,6 @@ do_list (int ctl)
 	{
 	  if (write (ctl, (void *) be, sizeof (BACKEND)) == -1 ||
 	      write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
-	    return -1;
-	  if (be->ha_addr.ai_addrlen > 0 &&
-	      write (ctl, be->ha_addr.ai_addr, be->ha_addr.ai_addrlen) == -1)
 	    return -1;
 	}
       if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
@@ -1967,7 +1962,7 @@ thr_control (void *arg)
 	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() add session lock: %s",
 		    strerror (rc));
-	  session_add (svc->sessions, cmd.key, be);
+	  service_session_add (svc, cmd.key, be);
 	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING,
 		    "thoriginalfiler_control() add session unlock: %s",
@@ -1984,7 +1979,7 @@ thr_control (void *arg)
 	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session lock: %s",
 		    strerror (rc));
-	  session_remove_by_key (svc->sessions, cmd.key);
+	  service_session_remove_by_key (svc, cmd.key);
 	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
 	    logmsg (LOG_WARNING, "thr_control() del session unlock: %s",
 		    strerror (rc));

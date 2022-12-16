@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 9, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "December 15, 2022" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1099,13 +1099,6 @@ value.
 Override the global
 .B WSTimeOut
 value.
-.TP
-\fBHAport\fR [ \fIaddress\fR ] \fIport\fR
-A port (and optional address) to be used for server function checks. See below
-the "High Availability" section for a more detailed discussion. By default
-.B pound
-uses the same address as the backend server, but you may use a separate address
-if you wish. This directive applies only to non Unix-domain servers.
 .TP
 \fBDisabled\fR \fIbool\fR
 Start

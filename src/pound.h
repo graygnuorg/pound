@@ -220,23 +220,25 @@ typedef enum
 /* back-end definition */
 typedef struct _backend
 {
+  struct _service *service;     /* Back pointer to the owning service */
   BACKEND_TYPE be_type;         /* Backend type */
   struct addrinfo addr;		/* IPv4/6 address */
   int priority;			/* priority */
   unsigned to;			/* read/write time-out */
   unsigned conn_to;		/* connection time-out */
   unsigned ws_to;		/* websocket time-out */
-  struct addrinfo ha_addr;	/* HA address/port */
   char *url;			/* for redirectors */
   int redir_code;               /* Redirection code (301, 302, or 307) */
   int redir_req;		/* the redirect should include the request path */
   SSL_CTX *ctx;			/* CTX for SSL connections */
+
+  /* FIXME: The following four fields are currently not used: */
   pthread_mutex_t mut;		/* mutex for this back-end */
   int n_requests;		/* number of requests seen */
   double t_requests;		/* time to answer these requests */
   double t_average;		/* average time to answer requests */
+
   int alive;			/* false if the back-end is dead */
-  int resurrect;		/* this back-end is to be resurrected */
   int disabled;			/* true if the back-end is disabled */
   SLIST_ENTRY (_backend) next;
 } BACKEND;
@@ -247,7 +249,7 @@ typedef struct session
 {
   char *key;
   BACKEND *backend;
-  time_t last_acc;
+  struct timespec expire;
   DLIST_ENTRY (session) link;
 } SESSION;
 
@@ -515,7 +517,7 @@ int check_header (const char *, char *);
  * mark a backend host as dead;
  * do nothing if no resurection code is active
  */
-void kill_be (SERVICE * const, BACKEND *, const int);
+void kill_be (SERVICE *, BACKEND *, const int);
 
 /*
  * Update the number of requests and time to answer for a given back-end
@@ -547,21 +549,10 @@ void config_parse (int, char **);
 void SSLINFO_callback (const SSL * s, int where, int rc);
 
 /*
- * expiration stuff
- */
-#ifndef EXPIRE_TO
-# define EXPIRE_TO   60
-#endif
-
-#ifndef HOST_TO
-# define HOST_TO     300
-#endif
-
-/*
- * run timed functions:
- *  - RSAgen every T_RSA_KEYS seconds
- *  - resurrect every alive_to seconds
- *  - expire every EXPIRE_TO seconds
+ * run periodic functions:
+ *  - RSAgen every T_RSA_KEYS seconds (on older OpenSSL)
+ *  - probe dead backends every alive_to seconds
+ *  - clean up expire sessions as needed
  */
 void *thr_timer (void *);
 
@@ -608,3 +599,12 @@ static inline char *stringbuf_value (struct stringbuf *sb)
 {
   return sb->base;
 }
+
+void job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data);
+void job_enqueue_after_unlocked (unsigned t, void (*func) (void *), void *data);
+
+void job_enqueue (struct timespec const *ts, void (*func) (void *), void *data);
+void job_enqueue_after (unsigned t, void (*func) (void *), void *data);
+
+void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data);
+void job_rearm (struct timespec *ts, void (*func) (void *), void *data);

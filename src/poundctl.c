@@ -110,7 +110,7 @@ static int
 be_prt (const int sock)
 {
   BACKEND be;
-  struct sockaddr_storage a, h;
+  struct sockaddr_storage a;
   int n_be;
   ssize_t n;
 
@@ -125,15 +125,6 @@ be_prt (const int sock)
 	  return -1;
 	}
       be.addr.ai_addr = (struct sockaddr *) &a;
-      if (be.ha_addr.ai_addrlen > 0)
-	{
-	  if (read (sock, &h, be.ha_addr.ai_addrlen) == -1)
-	    {
-	      perror ("read");
-	      return -1;
-	    }
-	  be.ha_addr.ai_addr = (struct sockaddr *) &h;
-	}
       if (xml_out)
 	printf
 	  ("<backend index=\"%d\" address=\"%s\" avg=\"%.3f\" priority=\"%d\" alive=\"%s\" status=\"%s\" />\n",

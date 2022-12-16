@@ -123,26 +123,6 @@
     }							\
   while (0)
 
-#define DLIST_INSERT_AFTER(head, anchor, elt, field)			\
-  do									\
-    {									\
-      if (((elt)->field.dl_next = (anchor)->field.dl_next) == NULL)	\
-	(head)->dl_last = (elt);					\
-      (anchor)->field.dl_next = (elt);					\
-      (elt)->field.dl_prev = (anchor);					\
-    }									\
-  while (0)
-
-#define DLIST_INSERT_BEFORE(head, anchor, elt, field)			\
-  do									\
-    {									\
-      if (((elt)->field.dl_prev = (anchor)->field.dl_prev) == NULL)	\
-	(head)->dl_first = (elt);					\
-      (anchor)->field.dl_prev = (elt);					\
-      (elt)->field.dl_next = anchor;					\
-    }									\
-  while (0)
-
 #define DLIST_INSERT_HEAD(head, elt, field)			\
   do								\
     {								\
@@ -167,6 +147,40 @@
     }								\
   while (0)
 
+#define DLIST_INSERT_AFTER(head, anchor, elt, field)			\
+  do									\
+    {									\
+      if ((anchor) == NULL)						\
+	DLIST_INSERT_TAIL (head, elt, field);				\
+      else								\
+	{								\
+	  if (((elt)->field.dl_next = (anchor)->field.dl_next) == NULL)	\
+	    (head)->dl_last = (elt);					\
+	  else								\
+	    (elt)->field.dl_next->link.dl_prev = (elt);			\
+	  (anchor)->field.dl_next = (elt);				\
+	  (elt)->field.dl_prev = (anchor);				\
+	}								\
+    }									\
+  while (0)
+
+#define DLIST_INSERT_BEFORE(head, anchor, elt, field)			\
+  do									\
+    {									\
+      if ((anchor) == NULL)						\
+	DLIST_INSERT_HEAD (head, elt, field);				\
+      else								\
+	{								\
+	  if (((elt)->field.dl_prev = (anchor)->field.dl_prev) == NULL)	\
+	    (head)->dl_first = (elt);					\
+	  else								\
+	    (elt)->field.dl_prev->link.dl_next = (elt);			\
+	  (anchor)->field.dl_prev = (elt);				\
+	  (elt)->field.dl_next = (anchor);				\
+	}								\
+    }									\
+  while (0)
+
 #define DLIST_REMOVE(head, elt, field)					\
   do									\
     {									\
@@ -180,6 +194,16 @@
 	(head)->dl_last = (elt)->field.dl_prev;				\
     }									\
   while (0)
+
+#define DLIST_REMOVE_HEAD(head, field)				\
+  do								\
+    {								\
+      (head)->dl_first = (head)->dl_first->field.dl_next;	\
+      (head)->dl_first->field.dl_prev = NULL;			\
+    }								\
+  while (0)
+
+#define DLIST_SHIFT DLIST_REMOVE_HEAD
 
 #define DLIST_FOREACH(var, head, field)		\
   for ((var) = (head)->dl_first; (var); (var) = (var)->field.dl_next)

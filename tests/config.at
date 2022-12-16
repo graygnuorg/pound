@@ -185,20 +185,4 @@ Service
 [pound: pound.cfg:2.7: unexpected end of file
 ])
 
-PT_CONF([# HAPort statement
-Service
-	Backend
-		Address 127.0.0.1
-		Port 8080
-		haport 8081
-	End
-	Backend
-		Address 127.0.0.2
-		Port 8080
-		haport 127.0.0.3 8082
-	End
-End
-])
-
 AT_CLEANUP
-

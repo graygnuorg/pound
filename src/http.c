@@ -857,7 +857,7 @@ do_http (THR_ARG *arg)
     force_10, sock_proto, is_rpc, is_ws;
   LISTENER *lstn;
   SERVICE *svc;
-  BACKEND *backend, *cur_backend, *old_backend;
+  BACKEND *backend, *cur_backend;
   struct addrinfo from_host;
   struct sockaddr_storage from_host_addr;
   BIO *cl, *be, *bb, *b64;
@@ -1376,19 +1376,8 @@ do_http (THR_ARG *arg)
 		      POUND_TID (), buf, strerror (errno));
 	      shutdown (sock, 2);
 	      close (sock);
-	      /*
-	       * kill the back-end only if no HAport is defined for it
-	       * otherwise allow the HAport mechanism to do its job
-	       */
-	      if (backend->ha_addr.ai_addrlen == 0)
-		kill_be (svc, backend, BE_KILL);
-	      /*
-	       * ...but make sure we don't get into a loop with the same
-	       * back-end
-	       */
-	      old_backend = backend;
-	      if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL
-		  || backend == old_backend)
+	      kill_be (svc, backend, BE_KILL);
+	      if ((backend = get_backend (svc, &from_host, url, &headers[1])) == NULL)
 		{
 		  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s",
 			  POUND_TID (), request,
