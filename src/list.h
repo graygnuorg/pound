@@ -195,12 +195,14 @@
     }									\
   while (0)
 
-#define DLIST_REMOVE_HEAD(head, field)				\
-  do								\
-    {								\
-      (head)->dl_first = (head)->dl_first->field.dl_next;	\
-      (head)->dl_first->field.dl_prev = NULL;			\
-    }								\
+#define DLIST_REMOVE_HEAD(head, field)					\
+  do									\
+    {									\
+      if (((head)->dl_first = (head)->dl_first->field.dl_next) != NULL)	\
+	(head)->dl_first->field.dl_prev = NULL;				\
+      else								\
+	(head)->dl_last = NULL;						\
+    }									\
   while (0)
 
 #define DLIST_SHIFT DLIST_REMOVE_HEAD
