@@ -27,6 +27,7 @@
 
 #include "pound.h"
 #include "extern.h"
+#include "json.h"
 
 /*
  * Compare two timespecs
@@ -238,12 +239,12 @@ service_session_find (SERVICE *svc, char *const key)
  * The service mutex must be locked.
  */
 static void
-service_session_remove_by_key (SERVICE *svc, char *const key)
+service_session_remove_by_key (SERVICE *svc, char const *key)
 {
   SESSION_TABLE *tab = svc->sessions;
   SESSION t, *res;
 
-  t.key = key;
+  t.key = (char*) key;
   if ((res = SESSION_DELETE (tab->hash, &t)) != NULL)
     {
       int first = DLIST_FIRST (&tab->head) == res;
@@ -1614,384 +1615,734 @@ thr_timer (void *arg)
   pthread_cleanup_pop (1);
 }
 
-typedef struct
+static char *
+get_param (char const *url, char const *param, size_t *ret_len)
 {
-  int control_sock;
-  BACKEND_HEAD *backends;
-} DUMP_ARG;
+  char *p;
+  size_t paramlen = strlen (param);
 
-static void
-dump_session (int control_sock, SESSION *t, BACKEND_HEAD * const backends)
-{
-  BACKEND *be, *bep = t->backend;
-  int n_be, sz;
-
-  n_be = 0;
-  SLIST_FOREACH (be, backends, next)
+  for (p = strchr (url, '?'); p && *++p; p = strchr (p, '&'))
     {
-      if (be == bep)
-	break;
-      n_be++;
+      if (strncmp (p, param, paramlen) == 0 && p[paramlen] == '=')
+	{
+	  p += paramlen + 1;
+	  *ret_len = strcspn (p, "&");
+	  break;
+	}
     }
-  if (!be)
-    /* should NEVER happen */
-    n_be = 0;
-  if (write (control_sock, t, sizeof (SESSION)) == -1)
-    {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
-	      strerror (errno));
-      return;
-    }
-  if (write (control_sock, &n_be, sizeof (n_be)) == -1)
-    {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
-	      strerror (errno));
-      return;
-    }
-  sz = strlen (t->key);
-  if (write (control_sock, &sz, sizeof (sz)) == -1)
-    {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
-	      strerror (errno));
-      return;
-    }
-  if (write (control_sock, t->key, sz) == -1)
-    {
-      logmsg (LOG_ERR, "%s:%d: %s() write: %s", __FILE__, __LINE__, __func__,
-	      strerror (errno));
-      return;
-    }
+  return p;
 }
-
+
 /*
- * write sessions to the control socket
- */
-static void
-dump_session_table (const int control_sock, SESSION_TABLE *const tab,
-		    BACKEND_HEAD * const backends)
-{
-  SESSION *sess;
-
-  if (tab)
-    DLIST_FOREACH (sess, &tab->head, link)
-      dump_session (control_sock, sess, backends);
-}
-
-/*
- * given a command, select a listener
+ * return listener by its number
  */
 static LISTENER *
-sel_lstn (const CTRL_CMD * cmd)
+get_nth_listener (int n)
 {
   LISTENER *lstn;
-  int i = 0;
 
-  if (cmd->listener < 0)
-    return NULL;
   SLIST_FOREACH (lstn, &listeners, next)
     {
-      if (i == cmd->listener)
-	return lstn;
-      i++;
+      if (n == 0)
+	break;
+      n--;
     }
   return lstn;
 }
 
 /*
- * given a command, select a service
+ * return service by its number
  */
 static SERVICE *
-sel_svc (const CTRL_CMD *cmd)
+get_nth_service (LISTENER *lstn, int n)
 {
-  SERVICE_HEAD *head;
   SERVICE *svc;
-  LISTENER *lstn;
-  int i;
-
-  if (cmd->listener < 0)
-    {
-      head = &services;
-    }
-  else
-    {
-      if ((lstn = sel_lstn (cmd)) == NULL)
-	return NULL;
-      head = &lstn->services;
-    }
-  i = 0;
+  SERVICE_HEAD *head = lstn ? &lstn->services : &services;
   SLIST_FOREACH (svc, head, next)
     {
-      if (i == cmd->service)
-	return svc;
-      i++;
+      if (n == 0)
+	break;
+      n--;
     }
-  return NULL;
+  return svc;
 }
 
 /*
- * given a command, select a back-end
+ * select a back-end by number
  */
 static BACKEND *
-sel_be (const CTRL_CMD * cmd)
+get_nth_backend (SERVICE *svc, int n)
 {
   BACKEND *be;
-  SERVICE *svc;
-  int i;
 
-  if ((svc = sel_svc (cmd)) == NULL)
-    return NULL;
-  i = 0;
   SLIST_FOREACH (be, &svc->backends, next)
     {
-      if (i == cmd->backend)
+      if (n == 0)
 	break;
-      i++;
+      n--;
     }
   return be;
 }
 
 static int
-do_list (int ctl)
+session_backend_index (SESSION *sess)
 {
-  int n;
-  LISTENER *lstn, dummy_lstn;
-  SERVICE *svc, dummy_svc;
-  BACKEND *be, dummy_be;
-  SESSION dummy_sess;
-  int rc;
-
-  memset (&dummy_lstn, 0, sizeof (dummy_lstn));
-  dummy_lstn.disabled = -1;
-  memset (&dummy_svc, 0, sizeof (dummy_svc));
-  dummy_svc.disabled = -1;
-  memset (&dummy_be, 0, sizeof (dummy_be));
-  dummy_be.disabled = -1;
-  memset (&dummy_sess, 0, sizeof (dummy_sess));
-  dummy_sess.backend = NULL;
-
-  n = get_thr_qlen ();
-  if (write (ctl, (void *) &n, sizeof (n)) == -1)
-    return -1;
-  SLIST_FOREACH (lstn, &listeners, next)
-    {
-      if (write (ctl, (void *) lstn, sizeof (LISTENER)) == -1)
-	return -1;
-      if (write (ctl, lstn->addr.ai_addr, lstn->addr.ai_addrlen) == -1)
-	return -1;
-      SLIST_FOREACH (svc, &lstn->services, next)
-	{
-	  if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
-	    return -1;
-	  SLIST_FOREACH (be, &svc->backends, next)
-	    {
-	      if (write (ctl, (void *) be, sizeof (BACKEND)) == -1)
-		return -1;
-	      if (write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
-		return -1;
-	    }
-	  if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
-	    return -1;
-	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
-	  else
-	    {
-	      dump_session_table (ctl, svc->sessions, &svc->backends);
-	      if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
-		logmsg (LOG_WARNING, "thr_control() unlock: %s",
-			strerror (rc));
-	    }
-	  if (write (ctl, (void *) &dummy_sess, sizeof (SESSION)) == -1)
-	    return -1;
-	}
-      if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
-	return -1;
-    }
-
-  if (write (ctl, (void *) &dummy_lstn, sizeof (LISTENER)) == -1)
-    return -1;
-
-  SLIST_FOREACH (svc, &services, next)
-    {
-      if (write (ctl, (void *) svc, sizeof (SERVICE)) == -1)
-	return -1;
-      SLIST_FOREACH (be, &svc->backends, next)
-	{
-	  if (write (ctl, (void *) be, sizeof (BACKEND)) == -1 ||
-	      write (ctl, be->addr.ai_addr, be->addr.ai_addrlen) == -1)
-	    return -1;
-	}
-      if (write (ctl, (void *) &dummy_be, sizeof (BACKEND)) == -1)
-	return -1;
-
-      if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
-	logmsg (LOG_WARNING, "thr_control() lock: %s", strerror (rc));
-      else
-	{
-	  dump_session_table (ctl, svc->sessions, &svc->backends);
-	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "thr_control() unlock: %s", strerror (rc));
-	}
-      if (write (ctl, (void *) &dummy_sess, sizeof (SESSION)) == -1)
-	return -1;
-    }
-  if (write (ctl, (void *) &dummy_svc, sizeof (SERVICE)) == -1)
-    return -1;
-  return 0;
-}
-
-/*
- * The controlling thread
- * listens to client requests and calls the appropriate functions
- */
-void *
-thr_control (void *arg)
-{
-  CTRL_CMD cmd;
-  int ctl, rc;
-  LISTENER *lstn;
-  SERVICE *svc;
+  int n = 0;
   BACKEND *be;
 
-  /* just to be safe */
-  if (control_sock < 0)
-    return NULL;
-  for (;;)
+  SLIST_FOREACH (be, &sess->backend->service->backends, next)
     {
-      struct sockaddr sa;
-      socklen_t len = sizeof (sa);
-      struct pollfd polls;
-
-      polls.fd = control_sock;
-      polls.events = POLLIN | POLLPRI;
-      polls.revents = 0;
-      if (poll (&polls, 1, -1) < 0)
-	{
-	  logmsg (LOG_WARNING, "thr_control() poll: %s", strerror (errno));
-	  continue;
-	}
-      if ((ctl = accept (control_sock, &sa, &len)) < 0)
-	{
-	  logmsg (LOG_WARNING, "thr_control() accept: %s", strerror (errno));
-	  continue;
-	}
-      if (read (ctl, &cmd, sizeof (cmd)) != sizeof (cmd))
-	{
-	  logmsg (LOG_WARNING, "thr_control() read: %s", strerror (errno));
-	  continue;
-	}
-      switch (cmd.cmd)
-	{
-	case CTRL_LST:
-	  /* logmsg(LOG_INFO, "thr_control() list"); */
-	  if (do_list (ctl))
-	    {
-	      logmsg (LOG_ERR, "do_list: write: %s", strerror (errno));
-	    }
-	  break;
-
-	case CTRL_EN_LSTN:
-	  if ((lstn = sel_lstn (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad listener %d", cmd.listener);
-	  else
-	    lstn->disabled = 0;
-	  break;
-
-	case CTRL_DE_LSTN:
-	  if ((lstn = sel_lstn (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad listener %d", cmd.listener);
-	  else
-	    lstn->disabled = 1;
-	  break;
-
-	case CTRL_EN_SVC:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad service %d/%d", cmd.listener,
-		    cmd.service);
-	  else
-	    svc->disabled = 0;
-	  break;
-
-	case CTRL_DE_SVC:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad service %d/%d", cmd.listener,
-		    cmd.service);
-	  else
-	    svc->disabled = 1;
-	  break;
-
-	case CTRL_EN_BE:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    {
-	      logmsg (LOG_INFO, "thr_control() bad service %d/%d",
-		      cmd.listener, cmd.service);
-	      break;
-	    }
-	  if ((be = sel_be (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad backend %d/%d/%d",
-		    cmd.listener, cmd.service, cmd.backend);
-	  else
-	    kill_be (svc, be, BE_ENABLE);
-	  break;
-
-	case CTRL_DE_BE:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    {
-	      logmsg (LOG_INFO, "thr_control() bad service %d/%d",
-		      cmd.listener, cmd.service);
-	      break;
-	    }
-	  if ((be = sel_be (&cmd)) == NULL)
-	    logmsg (LOG_INFO, "thr_control() bad backend %d/%d/%d",
-		    cmd.listener, cmd.service, cmd.backend);
-	  else
-	    kill_be (svc, be, BE_DISABLE);
-	  break;
-
-	case CTRL_ADD_SESS:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    {
-	      logmsg (LOG_INFO, "thr_control() bad service %d/%d",
-		      cmd.listener, cmd.service);
-	      break;
-	    }
-	  if ((be = sel_be (&cmd)) == NULL)
-	    {
-	      logmsg (LOG_INFO, "thr_control() bad back-end %d/%d",
-		      cmd.listener, cmd.service);
-	      break;
-	    }
-	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "thr_control() add session lock: %s",
-		    strerror (rc));
-	  service_session_add (svc, cmd.key, be);
-	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING,
-		    "thoriginalfiler_control() add session unlock: %s",
-		    strerror (rc));
-	  break;
-
-	case CTRL_DEL_SESS:
-	  if ((svc = sel_svc (&cmd)) == NULL)
-	    {
-	      logmsg (LOG_INFO, "thr_control() bad service %d/%d",
-		      cmd.listener, cmd.service);
-	      break;
-	    }
-	  if ((rc = pthread_mutex_lock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "thr_control() del session lock: %s",
-		    strerror (rc));
-	  service_session_remove_by_key (svc, cmd.key);
-	  if ((rc = pthread_mutex_unlock (&svc->mut)) != 0)
-	    logmsg (LOG_WARNING, "thr_control() del session unlock: %s",
-		    strerror (rc));
-	  break;
-
-	default:
-	  logmsg (LOG_WARNING, "thr_control() unknown command");
-	  break;
-	}
-      close (ctl);
+      if (be == sess->backend)
+	break;
+      n++;
     }
+  return n;
+}
+
+static struct json_value *
+timespec_serialize (struct timespec const *ts)
+{
+  char buf[sizeof("1970-01-01T00:00:00.000000")];
+  struct tm tm;
+  size_t n;
+
+  strftime (buf, sizeof (buf), "%Y-%m-%dT%H:%M:%S", localtime_r (&ts->tv_sec, &tm));
+  n = strlen (buf);
+  snprintf (buf + n, sizeof (buf) - n, ".%06ld", ts->tv_nsec / 1000);
+  return json_new_string (buf);
+}
+
+static struct json_value *
+service_session_serialize (SERVICE *svc)
+{
+  struct json_value *obj;
+
+  if (svc->sess_type == SESS_NONE)
+    obj = json_new_null ();
+  else
+    {
+      obj = json_new_array ();
+      if (svc->sessions)
+	{
+	  SESSION *sess;
+
+	  DLIST_FOREACH (sess, &svc->sessions->head, link)
+	    {
+	      struct json_value *s = json_new_object ();
+	      json_array_append (obj, s);
+	      json_object_set (s, "key", json_new_string (sess->key));
+	      json_object_set (s, "backend", json_new_integer (session_backend_index (sess)));
+	      json_object_set (s, "expire", timespec_serialize (&sess->expire));
+	    }
+	}
+    }
+
+  return obj;
+}
+
+static char const *
+backend_type_str (BACKEND_TYPE t)
+{
+  switch (t)
+    {
+    case BE_BACKEND:
+      return "backend";
+
+    case BE_REDIRECT:
+      return "redirect";
+
+    case BE_ACME:
+      return "acme";
+
+    case BE_CONTROL:
+      return "control";
+    }
+
+  return "UNKNOWN";
+}
+
+static struct json_value *
+addrinfo_serialize (struct addrinfo *addr)
+{
+  char buf[MAX_ADDR_BUFSIZE];
+
+  addr2str (buf, sizeof (buf), addr, 0);
+  return json_new_string (buf);
+}
+
+static struct json_value *
+backend_serialize (BACKEND *be)
+{
+  struct json_value *obj;
+
+  if (!be)
+    obj = json_new_null ();
+  else
+    {
+      obj = json_new_object ();
+
+      json_object_set (obj, "type", json_new_string (backend_type_str (be->be_type)));
+      json_object_set (obj, "priority", json_new_integer (be->priority));
+      json_object_set (obj, "alive", json_new_bool (be->alive));
+      json_object_set (obj, "enabled", json_new_bool (!be->disabled));
+      json_object_set (obj, "io_to", json_new_integer (be->to));
+      json_object_set (obj, "conn_to", json_new_integer (be->conn_to));
+      json_object_set (obj, "ws_to", json_new_integer (be->ws_to));
+      json_object_set (obj, "protocol", json_new_string (be->ctx ? "https" : "http"));
+
+      switch (be->be_type)
+	{
+	case BE_BACKEND:
+	  json_object_set (obj, "address", addrinfo_serialize (&be->addr));
+	  break;
+
+	case BE_REDIRECT:
+	  json_object_set (obj, "url", json_new_string (be->url));
+	  json_object_set (obj, "code", json_new_integer (be->redir_code));
+	  json_object_set (obj, "redir_req", json_new_bool (be->redir_req));
+	  break;
+
+	case BE_ACME:
+	  json_object_set (obj, "path", json_new_string (be->url));
+	  break;
+
+	case BE_CONTROL:
+	  /* FIXME */
+	  break;
+	}
+    }
+  return obj;
+}
+
+static struct json_value *
+backends_serialize (BACKEND_HEAD *head)
+{
+  struct json_value *obj;
+
+  if (SLIST_EMPTY (head))
+    obj = json_new_null ();
+  else
+    {
+      BACKEND *be;
+
+      obj = json_new_array ();
+      SLIST_FOREACH (be, head, next)
+	{
+	  json_array_append (obj, backend_serialize (be));
+	}
+    }
+  return obj;
+}
+
+static struct json_value *
+service_serialize (SERVICE *svc)
+{
+  struct json_value *obj = json_new_object ();
+  char const *typename;
+
+  pthread_mutex_lock (&svc->mut);
+  json_object_set (obj, "name", json_new_string (svc->name));
+  json_object_set (obj, "enabled", json_new_bool (!svc->disabled));
+  json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri));
+  json_object_set (obj, "ads_pri", json_new_integer (svc->abs_pri));
+  typename = sess_type_to_str (svc->sess_type);
+  json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"));
+  json_object_set (obj, "sessions", service_session_serialize (svc));
+  json_object_set (obj, "backends", backends_serialize (&svc->backends));
+  json_object_set (obj, "emergency", backend_serialize (svc->emergency));
+  pthread_mutex_unlock (&svc->mut);
+  return obj;
+}
+
+static struct json_value *
+listener_serialize (LISTENER *lstn)
+{
+  struct json_value *obj = json_new_object (), *p;
+  int is_https;
+  SERVICE *svc;
+
+  json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
+
+  is_https = !SLIST_EMPTY (&lstn->ctx_head);
+  json_object_set (obj, "protocol", json_new_string (is_https ? "https" : "http"));
+  if (is_https)
+    json_object_set (obj, "https11", json_new_bool (!lstn->noHTTPS11));
+  json_object_set (obj, "active", json_new_bool (!lstn->disabled));
+
+  p = json_new_array ();
+  json_object_set (obj, "services", p);
+  SLIST_FOREACH (svc, &lstn->services, next)
+    json_array_append (p, service_serialize (svc));
+
+  return obj;
+}
+
+static struct json_value *
+pound_serialize (void)
+{
+  struct json_value *obj, *p;
+  LISTENER *lstn;
+  SERVICE *svc;
+  struct timespec ts;
+
+  obj = json_new_object ();
+
+  clock_gettime (CLOCK_REALTIME, &ts);
+  json_object_set (obj, "timestamp", timespec_serialize (&ts));
+
+  json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()));
+
+  p = json_new_array ();
+  json_object_set (obj, "listeners", p);
+  SLIST_FOREACH (lstn, &listeners, next)
+    json_array_append (p, listener_serialize (lstn));
+
+  p = json_new_array ();
+  json_object_set (obj, "services", p);
+  SLIST_FOREACH (svc, &services, next)
+    json_array_append (p, service_serialize (svc));
+
+  return obj;
+}
+
+static void
+write_string (void *data, char const *str, size_t len)
+{
+  struct stringbuf *sb = data;
+  stringbuf_add (sb, str, len);
+}
+
+static int
+send_json_reply (BIO *c, struct json_value *val, char const *url)
+{
+  struct json_format format = {
+    .indent = 0,
+    .precision = 0,
+    .write = write_string
+  };
+  struct stringbuf sb;
+  char *str;
+  char *indent;
+  size_t len;
+
+  if ((indent = get_param (url, "indent", &len)) != NULL)
+    {
+      long n;
+      char *end;
+
+      errno = 0;
+      n = strtol (indent, &end, 10);
+      if (errno || end != indent + len || n < 0 || n > 80)
+	return 400;
+      format.indent = n;
+    }
+
+  stringbuf_init (&sb);
+  format.data = &sb;
+  json_value_format (val, &format, 0);
+  str = stringbuf_finish (&sb);
+
+  BIO_printf (c,
+	      "HTTP/1.1 %d %s\r\n"
+	      "Content-Type: application/json\r\n"
+	      "Content-Length: %"PRILONG"\r\n"
+	      "Connection: close\r\n\r\n"
+	      "%s",
+	      200, "OK", (LONG) strlen (str), str);
+  free (str);
+  BIO_flush (c);
+
+  return 200;
+}
+
+static int
+control_list_all (BIO *c, char const *url)
+{
+  struct json_value *val;
+  int rc;
+
+  val = pound_serialize ();
+  rc = send_json_reply (c, val, url);
+  json_value_free (val);
+  return rc;
+}
+
+static int
+ctl_getnum (char const **url)
+{
+  long n;
+  char *end;
+
+  if (**url == '/')
+    ++*url;
+  else
+    return -1;
+  errno = 0;
+  n = strtol (*url, &end, 10);
+  if (errno || n > INT_MAX)
+    return -1;
+  if (*end != 0 && *end != '/' && *end != '?')
+    return -1;
+  *url = end;
+  return n;
+}
+
+enum object_type
+  {
+    OBJ_LISTENER,
+    OBJ_SERVICE,
+    OBJ_BACKEND,
+  };
+
+typedef struct
+{
+  enum object_type type;
+  union
+  {
+    LISTENER *lstn;
+    SERVICE *svc;
+    BACKEND *be;
+  };
+} OBJECT;
+
+typedef int (*OBJHANDLER) (BIO *, OBJECT *, char const *, void *);
+
+static int
+ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
+{
+  int n;
+  OBJECT obj = { .type = OBJ_BACKEND };
+
+  if ((n = ctl_getnum (&url)) < 0)
+    return 404;
+  if ((obj.be = get_nth_backend (svc, n)) == NULL)
+    return 404;
+  return func (c, &obj, url, data);
+}
+
+static int
+ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url, LISTENER *lstn)
+{
+  int n;
+  OBJECT obj = { .type = OBJ_SERVICE };
+
+  if ((n = ctl_getnum (&url)) < 0)
+    return 404;
+
+  if ((obj.svc = get_nth_service (lstn, n)) == NULL)
+    return 404;
+
+  if (*url && *url != '?')
+    return ctl_backend (func, data, c, url, obj.svc);
+  return func (c, &obj, url, data);
+}
+
+static int
+ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
+{
+  int n;
+  OBJECT obj = { .type = OBJ_LISTENER };
+  size_t len = strcspn (url, "?");
+
+  if (url[0] == '/' && len == 1)
+    {
+      obj.lstn = NULL;
+      url++;
+    }
+  else if (url[0] == '/' && url[1] == '-' && (len == 2 || url[2] == '/'))
+    {
+      obj.lstn = NULL;
+      url += 2;
+    }
+  else
+    {
+      if ((n = ctl_getnum (&url)) < 0)
+	return 404;
+
+      if ((obj.lstn = get_nth_listener (n)) == NULL)
+	return 404;
+    }
+
+  if (*url && *url != '?')
+    return ctl_service (func, data, c, url, obj.lstn);
+
+  return func (c, &obj, url, data);
+}
+
+static int
+list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
+{
+  struct json_value *val;
+  int rc;
+
+  if (*url && *url != '?')
+    return 404;
+
+  switch (obj->type)
+    {
+    case OBJ_BACKEND:
+      val = backend_serialize (obj->be);
+      break;
+
+    case OBJ_SERVICE:
+      val = service_serialize (obj->svc);
+      break;
+
+    case OBJ_LISTENER:
+      if (obj->lstn)
+	val = listener_serialize (obj->lstn);
+      else
+	val = pound_serialize ();
+      break;
+    }
+
+  rc = send_json_reply (c, val, url);
+  json_value_free (val);
+  return rc;
+}
+
+static int
+control_list_listener (BIO *c, char const *url)
+{
+  if (*url == '/')
+    return ctl_listener (list_handler, NULL, c, url);
+  return 404;
+}
+
+static int
+control_list_service (BIO *c, char const *url)
+{
+  if (*url == '/')
+    return ctl_service (list_handler, NULL, c, url, NULL);
+  return 404;
+}
+
+static int
+disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
+{
+  int *dis = data;
+  int rc;
+  struct json_value *val;
+
+  if (*url && *url != '?')
+    return 404;
+
+  switch (obj->type)
+    {
+    case OBJ_BACKEND:
+      kill_be (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
+      break;
+
+    case OBJ_SERVICE:
+      obj->svc->disabled = *dis;
+      break;
+
+    case OBJ_LISTENER:
+      obj->lstn->disabled = *dis;
+      break;
+    }
+
+  val = json_new_bool (1);
+  rc = send_json_reply (c, val, url);
+  json_value_free (val);
+  return rc;
+}
+
+static int
+control_disable_listener (BIO *c, char const *url)
+{
+  int dis = 1;
+  if (*url == '/')
+    return ctl_listener (disable_handler, &dis, c, url);
+  return 404;
+}
+
+static int
+control_enable_listener (BIO *c, char const *url)
+{
+  int dis = 0;
+  if (*url == '/')
+    return ctl_listener (disable_handler, &dis, c, url);
+  return 404;
+}
+
+static int
+control_disable_service (BIO *c, char const *url)
+{
+  int dis = 1;
+  if (*url == '/')
+    return ctl_service (disable_handler, &dis, c, url, NULL);
+  return 404;
+}
+
+static int
+control_enable_service (BIO *c, char const *url)
+{
+  int dis = 0;
+  if (*url == '/')
+    return ctl_service (disable_handler, &dis, c, url, NULL);
+  return 404;
+}
+
+static int
+session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
+{
+  SERVICE *svc;
+  int rc;
+  struct json_value *val;
+  char keybuf[KEY_SIZE + 1];
+  char *key;
+  size_t keylen;
+
+  switch (obj->type)
+    {
+    case OBJ_BACKEND:
+    case OBJ_LISTENER:
+      return 400;
+
+    case OBJ_SERVICE:
+      svc = obj->svc;
+      break;
+    }
+
+  if ((key = get_param (url, "key", &keylen)) == NULL)
+    return 400;
+  if (keylen > sizeof (keybuf) - 1)
+    return 400;
+  strncpy (keybuf, key, keylen);
+
+  pthread_mutex_lock (&svc->mut);
+  service_session_remove_by_key (svc, keybuf);
+  pthread_mutex_unlock (&svc->mut);
+
+  val = service_serialize (svc);
+  rc = send_json_reply (c, val, url);
+  json_value_free (val);
+  return rc;
+}
+
+static int
+session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
+{
+  BACKEND *be;
+  SERVICE *svc;
+  int rc;
+  struct json_value *val;
+  char keybuf[KEY_SIZE + 1];
+  char *key;
+  size_t keylen;
+
+  switch (obj->type)
+    {
+    case OBJ_LISTENER:
+    case OBJ_SERVICE:
+      return 400;
+
+    case OBJ_BACKEND:
+      be = obj->be;
+      svc = be->service;
+      break;
+    }
+
+  if ((key = get_param (url, "key", &keylen)) == NULL)
+    return 400;
+  if (keylen > sizeof (keybuf) - 1)
+    return 400;
+  strncpy (keybuf, key, keylen);
+
+  pthread_mutex_lock (&svc->mut);
+  service_session_add (svc, keybuf, be);
+  pthread_mutex_unlock (&svc->mut);
+
+  val = service_serialize (svc);
+  rc = send_json_reply (c, val, url);
+  json_value_free (val);
+  return rc;
+}
+
+static int
+control_delete_session (BIO *c, char const *url)
+{
+  if (*url == '/')
+    return ctl_listener (session_remove_handler, NULL, c, url);
+  return 404;
+}
+
+static int
+control_add_session (BIO *c, char const *url)
+{
+  if (*url == '/')
+    return ctl_listener (session_add_handler, NULL, c, url);
+  return 404;
+}
+
+struct endpoint
+{
+  char *uri;
+  size_t uri_len;
+  int method;
+  int (*endfn) (BIO *, char const *);
+};
+
+static struct endpoint control_endpoint[] = {
+#define S(s) s, sizeof(s)-1
+  { S(""), METH_GET, control_list_all },
+  { S("/listener"), METH_GET, control_list_listener },
+  { S("/listener"), METH_DELETE, control_disable_listener },
+  { S("/listener"), METH_PUT, control_enable_listener },
+  { S("/service"), METH_GET, control_list_service },
+  { S("/service"), METH_DELETE, control_disable_service },
+  { S("/service"), METH_PUT, control_enable_service },
+  { S("/session"), METH_DELETE, control_delete_session },
+  { S("/session"), METH_PUT, control_add_session },
+#undef S
+  { NULL }
+};
+
+static struct endpoint *
+find_endpoint (int method, const char *uri, int *errcode)
+{
+  struct endpoint *p, *cp = NULL;
+  int uri_match = 0;
+  size_t len = strcspn (uri, "?");
+
+  if (len == 0)
+    return NULL;
+
+  if (uri[len-1] == '/')
+    --len;
+
+  for (p = control_endpoint; p->uri; p++)
+    if (len >= p->uri_len && memcmp (p->uri, uri, p->uri_len) == 0
+	&& (uri[p->uri_len] == 0
+	    || uri[p->uri_len] == '/'
+	    || uri[p->uri_len] == '?'))
+      {
+	if (p->method == method)
+	  {
+	    if (cp == NULL || cp->uri_len < p->uri_len)
+	      cp = p;
+	  }
+	else
+	  uri_match = 1;
+      }
+
+  if (cp == NULL)
+    /* FIXME: Should be 405, instead of 400 */
+    *errcode = uri_match ? 400 : 404;
+  return cp;
+}
+
+int
+control_reply (BIO *c, int method, const char *url, BACKEND *be)
+{
+  struct endpoint *ep;
+  int code;
+
+  ep = find_endpoint (method, url, &code);
+  if (ep == NULL)
+    return code;
+  return ep->endfn (c, url + ep->uri_len);
 }
 
 #ifndef SSL3_ST_SR_CLNT_HELLO_A

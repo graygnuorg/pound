@@ -32,14 +32,12 @@ char *user;			/* user to run as */
 char *group;			/* group to run as */
 char *root_jail;		/* directory to chroot to */
 char *pid_name = POUND_PID;     /* file to record pid in */
-char *ctrl_name;		/* control socket name */
 
 int anonymise;			/* anonymise client address */
 int daemonize = 1;		/* run as daemon */
 int enable_supervisor = SUPERVISOR; /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
 int print_log;			/* print log messages to stdout/stderr */
-int control_sock = -1;		/* control socket */
 
 unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
 unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */
@@ -378,6 +376,12 @@ thr_dispatch (void *unused)
   pthread_cleanup_pop (1);
 }
 
+void
+unlink_file (void *arg)
+{
+  unlink ((char*) arg);
+}
+
 static void
 pidfile_create (void)
 {
@@ -389,18 +393,47 @@ pidfile_create (void)
     {
       fprintf (fp, "%d\n", getpid ());
       fclose (fp);
+      pound_atexit (unlink_file, pid_name);
     }
   else
     logmsg (LOG_NOTICE, "Create \"%s\": %s", pid_name, strerror (errno));
 }
-
-static void
-pidfile_delete (void)
+
+/*
+ * Clean-up function queue.
+ */
+struct cleanup_routine
 {
-  if (pid_name)
-    unlink (pid_name);
+  void (*func) (void *);
+  void *arg;
+  SLIST_ENTRY (cleanup_routine) next;
+};
+
+static SLIST_HEAD (,cleanup_routine) cleanup_head = SLIST_HEAD_INITIALIZER (cleanup_head);
+
+void
+pound_atexit (void (*func) (void *), void *arg)
+{
+  struct cleanup_routine *cr;
+  XZALLOC (cr);
+  cr->func = func;
+  cr->arg = arg;
+  SLIST_PUSH (&cleanup_head, cr, next);
 }
 
+static void
+cleanup (void)
+{
+  struct cleanup_routine *cr;
+  while (!SLIST_EMPTY (&cleanup_head))
+    {
+      cr = SLIST_FIRST (&cleanup_head);
+      SLIST_SHIFT (&cleanup_head, next);
+      cr->func (cr->arg);
+      free (cr);
+    }
+}
+
 struct signal_handler
 {
   int signo;
@@ -463,16 +496,6 @@ server (void)
       exit (1);
     }
 
-  /* start the controlling thread (if needed) */
-  if (control_sock >= 0 && pthread_create (&thr, &attr, thr_control, NULL))
-    {
-      logmsg (LOG_ERR, "create thr_control: %s - aborted", strerror (errno));
-      exit (1);
-    }
-
-  /* FIXME: pause to make sure the service threads were started */
-  sleep (1);
-
   /*
    * Create the worker threads
    */
@@ -512,8 +535,7 @@ server (void)
       break;
     }
 
-  if (ctrl_name != NULL)
-    unlink (ctrl_name);
+  cleanup ();
 
   exit (0);
 }
@@ -697,30 +719,6 @@ main (const int argc, char **argv)
 
   logmsg (LOG_NOTICE, "starting...");
 
-  if (ctrl_name != NULL)
-    {
-      struct sockaddr_un ctrl;
-
-      memset (&ctrl, 0, sizeof (ctrl));
-      ctrl.sun_family = AF_UNIX;
-      strncpy (ctrl.sun_path, ctrl_name, sizeof (ctrl.sun_path) - 1);
-      unlink (ctrl.sun_path);
-      if ((control_sock = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-	{
-	  logmsg (LOG_ERR, "Control \"%s\" create: %s", ctrl.sun_path,
-		  strerror (errno));
-	  exit (1);
-	}
-      if (bind (control_sock, (struct sockaddr *) &ctrl,
-		(socklen_t) sizeof (ctrl)) < 0)
-	{
-	  logmsg (LOG_ERR, "Control \"%s\" bind: %s", ctrl.sun_path,
-		  strerror (errno));
-	  exit (1);
-	}
-      listen (control_sock, 512);
-    }
-
   /* open listeners */
   n_listeners = 0;
   SLIST_FOREACH (lstn, &listeners, next)
@@ -865,8 +863,6 @@ main (const int argc, char **argv)
   else
 #endif
     server ();
-
-  pidfile_delete ();
 
   return 0;
 }

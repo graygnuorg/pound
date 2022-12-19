@@ -750,7 +750,117 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
   err_reply (cl, h500, lstn->err500);
   return NULL;
 }
+
+struct method_def
+{
+  char const *name;
+  size_t length;
+  int meth;
+  int group;
+};
 
+static struct method_def methods[] = {
+#define S(s) s, sizeof(s)-1
+  { S("GET"),          METH_GET,           0 },
+  { S("POST"),         METH_POST,          0 },
+  { S("HEAD"),         METH_HEAD,          0 },
+  { S("PUT"),          METH_PUT,           1 },
+  { S("PATCH"),        METH_PATCH,         1 },
+  { S("DELETE"),       METH_DELETE,        1 },
+  { S("LOCK"),         METH_LOCK,          2 },
+  { S("UNLOCK"),       METH_UNLOCK,        2 },
+  { S("PROPFIND"),     METH_PROPFIND,      2 },
+  { S("PROPPATCH"),    METH_PROPPATCH,     2 },
+  { S("SEARCH"),       METH_SEARCH,        2 },
+  { S("MKCOL"),        METH_MKCOL,         2 },
+  { S("MOVE"),         METH_MOVE,          2 },
+  { S("COPY"),         METH_COPY,          2 },
+  { S("OPTIONS"),      METH_OPTIONS,       2 },
+  { S("TRACE"),        METH_TRACE,         2 },
+  { S("MKACTIVITY"),   METH_MKACTIVITY,    2 },
+  { S("CHECKOUT"),     METH_CHECKOUT,      2 },
+  { S("MERGE"),        METH_MERGE,         2 },
+  { S("REPORT"),       METH_REPORT,        2 },
+  { S("SUBSCRIBE"),    METH_SUBSCRIBE,     3 },
+  { S("UNSUBSCRIBE"),  METH_UNSUBSCRIBE,   3 },
+  { S("BPROPPATCH"),   METH_BPROPPATCH,    3 },
+  { S("POLL"),         METH_POLL,          3 },
+  { S("BMOVE"),        METH_BMOVE,         3 },
+  { S("BCOPY"),        METH_BCOPY,         3 },
+  { S("BDELETE"),      METH_BDELETE,       3 },
+  { S("BPROPFIND"),    METH_BPROPFIND,     3 },
+  { S("NOTIFY"),       METH_NOTIFY,        3 },
+  { S("CONNECT"),      METH_CONNECT,       3 },
+  { S("RPC_IN_DATA"),  METH_RPC_IN_DATA,   4 },
+  { S("RPC_OUT_DATA"), METH_RPC_OUT_DATA,  4 },
+#undef S
+  { NULL }
+};
+
+static struct method_def *
+find_method (const char *str, int group)
+{
+  struct method_def *m;
+
+  for (m = methods; m->name; m++)
+    {
+      if (strncasecmp (m->name, str, m->length) == 0)
+	return m;
+    }
+  return NULL;
+}
+
+static int
+parse_http_request (const char *req, int group,
+		    int *ret_meth, char *ret_url, /* FIXME: size_t url_size, */
+		    int *ret_http_ver)
+{
+  size_t len;
+  struct method_def *md;
+  char const *url;
+  int http_ver;
+  int n;
+
+  len = strcspn (req, " ");
+  if (len == 0 || req[len-1] == 0)
+    return -1;
+
+  if ((md = find_method (req, len)) == NULL)
+    return -1;
+
+  if (md->group > group)
+    return -1;
+
+  req += len;
+  req += strspn (req, " ");
+
+  if (*req == 0)
+    return -1;
+
+  url = req;
+  len = strcspn (url, " ");
+
+  req += len;
+  req += strspn (req, " ");
+  if (!(strncmp (req, "HTTP/1.", 7) == 0 &&
+	((http_ver = req[7]) == '0' || http_ver == '1') &&
+	req[8] == 0))
+    return -1;
+
+  *ret_meth = md->meth;
+  n = cpURL (ret_url, (char*) url, len);
+  if (n != strlen (ret_url))
+    /*
+     * the URL probably contained a %00 aka NULL - which we don't
+     * allow
+     */
+    return -1;
+
+  *ret_http_ver = http_ver;
+
+  return 0;
+}
+
 #define LOG_TIME_SIZE   32
 /*
  * Apache log-file-style time format
@@ -855,6 +965,7 @@ do_http (THR_ARG *arg)
 {
   int cl_11, be_11, res, chunked, n, sock, no_cont, skip, conn_closed,
     force_10, sock_proto, is_rpc, is_ws;
+  int method;
   LISTENER *lstn;
   SERVICE *svc;
   BACKEND *backend, *cur_backend;
@@ -1040,23 +1151,7 @@ do_http (THR_ARG *arg)
       /*
        * check for correct request
        */
-      strncpy (request, headers[0], MAXBUF);
-      if (!regexec (&lstn->verb, request, 3, matches, 0))
-	{
-	  no_cont = !strncasecmp (request + matches[1].rm_so, "HEAD",
-				  matches[1].rm_eo - matches[1].rm_so);
-	  if (!strncasecmp (request + matches[1].rm_so, "RPC_IN_DATA",
-			    matches[1].rm_eo - matches[1].rm_so))
-	    is_rpc = 1;
-	  else if (!strncasecmp (request + matches[1].rm_so, "RPC_OUT_DATA",
-				 matches[1].rm_eo - matches[1].rm_so))
-	    is_rpc = 0;
-	  else
-	    if (!strncasecmp (request + matches[1].rm_so, "GET",
-			      matches[1].rm_eo - matches[1].rm_so))
-	    is_ws |= WSS_REQ_GET;
-	}
-      else
+      if (parse_http_request (headers[0], lstn->verb, &method, url, &cl_11))
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") e501 bad request \"%s\" from %s",
 		  POUND_TID (), request,
@@ -1066,23 +1161,22 @@ do_http (THR_ARG *arg)
 	  clean_all ();
 	  return;
 	}
-      cl_11 = (request[strlen (request) - 1] == '1');
-      n = cpURL (url, request + matches[2].rm_so,
-		 matches[2].rm_eo - matches[2].rm_so);
-      if (n != strlen (url))
+
+      no_cont = method == METH_HEAD;
+      switch (method)
 	{
-	  /*
-	   * the URL probably contained a %00 aka NULL - which we don't
-	   * allow
-	   */
-	  logmsg (LOG_NOTICE, "(%"PRItid") e501 URL \"%s\" (contains NULL) from %s",
-		  POUND_TID (), url,
-		  addr2str (caddr, sizeof (caddr), &from_host, 1));
-	  err_reply (cl, h501, lstn->err501);
-	  free_headers (headers);
-	  clean_all ();
-	  return;
+	case METH_RPC_IN_DATA:
+	  is_rpc = 1;
+	  break;
+
+	case METH_RPC_OUT_DATA:
+	  is_rpc = 0;
+	  break;
+
+	case METH_GET:
+	  is_ws |= WSS_REQ_GET;
 	}
+
       if (lstn->has_pat && regexec (&lstn->url_pat, url, 0, NULL, 0))
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") e501 bad URL \"%s\" from %s",
@@ -1891,23 +1985,26 @@ do_http (THR_ARG *arg)
 	  break;
 	}
 
-      /*
-       * if we have a redirector
-       */
       if (cur_backend->be_type != BE_BACKEND)
 	{
 	  int code;
 	  char const *what;
 
-	  if (cur_backend->be_type == BE_REDIRECT)
+	  switch (cur_backend->be_type)
 	    {
+	    case BE_REDIRECT:
 	      code = redirect_reply (cl, url, cur_backend, &sm);
 	      what = "REDIRECT";
-	    }
-	  else /* BE_ACME */
-	    {
+	      break;
+
+	    case BE_ACME:
 	      code = acme_reply (cl, url, cur_backend, &sm);
 	      what = "ACME";
+	      break;
+
+	    case BE_CONTROL:
+	      code = control_reply (cl, method, url, cur_backend);
+	      what = "CONTROL";
 	    }
 
 	  switch (code)

@@ -15,463 +15,979 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
- *
- * Contact information:
- * Apsis GmbH
- * P.O.Box
- * 8707 Uetikon am See
- * Switzerland
- * EMail: roseg@apsis.ch
  */
-#include    "pound.h"
+#include "pound.h"
+#include "json.h"
 
-static int xml_out = 0;
-static int host_names = 0;
+char *progname;
 
-static void
-usage (const char *arg0)
+void
+logmsg (int prio, const char *fmt, ...)
 {
-  fprintf (stderr, "Usage: %s -c /control/socket [ -X ] cmd\n", arg0);
-  fprintf (stderr, "\twhere cmd is one of:\n");
-  fprintf (stderr, "\t-L n - enable listener n\n");
-  fprintf (stderr, "\t-l n - disable listener n\n");
-  fprintf (stderr,
-	   "\t-S n m - enable service m in service n (use -1 for global services)\n");
-  fprintf (stderr,
-	   "\t-s n m - disable service m in service n (use -1 for global services)\n");
-  fprintf (stderr,
-	   "\t-B n m r - enable back-end r in service m in listener n\n");
-  fprintf (stderr,
-	   "\t-b n m r - disable back-end r in service m in listener n\n");
-  fprintf (stderr,
-	   "\t-N n m k r - add a session with key k and back-end r in service m in listener n\n");
-  fprintf (stderr,
-	   "\t-n n m k - remove a session with key k r in service m in listener n\n");
-  fprintf (stderr, "\n");
-  fprintf (stderr,
-	   "\tentering the command without arguments lists the current configuration.\n");
-  fprintf (stderr, "\tthe -X flag results in XML output.\n");
-  fprintf (stderr,
-	   "\tthe -H flag shows symbolic host names instead of addresses.\n");
-  exit (1);
+  va_list ap;
+
+  fprintf (stderr, "%s: ", progname);
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fputc ('\n', stderr);
 }
+
+char *conf_name = POUND_CONF;
+char *socket_name;
+int json_option;
+int indent_option;
 
 /*
- * Translate inet/inet6 address/port into a string
+ * A temporary solution to obtain socket name from the pound.cfg file.
+ * FIXME: Use the parser from config.c for that.
  */
-static char *
-prt_addr (const struct addrinfo *addr)
+char *
+get_socket_name (void)
 {
-  static char res[UNIX_PATH_MAX + 9];
-  char buf[UNIX_PATH_MAX];
-  int port;
-  void *src;
+  FILE *fp;
+  char  buf[MAXBUF], *name = NULL;
+  int line = 0;
+  static char kw_str[] = "control";
+  static size_t kw_len = sizeof (kw_str) - 1;
 
-  memset (buf, 0, UNIX_PATH_MAX);
-  switch (addr->ai_family)
+  fp = fopen (conf_name, "r");
+  if (!fp)
     {
-    case AF_INET:
-      src = (void *) &((struct sockaddr_in *) addr->ai_addr)->sin_addr.s_addr;
-      port = ntohs (((struct sockaddr_in *) addr->ai_addr)->sin_port);
-      if (host_names
-	  && !getnameinfo (addr->ai_addr, addr->ai_addrlen, buf,
-			   UNIX_PATH_MAX - 1, NULL, 0, 0))
-	break;
-      if (inet_ntop (AF_INET, src, buf, sizeof (buf) - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
-      break;
-
-    case AF_INET6:
-      src = (void *) &((struct sockaddr_in6 *) addr->ai_addr)->sin6_addr.s6_addr;
-      port = ntohs (((struct sockaddr_in6 *) addr->ai_addr)->sin6_port);
-      if (host_names
-	  && !getnameinfo (addr->ai_addr, addr->ai_addrlen, buf,
-			   sizeof (buf) - 1, NULL, 0, 0))
-	break;
-      if (inet_ntop (AF_INET6, src, buf, sizeof (buf) - 1) == NULL)
-	strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
-      break;
-
-    case AF_UNIX:
-      strncpy (buf, (char *) addr->ai_addr, sizeof (buf) - 1);
-      port = 0;
-      break;
-
-    default:
-      strncpy (buf, "(UNKNOWN)", sizeof (buf) - 1);
-      port = 0;
-      break;
+      if (errno != ENOENT)
+	logmsg (LOG_ERR, "can't open %s: %s", conf_name, strerror (errno));
+      return NULL;
     }
-  snprintf (res, sizeof (res) - 1, "%s:%d", buf, port);
-  return res;
-}
-
-static int
-be_prt (const int sock)
-{
-  BACKEND be;
-  struct sockaddr_storage a;
-  int n_be;
-  ssize_t n;
-
-  n_be = 0;
-  while ((n = read (sock, (void *) &be, sizeof (BACKEND))) == sizeof (BACKEND))
+  while (fgets (buf, sizeof (buf), fp))
     {
-      if (be.disabled < 0)
-	break;
-      if (read (sock, &a, be.addr.ai_addrlen) == -1)
+      size_t len;
+      char *p;
+
+      ++line;
+      len = strlen (buf);
+      if (len == 0)
+	continue;
+      if (buf[len-1] != '\n')
 	{
-	  perror ("read");
-	  return -1;
+	  logmsg (LOG_ERR, "%s:%d: line too long", conf_name, line);
+	  break;
 	}
-      be.addr.ai_addr = (struct sockaddr *) &a;
-      if (xml_out)
-	printf
-	  ("<backend index=\"%d\" address=\"%s\" avg=\"%.3f\" priority=\"%d\" alive=\"%s\" status=\"%s\" />\n",
-	   n_be++, prt_addr (&be.addr), be.t_average / 1000000, be.priority,
-	   be.alive ? "yes" : "DEAD", be.disabled ? "DISABLED" : "active");
-      else
-	printf ("    %3d. Backend %s %s (%d %.3f sec) %s\n", n_be++,
-		prt_addr (&be.addr), be.disabled ? "DISABLED" : "active",
-		be.priority, be.t_average / 1000000,
-		be.alive ? "alive" : "DEAD");
-    }
-  if (n == -1)
-    {
-      perror ("read");
-      return -1;
-    }
-  return 0;
-}
+      while (len > 0 && isspace (buf[len-1]))
+	--len;
+      buf[len] = 0;
 
-static int
-sess_prt (const int sock)
-{
-  SESSION sess;
-  int n_be, n_sess, cont_len;
-  char buf[KEY_SIZE + 1];
-  ssize_t n;
+      for (p = buf; *p && isspace (*p); p++)
+	;
 
-  n_sess = 0;
-  while ((n = read (sock, (void *) &sess, sizeof (SESSION))) == sizeof (SESSION))
-    {
-      if (sess.backend == NULL)
-	break;
-      if (read (sock, &n_be, sizeof (n_be)) == -1 ||
-	  read (sock, &cont_len, sizeof (cont_len)) == -1)
+      if (*p == '#')
+	continue;
+
+      if (strncasecmp (p, kw_str, kw_len) == 0 &&
+	  (p[kw_len] == ' ' || p[kw_len] == '\t'))
 	{
-	  perror ("read");
-	  return -1;
-	}
+	  for (p += kw_len; *p && isspace (*p); p++)
+	    ;
+	  if (*p == '"')
+	    {
+	      char *q;
 
-      memset (buf, 0, KEY_SIZE + 1);
-      /* cont_len is at most KEY_SIZE */
+	      q = name = ++p;
+	      while (*p != '"')
+		{
+		  if (*p == 0)
+		    {
+		      logmsg (LOG_ERR, "%s:%d:%ld missing closing double-quote",
+			     conf_name, line, p - buf + 1);
+		      name = NULL;
+		      goto end;
+		    }
 
-      if (read (sock, buf, cont_len) == -1)
-	{
-	  perror ("read");
-	  return -1;
-	}
-
-      if (xml_out)
-	{
-	  int i, j;
-	  char escaped[KEY_SIZE * 2 + 1];
-
-	  for (i = j = 0; buf[i]; i++)
-	    if (buf[i] == '"')
-	      {
-		escaped[j++] = '\\';
-		escaped[j++] = '"';
-	      }
-	    else
-	      escaped[j++] = buf[i];
-	  escaped[j] = '\0';
-	  printf ("<session index=\"%d\" key=\"%s\" backend=\"%d\" />\n",
-		  n_sess++, escaped, n_be);
-	}
-      else
-	printf ("    %3d. Session %s -> %d\n", n_sess++, buf, n_be);
-    }
-
-  if (n == -1)
-    {
-      perror ("read");
-      return -1;
-    }
-  return 0;
-}
-
-static int
-svc_prt (const int sock)
-{
-  SERVICE svc;
-  int n_svc;
-  ssize_t n;
-  int res = 0;
-
-  n_svc = 0;
-  while ((n = read (sock, (void *) &svc, sizeof (SERVICE))) == sizeof (SERVICE))
-    {
-      if (svc.disabled < 0)
-	break;
-      if (xml_out)
-	{
-	  if (svc.name[0])
-	    printf ("<service index=\"%d\" name=\"%s\" status=\"%s\">\n",
-		    n_svc++, svc.name, svc.disabled ? "DISABLED" : "active");
+		  if (*p == '\\')
+		    {
+		      if (p[1] == '\\' || p[1] == '\"')
+			{
+			  p++;
+			}
+		      else
+			{
+			  logmsg (LOG_ERR, "%s:%d:%ld unrecognized escape character",
+				 conf_name, line, p - buf + 1);
+			}
+		    }
+		  *q++ = *p++;
+		}
+	      *q = 0;
+	      break;
+	    }
 	  else
-	    printf ("<service index=\"%d\"%s>\n", n_svc++,
-		    svc.disabled ? " DISABLED" : "");
+	    {
+	      logmsg (LOG_ERR, "%s:%d:%ld: expected quoted string",
+		     conf_name, line, p - buf + 1);
+	      break;
+	    }
 	}
-      else
-	{
-	  if (svc.name[0])
-	    printf ("  %3d. Service \"%s\" %s (%d)\n", n_svc++, svc.name,
-		    svc.disabled ? "DISABLED" : "active", svc.tot_pri);
-	  else
-	    printf ("  %3d. Service %s (%d)\n", n_svc++,
-		    svc.disabled ? "DISABLED" : "active", svc.tot_pri);
-	}
-      if ((res = be_prt (sock)) == 0)
-	res = sess_prt (sock);
-      if (xml_out)
-	printf ("</service>\n");
-      if (res)
-	break;
     }
-
-  if (n == -1)
+ end:
+  if (ferror (fp))
     {
-      perror ("read");
-      res = -1;
+      logmsg (LOG_ERR, "%s: %s", conf_name, strerror (errno));
     }
-  return res;
+  fclose (fp);
+
+  if (name)
+    socket_name = xstrdup (name);
+
+  return name;
 }
 
-static int
-get_sock (const char *sock_name)
+BIO *
+open_socket (void)
 {
   struct sockaddr_un ctrl;
-  int res;
+  int fd;
+  BIO *bio;
 
-  memset (&ctrl, 0, sizeof (ctrl));
+  if (strlen (socket_name) > sizeof (ctrl.sun_path))
+    {
+      logmsg (LOG_CRIT, "socket name too long");
+      exit (1);
+    }
+
   ctrl.sun_family = AF_UNIX;
-  strncpy (ctrl.sun_path, sock_name, sizeof (ctrl.sun_path) - 1);
-  if ((res = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
+  strncpy (ctrl.sun_path, socket_name, sizeof (ctrl.sun_path));
+  if ((fd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
     {
-      perror ("socket create");
+      logmsg (LOG_CRIT, "socket: %s", strerror (errno));
       exit (1);
     }
-  if (connect (res, (struct sockaddr *) &ctrl, (socklen_t) sizeof (ctrl)) < 0)
+  if (connect (fd, (struct sockaddr *) &ctrl, sizeof (ctrl)) < 0)
     {
-      perror ("connect");
+      logmsg (LOG_CRIT, "connect: %s", strerror (errno));
       exit (1);
     }
-  return res;
+
+  if ((bio = BIO_new_fd (fd, BIO_CLOSE)) == NULL)
+    {
+      logmsg (LOG_CRIT, "BIO_new_fd failed");
+      exit (1);
+    }
+
+  return bio;
+}
+
+typedef int OBJID[4];
+
+enum
+{
+  OI_LAST,
+  OI_LISTENER,
+  OI_SERVICE,
+  OI_BACKEND,
+};
+
+static void
+oi_getn (char const **uri, int *objid, int idx)
+{
+  long n;
+  char *p;
+  errno = 0;
+  n = strtol (*uri, &p, 10);
+  if (errno || n < 0 || n > INT_MAX)
+    {
+      logmsg (LOG_ERR, "bad uri: out of range near %s", *uri);
+      exit (1);
+    }
+  if (!((idx < OI_BACKEND) ? (*p == 0 || *p == '/') : (*p == 0)))
+    {
+      logmsg (LOG_ERR, "bad uri: garbage near %s", p);
+      exit (1);
+    }
+  objid[idx] = n;
+  *uri = p;
+}
+
+static void
+check_uri (char const *uri, int *objid)
+{
+  objid[OI_LAST] = -1;
+
+  if (*uri != '/')
+    {
+      logmsg (LOG_ERR, "bad uri: should start with a /");
+      exit (1);
+    }
+  ++uri;
+
+  objid[OI_LAST] = OI_LISTENER;
+  if (*uri == '-')
+    {
+      objid[OI_LISTENER] = -1;
+      uri++;
+    }
+  else
+    oi_getn (&uri, objid, OI_LISTENER);
+
+  if (*uri == 0)
+    return;
+  if (*uri != '/')
+    {
+      logmsg (LOG_ERR, "bad uri near %s", uri);
+      exit (1);
+    }
+
+  ++uri;
+
+  objid[OI_LAST] = OI_SERVICE;
+  oi_getn (&uri, objid, OI_SERVICE);
+
+  if (*uri == 0)
+    return;
+
+  ++uri;
+
+  objid[OI_LAST] = OI_BACKEND;
+  oi_getn (&uri, objid, OI_BACKEND);
+}
+
+static int
+xgets (BIO *bio, char *buf, int len)
+{
+  int n;
+
+  if ((n = BIO_gets (bio, buf, len)) < 0)
+    {
+      if (n == -1)
+	logmsg (LOG_ERR, "error reading response");
+      else if (n == -2)
+	logmsg (LOG_ERR, "BIO_gets not implemented; please, report");
+      exit (1);
+    }
+  if (n > 0 && buf[n-1] == '\r')
+    buf[--n] = 0;
+#if 0
+  if (transcript_option)
+    printf ("> %s\n", buf);
+#endif
+  return n;
 }
 
 int
-main (const int argc, char **argv)
+read_response_line (BIO *bio, char **ret_status, int *ret_version)
 {
-  CTRL_CMD cmd;
-  int sock, n_lstn, i;
-  char *arg0, *sock_name;
-  int c_opt, en_lst, de_lst, en_svc, de_svc, en_be, de_be, a_sess, d_sess,
-    is_set;
-  LISTENER lstn;
-  struct sockaddr_storage a;
-  int status = 0;
+  char buf[MAXBUF];
+  int ver;
+  char *p, *end;
+  long code;
 
-  arg0 = *argv;
-  sock_name = NULL;
-  en_lst = de_lst = en_svc = de_svc = en_be = de_be = is_set = a_sess =
-    d_sess = 0;
-  memset (&cmd, 0, sizeof (cmd));
-  opterr = 0;
-  i = 0;
-  while (!i && (c_opt = getopt (argc, argv, "c:LlSsBbNnXH")) > 0)
-    switch (c_opt)
-      {
-      case 'c':
-	sock_name = optarg;
-	break;
+  xgets (bio, buf, sizeof (buf));
+  if (strncmp (buf, "HTTP/1.", 7))
+    goto err;
+  ver = buf[7] - '0';
+  if (ver != 0 && ver != 1)
+    goto err;
+  p = buf + 8;
+  if (!isspace (*p))
+    goto err;
 
-      case 'X':
-	xml_out = 1;
-	break;
-
-      case 'L':
-	if (is_set)
-	  usage (arg0);
-	en_lst = is_set = 1;
-	break;
-
-      case 'l':
-	if (is_set)
-	  usage (arg0);
-	de_lst = is_set = 1;
-	break;
-
-      case 'S':
-	if (is_set)
-	  usage (arg0);
-	en_svc = is_set = 1;
-	break;
-
-      case 's':
-	if (is_set)
-	  usage (arg0);
-	de_svc = is_set = 1;
-	break;
-
-      case 'B':
-	if (is_set)
-	  usage (arg0);
-	en_be = is_set = 1;
-	break;
-
-      case 'b':
-	if (is_set)
-	  usage (arg0);
-	de_be = is_set = 1;
-	break;
-
-      case 'N':
-	if (is_set)
-	  usage (arg0);
-	a_sess = is_set = 1;
-	break;
-
-      case 'n':
-	if (is_set)
-	  usage (arg0);
-	d_sess = is_set = 1;
-	break;
-
-      case 'H':
-	host_names = 1;
-	break;
-
-      default:
-	if (optopt == '1')
-	  {
-	    optind--;
-	    i = 1;
-	  }
-	else
-	  {
-	    fprintf (stderr, "bad flag -%c", optopt);
-	    usage (arg0);
-	  }
-	break;
-      }
-
-  if (sock_name == NULL)
-    usage (arg0);
-  if (en_lst || de_lst)
+  while (isspace (*p))
     {
-      if (optind != (argc - 1))
-	usage (arg0);
-      cmd.cmd = (en_lst ? CTRL_EN_LSTN : CTRL_DE_LSTN);
-      cmd.listener = atoi (argv[optind++]);
-    }
-  if (en_svc || de_svc)
-    {
-      if (optind != (argc - 2))
-	usage (arg0);
-      cmd.cmd = (en_svc ? CTRL_EN_SVC : CTRL_DE_SVC);
-      cmd.listener = atoi (argv[optind++]);
-      cmd.service = atoi (argv[optind++]);
-    }
-  if (en_be || de_be)
-    {
-      if (optind != (argc - 3))
-	usage (arg0);
-      cmd.cmd = (en_be ? CTRL_EN_BE : CTRL_DE_BE);
-      cmd.listener = atoi (argv[optind++]);
-      cmd.service = atoi (argv[optind++]);
-      cmd.backend = atoi (argv[optind++]);
-    }
-  if (a_sess)
-    {
-      if (optind != (argc - 4))
-	usage (arg0);
-      cmd.cmd = CTRL_ADD_SESS;
-      cmd.listener = atoi (argv[optind++]);
-      cmd.service = atoi (argv[optind++]);
-      memset (cmd.key, 0, KEY_SIZE + 1);
-      strncpy (cmd.key, argv[optind++], KEY_SIZE);
-      cmd.backend = atoi (argv[optind++]);
-    }
-  if (d_sess)
-    {
-      if (optind != (argc - 3))
-	usage (arg0);
-      cmd.cmd = CTRL_DEL_SESS;
-      cmd.listener = atoi (argv[optind++]);
-      cmd.service = atoi (argv[optind++]);
-      strncpy (cmd.key, argv[optind++], KEY_SIZE);
-    }
-  if (!is_set)
-    {
-      if (optind != argc)
-	usage (arg0);
-      cmd.cmd = CTRL_LST;
+      if (!*p)
+	goto err;
+      p++;
     }
 
-  sock = get_sock (sock_name);
-  if (write (sock, &cmd, sizeof (cmd)) == -1)
+  code = strtol (p, &end, 10);
+  if (code <= 0 || end - p != 3)
     {
-      perror ("write");
+  err:
+      logmsg (LOG_ERR, "unexpected response: %s", buf);
       exit (1);
     }
 
-  if (!is_set)
-    {
-      int n;
+  p = end + strspn (end, " \n");
+  *ret_status = p;
+  *ret_version = ver;
+  return code;
+}
 
-      n_lstn = 0;
-      if (xml_out)
-	printf ("<pound>\n");
-      if (read (sock, &n, sizeof (n)) == sizeof (n))
-	{
-	  if (xml_out)
-	    printf ("<queue size=\"%d\"/>\n", n);
-	  else
-	    printf ("Requests in queue: %d\n", n);
-	}
-      while (read (sock, (void *) &lstn, sizeof (LISTENER)) == sizeof (LISTENER))
-	{
-	  if (lstn.disabled < 0)
-	    break;
-	  if (read (sock, &a, lstn.addr.ai_addrlen) == -1)
-	    {
-	      perror ("read");
-	      break;
-	    }
-	  lstn.addr.ai_addr = (struct sockaddr *) &a;
-	  if (xml_out)
-	    printf
-	      ("<listener index=\"%d\" protocol=\"%s\" address=\"%s\" status=\"%s\">\n",
-	       n_lstn++,
-	       !SLIST_EMPTY (&lstn.ctx_head) ? "HTTPS" : "http", prt_addr (&lstn.addr),
-	       lstn.disabled ? "DISABLED" : "active");
-	  else
-	    printf ("%3d. %s Listener %s %s\n", n_lstn++,
-		    !SLIST_EMPTY (&lstn.ctx_head) ? "HTTPS" : "http", prt_addr (&lstn.addr),
-		    lstn.disabled ? "*D" : "a");
-	  if (svc_prt (sock))
-	    status = 1;
-	  if (xml_out)
-	    printf ("</listener>\n");
-	}
-      if (!xml_out)
-	printf (" -1. Global services\n");
-      if (svc_prt (sock))
-	status = 1;
-      if (xml_out)
-	printf ("</pound>\n");
+struct json_value *
+read_response (BIO *bio)
+{
+  int code;
+  char *status;
+  long content_length = -1;
+  char buf[MAXBUF];
+  int ver;
+  int conn_close = 0;
+  char *content_buf;
+  int n;
+  struct json_value *json;
+  char *p;
+
+#define DEFHDR(n, v)					\
+  static char h_##n[] = v;				\
+  static size_t l_##n = sizeof (h_##n) - 1
+#define HDREQ(n, s)				\
+  (strncasecmp (s, h_##n, l_##n) == 0 && s[l_##n] == ':')
+#define HDRVAL(n, s)				\
+  (s + l_##n + 1)
+
+  DEFHDR (content_type, "Content-Type");
+  DEFHDR (content_length, "Content-Length");
+  DEFHDR (connection, "Connection");
+
+  if ((code = read_response_line (bio, &status, &ver)) != 200)
+    {
+      logmsg (LOG_ERR, "%s", status);
+      exit (1);
     }
-  return status;
+
+  for (;;)
+    {
+      char *p;
+
+      n = xgets (bio, buf, sizeof (buf));
+      if (n == 0)
+	break;
+      if (HDREQ (content_length, buf))
+	{
+	  errno = 0;
+	  content_length = strtol (HDRVAL (content_length, buf), &p, 10);
+	  if (errno || *p)
+	    {
+	      logmsg (LOG_ERR, "bad header line: %s", buf);
+	      exit (1);
+	    }
+	}
+      else if (HDREQ (content_type, buf))
+	{
+	  p = HDRVAL (content_type, buf);
+	  p += strspn (p, " \t");
+	  if (strcmp (p, "application/json"))
+	    {
+	      logmsg (LOG_ERR, "unexpected content type: %s", p);
+	      exit (1);
+	    }
+	}
+      else if (HDREQ (connection, buf))
+	{
+	  p = HDRVAL (connection, buf);
+	  p += strspn (p, " \t");
+	  conn_close = strcasecmp (p, "close") == 0;
+	}
+    }
+
+  if (content_length != -1)
+    {
+      content_buf = xmalloc (content_length + 1);
+      content_buf[content_length] = 0;
+      n = BIO_read (bio, content_buf, content_length);
+      if (n < 0)
+	{
+	  logmsg (LOG_CRIT, "read error");
+	  exit (1);
+	}
+    }
+  else if (conn_close || ver == 0)
+    {
+      struct stringbuf sb;
+
+      stringbuf_init (&sb);
+      while ((n = BIO_read (bio, buf, sizeof (buf))) > 0)
+	stringbuf_add (&sb, buf, n);
+      content_buf = stringbuf_finish (&sb);
+    }
+  else
+    {
+      logmsg (LOG_CRIT, "protocol error");
+      exit (1);
+    }
+
+  //  printf ("resp: %s\n", content_buf);
+  n = json_parse_string (content_buf, &json, &p);
+  if (n != JSON_E_NOERR)
+    {
+      int len;
+      logmsg (LOG_ERR, "error parsing JSON: %s", json_strerror (n));
+      len = p - content_buf;
+      logmsg (LOG_ERR, "JSON string: %*.*s HERE--> %s",
+	      len, len, content_buf, p);
+      exit (1);
+    }
+
+  return json;
+}
+
+static void
+write_string (void *data, char const *str, size_t len)
+{
+  fwrite (str, len, 1, (FILE*)data);
+}
+
+void
+print_json (struct json_value *val, FILE *fp)
+{
+  struct json_format format = {
+    .indent = indent_option,
+    .precision = 0,
+    .write = write_string,
+    .data = fp
+  };
+  json_value_format (val, &format, 0);
+}
+
+void
+json_error (struct json_value *val, char const *fmt, ...)
+{
+  va_list ap;
+
+  fprintf (stderr, "%s: ", progname);
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  va_end (ap);
+  fprintf (stderr, " in: ");
+  print_json (val, stderr);
+  fputc ('\n', stderr);
+}
+
+static char *
+json_object_get_string (struct json_value *obj, char const *name)
+{
+  struct json_value *val;
+  if (json_object_get (obj, name, &val) == 0)
+    {
+      if (val->type == json_string)
+	return val->v.s;
+      else
+	{
+	  json_error (obj, "bad type of %s: expected string", name);
+	  exit (1);
+	}
+    }
+  else
+    {
+      json_error (obj, "no %s attribute", name);
+      exit (1);
+    }
+}
+
+static int
+json_object_get_bool (struct json_value *obj, char const *name)
+{
+  struct json_value *val;
+  if (json_object_get (obj, name, &val) == 0)
+    {
+      if (val->type == json_bool)
+	return val->v.b;
+      else
+	{
+	  json_error (obj, "bad type of %s: expected boolean", name);
+	  exit (1);
+	}
+    }
+  else
+    {
+      json_error (obj, "no %s attribute", name);
+      exit (1);
+    }
+}
+
+static long
+json_object_get_integer (struct json_value *obj, char const *name)
+{
+  struct json_value *val;
+  if (json_object_get (obj, name, &val) == 0)
+    {
+      if (val->type == json_integer || val->type == json_number)
+	return val->v.n;
+      else
+	{
+	  json_error (obj, "bad type of %s: expected integer", name);
+	  exit (1);
+	}
+    }
+  else
+    {
+      json_error (obj, "no %s attribute", name);
+      exit (1);
+    }
+}
+
+void
+print_backend (struct json_value *obj, int n)
+{
+  char *type = json_object_get_string (obj, "type");
+  printf ("    %3d. %s", n, type);
+  if (strcmp (type, "backend") == 0)
+    printf (" %s %s %ld %s",
+	    json_object_get_string (obj, "protocol"),
+	    json_object_get_string (obj, "address"),
+	    json_object_get_integer (obj, "priority"),
+	    json_object_get_bool (obj, "alive") ? "alive" : "dead");
+  else if (strcmp (type, "redirect") == 0)
+    printf (" %3ld %s%s",
+	    json_object_get_integer (obj, "code"),
+	    json_object_get_string (obj, "url"),
+	    json_object_get_bool (obj, "redir_req") ?
+	    " (redirect request)" : "");
+  printf (" %s\n",
+	  json_object_get_bool (obj, "enabled") ? "active" : "disabled");
+}
+
+void
+print_sessions (struct json_value *obj)
+{
+  struct json_value *a;
+
+  if (json_object_get (obj, "sessions", &a) == 0)
+    {
+      if (a->type == json_null)
+	/* ok */;
+      else if (a->type == json_array)
+	{
+	  size_t i, n = json_array_length (a);
+	  for (i = 0; i < n; i++)
+	    {
+	      struct json_value *sess;
+	      json_array_get (a, i, &sess);
+	      printf ("    %3ld. Session %s %2ld %s\n", i,
+		      json_object_get_string (sess, "key"),
+		      json_object_get_integer (sess, "backend"),
+		      json_object_get_string (sess, "expire"));
+	    }
+	}
+      else
+	{
+	  json_error (obj, "bad type of %s: expected array", "sessions");
+	  exit (1);
+	}
+    }
+}
+
+void
+print_service (struct json_value *obj, int n)
+{
+  struct json_value *a;
+  printf ("  %3d. Service \"%s\" %s (%ld)\n",
+	  n,
+	  json_object_get_string (obj, "name"),
+	  json_object_get_bool (obj, "enabled") ? "active" : "disabled",
+	  json_object_get_integer (obj, "tot_pri"));
+  if (json_object_get (obj, "backends", &a) == 0)
+    {
+      if (a->type == json_null)
+	/* ok */;
+      else if (a->type == json_array)
+	{
+	  size_t i, n = json_array_length (a);
+	  for (i = 0; i < n; i++)
+	    {
+	      struct json_value *be;
+	      json_array_get (a, i, &be);
+	      print_backend (be, i);
+	    }
+	}
+      else
+	{
+	  json_error (obj, "bad type of %s: expected array", "backends");
+	  exit (1);
+	}
+    }
+
+  if (json_object_get (obj, "emergency", &a) == 0 && a->type == json_object)
+    {
+      printf ("    emergency backend %s %s %ld %s\n",
+	      json_object_get_string (a, "protocol"),
+	      json_object_get_string (a, "address"),
+	      json_object_get_integer (a, "priority"),
+	      json_object_get_bool (a, "alive") ? "alive" : "dead");
+    }
+
+  printf ("      Session type: %s\n",
+	  json_object_get_string (obj, "session_type"));
+  print_sessions (obj);
+}
+
+void
+print_services (struct json_value *obj, char *heading)
+{
+  struct json_value *a;
+
+  if (json_object_get (obj, "services", &a) == 0)
+    {
+      if (a->type == json_null)
+	/* ok */;
+      else if (a->type == json_array)
+	{
+	  size_t i, n = json_array_length (a);
+	  if (heading)
+	    printf ("%s\n", heading);
+	  for (i = 0; i < n; i++)
+	    {
+	      struct json_value *svc;
+	      json_array_get (a, i, &svc);
+	      print_service (svc, i);
+	    }
+	}
+      else
+	{
+	  json_error (obj, "bad type of %s: expected array", "services");
+	  exit (1);
+	}
+    }
+}
+
+void
+print_listener (struct json_value *obj, int n)
+{
+  printf ("%3d. Listener %s %s %s\n",
+	  n,
+	  json_object_get_string (obj, "protocol"),
+	  json_object_get_string (obj, "address"),
+	  json_object_get_bool (obj, "active") ? "active" : "disabled");
+  print_services (obj, NULL);
+}
+
+void
+print_listener_array (struct json_value *val)
+{
+  struct json_value *a;
+
+  if (json_object_get (val, "listeners", &a) == 0)
+    {
+      if (a->type == json_null)
+	printf ("no listeners defined\n");
+      else if (a->type == json_array)
+	{
+	  size_t n = json_array_length (a);
+	  if (n == 0)
+	    printf ("no listeners defined\n");
+	  else
+	    {
+	      size_t i;
+	      for (i = 0; i < n; i++)
+		{
+		  struct json_value *lst;
+		  json_array_get (a, i, &lst);
+		  print_listener (lst, i);
+		}
+	    }
+	}
+      else
+	{
+	  json_error (val, "bad type of %s: expected array", "listeners");
+	  exit (1);
+	}
+    }
+  else
+    {
+      json_error (val, "no \"listeners\" attribute");
+      exit (1);
+    }
+}
+
+void
+print_list_response (struct json_value *val, char const *arg)
+{
+  ++arg;
+
+  if (*arg == 0 || *arg == '-')
+    {
+      print_listener_array (val);
+      print_services (val, "Global services");
+    }
+  else
+    {
+      long n = strtol (arg, NULL, 10);
+      print_listener (val, n);
+    }
+}
+
+int
+command_list (BIO *bio, int argc, char **argv)
+{
+  char *uri = "/";
+  struct json_value *val;
+
+  if (argc == 1)
+    uri = argv[0];
+  else if (argc > 1)
+    {
+      logmsg (LOG_CRIT, "too many arguments");
+      exit (1);
+    }
+  BIO_printf (bio, "GET /listener%s HTTP/1.1\r\n"
+		   "Host: localhost\r\n\r\n",
+	      uri);
+  val = read_response (bio);
+  if (json_option)
+    print_json (val, stdout);
+  else
+    print_list_response (val, uri);
+  json_value_free (val);
+  return 0;
+}
+
+int
+command_on_off (BIO *bio, int argc, char **argv, char const *verb)
+{
+  char *uri;
+  struct json_value *val;
+
+  if (argc == 0)
+    {
+      logmsg (LOG_CRIT, "required argument missing");
+      return 1;
+    }
+  else if (argc > 1)
+    {
+      logmsg (LOG_CRIT, "too many arguments");
+      return 1;
+    }
+  uri = argv[0];
+  BIO_printf (bio, "%s /listener%s HTTP/1.1\r\n"
+		   "Host: localhost\r\n\r\n",
+	      verb, uri);
+  val = read_response (bio);
+  if (json_option)
+    print_json (val, stdout);
+  if (val->type != json_bool)
+    {
+      json_error (val, "unexpected object type");
+      return 1;
+    }
+  if (val->v.b == 0)
+    {
+      logmsg (LOG_CRIT, "command failed");
+      return 1;
+    }
+  json_value_free (val);
+  return 0;
+}
+
+int
+command_disable (BIO *bio, int argc, char **argv)
+{
+  return command_on_off (bio, argc, argv, "DELETE");
+}
+
+int
+command_enable (BIO *bio, int argc, char **argv)
+{
+  return command_on_off (bio, argc, argv, "PUT");
+}
+
+int
+command_delete_session (BIO *bio, int argc, char **argv)
+{
+  char *uri, *key;
+  struct json_value *val;
+  OBJID objid;
+
+  if (argc < 2)
+    {
+      logmsg (LOG_CRIT, "required argument missing");
+      return 1;
+    }
+  else if (argc > 2)
+    {
+      logmsg (LOG_CRIT, "too many arguments");
+      return 1;
+    }
+  uri = argv[0];
+  check_uri (uri, objid);
+  if (objid[OI_LAST] < OI_SERVICE)
+    {
+      logmsg (LOG_CRIT, "bad uri: service not specified");
+      return 1;
+    }
+  if (objid[OI_LAST] > OI_SERVICE)
+    {
+      logmsg (LOG_CRIT, "bad uri: spurious backend specification");
+      return 1;
+    }
+
+  key = argv[1];
+  BIO_printf (bio, "DELETE /session%s?key=%s HTTP/1.1\r\n"
+		   "Host: localhost\r\n\r\n",
+	      uri, key);
+  val = read_response (bio);
+  if (json_option)
+    print_json (val, stdout);
+  print_service (val, objid[OI_SERVICE]);
+  json_value_free (val);
+  return 0;
+}
+
+int
+command_add_session (BIO *bio, int argc, char **argv)
+{
+  char *uri, *key;
+  struct json_value *val;
+  OBJID objid;
+
+  if (argc < 2)
+    {
+      logmsg (LOG_CRIT, "required argument missing");
+      return 1;
+    }
+  else if (argc > 2)
+    {
+      logmsg (LOG_CRIT, "too many arguments");
+      return 1;
+    }
+  uri = argv[0];
+  check_uri (uri, objid);
+  if (objid[OI_LAST] != OI_BACKEND)
+    {
+      logmsg (LOG_CRIT, "bad uri: backend not specified");
+      return 1;
+    }
+
+  key = argv[1];
+  BIO_printf (bio, "PUT /session%s?key=%s HTTP/1.1\r\n"
+		   "Host: localhost\r\n\r\n",
+	      uri, key);
+  val = read_response (bio);
+  if (json_option)
+    print_json (val, stdout);
+  print_service (val, objid[OI_SERVICE]);
+  json_value_free (val);
+  return 0;
+}
+
+
+typedef int (*COMMAND) (BIO *, int, char **);
+
+struct dispatch_table
+{
+  char const *name;
+  COMMAND command;
+};
+
+static struct dispatch_table dispatch[] = {
+  { "list", command_list },
+  { "disable", command_disable },
+  { "off", command_disable },
+  { "enable", command_enable },
+  { "on", command_enable },
+  { "delete", command_delete_session },
+  { "del", command_delete_session },
+  { "add", command_add_session },
+  { NULL }
+};
+
+COMMAND
+find_command (char const *name)
+{
+  struct dispatch_table *p;
+
+  for (p = dispatch; p->name; p++)
+    if (strcmp (p->name, name) == 0)
+      return p->command;
+  return NULL;
+}
+
+static char *usage_text[] = {
+  "where L, S, and B stand for the numbers of listener, service and",
+  "backend, correspondingly.  A dash in place of L stands for global",
+  "scope.  Depending on COMMAND, either B or both S and B may be omitted.",
+  "",
+  "COMMANDs are:"
+  "",
+  "   list [/L/S/B]     list pound status; without argument, shows all",
+  "                     listeners and underlying objects.",
+  "   enable /L/S/B     enable listener, service, or backend.",
+  "   disable /L/S/B    disable listener, service, or backend.",
+  "   delete /L/S KEY   delete session with given key.",
+  "   add /L/S/B KEY    add session with given key.",
+  "",
+  "Shortcuts:",
+  "   on                same as enable",
+  "   off               same as disable",
+  "   del               same as delete",
+  "",
+  "OPTIONS:",
+  "   -c FILE           location of pound configuration file",
+  "   -i N              indentation level for JSON output",
+  "   -j                JSON output format",
+  "   -s SOCKET         sets control socket pathname",
+  "   -h                show this help output and exit",
+  NULL
+};
+
+void
+usage (int code)
+{
+  FILE *fp = code ? stderr : stdout;
+  int i;
+
+  fprintf (fp, "usage: %s [OPTIONS] COMMAND [/L/S/B] [ARG]\n", progname);
+  for (i = 0; usage_text[i]; i++)
+    fprintf (fp, "%s\n", usage_text[i]);
+  exit (code);
+}
+
+int
+main (int argc, char **argv)
+{
+  int c;
+  BIO *bio;
+  COMMAND command;
+
+  if ((progname = strrchr (argv[0], '/')) == NULL)
+    progname = argv[0];
+  else
+    progname++;
+
+  while ((c = getopt (argc, argv, "c:i:jhs:")) != EOF)
+    {
+      switch (c)
+	{
+	case 'c':
+	  conf_name = optarg;
+	  break;
+
+	case 's':
+	  socket_name = optarg;
+	  break;
+
+	case 'h':
+	  usage (0);
+
+	case 'i':
+	  indent_option = atoi (optarg);
+	  break;
+
+	case 'j':
+	  json_option = 1;
+	  break;
+
+	default:
+	  exit (1);
+	}
+    }
+
+  if (!socket_name && get_socket_name () == NULL)
+    {
+      logmsg (LOG_CRIT, "can't determine control socket name; use the -s option");
+      exit (1);
+    }
+
+  argc -= optind;
+  argv += optind;
+
+  if (argc == 0)
+    command = command_list;
+  else if ((command = find_command (argv[0])) == NULL)
+    usage (1);
+  else
+    {
+      argc--;
+      argv++;
+    }
+
+  bio = open_socket ();
+
+  return command (bio, argc, argv);
 }

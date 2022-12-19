@@ -14,70 +14,118 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "December 1, 2022" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "December 19, 2022" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
-.TP
-.B poundctl \fI-c /path/to/socket\fR [\fI-L/-l\fR] [\fI-S/-s\fR] [\fI-B/-b\fR] [\fI-N/-n\fR] [\fI-H\fR] [\fI-X\fR]
+.B poundctl
+[\fB\-c \fIFILE\fR]
+[\fB\-i \fIN\fR]
+[\fB\-j\fR]
+[\fB\-s \fISOCKET\fR]
+[\fB\-h\fR]
+\fICOMMAND\fR
+[\fB/\fIL\fB/\fIS\fB/\fIB\fR]
+[\fIARG\fR]
 .SH DESCRIPTION
+Displays status and controls various objects in the running instance
+of
+.BR pound (8)
+proxy server.
 .PP
-.B Poundctl
-controls various aspects of the operation of the
-.I pound(8)
-program.
+The program communicates with the running
+.BR pound
+program via a UNIX \fIcontrol socket\fR.  The
+.B pound.cfg
+file must contain a
+.B Control
+statement for this to work.  By default,
+.B poundctl
+will open the default
+.B pound.cfg
+file, look up for this statement and use the pathname defined by it as
+the control socket file.  This can be altered in two ways.  First, if
+using the configuration file in a non-standard location, the pathname
+of this file can be given to the program using the
+.B \-c
+command line option.  Secondly, the socket name can be supplied in the
+command line explicitly, using the
+.B \-s
+option.
+.PP
+The \fICOMMAND\fR argument instructs the program what action it
+is supposed to perform.  Missing \fICOMMAND\fR is equivalent to
+.BR list .
+All commands take the \fB/\fIL\fB/\fIS\fB/\fIB\fR argument, which
+specifies the
+.B pound
+object to apply the command to.  Here, \fIL\fR, \fIS\fR, and \fIB\fR
+stand for the numbers of \fIlistener\fR, \fIservice\fR and
+\fIbackend\fR, correspondingly.  Depending on the command, either
+\fIB\fR or both /\fIS\fR/\fIB\fR/ may be omitted.  For example,
+the following command will disable backend 2 in service 1 of listener 0:
+.PP
+.EX
+poundctl disable /0/1/2
+.EE
+.PP
+In contrast, the following command disables the listener 0 itself:
+.PP
+.EX
+poundctl disable /0
+.EE
+.PP
+A dash in place of \fIL\fR stands for global scope.  Thus, e.g.:
+.PP
+.EX
+poundctl disable /-/1
+.EE
+.PP
+disables the service 1 defined in the global scope of
+.BR pound.cfg .
+.PP
+The following commands are available:
+.TP
+\fBlist\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
+List status of the given object and its subordinates.  Without
+argument, shows all listeners and underlying objects.
+.TP
+\fBenable\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
+Enable listener, service, or backend.
+.TP
+\fBon\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
+Same as \fBenable\fR.
+.TP
+\fBdisable\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
+Disable listener, service, or backend.
+.TP
+\fBoff\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
+Same as \fBdisable\fR.
+.TP
+\fBdelete\fR \fB/\fIL\fB/\fIS\fR \fIKEY\fR
+Delete session with the given key.  Notice that backend may not be
+specified.
+.TP
+\fBadd\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR \fIKEY\fR
+Add session with given key.
 .SH OPTIONS
-Options available:
 .TP
-\fB\-c /path/to/socket\fR
-The path to the (Unix-domain) socket
-.B pound
-was configured to listen on for control. Your
-.B pound
-configuration file must contain the directive
-.I Control "/path/to/socket"
-for
-.B poundctl
-to work.
+\fB\-c \fIFILE\fR
+Location of \fBpound\fR configuration file.
 .TP
-\fB\-L/\-l \fIn\fR
-Enable/disable a listener. A disabled listener will stop accepting connection
-requests.
+\fB\-i \fIN\fR
+Sets indentation level for JSON output.
 .TP
-\fB\-S/\-s \fIn m\fR
-Enable/disable a service. A disabled service will not be used by
-.B pound
-to answer requests.
+\fB\-j\fr
+JSON output format.
 .TP
-\fB\-B/\-b \fIn m r\fR
-Enable/disable a back-end. A disabled back-end will not be passed requests to
-answer. Note however that existing sessions may still cause requests to be
-sent their way.
+\fB\-h\fR
+Shows a short help output and exit.
 .TP
-\fB\-N \fIn m k r\fR
-Add a session to service m in listener n. The session key is k and it points to
-back-end r.
-.TP
-\fB\-n \fIn m k\fR
-Remove a session from service m in listener n. The session key is k.
-.PP
-The parameters \fIn\fR, \fIm\fR and \fIr\fR refer to the number
-assigned to a particular listener, service and back-end in the
-listings. A listener number of -1 refers by convention to the global
-context.
-.TP
-\fB\-H\fR
-Try to resolve the addresses to symbolic names. Depending on your configuration,
-this may require an active DNS.
-.TP
-\fB\-X\fR
-Show the results in XML format.
-.PP
-When called without flags
-.B poundctl
-will print out a listing of the
-.B pound
-internal state.
+\fB\-s \fISOCKET\fR
+Sets control socket pathname.
+.SH SEE ALSO
+.BR pound (8).
 .SH AUTHOR
 Written by Robert Segall, Apsis GmbH, and Sergey Poznyakoff.
 .SH "REPORTING BUGS"

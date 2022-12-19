@@ -21,7 +21,7 @@ AM_CPPFLAGS = @SSL_CPPFLAGS@ \
  -DSYSCONFDIR=\"$(sysconfdir)\"\
  -DLOCALSTATEDIR=\"$(localstatedir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD=@PTHREAD_LIBS@
+LDADD = ./libpound.a @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
@@ -29,6 +29,9 @@ pound_SOURCES=\
  http.c\
  pound.c\
  svc.c
+
+noinst_LIBRARIES = libpound.a
+libpound_a_SOURCES = json.c json.h mem.c
 
 install-exec-hook:
 	-@if test "$${EUID:-65535}" -eq 0; then \

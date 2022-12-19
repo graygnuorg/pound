@@ -168,6 +168,44 @@
 #define ATTR_PRINTFLIKE(fmt,narg)                               \
     __attribute__ ((__format__ (__printf__, fmt, narg)))
 
+/* HTTP methods */
+
+enum
+  {
+    METH_GET,
+    METH_POST,
+    METH_HEAD,
+    METH_PUT,
+    METH_PATCH,
+    METH_DELETE,
+    METH_LOCK,
+    METH_UNLOCK,
+    METH_PROPFIND,
+    METH_PROPPATCH,
+    METH_SEARCH,
+    METH_MKCOL,
+    METH_MOVE,
+    METH_COPY,
+    METH_OPTIONS,
+    METH_TRACE,
+    METH_MKACTIVITY,
+    METH_CHECKOUT,
+    METH_MERGE,
+    METH_REPORT,
+    METH_SUBSCRIBE,
+    METH_UNSUBSCRIBE,
+    METH_BPROPPATCH,
+    METH_POLL,
+    METH_BMOVE,
+    METH_BCOPY,
+    METH_BDELETE,
+    METH_BPROPFIND,
+    METH_NOTIFY,
+    METH_CONNECT,
+    METH_RPC_IN_DATA,
+    METH_RPC_OUT_DATA,
+  };
+
 /* List definitions. */
 #include "list.h"
 
@@ -213,7 +251,8 @@ typedef enum
   {
     BE_BACKEND,
     BE_REDIRECT,
-    BE_ACME
+    BE_ACME,
+    BE_CONTROL
   }
   BACKEND_TYPE;
 
@@ -287,10 +326,10 @@ struct bool_service_cond
 
 enum service_cond_type
   {
+    COND_BOOL,
     COND_ACL,
     COND_URL,
     COND_HDR,
-    COND_BOOL,
   };
 
 typedef struct _service_cond
@@ -365,7 +404,7 @@ typedef struct _listener
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   char *add_head;		/* extra SSL header */
-  regex_t verb;			/* pattern to match the request verb against */
+  int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
@@ -556,12 +595,6 @@ void SSLINFO_callback (const SSL * s, int where, int rc);
  */
 void *thr_timer (void *);
 
-/*
- * The controlling thread
- * listens to client requests and calls the appropriate functions
- */
-void *thr_control (void *);
-
 void POUND_SSL_CTX_init (SSL_CTX *ctx);
 int set_ECDHCurve (char *name);
 
@@ -608,3 +641,8 @@ void job_enqueue_after (unsigned t, void (*func) (void *), void *data);
 
 void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data);
 void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
+
+char const *sess_type_to_str (int type);
+int control_reply (BIO *c, int method, const char *url, BACKEND *be);
+void pound_atexit (void (*func) (void *), void *arg);
+void unlink_file (void *arg);

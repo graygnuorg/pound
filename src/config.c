@@ -198,6 +198,15 @@ kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval)
       }
   return -1;
 }
+
+static char const *
+kw_to_str (struct kwtab *kwt, int t)
+{
+  for (; kwt->name; kwt++)
+    if (kwt->tok == t)
+      break;
+  return kwt->name;
+}
 
 /* Input stream */
 struct input
@@ -216,190 +225,6 @@ struct input
   /* Input buffer: */
   struct stringbuf buf;
 };
-
-void *
-mem2nrealloc (void *p, size_t *pn, size_t s)
-{
-  size_t n = *pn;
-  char *newp;
-
-  if (!p)
-    {
-      if (!n)
-	{
-	  /* The approximate size to use for initial small allocation
-	     requests, when the invoking code  specifies an old size of zero.
-	     64 bytes is the largest "small" request for the
-	     GNU C library malloc.  */
-	  enum { DEFAULT_MXFAST = 64 };
-
-	  n = DEFAULT_MXFAST / s;
-	  n += !n;
-	}
-    }
-  else
-    {
-      /* Set N = ceil (1.5 * N) so that progress is made if N == 1.
-	 Check for overflow, so that N * S stays in size_t range.
-	 The check is slightly conservative, but an exact check isn't
-	 worth the trouble.  */
-      if ((size_t) -1 / 3 * 2 / s <= n)
-	{
-	  errno = ENOMEM;
-	  return NULL;
-	}
-      n += (n + 1) / 2;
-    }
-
-  newp = realloc(p, n * s);
-  if (!newp)
-    return NULL;
-  *pn = n;
-  return newp;
-}
-
-void
-xnomem (void)
-{
-  logmsg (LOG_CRIT, "out of memory");
-  exit (1);
-}
-
-void *
-xmalloc (size_t s)
-{
-  void *p = malloc (s);
-  if (p == NULL)
-    xnomem ();
-  return p;
-}
-
-void *
-xcalloc (size_t nmemb, size_t size)
-{
-  void *p = calloc (nmemb, size);
-  if (!p)
-    xnomem ();
-  return p;
-}
-
-void *
-xrealloc (void *p, size_t s)
-{
-  if ((p = realloc (p, s)) == NULL)
-    xnomem ();
-  return p;
-}
-
-void *
-x2nrealloc (void *p, size_t *pn, size_t s)
-{
-  if ((p = mem2nrealloc (p, pn, s)) == NULL)
-    xnomem ();
-  return p;
-}
-
-char *
-xstrdup (char const *s)
-{
-  char *p = strdup (s);
-  if (!p)
-    xnomem ();
-  return p;
-}
-
-char *
-xstrndup (const char *s, size_t n)
-{
-  char *p = strndup (s, n);
-  if (!p)
-    xnomem ();
-  return p;
-}
-
-void
-stringbuf_init (struct stringbuf *sb)
-{
-  memset (sb, 0, sizeof (*sb));
-}
-
-void
-stringbuf_reset (struct stringbuf *sb)
-{
-  sb->len = 0;
-}
-
-void
-stringbuf_free (struct stringbuf *sb)
-{
-  free (sb->base);
-}
-
-void
-stringbuf_add_char (struct stringbuf *sb, int c)
-{
-  if (sb->len == sb->size)
-    sb->base = x2nrealloc (sb->base, &sb->size, 1);
-  sb->base[sb->len++] = c;
-}
-
-void
-stringbuf_add (struct stringbuf *sb, char const *str, size_t len)
-{
-  while (sb->len + len > sb->size)
-    sb->base = x2nrealloc (sb->base, &sb->size, 1);
-  memcpy (sb->base + sb->len, str, len);
-  sb->len += len;
-}
-
-void
-stringbuf_add_string (struct stringbuf *sb, char const *str)
-{
-  int c;
-
-  while ((c = *str++) != 0)
-    stringbuf_add_char (sb, c);
-}
-
-char *
-stringbuf_finish (struct stringbuf *sb)
-{
-  stringbuf_add_char (sb, 0);
-  return sb->base;
-}
-
-void
-stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap)
-{
-  for (;;)
-    {
-      size_t bufsize = sb->size - sb->len;
-      ssize_t n;
-      va_list aq;
-
-      va_copy (aq, ap);
-      n = vsnprintf (sb->base + sb->len, bufsize, fmt, aq);
-      va_end (aq);
-
-      if (n < 0 || n >= bufsize || !memchr (sb->base + sb->len, '\0', n + 1))
-	sb->base = x2nrealloc (sb->base, &sb->size, 1);
-      else
-	{
-	  sb->len += n;
-	  break;
-	}
-    }
-}
-
-void
-stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
-{
-  va_list ap;
-
-  va_start (ap, fmt);
-  stringbuf_vprintf (sb, fmt, ap);
-  va_end (ap);
-}
 
 static void
 stringbuf_format_locus_point (struct stringbuf *sb, struct locus_point const *loc)
@@ -2246,6 +2071,24 @@ struct service_session
   unsigned ttl;
 };
 
+static struct kwtab sess_type_tab[] = {
+  { "IP", SESS_IP },
+  { "COOKIE", SESS_COOKIE },
+  { "URL", SESS_URL },
+  { "PARM", SESS_PARM },
+  { "BASIC", SESS_BASIC },
+  { "HEADER", SESS_HEADER },
+  { NULL }
+};
+
+char const *
+sess_type_to_str (int type)
+{
+  if (type == SESS_NONE)
+    return "NONE";
+  return kw_to_str (sess_type_tab, type);
+}
+
 static int
 session_type_parser (void *call_data, void *section_data)
 {
@@ -2253,20 +2096,10 @@ session_type_parser (void *call_data, void *section_data)
   struct token *tok;
   int n;
 
-  static struct kwtab kwtab[] = {
-    { "IP", SESS_IP },
-    { "COOKIE", SESS_COOKIE },
-    { "URL", SESS_URL },
-    { "PARM", SESS_PARM },
-    { "BASIC", SESS_BASIC },
-    { "HEADER", SESS_HEADER },
-    { NULL }
-  };
-
   if ((tok = gettkn_expect (T_IDENT)) == NULL)
     return PARSER_FAIL;
 
-  if (kw_to_tok (kwtab, tok->str, 1, &n))
+  if (kw_to_tok (sess_type_tab, tok->str, 1, &n))
     {
       conf_error ("%s", "Unknown Session type");
       return PARSER_FAIL;
@@ -2641,32 +2474,10 @@ parse_acme (void *call_data, void *section_data)
 }
 
 
-static char *xhttp[] = {
-  "^(GET|POST|HEAD) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT) ([^ ]+) HTTP/1.[01]$",
-  "^(GET|POST|HEAD|PUT|PATCH|DELETE|LOCK|UNLOCK|PROPFIND|PROPPATCH|SEARCH|MKCOL|MOVE|COPY|OPTIONS|TRACE|MKACTIVITY|CHECKOUT|MERGE|REPORT|SUBSCRIBE|UNSUBSCRIBE|BPROPPATCH|POLL|BMOVE|BCOPY|BDELETE|BPROPFIND|NOTIFY|CONNECT|RPC_IN_DATA|RPC_OUT_DATA) ([^ ]+) HTTP/1.[01]$",
-};
-
 static int
 listener_parse_xhttp (void *call_data, void *section_data)
 {
-  regex_t *rx = call_data;
-  unsigned n;
-  int rc;
-
-  if ((rc = assign_unsigned (&n, NULL)) != PARSER_OK)
-    return rc;
-  if (n >= sizeof (xhttp) / sizeof (xhttp[0]))
-    {
-      conf_error ("%s", "argument out of allowed range");
-      return PARSER_FAIL;
-    }
-  regfree (rx);
-  if (xregcomp (rx, xhttp[n], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-    return PARSER_FAIL;
-  return PARSER_OK;
+  return assign_int_range (call_data, 0, 4);
 }
 
 static int
@@ -2883,11 +2694,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->err501 = "This method may not be used.";
   lst->err503 = "The service is not available. Please try again later.";
   lst->log_level = dfl->log_level;
-  if (xregcomp (&lst->verb, xhttp[0], REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-    {
-      free (lst);
-      return NULL;
-    }
+  lst->verb = 0;
   SLIST_INIT (&lst->head_off);
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
@@ -3517,6 +3324,69 @@ parse_threads_compat (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static int
+parse_control_global (void *call_data, void *section_data)
+{
+  struct token *tok;
+  LISTENER *lst;
+  SERVICE *svc;
+  BACKEND *be;
+  struct sockaddr_un *sun;
+  size_t len;
+
+  /* Get socket address */
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  /* Create listener for that address */
+  lst = listener_alloc (section_data);
+
+  len = strlen (tok->str);
+  if (len > UNIX_PATH_MAX)
+    {
+      conf_error_at_locus_range (&tok->locus,
+				 "%s", "UNIX path name too long");
+      return PARSER_FAIL;
+    }
+
+  len += offsetof (struct sockaddr_un, sun_path) + 1;
+  sun = xmalloc (len);
+  sun->sun_family = AF_UNIX;
+  strcpy (sun->sun_path, tok->str);
+  pound_atexit (unlink_file, sun->sun_path);
+
+  lst->addr.ai_socktype = SOCK_STREAM;
+  lst->addr.ai_family = AF_UNIX;
+  lst->addr.ai_protocol = 0;
+  lst->addr.ai_addr = (struct sockaddr *) sun;
+  lst->addr.ai_addrlen = len;
+
+  lst->verb = 1; /* Need PUT and DELETE methods */
+  /* Register listener in the global listener list */
+  SLIST_PUSH (&listeners, lst, next);
+
+  /* Create service */
+  XZALLOC (svc);
+  SLIST_INIT (&svc->backends);
+  svc->sess_type = SESS_NONE;
+  pthread_mutex_init (&svc->mut, NULL);
+  svc->tot_pri = 1;
+  svc->abs_pri = 1;
+  /* Register service in the listener */
+  SLIST_PUSH (&lst->services, svc, next);
+
+  /* Create backend */
+  XZALLOC (be);
+  be->be_type = BE_CONTROL;
+  be->priority = 1;
+  be->alive = 1;
+  pthread_mutex_init (&be->mut, NULL);
+  /* Register backend in service */
+  SLIST_PUSH (&svc->backends, be, next);
+
+  return PARSER_OK;
+}
+
 static PARSER_TABLE top_level_parsetab[] = {
   { "Include", parse_include },
   { "User", assign_string, &user },
@@ -3539,7 +3409,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case) },
   { "ECDHCurve", parse_ECDHCurve },
   { "SSLEngine", parse_SSLEngine },
-  { "Control", assign_string, &ctrl_name },
+  { "Control", parse_control_global },
   { "Anonymise", int_set_one, &anonymise },
   { "Anonymize", int_set_one, &anonymise },
   { "Service", parse_service, &services },

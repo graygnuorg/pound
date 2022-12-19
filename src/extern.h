@@ -5,10 +5,10 @@
 extern char *progname;          /* program name */
 
 extern char *user,		/* user to run as */
- *group,			/* group to run as */
- *root_jail,			/* directory to chroot to */
- *pid_name,			/* file to record pid in */
- *ctrl_name;			/* control socket name */
+  *group,			/* group to run as */
+  *root_jail,			/* directory to chroot to */
+  *pid_name;			/* file to record pid in */
+
 
 extern unsigned worker_min_count; /* min. number of worker threads */
 extern unsigned worker_max_count; /* max. number of worker threads */
@@ -22,7 +22,6 @@ extern int daemonize;		/* run as daemon */
 extern int enable_supervisor;   /* run supervisor process */
 extern int log_facility;	/* log facility to use */
 extern int print_log;		/* print log messages to stdout/stderr */
-extern int control_sock;	/* control socket */
 
 extern regex_t HEADER,		/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
