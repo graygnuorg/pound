@@ -262,6 +262,8 @@ xgets (BIO *bio, char *buf, int len)
 	logmsg (LOG_ERR, "BIO_gets not implemented; please, report");
       exit (1);
     }
+  if (n > 0 && buf[n-1] == '\n')
+    buf[--n] = 0;
   if (n > 0 && buf[n-1] == '\r')
     buf[--n] = 0;
 #if 0
