@@ -351,6 +351,7 @@ thr_dispatch (void *unused)
 			    logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
 			  */
 			  close (clnt);
+			  continue;
 			}
 
 		      arg.sock = clnt;

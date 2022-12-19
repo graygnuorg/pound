@@ -2117,6 +2117,31 @@ control_list_service (BIO *c, char const *url)
   return 404;
 }
 
+/*
+ * Return 1 if listener is a control one and 0 otherwise.
+ * The logic is based on the following premises:
+ *  1. Only UNIX sockets can be used for control interface.
+ *  2. Control listeners have exactly one service.
+ *  3. That service has exactly one backend.
+ *  4. Type of that backend is BE_CONTROL.
+ * See parse_control_global in config.c
+ */
+static int
+listener_is_control (LISTENER *lstn)
+{
+  if (lstn && lstn->addr.ai_family == AF_UNIX)
+    {
+      SERVICE *svc = SLIST_FIRST (&lstn->services);
+
+      if (svc && SLIST_NEXT (svc, next) == NULL)
+	{
+	  BACKEND *be = SLIST_FIRST (&svc->backends);
+	  return SLIST_NEXT (be, next) == NULL && be->be_type == BE_CONTROL;
+	}
+    }
+  return 0;
+}
+
 static int
 disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 {
@@ -2126,6 +2151,9 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 
   if (*url && *url != '?')
     return 404;
+
+  if (listener_is_control (obj->lstn))
+    return 400; // FIXME: 403?
 
   switch (obj->type)
     {

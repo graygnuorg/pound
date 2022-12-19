@@ -2013,12 +2013,27 @@ do_http (THR_ARG *arg)
 	      /* ok */
 	      break;
 
+	    case 400:
+	      err_reply (cl, h400, "Bad request");//FIXME
+
 	    case 404:
 	      err_reply (cl, h404, lstn->err404);
 	      break;
 
+	    case 413:
+	      err_reply (cl, h413, lstn->err413);
+	      break;
+
 	    case 500:
 	      err_reply (cl, h500, lstn->err500);
+	      break;
+
+	    case 501:
+	      err_reply (cl, h501, lstn->err501);
+	      break;
+
+	    case 503:
+	      err_reply (cl, h503, lstn->err503);
 	      break;
 	    }
 
