@@ -2658,12 +2658,13 @@ static PARSER_TABLE http_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, err404) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
+  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
   { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
   { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
@@ -2687,12 +2688,6 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
-  lst->err404 = "Not Found.";
-  lst->err413 = "Request too large.";
-  lst->err414 = "Request URI is too long.";
-  lst->err500 = "An internal server error occurred. Please try again later.";
-  lst->err501 = "This method may not be used.";
-  lst->err503 = "The service is not available. Please try again later.";
   lst->log_level = dfl->log_level;
   lst->verb = 0;
   SLIST_INIT (&lst->head_off);
@@ -3216,12 +3211,13 @@ static PARSER_TABLE https_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, err404) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, err413) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, err414) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, err500) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, err501) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, err503) },
+  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
   { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
   { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },

@@ -31,15 +31,25 @@
 /*
  * HTTP error replies
  */
-static char *h500 = "500 Internal Server Error",
-	    *h501 = "501 Not Implemented",
-	    *h503 = "503 Service Unavailable",
-	    *h400 = "400 Bad Request",
-	    *h404 = "404 Not Found",
-	    *h413 = "413 Payload Too Large";
+typedef struct
+{
+  int code;
+  char const *text;
+} HTTP_STATUS;
+
+static HTTP_STATUS http_status[] = {
+  [HTTP_STATUS_OK] = { 200, "OK" },
+  [HTTP_STATUS_BAD_REQUEST] = { 400, "Bad Request" },
+  [HTTP_STATUS_NOT_FOUND] = { 404, "Not Found" },
+  [HTTP_STATUS_PAYLOAD_TOO_LARGE] = { 413, "Payload Too Large" },
+  [HTTP_STATUS_URI_TOO_LONG] = { 414, "URI Too Long" },
+  [HTTP_STATUS_INTERNAL_SERVER_ERROR] = { 500, "Internal Server Error" },
+  [HTTP_STATUS_NOT_IMPLEMENTED] = { 501, "Not Implemented" },
+  [HTTP_STATUS_SERVICE_UNAVAILABLE] = { 503, "Service Unavailable" },
+};
 
 static char *err_response =
-	"HTTP/1.0 %s\r\n"
+	"HTTP/1.0 %d %s\r\n"
 	"Content-Type: text/html\r\n"
 	"Content-Length: %d\r\n"
 	"Expires: now\r\n"
@@ -52,11 +62,25 @@ static char *err_response =
  * Reply with an error
  */
 static void
-err_reply (BIO * const c, const char *head, const char *txt)
+err_reply (BIO *c, int err, char const *txt)
 {
-  BIO_printf (c, err_response, head, strlen (txt), txt);
+  if (!(err >= 0 && err < HTTP_STATUS_MAX))
+    {
+      err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+      txt = "Bad error code returned";
+    }
+  if (!txt)
+    txt = http_status[err].text;
+  BIO_printf (c, err_response, http_status[err].code, http_status[err].text,
+	      strlen (txt), txt);
   BIO_flush (c);
   return;
+}
+
+static void
+listener_err_reply (BIO *c, int err, LISTENER const *lstn)
+{
+  err_reply (c, err, lstn->http_err[err]);
 }
 
 static char *
@@ -180,7 +204,7 @@ redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm
   stringbuf_free (&cont_buf);
   stringbuf_free (&url_buf);
 
-  return code;
+  return HTTP_STATUS_OK;
 }
 
 /*
@@ -219,7 +243,7 @@ acme_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
   struct stat st;
   BIO *bin;
   char *file_name;
-  int rc = 200;
+  int rc = HTTP_STATUS_OK;
 
   file_name = expand_url (be->url, url, sm, 1);
 
@@ -227,19 +251,19 @@ acme_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
     {
       if (errno == ENOENT)
 	{
-	  rc = 404;
+	  rc = HTTP_STATUS_NOT_FOUND;
 	}
       else
 	{
 	  logmsg (LOG_ERR, "can't open %s: %s", file_name, strerror (errno));
-	  rc = 500;
+	  rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
     }
   else if (fstat (fd, &st))
     {
       logmsg (LOG_ERR, "can't stat %s: %s", file_name, strerror (errno));
       close (fd);
-      rc = 500;
+      rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
   else
     {
@@ -705,7 +729,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
     {
       logmsg (LOG_WARNING, "(%"PRItid") e500 headers: out of memory",
 	      POUND_TID ());
-      err_reply (cl, h500, lstn->err500);
+      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
       return NULL;
     }
   if ((headers[0] = malloc (MAXBUF)) == NULL)
@@ -713,7 +737,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
       free_headers (headers);
       logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
 	      POUND_TID ());
-      err_reply (cl, h500, lstn->err500);
+      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
       return NULL;
     }
   memset (headers[0], 0, MAXBUF);
@@ -738,7 +762,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
 	  free_headers (headers);
 	  logmsg (LOG_WARNING, "(%"PRItid") e500 header: out of memory",
 		  POUND_TID ());
-	  err_reply (cl, h500, lstn->err500);
+	  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	  return NULL;
 	}
       memset (headers[n], 0, MAXBUF);
@@ -747,7 +771,7 @@ get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
 
   free_headers (headers);
   logmsg (LOG_NOTICE, "(%"PRItid") e500 too many headers", POUND_TID ());
-  err_reply (cl, h500, lstn->err500);
+  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
   return NULL;
 }
 
@@ -1156,7 +1180,7 @@ do_http (THR_ARG *arg)
 	  logmsg (LOG_WARNING, "(%"PRItid") e501 bad request \"%s\" from %s",
 		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
-	  err_reply (cl, h501, lstn->err501);
+	  listener_err_reply (cl, HTTP_STATUS_NOT_IMPLEMENTED, lstn);
 	  free_headers (headers);
 	  clean_all ();
 	  return;
@@ -1182,7 +1206,7 @@ do_http (THR_ARG *arg)
 	  logmsg (LOG_NOTICE, "(%"PRItid") e501 bad URL \"%s\" from %s",
 		  POUND_TID (), url,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
-	  err_reply (cl, h501, lstn->err501);
+	  listener_err_reply (cl, HTTP_STATUS_NOT_IMPLEMENTED, lstn);
 	  free_headers (headers);
 	  clean_all ();
 	  return;
@@ -1234,7 +1258,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
 			  POUND_TID (), url,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
-		  err_reply (cl, h400,
+		  err_reply (cl, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Transfer-encoding values");
 		  free_headers (headers);
 		  clean_all ();
@@ -1249,7 +1273,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
 			  POUND_TID (), url,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
-		  err_reply (cl, h400,
+		  err_reply (cl, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Content-length values");
 		  free_headers (headers);
 		  clean_all ();
@@ -1262,7 +1286,7 @@ do_http (THR_ARG *arg)
 			    "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
 			    POUND_TID (), url,
 			    addr2str (caddr, sizeof (caddr), &from_host, 1));
-		    err_reply (cl, h400,
+		    err_reply (cl, HTTP_STATUS_BAD_REQUEST,
 			       "Bad request: Content-length bad value");
 		    free_headers (headers);
 		    clean_all ();
@@ -1359,7 +1383,7 @@ do_http (THR_ARG *arg)
 		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
 		  POUND_TID (), url,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
-	  err_reply (cl, h400,
+	  err_reply (cl, HTTP_STATUS_BAD_REQUEST,
 		     "Bad request: Transfer-encoding and Content-length headers present");
 	  free_headers (headers);
 	  clean_all ();
@@ -1375,7 +1399,7 @@ do_http (THR_ARG *arg)
 	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRILONG") from %s",
 		  POUND_TID (), cont,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1));
-	  err_reply (cl, h413, lstn->err413);
+	  listener_err_reply (cl, HTTP_STATUS_PAYLOAD_TOO_LARGE, lstn);
 	  free_headers (headers);
 	  clean_all ();
 	  return;
@@ -1405,7 +1429,7 @@ do_http (THR_ARG *arg)
 		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  v_host[0] ? v_host : "-");
-	  err_reply (cl, h503, lstn->err503);
+	  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	  free_headers (headers);
 	  clean_all ();
 	  return;
@@ -1416,7 +1440,7 @@ do_http (THR_ARG *arg)
 		  POUND_TID (), request,
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  v_host[0] ? v_host : "-");
-	  err_reply (cl, h503, lstn->err503);
+	  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	  free_headers (headers);
 	  clean_all ();
 	  return;
@@ -1447,7 +1471,7 @@ do_http (THR_ARG *arg)
 	    default:
 	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
 		      POUND_TID (), backend->addr.ai_family);
-	      err_reply (cl, h503, lstn->err503);
+	      listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	      free_headers (headers);
 	      clean_all ();
 	      return;
@@ -1458,7 +1482,7 @@ do_http (THR_ARG *arg)
 	      str_be (buf, sizeof (buf), backend);
 	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
 		      POUND_TID (), buf, strerror (errno));
-	      err_reply (cl, h503, lstn->err503);
+	      listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	      free_headers (headers);
 	      clean_all ();
 	      return;
@@ -1476,7 +1500,7 @@ do_http (THR_ARG *arg)
 		  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s",
 			  POUND_TID (), request,
 			  addr2str (caddr, sizeof (caddr), &from_host, 1));
-		  err_reply (cl, h503, lstn->err503);
+		  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 		  free_headers (headers);
 		  clean_all ();
 		  return;
@@ -1508,7 +1532,7 @@ do_http (THR_ARG *arg)
 		      POUND_TID ());
 	      shutdown (sock, 2);
 	      close (sock);
-	      err_reply (cl, h503, lstn->err503);
+	      listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	      free_headers (headers);
 	      clean_all ();
 	      return;
@@ -1525,7 +1549,7 @@ do_http (THR_ARG *arg)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") be SSL_new: failed",
 			  POUND_TID ());
-		  err_reply (cl, h503, lstn->err503);
+		  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 		  free_headers (headers);
 		  clean_all ();
 		  return;
@@ -1535,7 +1559,7 @@ do_http (THR_ARG *arg)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") BIO_new(Bio_f_ssl()) failed",
 			  POUND_TID ());
-		  err_reply (cl, h503, lstn->err503);
+		  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 		  free_headers (headers);
 		  clean_all ();
 		  return;
@@ -1548,7 +1572,7 @@ do_http (THR_ARG *arg)
 		  str_be (buf, sizeof (buf), backend);
 		  logmsg (LOG_NOTICE, "BIO_do_handshake with %s failed: %s",
 			  buf, ERR_error_string (ERR_get_error (), NULL));
-		  err_reply (cl, h503, lstn->err503);
+		  listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 		  free_headers (headers);
 		  clean_all ();
 		  return;
@@ -1558,7 +1582,7 @@ do_http (THR_ARG *arg)
 	    {
 	      logmsg (LOG_WARNING, "(%"PRItid") e503 BIO_new(buffer) server failed",
 		      POUND_TID ());
-	      err_reply (cl, h503, lstn->err503);
+	      listener_err_reply (cl, HTTP_STATUS_SERVICE_UNAVAILABLE, lstn);
 	      free_headers (headers);
 	      clean_all ();
 	      return;
@@ -1625,7 +1649,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write to %s/%s: %s (%.3f sec)",
 			  POUND_TID (), buf, request, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  free_headers (headers);
 		  clean_all ();
 		  return;
@@ -1643,7 +1667,7 @@ do_http (THR_ARG *arg)
 			"(%"PRItid") e500 error write AddHeader to %s: %s (%.3f sec)",
 			POUND_TID (), buf, strerror (errno),
 			(end_req - start_req) / 1000000.0);
-		err_reply (cl, h500, lstn->err500);
+		listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		free_headers (headers);
 		clean_all ();
 		return;
@@ -1672,7 +1696,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-cipher to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  clean_all ();
 		  return;
 		}
@@ -1692,7 +1716,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-Subject to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1709,7 +1733,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-Issuer to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1725,7 +1749,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-notBefore to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1741,7 +1765,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-notAfter to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1755,7 +1779,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-serial to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1770,7 +1794,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1785,7 +1809,7 @@ do_http (THR_ARG *arg)
 			      "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
 			      POUND_TID (), buf, strerror (errno),
 			      (end_req - start_req) / 1000000.0);
-		      err_reply (cl, h500, lstn->err500);
+		      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		      BIO_free_all (bb);
 		      clean_all ();
 		      return;
@@ -1799,7 +1823,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
 			  POUND_TID (), buf, strerror (errno),
 			  (end_req - start_req) / 1000000.0);
-		  err_reply (cl, h500, lstn->err500);
+		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
 		  return;
@@ -1838,7 +1862,7 @@ do_http (THR_ARG *arg)
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request,
 		      (end_req - start_req) / 1000000.0);
-	      err_reply (cl, h500, lstn->err500);
+	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
 	    }
@@ -1858,7 +1882,7 @@ do_http (THR_ARG *arg)
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
-	      err_reply (cl, h500, lstn->err500);
+	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
 	    }
@@ -1959,7 +1983,7 @@ do_http (THR_ARG *arg)
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  buf, request, strerror (errno),
 		  (end_req - start_req) / 1000000.0);
-	  err_reply (cl, h500, lstn->err500);
+	  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	  clean_all ();
 	  return;
 	}
@@ -2007,35 +2031,8 @@ do_http (THR_ARG *arg)
 	      what = "CONTROL";
 	    }
 
-	  switch (code)
-	    {
-	    case 200:
-	      /* ok */
-	      break;
-
-	    case 400:
-	      err_reply (cl, h400, "Bad request");//FIXME
-
-	    case 404:
-	      err_reply (cl, h404, lstn->err404);
-	      break;
-
-	    case 413:
-	      err_reply (cl, h413, lstn->err413);
-	      break;
-
-	    case 500:
-	      err_reply (cl, h500, lstn->err500);
-	      break;
-
-	    case 501:
-	      err_reply (cl, h501, lstn->err501);
-	      break;
-
-	    case 503:
-	      err_reply (cl, h503, lstn->err503);
-	      break;
-	    }
+	  if (code != HTTP_STATUS_OK)
+	    listener_err_reply (cl, code, lstn);
 
 	  addr2str (caddr, sizeof (caddr), &from_host, 1);
 	  switch (lstn->log_level)
@@ -2155,7 +2152,7 @@ do_http (THR_ARG *arg)
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
 		      (end_req - start_req) / 1000000.0);
-	      err_reply (cl, h500, lstn->err500);
+	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
 	    }

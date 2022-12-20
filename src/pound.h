@@ -205,6 +205,21 @@ enum
     METH_RPC_IN_DATA,
     METH_RPC_OUT_DATA,
   };
+
+/* HTTP errors */
+enum
+  {
+    HTTP_STATUS_OK,                // 200
+    HTTP_STATUS_BAD_REQUEST,       // 400
+    HTTP_STATUS_NOT_FOUND,         // 404
+    HTTP_STATUS_PAYLOAD_TOO_LARGE, // 413
+    HTTP_STATUS_URI_TOO_LONG,      // 414
+    HTTP_STATUS_INTERNAL_SERVER_ERROR,          // 500
+    HTTP_STATUS_NOT_IMPLEMENTED,   // 501
+    HTTP_STATUS_SERVICE_UNAVAILABLE, // 503
+    HTTP_STATUS_MAX
+  };
+
 
 /* List definitions. */
 #include "list.h"
@@ -408,8 +423,7 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
-  char *err404, *err413, *err414, *err500, *err501, *err503;
-				/* error messages */
+  char *http_err[HTTP_STATUS_MAX];	/* error messages */
   LONG max_req;			/* max. request size */
   MATCHER_HEAD head_off;	/* headers to remove */
   int rewr_loc;			/* rewrite location response */

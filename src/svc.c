@@ -1933,7 +1933,7 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
       errno = 0;
       n = strtol (indent, &end, 10);
       if (errno || end != indent + len || n < 0 || n > 80)
-	return 400;
+	return HTTP_STATUS_BAD_REQUEST;
       format.indent = n;
     }
 
@@ -1952,7 +1952,7 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
   free (str);
   BIO_flush (c);
 
-  return 200;
+  return HTTP_STATUS_OK;
 }
 
 static int
@@ -2014,9 +2014,9 @@ ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
   OBJECT obj = { .type = OBJ_BACKEND };
 
   if ((n = ctl_getnum (&url)) < 0)
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
   if ((obj.be = get_nth_backend (svc, n)) == NULL)
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
   return func (c, &obj, url, data);
 }
 
@@ -2027,10 +2027,10 @@ ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url, LISTENER *lst
   OBJECT obj = { .type = OBJ_SERVICE };
 
   if ((n = ctl_getnum (&url)) < 0)
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
 
   if ((obj.svc = get_nth_service (lstn, n)) == NULL)
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
 
   if (*url && *url != '?')
     return ctl_backend (func, data, c, url, obj.svc);
@@ -2057,10 +2057,10 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
   else
     {
       if ((n = ctl_getnum (&url)) < 0)
-	return 404;
+	return HTTP_STATUS_NOT_FOUND;
 
       if ((obj.lstn = get_nth_listener (n)) == NULL)
-	return 404;
+	return HTTP_STATUS_NOT_FOUND;
     }
 
   if (*url && *url != '?')
@@ -2076,7 +2076,7 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   int rc;
 
   if (*url && *url != '?')
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
 
   switch (obj->type)
     {
@@ -2106,7 +2106,7 @@ control_list_listener (BIO *c, char const *url)
 {
   if (*url == '/')
     return ctl_listener (list_handler, NULL, c, url);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2114,7 +2114,7 @@ control_list_service (BIO *c, char const *url)
 {
   if (*url == '/')
     return ctl_service (list_handler, NULL, c, url, NULL);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 /*
@@ -2150,10 +2150,10 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   struct json_value *val;
 
   if (*url && *url != '?')
-    return 404;
+    return HTTP_STATUS_NOT_FOUND;
 
   if (listener_is_control (obj->lstn))
-    return 400; // FIXME: 403?
+    return HTTP_STATUS_BAD_REQUEST; // FIXME: 403?
 
   switch (obj->type)
     {
@@ -2182,7 +2182,7 @@ control_disable_listener (BIO *c, char const *url)
   int dis = 1;
   if (*url == '/')
     return ctl_listener (disable_handler, &dis, c, url);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2191,7 +2191,7 @@ control_enable_listener (BIO *c, char const *url)
   int dis = 0;
   if (*url == '/')
     return ctl_listener (disable_handler, &dis, c, url);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2200,7 +2200,7 @@ control_disable_service (BIO *c, char const *url)
   int dis = 1;
   if (*url == '/')
     return ctl_service (disable_handler, &dis, c, url, NULL);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2209,7 +2209,7 @@ control_enable_service (BIO *c, char const *url)
   int dis = 0;
   if (*url == '/')
     return ctl_service (disable_handler, &dis, c, url, NULL);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2226,7 +2226,7 @@ session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     {
     case OBJ_BACKEND:
     case OBJ_LISTENER:
-      return 400;
+      return HTTP_STATUS_BAD_REQUEST;
 
     case OBJ_SERVICE:
       svc = obj->svc;
@@ -2234,9 +2234,9 @@ session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     }
 
   if ((key = get_param (url, "key", &keylen)) == NULL)
-    return 400;
+    return HTTP_STATUS_BAD_REQUEST;
   if (keylen > sizeof (keybuf) - 1)
-    return 400;
+    return HTTP_STATUS_BAD_REQUEST;
   strncpy (keybuf, key, keylen);
 
   pthread_mutex_lock (&svc->mut);
@@ -2264,7 +2264,7 @@ session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     {
     case OBJ_LISTENER:
     case OBJ_SERVICE:
-      return 400;
+      return HTTP_STATUS_BAD_REQUEST;
 
     case OBJ_BACKEND:
       be = obj->be;
@@ -2273,9 +2273,9 @@ session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     }
 
   if ((key = get_param (url, "key", &keylen)) == NULL)
-    return 400;
+    return HTTP_STATUS_BAD_REQUEST;
   if (keylen > sizeof (keybuf) - 1)
-    return 400;
+    return HTTP_STATUS_BAD_REQUEST;
   strncpy (keybuf, key, keylen);
 
   pthread_mutex_lock (&svc->mut);
@@ -2293,7 +2293,7 @@ control_delete_session (BIO *c, char const *url)
 {
   if (*url == '/')
     return ctl_listener (session_remove_handler, NULL, c, url);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 static int
@@ -2301,7 +2301,7 @@ control_add_session (BIO *c, char const *url)
 {
   if (*url == '/')
     return ctl_listener (session_add_handler, NULL, c, url);
-  return 404;
+  return HTTP_STATUS_NOT_FOUND;
 }
 
 struct endpoint
@@ -2356,8 +2356,8 @@ find_endpoint (int method, const char *uri, int *errcode)
       }
 
   if (cp == NULL)
-    /* FIXME: Should be 405, instead of 400 */
-    *errcode = uri_match ? 400 : 404;
+    /* FIXME: Should be 405, instead of 400 (HTTP_STATUS_BAD_REQUEST) */
+    *errcode = uri_match ? HTTP_STATUS_BAD_REQUEST : HTTP_STATUS_NOT_FOUND;
   return cp;
 }
 
