@@ -30,23 +30,6 @@
 #include "json.h"
 
 /*
- * Compare two timespecs
- */
-static inline int
-timespec_cmp (struct timespec const *a, struct timespec const *b)
-{
-  if (a->tv_sec < b->tv_sec)
-    return -1;
-  if (a->tv_sec > b->tv_sec)
-    return 1;
-  if (a->tv_nsec < b->tv_nsec)
-    return -1;
-  if (a->tv_nsec > b->tv_nsec)
-    return 1;
-  return 0;
-}
-
-/*
  * basic hashing function, based on fmv
  */
 static unsigned long
@@ -379,6 +362,30 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 	}
     }
   return res;
+}
+
+/* Return a string representation for a back-end address */
+char *
+str_be (char *buf, size_t size, BACKEND *be)
+{
+  switch (be->be_type)
+    {
+    case BE_BACKEND:
+      addr2str (buf, size, &be->addr, 0);
+      break;
+
+    case BE_REDIRECT:
+      snprintf (buf, size, "redirect:%s", be->url);
+      break;
+
+    case BE_ACME:
+      snprintf (buf, size, "acme:%s", be->url);
+      break;
+
+    case BE_CONTROL:
+      strncpy (buf, "control", size);
+    }
+  return buf;
 }
 
 /*

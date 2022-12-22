@@ -140,7 +140,7 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
  * Reply with a redirect
  */
 static int
-redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
+redirect_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
 {
   int code = be->redir_code;
   char const *code_msg, *cont;
@@ -211,8 +211,7 @@ redirect_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm
  * Read and write some binary data
  */
 static int
-copy_bin (BIO * const cl, BIO * const be, LONG cont, LONG * res_bytes,
-	  const int no_write)
+copy_bin (BIO *cl, BIO *be, LONG cont, LONG *res_bytes, int no_write)
 {
   char buf[MAXBUF];
   int res;
@@ -237,7 +236,7 @@ copy_bin (BIO * const cl, BIO * const be, LONG cont, LONG * res_bytes,
 }
 
 static int
-acme_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
+acme_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
 {
   int fd;
   struct stat st;
@@ -296,7 +295,7 @@ acme_reply (BIO * const c, const char *url, BACKEND *be, struct submatch *sm)
  * Return 0 on success
  */
 static int
-get_line (BIO * const in, char *const buf, const int bufsize)
+get_line (BIO *in, char *const buf, int bufsize)
 {
   char tmp;
   int i, seen_cr;
@@ -402,8 +401,7 @@ strip_eol (char *lin)
  * Copy chunked
  */
 static int
-copy_chunks (BIO * const cl, BIO * const be, LONG * res_bytes,
-	     const int no_write, const LONG max_size)
+copy_chunks (BIO *cl, BIO *be, LONG * res_bytes, int no_write, LONG max_size)
 {
   char buf[MAXBUF];
   LONG cont, tot_size;
@@ -542,7 +540,7 @@ bio_callback
 (BIO *bio, int cmd, const char *argp, size_t len, int argi,
  long argl, int ret, size_t *processed)
 #else
-(BIO * const bio, const int cmd, const char *argp, int argi,
+(BIO *bio, int cmd, const char *argp, int argi,
 	      long argl, long ret)
 #endif
 {
@@ -676,7 +674,7 @@ set_callback (BIO *cl, BIO_ARG *arg)
  * Check if the file underlying a BIO is readable
  */
 static int
-is_readable (BIO * const bio, const int to_wait)
+is_readable (BIO *bio, int to_wait)
 {
   struct pollfd p;
 
@@ -701,7 +699,7 @@ free_headers (char **headers)
 }
 
 static char **
-get_headers (BIO * const in, BIO * const cl, const LISTENER * lstn)
+get_headers (BIO *in, BIO *cl, const LISTENER *lstn)
 {
   char **headers, buf[MAXBUF];
   int res, n;
@@ -885,61 +883,240 @@ parse_http_request (const char *req, int group,
   return 0;
 }
 
+/*
+ * HTTP Logging
+ *
+ * Function signatures are overly complex.  They will get simplified when
+ * do_http gets revised.
+ */
+
+static char *
+anon_addr2str (char *buf, size_t size, struct addrinfo const *from_host)
+{
+  if (from_host->ai_family == AF_UNIX)
+    {
+      strncpy (buf, "socket", size);
+    }
+  else
+    {
+      addr2str (buf, size, from_host, 1);
+      if (anonymise)
+	{
+	  char *last;
+
+	  if ((last = strrchr (buf, '.')) != NULL
+	      || (last = strrchr (buf, ':')) != NULL)
+	    strcpy (++last, "0");
+	}
+    }
+  return buf;
+}
+
 #define LOG_TIME_SIZE   32
+
 /*
  * Apache log-file-style time format
  */
-static void
-log_time (char *res)
+static char *
+log_time_str (char *res, size_t size, struct timespec const *ts)
 {
-  time_t now;
-  struct tm *t_now;
-
-  now = time (NULL);
-#ifdef  HAVE_LOCALTIME_R
-  t_now = localtime_r (&now, &t_res);
-#else
-  t_now = localtime (&now);
-#endif
-  strftime (res, LOG_TIME_SIZE - 1, "%d/%b/%Y:%H:%M:%S %z", t_now);
-  return;
-}
-
-static double
-cur_time (void)
-{
-#ifdef  HAVE_GETTIMEOFDAY
-  struct timeval tv;
-  struct timezone tz;
-  int sv_errno;
-
-  sv_errno = errno;
-  gettimeofday (&tv, &tz);
-  errno = sv_errno;
-  return tv.tv_sec * 1000000.0 + tv.tv_usec;
-#else
-  return time (NULL) * 1000000.0;
-#endif
+  struct tm tm;
+  strftime (res, size, "%d/%b/%Y:%H:%M:%S %z", localtime_r (&ts->tv_sec, &tm));
+  return res;
 }
 
 #define LOG_BYTES_SIZE  32
+
 /*
  * Apache log-file-style number format
  */
-static void
-log_bytes (char *res, const LONG cnt)
+static char *
+log_bytes (char *res, size_t size, LONG cnt)
 {
   if (cnt > L0)
-#ifdef  HAVE_LONG_LONG_INT
-    snprintf (res, LOG_BYTES_SIZE - 1, "%lld", cnt);
-#else
-    snprintf (res, LOG_BYTES_SIZE - 1, "%ld", cnt);
-#endif
+    snprintf (res, size, "%"PRILONG, cnt);
   else
     strcpy (res, "-");
-  return;
+  return res;
 }
 
+static char *
+log_duration (char *buf, size_t size, struct timespec const *start)
+{
+  struct timespec end, diff;
+  clock_gettime (CLOCK_REALTIME, &end);
+  diff = timespec_sub (&end, start);
+  snprintf (buf, size, "%ld.%03ld", diff.tv_sec, diff.tv_nsec / 1000000);
+  return buf;
+}
+
+static void
+http_log_0 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_agent, char *referer, char *u_name,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  /* nothing */
+}
+
+static void
+http_log_1 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_agent, char *referer, char *u_name,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  char buf[MAX_ADDR_BUFSIZE];
+  logmsg (LOG_INFO, "%s %s - %s",
+	  anon_addr2str (buf, sizeof (buf), from_host), request, response);
+}
+
+static char *
+be_service_name (BACKEND *be)
+{
+  switch (be->be_type)
+    {
+    case BE_BACKEND:
+      if (be->service->name[0])
+	return be->service->name;
+      break;
+    case BE_REDIRECT:
+      return "(redirect)";
+    case BE_ACME:
+      return "(acme)";
+    case BE_CONTROL:
+      return "(control)";
+    }
+  return "-";
+}
+
+static void
+http_log_2 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_name,  char *u_agent, char *referer,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  char caddr[MAX_ADDR_BUFSIZE];
+  char baddr[MAX_ADDR_BUFSIZE];
+  char timebuf[LOG_TIME_SIZE];
+
+  if (v_host[0])
+    logmsg (LOG_INFO,
+	    "%s %s - %s (%s/%s -> %s) %s sec",
+	    anon_addr2str (caddr, sizeof (caddr), from_host),
+	    request, response, v_host,
+	    be_service_name (be),
+	    str_be (baddr, sizeof (baddr), be),
+	    log_duration (timebuf, sizeof (timebuf), ts));
+  else
+    logmsg (LOG_INFO,
+	    "%s %s - %s (%s -> %s) %s sec",
+	    anon_addr2str (caddr, sizeof (caddr), from_host),
+	    request, response,
+	    be_service_name (be),
+	    str_be (baddr, sizeof (baddr), be),
+	    log_duration (timebuf, sizeof (timebuf), ts));
+}
+
+static void
+http_log_3 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_name, char *u_agent, char *referer,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  char caddr[MAX_ADDR_BUFSIZE];
+  char timebuf[LOG_TIME_SIZE];
+  char bytebuf[LOG_BYTES_SIZE];
+
+  logmsg (LOG_INFO,
+	  "%s %s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\"",
+	  v_host[0] ? v_host : "-",
+	  anon_addr2str (caddr, sizeof (caddr), from_host),
+	  u_name[0] ? u_name : "-",
+	  log_time_str (timebuf, sizeof (timebuf), ts),
+	  request,
+	  code,
+	  log_bytes (bytebuf, sizeof (bytebuf), bytes),
+	  referer, u_agent);
+}
+
+static void
+http_log_4 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_agent, char *referer, char *u_name,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  char caddr[MAX_ADDR_BUFSIZE];
+  char timebuf[LOG_TIME_SIZE];
+  char bytebuf[LOG_BYTES_SIZE];
+
+  logmsg (LOG_INFO,
+	  "%s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\"",
+	  anon_addr2str (caddr, sizeof (caddr), from_host),
+	  u_name,
+	  log_time_str (timebuf, sizeof (timebuf), ts),
+	  request,
+	  code,
+	  log_bytes (bytebuf, sizeof (bytebuf), bytes),
+	  referer, u_agent);
+}
+
+static void
+http_log_5 (struct addrinfo const *from_host, struct timespec *ts,
+	    char *request, char *v_host,
+	    char *u_agent, char *referer, char *u_name,
+	    LISTENER *lstn, BACKEND *be,
+	    int code, char *response, LONG bytes)
+{
+  char caddr[MAX_ADDR_BUFSIZE];
+  char baddr[MAX_ADDR_BUFSIZE];
+  char timebuf[LOG_TIME_SIZE];
+  char dbuf[LOG_TIME_SIZE];
+  char bytebuf[LOG_BYTES_SIZE];
+
+  logmsg (LOG_INFO,
+	  "%s %s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\" (%s -> %s) %s sec",
+	  v_host[0] ? v_host : "-",
+	  anon_addr2str (caddr, sizeof (caddr), from_host),
+	  u_name,
+	  log_time_str (timebuf, sizeof (timebuf), ts),
+	  request,
+	  code,
+	  log_bytes (bytebuf, sizeof (bytebuf), bytes),
+	  referer, u_agent,
+	  be_service_name (be), str_be (baddr, sizeof (baddr), be),
+	  log_duration (dbuf, sizeof (dbuf), ts));
+}
+
+static void (*http_logger[]) (struct addrinfo const *, struct timespec *,
+			      char *, char *,
+			      char *, char *, char *, LISTENER *, BACKEND *,
+			      int, char *, LONG) = {
+  http_log_0,
+  http_log_1,
+  http_log_2,
+  http_log_3,
+  http_log_4,
+  http_log_5
+};
+
+static void
+http_log (struct addrinfo const *from_host, struct timespec *ts,
+	  char *request, char *v_host,
+	  char *u_agent, char *referer, char *u_name,
+	  LISTENER *lstn, BACKEND *be,
+	  int code, char *response, LONG bytes)
+{
+  http_logger[lstn->log_level] (from_host, ts,
+				request, v_host,
+				u_agent, referer, u_name, lstn, be,
+				code, response, bytes);
+}
+
 /*
  * Cleanup code. This should really be in the pthread_cleanup_push, except
  * for bugs in some implementations
@@ -1005,12 +1182,13 @@ do_http (THR_ARG *arg)
     **headers,
     headers_ok[MAXHEADERS],
     v_host[MAXBUF], referer[MAXBUF], u_agent[MAXBUF], u_name[MAXBUF],
-    caddr[MAX_ADDR_BUFSIZE], req_time[LOG_TIME_SIZE], s_res_bytes[LOG_BYTES_SIZE], *mh;
+    caddr[MAX_ADDR_BUFSIZE], *mh;
+  char duration_buf[LOG_TIME_SIZE];
   SSL *ssl, *be_ssl;
-  LONG cont, res_bytes;
+  LONG cont, res_bytes = 0;
   regmatch_t matches[4];
   struct linger l;
-  double start_req, end_req;
+  struct timespec start_req;
   RENEG_STATE reneg_state;
   BIO_ARG ba1, ba2;
   enum
@@ -1168,14 +1346,14 @@ do_http (THR_ARG *arg)
 	  clean_all ();
 	  return;
 	}
-      memset (req_time, 0, LOG_TIME_SIZE);
-      start_req = cur_time ();
-      log_time (req_time);
+
+      clock_gettime (CLOCK_REALTIME, &start_req);
 
       /*
        * check for correct request
        */
-      if (parse_http_request (headers[0], lstn->verb, &method, url, &cl_11))
+      strncpy (request, headers[0], MAXBUF);
+      if (parse_http_request (request, lstn->verb, &method, url, &cl_11))
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") e501 bad request \"%s\" from %s",
 		  POUND_TID (), request,
@@ -1644,11 +1822,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "%s\r\n", headers[n]) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write to %s/%s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write to %s/%s: %s (%s sec)",
 			  POUND_TID (), buf, request, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  free_headers (headers);
 		  clean_all ();
@@ -1662,11 +1839,10 @@ do_http (THR_ARG *arg)
 	    if (BIO_printf (be, "%s\r\n", lstn->add_head) <= 0)
 	      {
 		str_be (buf, sizeof (buf), cur_backend);
-		end_req = cur_time ();
 		logmsg (LOG_WARNING,
-			"(%"PRItid") e500 error write AddHeader to %s: %s (%.3f sec)",
+			"(%"PRItid") e500 error write AddHeader to %s: %s (%s sec)",
 			POUND_TID (), buf, strerror (errno),
-			(end_req - start_req) / 1000000.0);
+			log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		free_headers (headers);
 		clean_all ();
@@ -1691,11 +1867,10 @@ do_http (THR_ARG *arg)
 			      buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-cipher to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-cipher to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  clean_all ();
 		  return;
@@ -1711,11 +1886,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-Subject: %s\r\n", buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-Subject to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-Subject to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1728,11 +1902,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-Issuer: %s\r\n", buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-Issuer to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-Issuer to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1744,11 +1917,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-notBefore: %s\r\n", buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-notBefore to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-notBefore to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1760,11 +1932,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-notAfter: %s\r\n", buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-notAfter to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-notAfter to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1774,11 +1945,10 @@ do_http (THR_ARG *arg)
 			      ASN1_INTEGER_get (X509_get_serialNumber (x509))) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-serial to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-serial to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1789,11 +1959,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "X-SSL-certificate: %s", buf) <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1804,11 +1973,10 @@ do_http (THR_ARG *arg)
 		  if (BIO_printf (be, "%s", buf) <= 0)
 		    {
 		      str_be (buf, sizeof (buf), cur_backend);
-		      end_req = cur_time ();
 		      logmsg (LOG_WARNING,
-			      "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			      "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%s sec)",
 			      POUND_TID (), buf, strerror (errno),
-			      (end_req - start_req) / 1000000.0);
+			      log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		      BIO_free_all (bb);
 		      clean_all ();
@@ -1818,11 +1986,10 @@ do_http (THR_ARG *arg)
 	      if (BIO_printf (be, "\r\n") <= 0)
 		{
 		  str_be (buf, sizeof (buf), cur_backend);
-		  end_req = cur_time ();
 		  logmsg (LOG_WARNING,
-			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%.3f sec)",
+			  "(%"PRItid") e500 error write X-SSL-certificate to %s: %s (%s sec)",
 			  POUND_TID (), buf, strerror (errno),
-			  (end_req - start_req) / 1000000.0);
+			  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 		  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 		  BIO_free_all (bb);
 		  clean_all ();
@@ -1855,13 +2022,12 @@ do_http (THR_ARG *arg)
 			   lstn->max_req))
 	    {
 	      str_be (buf, sizeof (buf), cur_backend);
-	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%"PRItid") e500 for %s copy_chunks to %s/%s (%.3f sec)",
+		      "(%"PRItid") e500 for %s copy_chunks to %s/%s (%s sec)",
 		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request,
-		      (end_req - start_req) / 1000000.0);
+		      log_duration (duration_buf, sizeof (duration_buf), &start_req));
 	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
@@ -1875,13 +2041,12 @@ do_http (THR_ARG *arg)
 	  if (copy_bin (cl, be, cont, NULL, cur_backend->be_type != BE_BACKEND))
 	    {
 	      str_be (buf, sizeof (buf), cur_backend);
-	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%.3f sec)",
+		      "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%s sec)",
 		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
-		      (end_req - start_req) / 1000000.0);
+		      log_duration (duration_buf, sizeof (duration_buf), &start_req));
 	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
@@ -1976,13 +2141,12 @@ do_http (THR_ARG *arg)
       if (cur_backend->be_type == BE_BACKEND && BIO_flush (be) != 1)
 	{
 	  str_be (buf, sizeof (buf), cur_backend);
-	  end_req = cur_time ();
 	  logmsg (LOG_NOTICE,
-		  "(%"PRItid") e500 for %s error flush to %s/%s: %s (%.3f sec)",
+		  "(%"PRItid") e500 for %s error flush to %s/%s: %s (%s sec)",
 		  POUND_TID (),
 		  addr2str (caddr, sizeof (caddr), &from_host, 1),
 		  buf, request, strerror (errno),
-		  (end_req - start_req) / 1000000.0);
+		  log_duration (duration_buf, sizeof (duration_buf), &start_req));
 	  listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	  clean_all ();
 	  return;
@@ -2012,125 +2176,40 @@ do_http (THR_ARG *arg)
       if (cur_backend->be_type != BE_BACKEND)
 	{
 	  int code;
-	  char const *what;
 
 	  switch (cur_backend->be_type)
 	    {
 	    case BE_REDIRECT:
 	      code = redirect_reply (cl, url, cur_backend, &sm);
-	      what = "REDIRECT";
 	      break;
 
 	    case BE_ACME:
 	      code = acme_reply (cl, url, cur_backend, &sm);
-	      what = "ACME";
 	      break;
 
 	    case BE_CONTROL:
 	      code = control_reply (cl, method, url, cur_backend);
-	      what = "CONTROL";
 	    }
 
 	  if (code != HTTP_STATUS_OK)
 	    listener_err_reply (cl, code, lstn);
 
-	  addr2str (caddr, sizeof (caddr), &from_host, 1);
-	  switch (lstn->log_level)
-	    {
-	    case 0:
-	      break;
+	  http_log (&from_host, &start_req,
+		    request, v_host,
+		    u_agent, referer, u_name,
+		    lstn, cur_backend,
+		    code, response, 0); //FIXME: number of bytes
 
-	    case 1:
-	    case 2:
-	      logmsg (LOG_INFO, "%s %s - %s %s", caddr, request, what, buf);
-	      break;
-
-	    case 3:
-	      if (v_host[0])
-		logmsg (LOG_INFO,
-			"%s %s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
-			v_host, caddr, u_name[0] ? u_name : "-", req_time,
-			request, code, referer, u_agent);
-	      else
-		logmsg (LOG_INFO,
-			"%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
-			caddr, u_name[0] ? u_name : "-", req_time, request,
-			code, referer, u_agent);
-	      break;
-
-	    case 4:
-	    case 5:
-	      logmsg (LOG_INFO,
-		      "%s - %s [%s] \"%s\" %d 0 \"%s\" \"%s\"",
-		      caddr, u_name[0] ? u_name : "-", req_time, request,
-		      code, referer, u_agent);
-	      break;
-	    }
 	  if (!cl_11 || conn_closed || force_10)
 	    break;
 	  continue;
 	}
       else if (is_rpc == 1)
 	{
-	  /*
-	   * log RPC_IN_DATA
-	   */
-	  end_req = cur_time ();
-	  memset (s_res_bytes, 0, LOG_BYTES_SIZE);
-	  /*
-	   * actual request length
-	   */
-	  log_bytes (s_res_bytes, res_bytes);
-	  addr2str (caddr, sizeof (caddr), &from_host, 1);
-	  str_be (buf, sizeof (buf), cur_backend);
-	  switch (lstn->log_level)
-	    {
-	    case 0:
-	      break;
-
-	    case 1:
-	      logmsg (LOG_INFO, "%s %s - -", caddr, request);
-	      break;
-
-	    case 2:
-	      if (v_host[0])
-		logmsg (LOG_INFO,
-			"%s %s - - (%s/%s -> %s) %.3f sec",
-			caddr, request, v_host,
-			svc->name[0] ? svc->name : "-", buf,
-			(end_req - start_req) / 1000000.0);
-	      else
-		logmsg (LOG_INFO,
-			"%s %s - - (%s -> %s) %.3f sec",
-			caddr, request, svc->name[0] ? svc->name : "-", buf,
-			(end_req - start_req) / 1000000.0);
-	      break;
-
-	    case 3:
-	      logmsg (LOG_INFO,
-		      "%s %s - %s [%s] \"%s\" 000 %s \"%s\" \"%s\"",
-		      v_host[0] ? v_host : "-", caddr,
-		      u_name[0] ? u_name : "-", req_time, request,
-		      s_res_bytes, referer, u_agent);
-	      break;
-
-	    case 4:
-	      logmsg (LOG_INFO,
-		      "%s - %s [%s] \"%s\" 000 %s \"%s\" \"%s\"",
-		      caddr, u_name[0] ? u_name : "-", req_time, request,
-		      s_res_bytes, referer, u_agent);
-	      break;
-
-	    case 5:
-	      logmsg (LOG_INFO,
-		      "%s %s - %s [%s] \"%s\" 000 %s \"%s\" \"%s\" (%s -> %s) %.3f sec",
-		      v_host[0] ? v_host : "-", caddr,
-		      u_name[0] ? u_name : "-", req_time,
-		      request, s_res_bytes, referer, u_agent,
-		      svc->name[0] ? svc->name : "-", buf,
-		      (end_req - start_req) / 1000000.0);
-	      break;
-	    }
+	  http_log (&from_host, &start_req,
+		    request, v_host,
+		    u_agent, referer, u_name, lstn, cur_backend,
+		    0, response, res_bytes); //FIXME: response code
 	  /*
 	   * no response expected - bail out
 	   */
@@ -2145,13 +2224,12 @@ do_http (THR_ARG *arg)
 	  if ((headers = get_headers (be, cl, lstn)) == NULL)
 	    {
 	      str_be (buf, sizeof (buf), cur_backend);
-	      end_req = cur_time ();
 	      logmsg (LOG_NOTICE,
-		      "(%"PRItid") e500 for %s response error read from %s/%s: %s (%.3f secs)",
+		      "(%"PRItid") e500 for %s response error read from %s/%s: %s (%s secs)",
 		      POUND_TID (),
 		      addr2str (caddr, sizeof (caddr), &from_host, 1),
 		      buf, request, strerror (errno),
-		      (end_req - start_req) / 1000000.0);
+		      log_duration (duration_buf, sizeof (duration_buf), &start_req));
 	      listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
 	      clean_all ();
 	      return;
@@ -2574,73 +2652,11 @@ do_http (THR_ARG *arg)
 		}
 	    }
 	}
-      end_req = cur_time ();
 
-      /*
-       * log what happened
-       */
-      memset (s_res_bytes, 0, LOG_BYTES_SIZE);
-      log_bytes (s_res_bytes, res_bytes);
-      addr2str (caddr, sizeof (caddr), &from_host, 1);
-      if (anonymise)
-	{
-	  char *last;
-
-	  if ((last = strrchr (caddr, '.')) != NULL
-	      || (last = strrchr (caddr, ':')) != NULL)
-	    strcpy (++last, "0");
-	}
-      str_be (buf, sizeof (buf), cur_backend);
-      switch (lstn->log_level)
-	{
-	case 0:
-	  break;
-
-	case 1:
-	  logmsg (LOG_INFO, "%s %s - %s", caddr, request, response);
-	  break;
-
-	case 2:
-	  if (v_host[0])
-	    logmsg (LOG_INFO,
-		    "%s %s - %s (%s/%s -> %s) %.3f sec",
-		    caddr, request, response, v_host,
-		    svc->name[0] ? svc->name : "-", buf,
-		    (end_req - start_req) / 1000000.0);
-	  else
-	    logmsg (LOG_INFO,
-		    "%s %s - %s (%s -> %s) %.3f sec", caddr,
-		    request, response, svc->name[0] ? svc->name : "-", buf,
-		    (end_req - start_req) / 1000000.0);
-	  break;
-
-	case 3:
-	  logmsg (LOG_INFO,
-		  "%s %s - %s [%s] \"%s\" %c%c%c %s \"%s\" \"%s\"",
-		  v_host[0] ? v_host : "-", caddr,
-		  u_name[0] ? u_name : "-", req_time, request, response[9],
-		  response[10], response[11], s_res_bytes, referer, u_agent);
-	  break;
-
-	case 4:
-	  logmsg (LOG_INFO,
-		  "%s - %s [%s] \"%s\" %c%c%c %s \"%s\" \"%s\"",
-		  caddr, u_name[0] ? u_name : "-", req_time, request,
-		  response[9], response[10], response[11], s_res_bytes,
-		  referer, u_agent);
-	  break;
-
-	case 5:
-	  logmsg (LOG_INFO,
-		  "%s %s - %s [%s] \"%s\" %c%c%c %s \"%s\" \"%s\" (%s -> %s) %.3f sec",
-		  v_host[0] ? v_host : "-", caddr,
-		  u_name[0] ? u_name : "-", req_time, request,
-		  response[9], response[10], response[11],
-		  s_res_bytes, referer, u_agent,
-		  svc->name[0] ? svc->name : "-", buf,
-		  (end_req - start_req) / 1000000.0);
-	  break;
-	}
+      http_log (&from_host, &start_req,
+		request, v_host,
+		u_agent, referer, u_name, lstn, cur_backend,
+		strtol (response+9, NULL, 10), response, res_bytes);
 
       if (!be_11)
 	{

@@ -2213,6 +2213,7 @@ parse_session (void *call_data, void *section_data)
   svc->sess_type = sess.type;
 
   free (sess.id);
+  stringbuf_free (&sb);
 
   return PARSER_OK;
 }
@@ -2650,6 +2651,12 @@ append_string_line (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static int
+parse_log_level (void *call_data, void *section_data)
+{
+  return assign_int_range (call_data, 0, 5);
+}
+
 static PARSER_TABLE http_parsetab[] = {
   { "End", parse_end },
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
@@ -2670,7 +2677,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
+  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "HeaderAdd", append_string_line, NULL, offsetof (LISTENER, add_head) },
   { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
@@ -3223,7 +3230,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", assign_int, NULL, offsetof (LISTENER, log_level) },
+  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "HeaderAdd", append_string_line, NULL, offsetof (LISTENER, add_head) },
   { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },

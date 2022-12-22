@@ -219,6 +219,42 @@ enum
     HTTP_STATUS_SERVICE_UNAVAILABLE, // 503
     HTTP_STATUS_MAX
   };
+
+/*
+ * Operations on struct timespec
+ */
+/*
+ * Compare two timespecs
+ */
+static inline int
+timespec_cmp (struct timespec const *a, struct timespec const *b)
+{
+  if (a->tv_sec < b->tv_sec)
+    return -1;
+  if (a->tv_sec > b->tv_sec)
+    return 1;
+  if (a->tv_nsec < b->tv_nsec)
+    return -1;
+  if (a->tv_nsec > b->tv_nsec)
+    return 1;
+  return 0;
+}
+
+static inline struct timespec
+timespec_sub (struct timespec const *a, struct timespec const *b)
+{
+  struct timespec d;
+
+  d.tv_sec = a->tv_sec - b->tv_sec;
+  d.tv_nsec = a->tv_nsec - b->tv_nsec;
+  if (d.tv_nsec < 0)
+    {
+      --d.tv_sec;
+      d.tv_nsec += 1e9;
+    }
+
+  return d;
+}
 
 
 /* List definitions. */
@@ -520,7 +556,7 @@ int cpURL (char *, char *, int);
 char *addr2str (char *, int, const struct addrinfo *, int);
 
 /* Return a string representation for a back-end address */
-#define str_be(BUF, LEN, BE)    addr2str((BUF), (LEN), &(BE)->addr, 0)
+char *str_be (char *buf, size_t size, BACKEND *be);
 
 struct submatch
 {
