@@ -619,7 +619,7 @@ print_services (struct json_value *obj, char *heading)
     {
       if (a->type == json_null)
 	/* ok */;
-      else if (a->type == json_array)
+      else if (a->type == json_array && json_array_length (a) > 0)
 	{
 	  size_t i, n = json_array_length (a);
 	  if (heading)
