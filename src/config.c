@@ -1052,27 +1052,6 @@ assign_log_facility (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
-
-static int
-assign_log_level (void *call_data, void *section_data)
-{
-  unsigned n;
-  int ret = assign_unsigned (&n, NULL);
-  if (ret == PARSER_OK)
-    {
-      if (n >= INT_MAX)
-	{
-	  conf_error ("%s", "log level out of allowed range");
-	  ret = PARSER_FAIL;
-	}
-      else
-	{
-	  *(int*)call_data = n;
-	}
-    }
-  return ret;
-}
-
 /*
  * The ai_flags in the struct addrinfo is not used, unless in hints.
  * Therefore it is reused to mark which parts of address have been
@@ -3403,7 +3382,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "WorkerIdleTimeout", assign_timeout, &worker_idle_timeout },
   { "Grace", assign_timeout, &grace },
   { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },
-  { "LogLevel", assign_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
+  { "LogLevel", parse_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
   { "Alive", assign_timeout, &alive_to },
   { "Client", assign_timeout, NULL, offsetof (POUND_DEFAULTS, clnt_to) },
   { "TimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_to) },
