@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2022-12-19
+Pound -- history of user-visible changes. 2022-12-27
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -13,7 +13,9 @@ Version 4.1.91 (git)
 
 The timer thread is rewritten completely in order to do periodic
 operations (such as backend probing and session expiration)
-precisely when needed and lower the incurred CPU usage.
+precisely when needed, instead of waking up in fixed intervals and
+checking what should be done.  Among others, this helps reduce the CPU
+load.
 
 Whenever a backend is marked as dead, a periodic job is scheduled
 for "alive_to" seconds from the current time, which will probe the
@@ -26,17 +28,17 @@ consisting of a hash table (to quickly look-up a session) and
 a doubly-linked list (to provide for session expiration).  Sessions
 within the latter are sorted by their expiration time.  A periodic
 job is scheduled to the expiration time of the first session in the
-list, i.e. the least recently used one.  When the job has removed the
-expired session, it reschedules itself to the expiration time of the
+list, i.e. the least recently used one.  After removing the expired
+session, the job reschedules itself to the expiration time of the
 next session (which becomes first in the list), if any.
 
 * The "haport" feature has been removed.
 
-* Rewrite control interface
+* Control interface rewritten
 
 The new control interface uses REST API.
 
-* Rewrite poundctl
+* Poundctl rewritten
 
 Version 4.1, 2022-12-10
 

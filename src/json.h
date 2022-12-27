@@ -121,3 +121,5 @@ enum
 
 int json_parse_string (char const *input, struct json_value **retval,
 		       char **endp);
+
+extern void (*json_memabrt) (void);
