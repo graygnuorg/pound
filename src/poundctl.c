@@ -619,16 +619,19 @@ print_services (struct json_value *obj, char *heading)
     {
       if (a->type == json_null)
 	/* ok */;
-      else if (a->type == json_array && json_array_length (a) > 0)
+      else if (a->type == json_array)
 	{
-	  size_t i, n = json_array_length (a);
-	  if (heading)
-	    printf ("%s\n", heading);
-	  for (i = 0; i < n; i++)
+	  if (json_array_length (a) > 0)
 	    {
-	      struct json_value *svc;
-	      json_array_get (a, i, &svc);
-	      print_service (svc, i);
+	      size_t i, n = json_array_length (a);
+	      if (heading)
+		printf ("%s\n", heading);
+	      for (i = 0; i < n; i++)
+		{
+		  struct json_value *svc;
+		  json_array_get (a, i, &svc);
+		  print_service (svc, i);
+		}
 	    }
 	}
       else
