@@ -46,7 +46,7 @@ $(TESTSUITE): package.m4 $(TESTSUITE_AT)
 	$(AM_V_GEN)$(AUTOTEST) -I $(srcdir) testsuite.at -o $@.tmp
 	$(AM_V_at)mv $@.tmp $@
 
-atconfig: $(top_builddir)/config.status 
+atconfig: $(top_builddir)/config.status
 	cd $(top_builddir) && ./config.status tests/$@
 
 clean-local:
@@ -85,8 +85,12 @@ TESTSUITE_AT = \
  sessip.at\
  sessparm.at\
  sessurl.at\
+ template.at\
  url.at\
  virthost.at\
  xhttp.at
 
-noinst_PROGRAMS = 
+noinst_PROGRAMS = tmplrun
+tmplrun_SOURCES = tmplrun.c
+AM_CPPFLAGS = -I$(top_srcdir)/src
+tmplrun_LDADD = ../src/libpound.a

@@ -2,7 +2,7 @@
  * Global variables needed by everybody
  */
 
-extern char *progname;          /* program name */
+extern char const *progname;          /* program name */
 
 extern char *user,		/* user to run as */
   *group,			/* group to run as */

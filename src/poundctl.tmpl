@@ -1,0 +1,48 @@
+{{- /* Default template for poundctl */ -}}
+{{- /* Copyright (C) 2022 Sergey Poznyakoff
+     *
+     * Pound is free software; you can redistribute it and/or modify
+     * it under the terms of the GNU General Public License as published by
+     * the Free Software Foundation; either version 3 of the License, or
+     * (at your option) any later version.
+     *
+     * Pound is distributed in the hope that it will be useful,
+     * but WITHOUT ANY WARRANTY; without even the implied warranty of
+     * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+     * GNU General Public License for more details.
+     *
+     * You should have received a copy of the GNU General Public License
+     * along with pound.  If not, see <http://www.gnu.org/licenses/>.
+     */ -}}
+{{- /* Iterate over all listeners */ -}}
+{{define "default" -}}
+{{range $lno,$lstn = .listeners -}}
+{{printf "%3d" $lno}}. Listener {{$lstn.protocol}}://{{$lstn.address}} {{if $lstn.active}}active{{else}}disabled{{end}}
+ {{- /* For each listener, show all its services */ -}}
+ {{block "print_services" $lstn.services}}
+ {{- range $sno,$svc = .}}
+   {{printf "%3d" $sno}}. Service "{{$svc.name}}" {{if $svc.enabled}}active{{else}}disabled{{end}} ({{$svc.tot_pri}})
+  {{- /* List each backend in service */ -}}
+  {{- range $bno,$backend = $svc.backends}}
+      {{printf "%3d" $bno}}. {{$backend.type}} {{if eq $backend.type "backend" -}}
+{{$backend.protocol}} {{$backend.address}} {{$backend.priority}} {{if $backend.alive}}alive{{else}}dead{{end}}
+     {{- else if eq $backend.type "redirect" -}}
+{{$backend.code}} {{$backend.url}}{{if $backend.redir_req}} (redirect request){{end}}
+     {{- end}} {{if $backend.enabled}}active{{else}}disabled{{end}}
+  {{- end}}{{ /* iterating over backends */ }}
+  {{- /* Show session type supported by the service */ }}
+     Session type: {{$svc.session_type}}
+       {{- if len $svc.sessions}}
+         {{- /* List all sessions */ }}
+         {{- range $i, $sess = $svc.sessions}}
+       {{$i}}. Session {{$sess.key}} {{$sess.backend}} {{$sess.expire}}
+         {{- end}}{{ /* ranging over sessions */ -}}
+       {{end}}{{ /* if len */ }}
+ {{- end}}{{ /* iterating over services */ }}
+ {{- end}}{{ /* block print_services */ }}
+{{end}}{{ /* iterating over listeners */ }}
+{{- if len .services}}
+Global services:
+{{block "print_services" .services}}
+{{end -}}{{ /* if len .services */ }}
+{{end -}}{{ /* define */ }}

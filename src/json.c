@@ -326,8 +326,7 @@ json_copy_string (struct json_value *val, struct json_value **ret_val)
   return 0;
 }
 
-enum
-{ ESCAPE, UNESCAPE };
+enum { ESCAPE, UNESCAPE };
 
 static int
 escape (char c, char *o, int un)
@@ -600,6 +599,7 @@ json_copy_object (struct json_value *val, struct json_value **ret_val)
 	  return -1;
 	}
     }
+  *ret_val = newval;
   return 0;
 }
 

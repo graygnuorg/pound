@@ -658,6 +658,13 @@ supervisor (void)
 }
 #endif
 
+void
+xnomem (void)
+{
+  logmsg (LOG_CRIT, "out of memory");
+  exit (1);
+}
+
 int
 main (const int argc, char **argv)
 {

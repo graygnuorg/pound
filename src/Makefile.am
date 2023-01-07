@@ -19,7 +19,8 @@ AM_CFLAGS = @PTHREAD_CFLAGS@
 
 AM_CPPFLAGS = @SSL_CPPFLAGS@ \
  -DSYSCONFDIR=\"$(sysconfdir)\"\
- -DLOCALSTATEDIR=\"$(localstatedir)\"
+ -DLOCALSTATEDIR=\"$(localstatedir)\"\
+ -DPKGDATADIR=\"$(pkgdatadir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
 LDADD = ./libpound.a @PTHREAD_LIBS@
 
@@ -31,7 +32,10 @@ pound_SOURCES=\
  svc.c
 
 noinst_LIBRARIES = libpound.a
-libpound_a_SOURCES = json.c json.h mem.c
+libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
+
+pkgdata_DATA = poundctl.tmpl
+EXTRA_DIST = poundctl.tmpl
 
 install-exec-hook:
 	-@if test "$${EUID:-65535}" -eq 0; then \

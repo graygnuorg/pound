@@ -22,7 +22,6 @@
 #include <openssl/x509v3.h>
 #include <assert.h>
 
-char *progname;
 
 /*
  * Scanner
@@ -3642,10 +3641,8 @@ config_parse (int argc, char **argv)
   char *conf_name = POUND_CONF;
   char *pid_file_option = NULL;
 
-  if ((progname = strrchr (argv[0], '/')) != NULL)
-    progname++;
-  else
-    progname = argv[0];
+  set_progname (argv[0]);
+
   while ((c = getopt (argc, argv, "cf:hp:VvW:")) > 0)
     switch (c)
       {

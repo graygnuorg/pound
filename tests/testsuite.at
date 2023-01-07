@@ -31,10 +31,10 @@ PT_PREREQ_PERL
 AT_DATA([pound.cfi],
 [m4_if([$1],[],[ListenHTTP
 	Service
-                Backend
-                        Address
-                        Port
-                End
+		Backend
+			Address
+			Port
+		End
 	End
 End],[$1])
 ])
@@ -76,3 +76,5 @@ m4_include([sesscookie.at])
 AT_BANNER([HTTPS])
 m4_include([https.at])
 m4_include([virthost.at])
+AT_BANNER([Templates])
+m4_include([template.at])

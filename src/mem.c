@@ -58,13 +58,6 @@ mem2nrealloc (void *p, size_t *pn, size_t s)
   return newp;
 }
 
-void
-xnomem (void)
-{
-  logmsg (LOG_CRIT, "out of memory");
-  exit (1);
-}
-
 void *
 xmalloc (size_t s)
 {
@@ -162,6 +155,17 @@ stringbuf_add_string (struct stringbuf *sb, char const *str)
 }
 
 char *
+stringbuf_set (struct stringbuf *sb, int c, size_t n)
+{
+  size_t start = sb->len;
+  while (sb->len + n > sb->size)
+    sb->base = x2nrealloc (sb->base, &sb->size, 1);
+  memset (sb->base + sb->len, c, n);
+  sb->len += n;
+  return sb->base + start;
+}
+
+char *
 stringbuf_finish (struct stringbuf *sb)
 {
   stringbuf_add_char (sb, 0);
@@ -200,4 +204,3 @@ stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
   stringbuf_vprintf (sb, fmt, ap);
   va_end (ap);
 }
-

@@ -91,6 +91,17 @@
 #define SLIST_COPY(dst, src)			\
   *dst = *src
 
+#define SLIST_CONCAT(a, b, field)				\
+  do								\
+    {								\
+      if ((a)->sl_last)						\
+	(a)->sl_last->field = (b)->sl_first;			\
+      else							\
+	(a)->sl_first = (b)->sl_first;				\
+      (a)->sl_last = (b)->sl_last;				\
+    }								\
+  while (0)
+
 #define SLIST_FIRST(head) ((head)->sl_first)
 #define SLIST_LAST(head) ((head)->sl_last)
 #define SLIST_EMPTY(head) (SLIST_FIRST (head) == NULL)
@@ -126,7 +137,7 @@
 #define DLIST_INSERT_HEAD(head, elt, field)			\
   do								\
     {								\
-      (elt)->field.dl_prev = NULL;  				\
+      (elt)->field.dl_prev = NULL;				\
       if (((elt)->field.dl_next = (head)->dl_first) == NULL)	\
 	(head)->dl_last = (elt);				\
       else							\
@@ -138,7 +149,7 @@
 #define DLIST_INSERT_TAIL(head, elt, field)			\
   do								\
     {								\
-      (elt)->field.dl_next = NULL;  				\
+      (elt)->field.dl_next = NULL;				\
       if (((elt)->field.dl_prev = (head)->dl_last) == NULL)	\
 	(head)->dl_first = (elt);				\
       else							\

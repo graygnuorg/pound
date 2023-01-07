@@ -156,6 +156,11 @@
 #ifndef LOCALSTATEDIR
 # define LOCALSTATEDIR "/var"
 #endif
+#ifndef PKGDATADIR
+# define PKGDATADIR "/usr/share/pound"
+#endif
+
+#define POUND_TMPL_PATH "~:" PKGDATADIR
 
 #ifndef POUND_CONF
 # define POUND_CONF SYSCONFDIR "/" "pound.cfg"
@@ -677,10 +682,16 @@ void stringbuf_add_string (struct stringbuf *sb, char const *str);
 void stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
 void stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
   ATTR_PRINTFLIKE(2,3);
+char *stringbuf_set (struct stringbuf *sb, int c, size_t n);
 
 static inline char *stringbuf_value (struct stringbuf *sb)
 {
   return sb->base;
+}
+
+static inline size_t stringbuf_len (struct stringbuf *sb)
+{
+  return sb->len;
 }
 
 void job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data);
@@ -696,3 +707,29 @@ char const *sess_type_to_str (int type);
 int control_reply (BIO *c, int method, const char *url, BACKEND *be);
 void pound_atexit (void (*func) (void *), void *arg);
 void unlink_file (void *arg);
+
+char const *progname;
+
+void set_progname (char const *arg);
+
+typedef struct template *TEMPLATE;
+struct json_value;
+
+enum
+  {
+    TMPL_ERR_OK,    /* No error */
+    TMPL_ERR_EOF,   /* Unexpected end of file */
+    TMPL_ERR_RANGE, /* Number out of range */
+    TMPL_ERR_NOFUNC,/* No such function */
+    TMPL_ERR_BADTOK,/* Unexpected token */
+    TMPL_ERR_NOTMPL,/* No such template */
+  };
+
+TEMPLATE template_lookup (const char *name);
+int template_parse (char *text, TEMPLATE *ret_tmpl, size_t *end);
+void template_run (TEMPLATE tmpl, struct json_value *val, FILE *outfile);
+char const *template_strerror (int ec);
+void template_free (TEMPLATE tmpl);
+
+void errormsg (int ex, int ec, char const *fmt, ...);
+void json_error (struct json_value *val, char const *fmt, ...);
