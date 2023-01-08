@@ -731,8 +731,9 @@ find_template_file (char const *name, char **ret_name)
 		  stringbuf_add_string (&sb, home);
 		  if (*++p != '/')
 		    stringbuf_add_char (&sb, '/');
+		  len--;
 		}
-	      stringbuf_add (&sb, p, len-1);
+	      stringbuf_add (&sb, p, len);
 
 	      file_name = stringbuf_finish (&sb);
 
@@ -785,7 +786,7 @@ find_template_file (char const *name, char **ret_name)
 	    }
 
 	  p += len;
-	  if (p[0] == ':')
+	  if (*p == ':')
 	    p++;
 	}
 
