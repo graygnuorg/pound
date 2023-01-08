@@ -42,10 +42,12 @@ get_socket_name (void)
   static char kw_str[] = "control";
   static size_t kw_len = sizeof (kw_str) - 1;
 
+  if (verbose_option)
+    errormsg (0, 0, "scanning file %s", conf_name);
   fp = fopen (conf_name, "r");
   if (!fp)
     {
-      if (errno != ENOENT)
+      if (errno != ENOENT || verbose_option)
 	errormsg (0, errno, "can't open %s", strerror (errno));
       return NULL;
     }
@@ -537,7 +539,14 @@ command_delete_session (BIO *bio, int argc, char **argv)
     print_json (val, stdout);
   else
     {
-      //FIXME: print_service (val, objid[OI_SERVICE]);
+      TEMPLATE tmpl;
+
+      tmpl = template_lookup (tmpl_name);
+      if (!tmpl)
+	{
+	  errormsg (1, 0, "template %s not defined", tmpl_name);
+	}
+      template_run (tmpl, val, stdout);
     }
   json_value_free (val);
   return 0;
@@ -577,7 +586,14 @@ command_add_session (BIO *bio, int argc, char **argv)
     print_json (val, stdout);
   else
     {
-      //FIXME print_service (val, objid[OI_SERVICE]);
+      TEMPLATE tmpl;
+
+      tmpl = template_lookup (tmpl_name);
+      if (!tmpl)
+	{
+	  errormsg (1, 0, "template %s not defined", tmpl_name);
+	}
+      template_run (tmpl, val, stdout);
     }
   json_value_free (val);
   return 0;
@@ -635,13 +651,14 @@ static char *usage_text[] = {
   "   del               same as delete",
   "",
   "OPTIONS:",
-  "   -c FILE           location of pound configuration file",
-  "   -f FILE           read templates from this file",
+  "   -f FILE           location of pound configuration file",
   "   -i N              indentation level for JSON output",
   "   -j                JSON output format",
   "   -s SOCKET         sets control socket pathname",
+  "   -t FILE           read templates from this file",
   "   -T NAME           name of the default template",
   "   -v                verbose output",
+  "   -V                print program version, compilation settings, and exit",
   "   -h                show this help output and exit",
   NULL
 };
@@ -655,6 +672,11 @@ usage (int code)
   fprintf (fp, "usage: %s [OPTIONS] COMMAND [/L/S/B] [ARG]\n", progname);
   for (i = 0; usage_text[i]; i++)
     fprintf (fp, "%s\n", usage_text[i]);
+  printf ("\n");
+  printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
+#ifdef PACKAGE_URL
+  printf ("%s home page: <%s>\n", PACKAGE_NAME, PACKAGE_URL);
+#endif
   exit (code);
 }
 
@@ -691,30 +713,76 @@ find_template_file (char const *name, char **ret_name)
       while (*p)
 	{
 	  size_t len = strcspn (p, ":");
+	  int fd;
 
-	  stringbuf_reset (&sb);
-	  if (*p == '~')
+	  if (len > 0)
 	    {
-	      char *home = getenv ("HOME");
-	      if (!home)
+	      stringbuf_reset (&sb);
+	      if (*p == '~')
 		{
-		  struct passwd *pw = getpwuid (getuid ());
-		  assert (pw != NULL);
-		  home = pw->pw_dir;
+		  char *home = getenv ("HOME");
+		  if (!home)
+		    {
+		      struct passwd *pw = getpwuid (getuid ());
+		      assert (pw != NULL);
+		      home = pw->pw_dir;
+		    }
+		  assert (home != NULL);
+		  stringbuf_add_string (&sb, home);
+		  if (*++p != '/')
+		    stringbuf_add_char (&sb, '/');
 		}
-	      assert (home != NULL);
-	      stringbuf_add_string (&sb, home);
-	      if (*++p != '/')
-		stringbuf_add_char (&sb, '/');
-	    }
-	  stringbuf_add (&sb, p, len);
-	  stringbuf_add_char (&sb, '/');
-	  stringbuf_add_string (&sb, name);
-	  file_name = stringbuf_finish (&sb);
+	      stringbuf_add (&sb, p, len-1);
 
-	  fp = fopen (file_name, "r");
-	  if (fp)
-	    break;
+	      file_name = stringbuf_finish (&sb);
+
+	      fd = open (file_name, O_RDONLY);
+	      if (fd == -1)
+		{
+		  if (errno != ENOENT)
+		    errormsg (0, errno, "opening %s", file_name);
+		}
+	      else
+		{
+		  struct stat st;
+		  if (fstat (fd, &st))
+		    {
+		      errormsg (0, errno, "stat %s", file_name);
+		    }
+		  else if (S_ISDIR (st.st_mode))
+		    {
+		      int dirfd = fd;
+		      fd = openat (dirfd, name, O_RDONLY);
+		      if (fd == -1)
+			{
+			  if (errno != ENOENT)
+			    errormsg (0, errno, "opening %s/%s", file_name, name);
+			}
+		      else
+			{
+			  fp = fdopen (fd, "r");
+			  if (fp)
+			    {
+			      sb.len--; /* a hack to remove terminating \0 */
+			      stringbuf_add_char (&sb, '/');
+			      stringbuf_add_string (&sb, name);
+			      file_name = stringbuf_finish (&sb);
+			      break;
+			    }
+			  errormsg (0, errno, "fdopen");
+			}
+		      close (dirfd);
+		    }
+		  else if (S_ISREG (st.st_mode))
+		    {
+		      fp = fdopen (fd, "r");
+		      if (fp)
+			break;
+		      errormsg (0, errno, "fdopen");
+		    }
+		  close (fd);
+		}
+	    }
 
 	  p += len;
 	  if (p[0] == ':')
@@ -806,6 +874,12 @@ read_template (void)
     }
 }
 
+static struct string_value poundctl_settings[] = {
+  { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
+  { "Template search path",STRING_CONSTANT, { .s_const = POUND_TMPL_PATH } },
+  { NULL }
+};
+
 int
 main (int argc, char **argv)
 {
@@ -815,16 +889,12 @@ main (int argc, char **argv)
 
   set_progname (argv[0]);
 
-  while ((c = getopt (argc, argv, "c:f:i:jhs:T:v")) != EOF)
+  while ((c = getopt (argc, argv, "f:i:jhs:T:t:vV")) != EOF)
     {
       switch (c)
 	{
-	case 'c':
-	  conf_name = optarg;
-	  break;
-
 	case 'f':
-	  tmpl_file = optarg;
+	  conf_name = optarg;
 	  break;
 
 	case 's':
@@ -845,6 +915,14 @@ main (int argc, char **argv)
 	case 'T':
 	  tmpl_name = optarg;
 	  break;
+
+	case 't':
+	  tmpl_file = optarg;
+	  break;
+
+	case 'V':
+	  print_version (poundctl_settings);
+	  exit (0);
 
 	case 'v':
 	  verbose_option++;

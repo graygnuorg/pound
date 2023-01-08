@@ -14,35 +14,62 @@
      * You should have received a copy of the GNU General Public License
      * along with pound.  If not, see <http://www.gnu.org/licenses/>.
      */ -}}
-{{- /* Iterate over all listeners */ -}}
 {{define "default" -}}
+
+{{- /* The code below deduces the type of object passed to it by
+       presence of certain attributes:
+       
+         "listeners"  -  entire listing as requested by poundctl list
+	 "services"   -  single listener as requested by poundctl list /L
+	                 Notice that this attribute is present in the full
+			 listing as well, so presense of "listeners" should
+			 be checked first.
+	 "backends"   -  single service as requested by poundctl list /L/S
+
+       otherwise, a backend listing (poundctl list /L/S/B) is assumed. */ -}}
+ 
+{{if exists . "listeners" -}}
+{{- /* Iterate over all listeners */ -}}
 {{range $lno,$lstn = .listeners -}}
-{{printf "%3d" $lno}}. Listener {{$lstn.protocol}}://{{$lstn.address}} {{if $lstn.active}}active{{else}}disabled{{end}}
+{{printf "%3d" $lno}}. {{block "print_listener" $lstn -}}
+ Listener {{.protocol}}://{{.address}} {{if .active}}active{{else}}disabled{{end}}
  {{- /* For each listener, show all its services */ -}}
- {{block "print_services" $lstn.services}}
+ {{block "print_services" .services}}
  {{- range $sno,$svc = .}}
-   {{printf "%3d" $sno}}. Service "{{$svc.name}}" {{if $svc.enabled}}active{{else}}disabled{{end}} ({{$svc.tot_pri}})
+   {{printf "%3d" $sno}}. {{block "print_service" $svc -}}
+   Service "{{.name}}" {{if .enabled}}active{{else}}disabled{{end}} ({{.tot_pri}})
   {{- /* List each backend in service */ -}}
-  {{- range $bno,$backend = $svc.backends}}
-      {{printf "%3d" $bno}}. {{$backend.type}} {{if eq $backend.type "backend" -}}
-{{$backend.protocol}} {{$backend.address}} {{$backend.priority}} {{if $backend.alive}}alive{{else}}dead{{end}}
-     {{- else if eq $backend.type "redirect" -}}
-{{$backend.code}} {{$backend.url}}{{if $backend.redir_req}} (redirect request){{end}}
-     {{- end}} {{if $backend.enabled}}active{{else}}disabled{{end}}
+  {{- range $bno,$backend = .backends}}
+      {{printf "%3d" $bno}}. {{block "print_backend" $backend -}}
+       {{.type}} {{if eq .type "backend" -}}
+{{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
+     {{- else if eq .type "redirect" -}}
+{{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
+     {{- end}} {{if .enabled}}active{{else}}disabled{{end}}
+   {{- end}}{{ /* block print_backend */ }}
   {{- end}}{{ /* iterating over backends */ }}
   {{- /* Show session type supported by the service */ }}
-     Session type: {{$svc.session_type}}
-       {{- if len $svc.sessions}}
+     Session type: {{.session_type}}
+       {{- if len .sessions}}
          {{- /* List all sessions */ }}
-         {{- range $i, $sess = $svc.sessions}}
+         {{- range $i, $sess = .sessions}}
        {{$i}}. Session {{$sess.key}} {{$sess.backend}} {{$sess.expire}}
          {{- end}}{{ /* ranging over sessions */ -}}
        {{end}}{{ /* if len */ }}
+ {{- end}}{{ /* block print_service */ }}
  {{- end}}{{ /* iterating over services */ }}
  {{- end}}{{ /* block print_services */ }}
+ {{- end}}{{ /* block print_listener */ }}
 {{end}}{{ /* iterating over listeners */ }}
 {{- if len .services}}
 Global services:
 {{block "print_services" .services}}
 {{end -}}{{ /* if len .services */ }}
+{{else if exists . "services"}}
+{{block "print_listener" .}}
+{{else if exists . "backends"}}
+{{block "print_service" .}}
+{{else}}
+{{block "print_backend" .}}
+{{end -}}
 {{end -}}{{ /* define */ }}

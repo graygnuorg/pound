@@ -715,6 +715,44 @@ func_even (ACTUAL_ARG_HEAD const *head)
   json_value_free (tmp);
   return result;
 }
+
+static struct json_value *
+func_typeof (ACTUAL_ARG_HEAD const *head)
+{
+  struct tmpl_actual_arg *arg = single_arg (head, "typeof");
+  static char const *json_typestr[] = {
+    [json_null] = "null",
+    [json_bool] = "bool",
+    [json_number] = "number",
+    [json_integer] = "integer",
+    [json_string] = "string",
+    [json_array] = "array",
+    [json_object] = "object"
+  };
+  assert (arg->val->type >= 0 && arg->val->type < sizeof (json_typestr) / sizeof (json_typestr[0]));
+  return json_new_string (json_typestr[arg->val->type]);
+}
+
+static struct json_value *
+func_exists (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *a, *b, *jv;
+  int rc;
+  two_args (head, "exists", &a, &b);
+  if (a->type != json_object)
+    {
+      json_error (a, "argument 1 to exists has wrong type");
+      rc = 0;
+    }
+  else if (b->type != json_string)
+    {
+      json_error (a, "argument 2 to exists has wrong type");
+      rc = 0;
+    }
+  else
+    rc = json_object_get (a, b->v.s, &jv) == 0;
+  return json_new_bool (rc);
+}
 
 /*
  * Implementation of the printf function, written along the lines of
@@ -1292,6 +1330,8 @@ static struct func_def funtab[] = {
   { "ge", func_ge },
   { "even", func_even },
   { "printf", func_printf },
+  { "typeof", func_typeof },
+  { "exists", func_exists },
   { NULL }
 };
 

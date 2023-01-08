@@ -3503,71 +3503,6 @@ feature_set (char const *name)
   return -1;
 }
 
-enum string_value_type
-  {
-    STRING_CONSTANT,
-    STRING_INT,
-    STRING_VARIABLE,
-    STRING_FUNCTION,
-    STRING_PRINTER
-  };
-
-struct string_value
-{
-  char const *kw;
-  enum string_value_type type;
-  union
-  {
-    char *s_const;
-    char **s_var;
-    int s_int;
-    char const *(*s_func) (void);
-    void (*s_print) (FILE *);
-  } data;
-};
-
-#define VALUE_COLUMN 28
-
-static void
-print_string_values (struct string_value *values, FILE *fp)
-{
-  struct string_value *p;
-  char const *val;
-
-  for (p = values; p->kw; p++)
-    {
-      int n = fprintf (fp, "%s:", p->kw);
-      if (n < VALUE_COLUMN)
-	fprintf (fp, "%*s", VALUE_COLUMN-n, "");
-
-      switch (p->type)
-	{
-	case STRING_CONSTANT:
-	  val = p->data.s_const;
-	  break;
-
-	case STRING_INT:
-	  fprintf (fp, "%d\n", p->data.s_int);
-	  continue;
-
-	case STRING_VARIABLE:
-	  val = *p->data.s_var;
-	  break;
-
-	case STRING_FUNCTION:
-	  val = p->data.s_func ();
-	  break;
-
-	case STRING_PRINTER:
-	  p->data.s_print (fp);
-	  fputc ('\n', fp);
-	  continue;
-	}
-
-      fprintf (fp, "%s\n", val);
-    }
-}
-
 static char const *
 supervisor_status (void)
 {
@@ -3589,22 +3524,6 @@ struct string_value pound_settings[] = {
 #endif
   { NULL }
 };
-
-static int copyright_year = 2022;
-void
-print_version (void)
-{
-  printf ("%s (%s) %s\n", progname, PACKAGE_NAME, PACKAGE_VERSION);
-  printf ("Copyright (C) 2002-2010 Apsis GmbH\n");
-  printf ("Copyright (C) 2018-%d Sergey Poznyakoff\n", copyright_year);
-  printf ("\
-License GPLv3+: GNU GPL version 3 or later <http://gnu.org/licenses/gpl.html>\n\
-This is free software: you are free to change and redistribute it.\n\
-There is NO WARRANTY, to the extent permitted by law.\n\
-");
-  printf ("\nBuilt-in defaults:\n\n");
-  print_string_values (pound_settings, stdout);
-}
 
 void
 print_help (void)
@@ -3663,7 +3582,7 @@ config_parse (int argc, char **argv)
 	break;
 
       case 'V':
-	print_version ();
+	print_version (pound_settings);
 	exit (0);
 
       case 'v':

@@ -160,7 +160,7 @@
 # define PKGDATADIR "/usr/share/pound"
 #endif
 
-#define POUND_TMPL_PATH "~:" PKGDATADIR
+#define POUND_TMPL_PATH "~/.poundctl.tmpl:" PKGDATADIR
 
 #ifndef POUND_CONF
 # define POUND_CONF SYSCONFDIR "/" "pound.cfg"
@@ -710,7 +710,31 @@ void unlink_file (void *arg);
 
 char const *progname;
 
+enum string_value_type
+  {
+    STRING_CONSTANT,
+    STRING_INT,
+    STRING_VARIABLE,
+    STRING_FUNCTION,
+    STRING_PRINTER
+  };
+
+struct string_value
+{
+  char const *kw;
+  enum string_value_type type;
+  union
+  {
+    char *s_const;
+    char **s_var;
+    int s_int;
+    char const *(*s_func) (void);
+    void (*s_print) (FILE *);
+  } data;
+};
+
 void set_progname (char const *arg);
+void print_version (struct string_value *settings);
 
 typedef struct template *TEMPLATE;
 struct json_value;
