@@ -1,6 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
+ * Copyright (C) 2018-2023 Sergey Poznyakoff
  *
  * This file is part of Pound.
  *

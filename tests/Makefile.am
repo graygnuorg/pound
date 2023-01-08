@@ -1,6 +1,6 @@
 ## Makefile for the pound testsuite
 ## Process this file with automake to produce Makefile.in.
-## Copyright (C) 2022 Sergey Poznyakoff
+## Copyright (C) 2022-2023 Sergey Poznyakoff
 ##
 ## Pound is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
