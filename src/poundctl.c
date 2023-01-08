@@ -689,7 +689,7 @@ xnomem (void)
 static FILE *
 find_template_file (char const *name, char **ret_name)
 {
-  FILE *fp;
+  FILE *fp = NULL;
   char *file_name;
   struct stringbuf sb;
 

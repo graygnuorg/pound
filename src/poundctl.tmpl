@@ -18,7 +18,7 @@
 
 {{- /* The code below deduces the type of object passed to it by
        presence of certain attributes:
-       
+
          "listeners"  -  entire listing as requested by poundctl list
 	 "services"   -  single listener as requested by poundctl list /L
 	                 Notice that this attribute is present in the full
@@ -27,7 +27,7 @@
 	 "backends"   -  single service as requested by poundctl list /L/S
 
        otherwise, a backend listing (poundctl list /L/S/B) is assumed. */ -}}
- 
+
 {{if exists . "listeners" -}}
 {{- /* Iterate over all listeners */ -}}
 {{range $lno,$lstn = .listeners -}}
@@ -65,11 +65,11 @@
 Global services:
 {{block "print_services" .services}}
 {{end -}}{{ /* if len .services */ }}
-{{else if exists . "services"}}
+{{else if exists . "services" -}}
 {{block "print_listener" .}}
-{{else if exists . "backends"}}
+{{else if exists . "backends" -}}
 {{block "print_service" .}}
-{{else}}
+{{else -}}
 {{block "print_backend" .}}
 {{end -}}
 {{end -}}{{ /* define */ }}
