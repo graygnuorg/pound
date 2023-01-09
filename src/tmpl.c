@@ -360,6 +360,27 @@ is_true (struct json_value *val)
   return 0;
 }
 
+static int
+is_empty (struct json_value *val)
+{
+  switch (val->type)
+    {
+    case json_null:
+      return 1;
+    case json_bool:
+    case json_number:
+    case json_integer:
+      return 0;
+    case json_string:
+      return strlen (val->v.s) == 0;
+    case json_array:
+      return val->v.a->oc == 0;
+    case json_object:
+      return val->v.o->pair_count == 0;
+    }
+  return 0;
+}
+
 static struct tmpl_actual_arg *
 single_arg (ACTUAL_ARG_HEAD const *head, char const *funcname)
 {
@@ -1959,6 +1980,13 @@ struct tmpl_range
   char *vars[2];
 };
 
+struct tmpl_with
+{
+  TMPL_PIPELINE cond;
+  TMPL_ACTION_LIST branches[2];
+  char *var;
+};
+
 struct tmpl_block
 {
   TMPL_PIPELINE arg;
@@ -1976,6 +2004,7 @@ struct tmpl_action
     struct tmpl_conditional cond;
     struct tmpl_range range;
     struct tmpl_block block;
+    struct tmpl_with with;
   } v;
 };
 
@@ -2033,10 +2062,16 @@ tmpl_action_free (struct tmpl_action *act)
       break;
 
     case TMPL_ACT_COND:
-    case TMPL_ACT_WITH:
       tmpl_pipeline_free (&act->v.cond.cond);
       tmpl_action_list_free (&act->v.cond.branches[0]);
       tmpl_action_list_free (&act->v.cond.branches[1]);
+      break;
+
+    case TMPL_ACT_WITH:
+      tmpl_pipeline_free (&act->v.with.cond);
+      tmpl_action_list_free (&act->v.with.branches[0]);
+      tmpl_action_list_free (&act->v.with.branches[1]);
+      free (act->v.with.var);
       break;
 
     case TMPL_ACT_RANGE:
@@ -2065,6 +2100,8 @@ tmpl_action_list_free (TMPL_ACTION_LIST *head)
       tmpl_action_free (act);
     }
 }
+
+static void tmpl_run_in_env (TEMPLATE tmpl, struct json_value *val, struct tmpl_env *top);
 
 int
 tmpl_action_eval (struct tmpl_env *env, TMPL_ACTION_LIST *head)
@@ -2110,21 +2147,31 @@ tmpl_action_eval (struct tmpl_env *env, TMPL_ACTION_LIST *head)
 	  {
 	    struct json_value *jv;
 
-	    jv = tmpl_pipeline_eval (env, &act->v.cond.cond);
-	    if (is_true (jv))
+	    jv = tmpl_pipeline_eval (env, &act->v.with.cond);
+	    if (!is_empty (jv))
 	      {
-		struct tmpl_env *sub_env = tmpl_env_new (jv, 1, env);
-		res = tmpl_action_eval (sub_env, &act->v.cond.branches[1]);
+		struct tmpl_env *sub_env;
+
+		if (act->v.with.var)
+		  {
+		    sub_env = tmpl_env_new (env->dot, 0, env);
+		    json_object_set (sub_env->vars, act->v.with.var, jv);
+		  }
+		else
+		  {
+		    sub_env = tmpl_env_new (jv, 1, env);
+		  }
+		res = tmpl_action_eval (sub_env, &act->v.with.branches[1]);
 		tmpl_env_free (sub_env);
 	      }
 	    else
-	      res = tmpl_action_eval (env, &act->v.cond.branches[0]);
+	      res = tmpl_action_eval (env, &act->v.with.branches[0]);
 	  }
 	  break;
 
 	case TMPL_ACT_RANGE:
 	  {
-	    struct json_value *jv, *save_dot;
+	    struct json_value *jv;
 	    size_t len;
 
 	    jv = tmpl_pipeline_eval (env, &act->v.range.cond);
@@ -2134,29 +2181,33 @@ tmpl_action_eval (struct tmpl_env *env, TMPL_ACTION_LIST *head)
 		if ((len = json_array_length (jv)) > 0)
 		  {
 		    size_t i;
+		    struct tmpl_env *sub_env;
 
-		    save_dot = env->dot;
+		    sub_env = tmpl_env_new (env->dot, 0, env);
+
 		    for (i = 0; i < len; i++)
 		      {
 			if (act->v.range.vars[0] || act->v.range.vars[1])
 			  {
 			    if (act->v.range.vars[0])
-			      json_object_set (env->vars, act->v.range.vars[0],
+			      json_object_set (sub_env->vars,
+					       act->v.range.vars[0],
 					       json_new_integer (i));
 			    if (act->v.range.vars[1])
 			      {
 				struct json_value *v, *t;
 				json_array_get (jv, i, &v);
 				json_value_copy (v, &t);
-				json_object_set (env->vars, act->v.range.vars[1], t);
+				json_object_set (sub_env->vars,
+						 act->v.range.vars[1], t);
 			      }
 			  }
 			else
-			  json_array_get (jv, i, &env->dot);
-			if (tmpl_action_eval (env, &act->v.range.branches[1]))
+			  json_array_get (jv, i, &sub_env->dot);
+			if (tmpl_action_eval (sub_env, &act->v.range.branches[1]))
 			  break;
 		      }
-		    env->dot = save_dot;
+		    tmpl_env_free (sub_env);
 		  }
 		else
 		  res = tmpl_action_eval (env, &act->v.range.branches[0]);
@@ -2166,28 +2217,32 @@ tmpl_action_eval (struct tmpl_env *env, TMPL_ACTION_LIST *head)
 		if (!SLIST_EMPTY (&jv->v.o->pair_head))
 		  {
 		    struct json_pair *pair;
+		    struct tmpl_env *sub_env;
 
-		    save_dot = env->dot;
+		    sub_env = tmpl_env_new (env->dot, 0, env);
+
 		    SLIST_FOREACH (pair, &jv->v.o->pair_head, next)
 		      {
 			if (act->v.range.vars[0] || act->v.range.vars[1])
 			  {
 			    if (act->v.range.vars[0])
-			      json_object_set (env->vars, act->v.range.vars[0],
+			      json_object_set (sub_env->vars,
+					       act->v.range.vars[0],
 					       json_new_string (pair->k));
 			    if (act->v.range.vars[1])
 			      {
 				struct json_value *t;
 				json_value_copy (pair->v, &t);
-				json_object_set (env->vars, act->v.range.vars[1], t);
+				json_object_set (sub_env->vars,
+						 act->v.range.vars[1], t);
 			      }
 			  }
 			else
-			  env->dot = pair->v;
-			if (tmpl_action_eval (env, &act->v.range.branches[1]))
+			  sub_env->dot = pair->v;
+			if (tmpl_action_eval (sub_env, &act->v.range.branches[1]))
 			  break;
 		      }
-		    env->dot = save_dot;
+		    tmpl_env_free (sub_env);
 		  }
 		else
 		  res = tmpl_action_eval (env, &act->v.range.branches[0]);
@@ -2204,8 +2259,7 @@ tmpl_action_eval (struct tmpl_env *env, TMPL_ACTION_LIST *head)
 	    struct json_value *arg;
 
 	    arg = tmpl_pipeline_eval (env, &act->v.block.arg);
-	    template_run (act->v.block.tmpl, arg, env->outfile);
-	    json_value_free (arg);
+	    tmpl_run_in_env (act->v.block.tmpl, arg, env);
 	    break;
 	  }
 
@@ -2406,14 +2460,50 @@ elsewith_action_parser (struct tmpl_input *in, PARSER_TABLES acttab,
 }
 
 static int
+parse_with_var (struct tmpl_input *in, char **var)
+{
+  struct tmpl_tok *tok;
+  size_t save_off;
+
+  var[0] = NULL;
+
+  save_off = in->off;
+
+  tok = tmpl_gettok (in);
+  if (tok->type == TMPL_TOK_VAR)
+    {
+      var[0] = tok->v.str;
+      tok->v.str = NULL;
+    }
+  else if (tok->type != '_')
+    {
+      tmpl_input_putback (in);
+      return 0;
+    }
+
+  tok = tmpl_gettok (in);
+  if (tok->type != '=')
+    {
+      in->off = in->start = save_off;
+      free (var[0]);
+      return -1;
+    }
+
+  return 0;
+}
+
+static int
 with_action_parser (struct tmpl_input *in, PARSER_TABLES acttab,
 		    TMPL_ACTION_LIST *head, void *data)
 {
   struct tmpl_action *act = tmpl_action_new (head, TMPL_ACT_WITH);
-  struct cond_state state = { &act->v.cond.branches[0] };
+  struct cond_state state = { &act->v.with.branches[0] };
   PARSER_TABLES loctab;
 
-  if (scan_pipeline (in, &act->v.cond.cond) != TMPL_TOK_END)
+  if (parse_with_var (in, &act->v.with.var))
+    return TMPL_ACTION_ERR;
+
+  if (scan_pipeline (in, &act->v.with.cond) != TMPL_TOK_END)
     {
       if (!in->error)
 	in->error = TMPL_ERR_BADTOK;
@@ -2421,7 +2511,7 @@ with_action_parser (struct tmpl_input *in, PARSER_TABLES acttab,
     }
 
   parser_tables_copy (loctab, acttab, withdef, NULL);
-  scan_action (in, loctab, &act->v.cond.branches[1], &state);
+  scan_action (in, loctab, &act->v.with.branches[1], &state);
 
   return in->error ? TMPL_ACTION_ERR : TMPL_ACTION_OK;
 }
@@ -2860,6 +2950,16 @@ template_parse (char *text, TEMPLATE *ret_tmpl, size_t *end)
   if (end)
     *end = in.off;
   return in.error;
+}
+
+static void
+tmpl_run_in_env (TEMPLATE tmpl, struct json_value *val, struct tmpl_env *top)
+{
+  struct tmpl_env *env;
+
+  env = tmpl_env_new (val, 1, top);
+  tmpl_action_eval (env, &tmpl->head);
+  tmpl_env_free (env);
 }
 
 void
