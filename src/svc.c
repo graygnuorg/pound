@@ -1850,7 +1850,7 @@ service_serialize (SERVICE *svc)
   json_object_set (obj, "name", json_new_string (svc->name));
   json_object_set (obj, "enabled", json_new_bool (!svc->disabled));
   json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri));
-  json_object_set (obj, "ads_pri", json_new_integer (svc->abs_pri));
+  json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri));
   typename = sess_type_to_str (svc->sess_type);
   json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"));
   json_object_set (obj, "sessions", service_session_serialize (svc));
@@ -1872,8 +1872,8 @@ listener_serialize (LISTENER *lstn)
   is_https = !SLIST_EMPTY (&lstn->ctx_head);
   json_object_set (obj, "protocol", json_new_string (is_https ? "https" : "http"));
   if (is_https)
-    json_object_set (obj, "https11", json_new_bool (!lstn->noHTTPS11));
-  json_object_set (obj, "active", json_new_bool (!lstn->disabled));
+    json_object_set (obj, "nohttps11", json_new_integer (lstn->noHTTPS11));
+  json_object_set (obj, "enabled", json_new_bool (!lstn->disabled));
 
   p = json_new_array ();
   json_object_set (obj, "services", p);

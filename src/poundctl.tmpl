@@ -32,7 +32,7 @@
 {{- /* Iterate over all listeners */ -}}
 {{range $lno,$lstn = .listeners -}}
 {{printf "%3d" $lno}}. {{block "print_listener" $lstn -}}
- Listener {{.protocol}}://{{.address}} {{if .active}}active{{else}}disabled{{end}}
+ Listener {{.protocol}}://{{.address}} {{if .enabled}}enabled{{else}}disabled{{end}}
  {{- /* For each listener, show all its services */ -}}
  {{block "print_services" .services}}
  {{- range $sno,$svc = .}}
