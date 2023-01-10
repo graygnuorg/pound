@@ -338,29 +338,6 @@ tmpl_pipeline_eval (struct tmpl_env *env, TMPL_PIPELINE *head)
  */
 
 static int
-is_true (struct json_value *val)
-{
-  switch (val->type)
-    {
-    case json_null:
-      return 0;
-    case json_bool:
-      return val->v.b;
-    case json_number:
-      return !(-1e-3 <= val->v.n && val->v.n <= 1e-3);
-    case json_integer:
-      return (long) val->v.n != 0;
-    case json_string:
-      return val->v.s[0] != 0;
-    case json_array:
-      return val->v.a->oc > 0;
-    case json_object:
-      return val->v.o->pair_count > 0;
-    }
-  return 0;
-}
-
-static int
 is_empty (struct json_value *val)
 {
   switch (val->type)
@@ -368,9 +345,11 @@ is_empty (struct json_value *val)
     case json_null:
       return 1;
     case json_bool:
+      return val->v.b == 0;
     case json_number:
+      return -1e-3 <= val->v.n && val->v.n <= 1e-3;
     case json_integer:
-      return 0;
+      return (long) val->v.n == 0;
     case json_string:
       return strlen (val->v.s) == 0;
     case json_array:
@@ -379,6 +358,12 @@ is_empty (struct json_value *val)
       return val->v.o->pair_count == 0;
     }
   return 0;
+}
+
+static inline int
+is_true (struct json_value *val)
+{
+  return !is_empty (val);
 }
 
 static struct tmpl_actual_arg *
