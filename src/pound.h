@@ -445,8 +445,8 @@ typedef struct _pound_ctx
 {
   SSL_CTX *ctx;
   char *server_name;
-  unsigned char **subjectAltNames;
-  unsigned int subjectAltNameCount;
+  char **subjectAltNames;
+  size_t subjectAltNameCount;
   SLIST_ENTRY (_pound_ctx) next;
 } POUND_CTX;
 

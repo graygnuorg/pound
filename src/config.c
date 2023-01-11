@@ -2702,90 +2702,37 @@ parse_listen_http (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
-static int
-is_class (int c, char *cls)
-{
-  int k;
-
-  if (*cls == 0)
-    return 0;
-  if (c == *cls)
-    return 1;
-  cls++;
-  while ((k = *cls++) != 0)
-    {
-      if (k == '-' && cls[0] != 0)
-	{
-	  if (cls[-2] <= c && c <= cls[0])
-	    return 1;
-	  cls++;
-	}
-      else if (c == k)
-	return 1;
-    }
-  return 0;
-}
-
-static char *
-extract_cn (char const *str, size_t *plen)
-{
-  while (*str)
-    {
-      if ((str[0] == 'c' || str[0] == 'C') && (str[1] == 'n' || str[1] == 'N') && str[2] == '=')
-	{
-	  size_t i;
-	  str += 3;
-	  for (i = 0; str[i] && is_class (str[i], "-*.A-Za-z0-9"); i++)
-	    ;
-	  if (str[i] == 0)
-	    {
-	      *plen = i;
-	      return (char*) str;
-	    }
-	  str += i;
-	}
-      str++;
-    }
-  return NULL;
-}
-
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 # define general_name_string(n) \
-	(unsigned char*) \
 	xstrndup ((char*)ASN1_STRING_get0_data (n->d.dNSName),	\
 		 ASN1_STRING_length (n->d.dNSName) + 1)
 #else
 # define general_name_string(n) \
-	(unsigned char*) \
 	xstrndup ((char*)ASN1_STRING_data(n->d.dNSName),	\
 		 ASN1_STRING_length (n->d.dNSName) + 1)
 #endif
 
-unsigned char **
-get_subjectaltnames (X509 * x509, unsigned int *count)
+static void
+get_subjectaltnames (X509 *x509, POUND_CTX *pc, size_t san_max)
 {
-  unsigned int local_count;
-  unsigned char **result;
   STACK_OF (GENERAL_NAME) * san_stack =
     (STACK_OF (GENERAL_NAME) *) X509_get_ext_d2i (x509, NID_subject_alt_name,
 						  NULL, NULL);
-  unsigned char *temp[sk_GENERAL_NAME_num (san_stack)];
-  GENERAL_NAME *name;
-  int i;
+  char **result;
 
-  local_count = 0;
-  result = NULL;
-  name = NULL;
-  *count = 0;
   if (san_stack == NULL)
-    return NULL;
+    return;
   while (sk_GENERAL_NAME_num (san_stack) > 0)
     {
-      name = sk_GENERAL_NAME_pop (san_stack);
+      GENERAL_NAME *name = sk_GENERAL_NAME_pop (san_stack);
       switch (name->type)
 	{
 	case GEN_DNS:
-	  temp[local_count++] = general_name_string (name);
+	  if (pc->subjectAltNameCount == san_max)
+	    pc->subjectAltNames = x2nrealloc (pc->subjectAltNames,
+					      &san_max,
+					      sizeof (pc->subjectAltNames[0]));
+	  pc->subjectAltNames[pc->subjectAltNameCount++] = general_name_string (name);
 	  break;
 
 	default:
@@ -2795,14 +2742,11 @@ get_subjectaltnames (X509 * x509, unsigned int *count)
       GENERAL_NAME_free (name);
     }
 
-  result = xcalloc (local_count, sizeof (unsigned char *));
-  for (i = 0; i < local_count; i++)
-    result[i] = temp[i];
-  *count = local_count;
-
   sk_GENERAL_NAME_pop_free (san_stack, GENERAL_NAME_free);
-
-  return result;
+  if (pc->subjectAltNameCount
+      && (result = realloc (pc->subjectAltNames,
+			    pc->subjectAltNameCount * sizeof (pc->subjectAltNames[0]))) != NULL)
+    pc->subjectAltNames = result;
 }
 
 static int
@@ -2850,10 +2794,10 @@ https_parse_cert (void *call_data, void *section_data)
   {
     /* we have support for SNI */
     FILE *fcert;
-    char server_name[MAXBUF];
     X509 *x509;
-    char *cnp;
-    size_t cnl;
+    X509_NAME *xname = NULL;
+    int i;
+    size_t san_max;
 
     if ((fcert = fopen (tok->str, "r")) == NULL)
       {
@@ -2870,22 +2814,42 @@ https_parse_cert (void *call_data, void *section_data)
 	return PARSER_FAIL;
       }
 
-    memset (server_name, '\0', MAXBUF);
-    X509_NAME_oneline (X509_get_subject_name (x509), server_name,
-		       sizeof (server_name) - 1);
     pc->subjectAltNameCount = 0;
     pc->subjectAltNames = NULL;
-    pc->subjectAltNames = get_subjectaltnames (x509, &pc->subjectAltNameCount);
+    san_max = 0;
+
+    /* Extract server name */
+    xname = X509_get_subject_name (x509);
+    for (i = -1;
+	 (i = X509_NAME_get_index_by_NID (xname, NID_commonName, i)) != -1;)
+      {
+	X509_NAME_ENTRY *entry = X509_NAME_get_entry (xname, i);
+	ASN1_STRING *value;
+	char *str = NULL;
+	value = X509_NAME_ENTRY_get_data (entry);
+	if (ASN1_STRING_to_UTF8 ((unsigned char **)&str, value) >= 0)
+	  {
+	    if (pc->server_name == NULL)
+	      pc->server_name = str;
+	    else
+	      {
+		if (pc->subjectAltNameCount == san_max)
+		  pc->subjectAltNames = x2nrealloc (pc->subjectAltNames,
+						    &san_max,
+						    sizeof (pc->subjectAltNames[0]));
+		pc->subjectAltNames[pc->subjectAltNameCount++] = str;
+	      }
+	  }
+      }
+
+    get_subjectaltnames (x509, pc, san_max);
     X509_free (x509);
 
-    if ((cnp = extract_cn (server_name, &cnl)) == NULL)
+    if (pc->server_name == NULL)
       {
-	conf_error ("no CN in certificate subject name (%s)\n", server_name);
+	conf_error ("%s", "no CN in certificate subject name\n");
 	return PARSER_FAIL;
       }
-    pc->server_name = xmalloc (cnl + 1);
-    memcpy (pc->server_name, cnp, cnl);
-    pc->server_name[cnl] = 0;
   }
 #else
   if (res->ctx)
