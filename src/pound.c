@@ -25,6 +25,7 @@
  */
 
 #include "pound.h"
+#include "json.h"
 #include "extern.h"
 
 /* common variables */
@@ -75,11 +76,8 @@ l_init (void)
   int i, n_locks;
 
   n_locks = CRYPTO_num_locks ();
-  if ((l_array = calloc (n_locks, sizeof (pthread_mutex_t))) == NULL)
-    {
-      logmsg (LOG_ERR, "lock init: out of memory - aborted...");
-      exit (1);
-    }
+  l_array = xcalloc (n_locks, sizeof (pthread_mutex_t));
+
   for (i = 0; i < n_locks; i++)
     /* pthread_mutex_init() always returns 0 */
     pthread_mutex_init (&l_array[i], NULL);
@@ -295,11 +293,7 @@ thr_dispatch (void *unused)
   struct pollfd *polls;
 
   /* alloc the poll structures */
-  if ((polls = calloc (n_listeners, sizeof (struct pollfd))) == NULL)
-    {
-      logmsg (LOG_ERR, "Out of memory for poll - aborted");
-      exit (1);
-    }
+  polls = xcalloc (n_listeners, sizeof (struct pollfd));
 
   i = 0;
   SLIST_FOREACH (lstn, &listeners, next)
@@ -658,11 +652,25 @@ supervisor (void)
 }
 #endif
 
+/*
+ * This is used as exit point if memory allocation failures occur at program
+ * startup (e.g. when parsing config or the like).
+ */
 void
 xnomem (void)
 {
   logmsg (LOG_CRIT, "out of memory");
   exit (1);
+}
+
+/*
+ * This is used as json_memabrt hook.  The code in svc.c handles memory
+ * allocation failures gracefully and returns 500 if any occurs.
+ */
+void
+lognomem (void)
+{
+  logmsg (LOG_CRIT, "out of memory");
 }
 
 int
@@ -718,6 +726,8 @@ main (const int argc, char **argv)
     }
   SOL_TCP = pe->p_proto;
 #endif
+
+  json_memabrt = lognomem;
 
   /* read config */
   config_parse (argc, argv);

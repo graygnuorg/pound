@@ -378,7 +378,7 @@ read_response (BIO *bio)
     {
       struct stringbuf sb;
 
-      stringbuf_init (&sb);
+      xstringbuf_init (&sb);
       while ((n = BIO_read (bio, buf, sizeof (buf))) > 0)
 	stringbuf_add (&sb, buf, n);
       content_buf = stringbuf_finish (&sb);
@@ -693,7 +693,7 @@ find_template_file (char const *name, char **ret_name)
   char *file_name;
   struct stringbuf sb;
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   if (name[0] == '/' || strncmp (name, "./", 2) == 0 ||
       strncmp (name, "../", 3) == 0)
     {
@@ -889,6 +889,7 @@ main (int argc, char **argv)
   COMMAND command;
 
   set_progname (argv[0]);
+  json_memabrt = xnomem;
 
   while ((c = getopt (argc, argv, "f:i:jhs:T:t:vV")) != EOF)
     {

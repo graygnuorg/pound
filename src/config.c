@@ -271,7 +271,7 @@ vconf_error_at_locus_range (struct locus_range const *loc, char const *fmt, va_l
 {
   struct stringbuf sb;
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   if (loc)
     {
       stringbuf_format_locus_range (&sb, loc);
@@ -296,7 +296,7 @@ vconf_error_at_locus_point (struct locus_point const *loc, char const *fmt, va_l
 {
   struct stringbuf sb;
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   if (loc)
     {
       stringbuf_format_locus_point (&sb, loc);
@@ -1572,7 +1572,7 @@ backend_parse_https (void *call_data, void *section_data)
 			 SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
   SSL_CTX_clear_options (be->ctx, SSL_OP_LEGACY_SERVER_CONNECT);
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
   SSL_CTX_set_session_id_context (be->ctx, (unsigned char *) sb.base, sb.len);
   stringbuf_free (&sb);
@@ -1956,7 +1956,7 @@ parse_cond_host (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   stringbuf_add_string (&sb, "Host:[[:space:]]*");
   p = tok->str;
   while (*p)
@@ -2140,7 +2140,7 @@ parse_session (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   switch (sess.type)
     {
     case SESS_COOKIE:
@@ -2586,7 +2586,7 @@ listener_parse_socket_from (void *call_data, void *section_data)
     struct stringbuf sb;
     char tmp[MAX_ADDR_BUFSIZE];
 
-    stringbuf_init (&sb);
+    xstringbuf_init (&sb);
     stringbuf_format_locus_range (&sb, &tok->locus);
     stringbuf_add_string (&sb, ": obtained address ");
     stringbuf_add_string (&sb, addr2str (tmp, sizeof (tmp), &lst->addr, 0));
@@ -3235,7 +3235,7 @@ parse_listen_https (void *call_data, void *section_data)
     }
 #endif
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   SLIST_FOREACH (pc, &lst->ctx_head, next)
     {
       SSL_CTX_set_app_data (pc->ctx, lst);

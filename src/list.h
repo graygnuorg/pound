@@ -15,6 +15,9 @@
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#ifndef _POUND_LIST_H
+# define _POUND_LIST_H
+
 /*
  * Singly-linked list macros.
  */
@@ -240,3 +243,5 @@
        (var);								\
        (var) = (tmp),							\
 	 ((tmp) = (var) ? DLIST_NEXT (var, field) : NULL))
+
+#endif

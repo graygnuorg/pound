@@ -88,7 +88,7 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
   struct stringbuf sb;
   char *p;
 
-  stringbuf_init (&sb);
+  stringbuf_init_log (&sb);
   while (*url)
     {
       size_t len = strcspn (url, "$");
@@ -132,7 +132,9 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
   if (!redir_req)
     stringbuf_add_string (&sb, orig_url);
 
-  return stringbuf_finish (&sb);
+  if ((p = stringbuf_finish (&sb)) == NULL)
+    stringbuf_free (&sb);
+  return p;
 }
 
 /*
@@ -163,12 +165,16 @@ redirect_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
     }
 
   xurl = expand_url (be->url, url, sm, be->redir_req);
+  if (!xurl)
+    {
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
 
   /*
    * Make sure to return a safe version of the URL (otherwise CSRF
    * becomes a possibility)
    */
-  stringbuf_init (&url_buf);
+  stringbuf_init_log (&url_buf);
   for (i = 0; xurl[i]; i++)
     {
       if (isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
@@ -181,14 +187,26 @@ redirect_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
   url = stringbuf_finish (&url_buf);
   free (xurl);
 
-  stringbuf_init (&cont_buf);
+  if (!url)
+    {
+      stringbuf_free (&url_buf);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
+
+  stringbuf_init_log (&cont_buf);
   stringbuf_printf (&cont_buf,
 		    "<html><head><title>Redirect</title></head>"
 		    "<body><h1>Redirect</h1>"
 		    "<p>You should go to <a href=\"%s\">%s</a></p>"
 		    "</body></html>",
 		    url, url);
-  cont = stringbuf_finish (&cont_buf);
+
+  if ((cont = stringbuf_finish (&cont_buf)) == NULL)
+    {
+      stringbuf_free (&cont_buf);
+      stringbuf_free (&url_buf);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
 
   BIO_printf (c,
 	      "HTTP/1.0 %d %s\r\n"

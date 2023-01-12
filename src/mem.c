@@ -111,9 +111,10 @@ xstrndup (const char *s, size_t n)
 }
 
 void
-stringbuf_init (struct stringbuf *sb)
+stringbuf_init (struct stringbuf *sb, void (*nomem) (void))
 {
   memset (sb, 0, sizeof (*sb));
+  sb->nomem = nomem;
 }
 
 void
@@ -128,38 +129,57 @@ stringbuf_free (struct stringbuf *sb)
   free (sb->base);
 }
 
-void
-stringbuf_add_char (struct stringbuf *sb, int c)
-{
-  if (sb->len == sb->size)
-    sb->base = x2nrealloc (sb->base, &sb->size, 1);
-  sb->base[sb->len++] = c;
-}
-
-void
-stringbuf_add (struct stringbuf *sb, char const *str, size_t len)
+static int
+stringbuf_expand (struct stringbuf *sb, size_t len)
 {
   while (sb->len + len > sb->size)
-    sb->base = x2nrealloc (sb->base, &sb->size, 1);
-  memcpy (sb->base + sb->len, str, len);
-  sb->len += len;
+    {
+      char *p = mem2nrealloc (sb->base, &sb->size, 1);
+      if (p == NULL)
+	{
+	  if (sb->nomem)
+	    sb->nomem ();
+	  sb->err = 1;
+	  return -1;
+	}
+      sb->base = p;
+    }
+  sb->err = 0;
+  return 0;
 }
 
-void
+int
+stringbuf_add_char (struct stringbuf *sb, int c)
+{
+  if (stringbuf_expand (sb, 1))
+    return -1;
+  sb->base[sb->len++] = c;
+  return 0;
+}
+
+int
+stringbuf_add (struct stringbuf *sb, char const *str, size_t len)
+{
+  if (stringbuf_expand (sb, len))
+    return -1;
+  memcpy (sb->base + sb->len, str, len);
+  sb->len += len;
+  return 0;
+}
+
+int
 stringbuf_add_string (struct stringbuf *sb, char const *str)
 {
-  int c;
-
-  while ((c = *str++) != 0)
-    stringbuf_add_char (sb, c);
+  return stringbuf_add (sb, str, strlen (str));
 }
 
 char *
 stringbuf_set (struct stringbuf *sb, int c, size_t n)
 {
   size_t start = sb->len;
-  while (sb->len + n > sb->size)
-    sb->base = x2nrealloc (sb->base, &sb->size, 1);
+
+  if (stringbuf_expand (sb, n))
+    return NULL;
   memset (sb->base + sb->len, c, n);
   sb->len += n;
   return sb->base + start;
@@ -168,11 +188,12 @@ stringbuf_set (struct stringbuf *sb, int c, size_t n)
 char *
 stringbuf_finish (struct stringbuf *sb)
 {
-  stringbuf_add_char (sb, 0);
+  if (stringbuf_err (sb) || stringbuf_add_char (sb, 0))
+    return NULL;
   return sb->base;
 }
 
-void
+int
 stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap)
 {
   for (;;)
@@ -186,21 +207,34 @@ stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap)
       va_end (aq);
 
       if (n < 0 || n >= bufsize || !memchr (sb->base + sb->len, '\0', n + 1))
-	sb->base = x2nrealloc (sb->base, &sb->size, 1);
+	{
+	  char *p = mem2nrealloc (sb->base, &sb->size, 1);
+	  if (p == NULL)
+	    {
+	      if (sb->nomem)
+		sb->nomem ();
+	      sb->err = 1;
+	      return -1;
+	    }
+	  sb->base = p;
+	}
       else
 	{
 	  sb->len += n;
 	  break;
 	}
     }
+  return 0;
 }
 
-void
+int
 stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
 {
   va_list ap;
+  int rc;
 
   va_start (ap, fmt);
-  stringbuf_vprintf (sb, fmt, ap);
+  rc = stringbuf_vprintf (sb, fmt, ap);
   va_end (ap);
+  return rc;
 }

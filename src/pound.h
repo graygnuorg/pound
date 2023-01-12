@@ -671,19 +671,27 @@ struct stringbuf
   char *base;                     /* Buffer storage. */
   size_t size;                    /* Size of buf. */
   size_t len;                     /* Actually used length in buf. */
+  void (*nomem) (void);           /* Out of memory handler. */
+  int err;                        /* Error indicator */
 };
 
-void stringbuf_init (struct stringbuf *sb);
+void stringbuf_init (struct stringbuf *sb, void (*nomem) (void));
 void stringbuf_reset (struct stringbuf *sb);
 char *stringbuf_finish (struct stringbuf *sb);
 void stringbuf_free (struct stringbuf *sb);
-void stringbuf_add (struct stringbuf *sb, char const *str, size_t len);
-void stringbuf_add_char (struct stringbuf *sb, int c);
-void stringbuf_add_string (struct stringbuf *sb, char const *str);
-void stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
-void stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
+int stringbuf_add (struct stringbuf *sb, char const *str, size_t len);
+int stringbuf_add_char (struct stringbuf *sb, int c);
+int stringbuf_add_string (struct stringbuf *sb, char const *str);
+int stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
+int stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
   ATTR_PRINTFLIKE(2,3);
 char *stringbuf_set (struct stringbuf *sb, int c, size_t n);
+
+static inline int
+stringbuf_err (struct stringbuf *sb)
+{
+  return sb->err;
+}
 
 static inline char *stringbuf_value (struct stringbuf *sb)
 {
@@ -693,6 +701,19 @@ static inline char *stringbuf_value (struct stringbuf *sb)
 static inline size_t stringbuf_len (struct stringbuf *sb)
 {
   return sb->len;
+}
+
+extern void xnomem (void);
+extern void lognomem (void);
+
+static inline void xstringbuf_init (struct stringbuf *sb)
+{
+  stringbuf_init (sb, xnomem);
+}
+
+static inline void stringbuf_init_log (struct stringbuf *sb)
+{
+  stringbuf_init (sb, lognomem);
 }
 
 void job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data);

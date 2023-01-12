@@ -14,6 +14,9 @@
  * You should have received a copy of the GNU General Public License
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef POUND_JSON_H
+# define POUND_JSON_H
+
 #include <stdlib.h>
 #include "list.h"
 
@@ -123,3 +126,5 @@ int json_parse_string (char const *input, struct json_value **retval,
 		       char **endp);
 
 extern void (*json_memabrt) (void);
+
+#endif

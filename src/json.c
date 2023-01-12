@@ -436,7 +436,7 @@ json_copy_array (struct json_value *val, struct json_value **ret_val)
   return 0;
 }
 
-int
+static int
 json_array_expand (struct json_value *jv)
 {
   size_t i;
@@ -459,7 +459,7 @@ json_array_expand (struct json_value *jv)
 int
 json_array_insert (struct json_value *jv, size_t idx, struct json_value *v)
 {
-  if (jv->type != json_array)
+  if (jv == NULL || jv->type != json_array || v == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -481,7 +481,7 @@ json_array_insert (struct json_value *jv, size_t idx, struct json_value *v)
 int
 json_array_append (struct json_value *jv, struct json_value *v)
 {
-  if (jv->type != json_array)
+  if (jv == NULL || jv->type != json_array || v == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -492,7 +492,7 @@ json_array_append (struct json_value *jv, struct json_value *v)
 int
 json_array_set (struct json_value *jv, size_t idx, struct json_value *v)
 {
-  if (jv->type != json_array)
+  if (jv == NULL || jv->type != json_array || v == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -509,7 +509,7 @@ json_array_set (struct json_value *jv, size_t idx, struct json_value *v)
 int
 json_array_get (struct json_value *jv, size_t idx, struct json_value **retval)
 {
-  if (jv->type != json_array)
+  if (jv == NULL || jv->type != json_array || retval == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -708,7 +708,7 @@ json_object_set (struct json_value *obj, char const *name,
   struct json_pair *p;
   int res;
 
-  if (obj->type != json_object)
+  if (obj == NULL || obj->type != json_object || val == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -730,7 +730,7 @@ json_object_get (struct json_value *obj, char const *name,
   struct json_pair *p;
   int res;
 
-  if (obj->type != json_object)
+  if (obj == NULL || obj->type != json_object || name == NULL || retval == NULL)
     {
       errno = EINVAL;
       return -1;
@@ -784,7 +784,7 @@ json_object_filter (struct json_value *obj,
   struct json_object *op;
   struct json_pair *p, *prev;
 
-  if (obj->type != json_object)
+  if (obj == NULL || obj->type != json_object || pred == NULL)
     {
       errno = EINVAL;
       return -1;

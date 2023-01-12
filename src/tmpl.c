@@ -472,7 +472,7 @@ json_cast_to_string (struct json_value *val)
   struct stringbuf sb;
   char *s;
 
-  stringbuf_init (&sb);
+  xstringbuf_init (&sb);
   switch (val->type)
     {
     case json_null:
@@ -883,8 +883,8 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 
   format = argstart->val->v.s;
 
-  stringbuf_init (&sb);
-  stringbuf_init (&tmpbuf);
+  xstringbuf_init (&sb);
+  xstringbuf_init (&tmpbuf);
 
   argstart = SLIST_NEXT (argstart, next);
 

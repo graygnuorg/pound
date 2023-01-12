@@ -281,7 +281,7 @@ vlogmsg (const int priority, const char *fmt, va_list ap)
   else
     {
       struct stringbuf sb;
-      stringbuf_init (&sb);
+      xstringbuf_init (&sb);
       stringbuf_vprintf (&sb, fmt, ap);
       syslog (priority, "%s", stringbuf_value (&sb));
       stringbuf_free (&sb);
@@ -1722,27 +1722,49 @@ static struct json_value *
 service_session_serialize (SERVICE *svc)
 {
   struct json_value *obj;
+  int err = 0;
 
   if (svc->sess_type == SESS_NONE)
     obj = json_new_null ();
   else
     {
       obj = json_new_array ();
-      if (svc->sessions)
+      if (obj && svc->sessions)
 	{
 	  SESSION *sess;
 
 	  DLIST_FOREACH (sess, &svc->sessions->head, link)
 	    {
 	      struct json_value *s = json_new_object ();
-	      json_array_append (obj, s);
-	      json_object_set (s, "key", json_new_string (sess->key));
-	      json_object_set (s, "backend", json_new_integer (session_backend_index (sess)));
-	      json_object_set (s, "expire", timespec_serialize (&sess->expire));
+
+	      if (!s)
+		{
+		  err = 1;
+		  break;
+		}
+	      else if (json_array_append (obj, s))
+		{
+		  json_value_free (s);
+		  err = 1;
+		  break;
+		}
+	      else if (json_object_set (s, "key", json_new_string (sess->key))
+		       || json_object_set (s, "backend",
+					   json_new_integer (session_backend_index (sess)))
+		       || json_object_set (s, "expire", timespec_serialize (&sess->expire)))
+		{
+		  err = 1;
+		  break;
+		}
 	    }
 	}
     }
 
+  if (err)
+    {
+      json_value_free (obj);
+      obj = NULL;
+    }
   return obj;
 }
 
@@ -1780,6 +1802,7 @@ static struct json_value *
 backend_serialize (BACKEND *be)
 {
   struct json_value *obj;
+  int err = 0;
 
   if (!be)
     obj = json_new_null ();
@@ -1787,35 +1810,48 @@ backend_serialize (BACKEND *be)
     {
       obj = json_new_object ();
 
-      json_object_set (obj, "type", json_new_string (backend_type_str (be->be_type)));
-      json_object_set (obj, "priority", json_new_integer (be->priority));
-      json_object_set (obj, "alive", json_new_bool (be->alive));
-      json_object_set (obj, "enabled", json_new_bool (!be->disabled));
-      json_object_set (obj, "io_to", json_new_integer (be->to));
-      json_object_set (obj, "conn_to", json_new_integer (be->conn_to));
-      json_object_set (obj, "ws_to", json_new_integer (be->ws_to));
-      json_object_set (obj, "protocol", json_new_string (be->ctx ? "https" : "http"));
-
-      switch (be->be_type)
+      if (obj)
 	{
-	case BE_BACKEND:
-	  json_object_set (obj, "address", addrinfo_serialize (&be->addr));
-	  break;
+	  if (json_object_set (obj, "type",
+			       json_new_string (backend_type_str (be->be_type)))
+	      || json_object_set (obj, "priority",
+				  json_new_integer (be->priority))
+	      || json_object_set (obj, "alive", json_new_bool (be->alive))
+	      || json_object_set (obj, "enabled", json_new_bool (!be->disabled))
+	      || json_object_set (obj, "io_to", json_new_integer (be->to))
+	      || json_object_set (obj, "conn_to", json_new_integer (be->conn_to))
+	      || json_object_set (obj, "ws_to", json_new_integer (be->ws_to))
+	      || json_object_set (obj, "protocol", json_new_string (be->ctx ? "https" : "http")))
+	    {
+	      err = 1;
+	    }
+	  else
+	    switch (be->be_type)
+	      {
+	      case BE_BACKEND:
+		err = json_object_set (obj, "address", addrinfo_serialize (&be->addr));
+		break;
 
-	case BE_REDIRECT:
-	  json_object_set (obj, "url", json_new_string (be->url));
-	  json_object_set (obj, "code", json_new_integer (be->redir_code));
-	  json_object_set (obj, "redir_req", json_new_bool (be->redir_req));
-	  break;
+	      case BE_REDIRECT:
+		err = json_object_set (obj, "url", json_new_string (be->url))
+		      || json_object_set (obj, "code", json_new_integer (be->redir_code))
+		      || json_object_set (obj, "redir_req", json_new_bool (be->redir_req));
+		break;
 
-	case BE_ACME:
-	  json_object_set (obj, "path", json_new_string (be->url));
-	  break;
+	      case BE_ACME:
+		err = json_object_set (obj, "path", json_new_string (be->url));
+		break;
 
-	case BE_CONTROL:
-	  /* FIXME */
-	  break;
+	      case BE_CONTROL:
+		/* FIXME */
+		break;
+	      }
 	}
+    }
+  if (err)
+    {
+      json_value_free (obj);
+      obj = NULL;
     }
   return obj;
 }
@@ -1834,7 +1870,12 @@ backends_serialize (BACKEND_HEAD *head)
       obj = json_new_array ();
       SLIST_FOREACH (be, head, next)
 	{
-	  json_array_append (obj, backend_serialize (be));
+	  if (json_array_append (obj, backend_serialize (be)))
+	    {
+	      json_value_free (obj);
+	      obj = NULL;
+	      break;
+	    }
 	}
     }
   return obj;
@@ -1846,17 +1887,26 @@ service_serialize (SERVICE *svc)
   struct json_value *obj = json_new_object ();
   char const *typename;
 
-  pthread_mutex_lock (&svc->mut);
-  json_object_set (obj, "name", json_new_string (svc->name));
-  json_object_set (obj, "enabled", json_new_bool (!svc->disabled));
-  json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri));
-  json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri));
-  typename = sess_type_to_str (svc->sess_type);
-  json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"));
-  json_object_set (obj, "sessions", service_session_serialize (svc));
-  json_object_set (obj, "backends", backends_serialize (&svc->backends));
-  json_object_set (obj, "emergency", backend_serialize (svc->emergency));
-  pthread_mutex_unlock (&svc->mut);
+  if (obj)
+    {
+      pthread_mutex_lock (&svc->mut);
+
+      typename = sess_type_to_str (svc->sess_type);
+      if (json_object_set (obj, "name", json_new_string (svc->name))
+	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
+	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
+	  || json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri))
+	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
+	  || json_object_set (obj, "sessions", service_session_serialize (svc))
+	  || json_object_set (obj, "backends", backends_serialize (&svc->backends))
+	  || json_object_set (obj, "emergency", backend_serialize (svc->emergency)))
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+      pthread_mutex_unlock (&svc->mut);
+    }
+
   return obj;
 }
 
@@ -1867,18 +1917,41 @@ listener_serialize (LISTENER *lstn)
   int is_https;
   SERVICE *svc;
 
-  json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
+  if (obj)
+    {
+      int err = 0;
 
-  is_https = !SLIST_EMPTY (&lstn->ctx_head);
-  json_object_set (obj, "protocol", json_new_string (is_https ? "https" : "http"));
-  if (is_https)
-    json_object_set (obj, "nohttps11", json_new_integer (lstn->noHTTPS11));
-  json_object_set (obj, "enabled", json_new_bool (!lstn->disabled));
+      err = json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
 
-  p = json_new_array ();
-  json_object_set (obj, "services", p);
-  SLIST_FOREACH (svc, &lstn->services, next)
-    json_array_append (p, service_serialize (svc));
+      is_https = !SLIST_EMPTY (&lstn->ctx_head);
+      err |= json_object_set (obj, "protocol",
+			      json_new_string (is_https ? "https" : "http"));
+      if (is_https)
+	err |= json_object_set (obj, "nohttps11", json_new_integer (lstn->noHTTPS11));
+      err |= json_object_set (obj, "enabled", json_new_bool (!lstn->disabled));
+
+      if ((p = json_new_array ()) == NULL)
+	err = 1;
+      else
+	{
+	  if (json_object_set (obj, "services", p))
+	    {
+	      json_value_free (p);
+	      err = 1;
+	    }
+	  SLIST_FOREACH (svc, &lstn->services, next)
+	    {
+	      if ((err = json_array_append (p, service_serialize (svc))) != 0)
+		break;
+	    }
+	}
+
+      if (err)
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
 
   return obj;
 }
@@ -1893,20 +1966,53 @@ pound_serialize (void)
 
   obj = json_new_object ();
 
-  clock_gettime (CLOCK_REALTIME, &ts);
-  json_object_set (obj, "timestamp", timespec_serialize (&ts));
+  if (obj)
+    {
+      int err = 0;
 
-  json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()));
+      clock_gettime (CLOCK_REALTIME, &ts);
+      if (json_object_set (obj, "timestamp", timespec_serialize (&ts))
+	  || json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ())))
+	{
+	  err = 1;
+	}
+      else if ((p = json_new_array ()) == NULL)
+	err = 1;
+      else if (json_object_set (obj, "listeners", p))
+	{
+	  json_value_free (p);
+	  err = 1;
+	}
+      else
+	{
+	  SLIST_FOREACH (lstn, &listeners, next)
+	    if ((err = json_array_append (p, listener_serialize (lstn))) != 0)
+	      break;
+	}
 
-  p = json_new_array ();
-  json_object_set (obj, "listeners", p);
-  SLIST_FOREACH (lstn, &listeners, next)
-    json_array_append (p, listener_serialize (lstn));
+      if (err == 0)
+	{
+	  if ((p = json_new_array ()) == NULL)
+	    err = 1;
+	  else if (json_object_set (obj, "services", p))
+	    {
+	      json_value_free (p);
+	      err = 1;
+	    }
+	  else
+	    {
+	      SLIST_FOREACH (svc, &services, next)
+		if ((err = json_array_append (p, service_serialize (svc))) != 0)
+		  break;
+	    }
+	}
 
-  p = json_new_array ();
-  json_object_set (obj, "services", p);
-  SLIST_FOREACH (svc, &services, next)
-    json_array_append (p, service_serialize (svc));
+      if (err)
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
 
   return obj;
 }
@@ -1943,10 +2049,14 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
       format.indent = n;
     }
 
-  stringbuf_init (&sb);
+  stringbuf_init_log (&sb);
   format.data = &sb;
   json_value_format (val, &format, 0);
-  str = stringbuf_finish (&sb);
+  if ((str = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
 
   BIO_printf (c,
 	      "HTTP/1.1 %d %s\r\n"
@@ -1955,8 +2065,8 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
 	      "Connection: close\r\n\r\n"
 	      "%s",
 	      200, "OK", (LONG) strlen (str), str);
-  free (str);
   BIO_flush (c);
+  stringbuf_free (&sb);
 
   return HTTP_STATUS_OK;
 }
@@ -1967,9 +2077,13 @@ control_list_all (BIO *c, char const *url)
   struct json_value *val;
   int rc;
 
-  val = pound_serialize ();
-  rc = send_json_reply (c, val, url);
-  json_value_free (val);
+  if ((val = pound_serialize ()) == NULL)
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  else
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
   return rc;
 }
 
@@ -2102,8 +2216,13 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
       break;
     }
 
-  rc = send_json_reply (c, val, url);
-  json_value_free (val);
+  if (!val)
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  else
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
   return rc;
 }
 
@@ -2176,9 +2295,13 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
       break;
     }
 
-  val = json_new_bool (1);
-  rc = send_json_reply (c, val, url);
-  json_value_free (val);
+  if ((val = json_new_bool (1)) == NULL)
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  else
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
   return rc;
 }
 
@@ -2249,9 +2372,13 @@ session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   service_session_remove_by_key (svc, keybuf);
   pthread_mutex_unlock (&svc->mut);
 
-  val = service_serialize (svc);
-  rc = send_json_reply (c, val, url);
-  json_value_free (val);
+  if ((val = service_serialize (svc)) != NULL)
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
+  else
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   return rc;
 }
 
@@ -2288,9 +2415,13 @@ session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   service_session_add (svc, keybuf, be);
   pthread_mutex_unlock (&svc->mut);
 
-  val = service_serialize (svc);
-  rc = send_json_reply (c, val, url);
-  json_value_free (val);
+  if ((val = service_serialize (svc)) != NULL)
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
+  else
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   return rc;
 }
 
