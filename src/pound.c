@@ -54,8 +54,7 @@ regex_t HEADER,			/* Allowed header */
   CHUNK_HEAD,			/* chunk header line */
   RESP_SKIP,			/* responses for which we skip response */
   RESP_IGN,			/* responses for which we ignore content */
-  LOCATION,			/* the host we are redirected to */
-  AUTHORIZATION;		/* the Authorisation header */
+  LOCATION;			/* the host we are redirected to */
 
 #ifndef  SOL_TCP
 /* for systems without the definition */
@@ -695,9 +694,8 @@ main (const int argc, char **argv)
   CRYPTO_set_locking_callback (l_lock);
 
   /* prepare regular expressions */
-  if (regcomp
-      (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",
-       REG_ICASE | REG_NEWLINE | REG_EXTENDED)
+  if (regcomp (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",
+	       REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&CONN_UPGRD, "(^|[ \t,])upgrade([ \t,]|$)",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&CHUNK_HEAD, "^([0-9a-f]+).*$",
@@ -708,9 +706,6 @@ main (const int argc, char **argv)
 		  "^HTTP/1.[01] (10[1-9]|1[1-9][0-9]|204|30[456]).*$",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&LOCATION, "(http|https)://([^/]+)(.*)",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&AUTHORIZATION,
-		  "Authorization:[ \t]*Basic[ \t]*\"?([^ \t]*)\"?[ \t]*",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED))
     {
       logmsg (LOG_ERR, "bad essential Regex - aborted");

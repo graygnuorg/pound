@@ -505,20 +505,24 @@ typedef enum
   RENEG_STATE;
 
 /* Header types */
-#define HEADER_ILLEGAL              -1
-#define HEADER_OTHER                0
-#define HEADER_TRANSFER_ENCODING    1
-#define HEADER_CONTENT_LENGTH       2
-#define HEADER_CONNECTION           3
-#define HEADER_LOCATION             4
-#define HEADER_CONTLOCATION         5
-#define HEADER_HOST                 6
-#define HEADER_REFERER              7
-#define HEADER_USER_AGENT           8
-#define HEADER_URI                  9
-#define HEADER_DESTINATION          10
-#define HEADER_EXPECT               11
-#define HEADER_UPGRADE              13
+enum
+  {
+    HEADER_ILLEGAL = -1,
+    HEADER_OTHER = 0,
+    HEADER_TRANSFER_ENCODING,
+    HEADER_CONTENT_LENGTH,
+    HEADER_CONNECTION,
+    HEADER_LOCATION,
+    HEADER_CONTLOCATION,
+    HEADER_HOST,
+    HEADER_REFERER,
+    HEADER_USER_AGENT,
+    HEADER_URI,
+    HEADER_DESTINATION,
+    HEADER_EXPECT,
+    HEADER_UPGRADE,
+    HEADER_AUTHORIZATION
+  };
 
 /* control request stuff */
 typedef enum

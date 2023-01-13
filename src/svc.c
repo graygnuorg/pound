@@ -474,7 +474,7 @@ cpURL (char *res, char *src, int len)
  * return a code and possibly content in the arg
  */
 int
-check_header (const char *header, char *const content)
+check_header (const char *header, char *content)
 {
   regmatch_t matches[4];
   static struct
@@ -482,20 +482,22 @@ check_header (const char *header, char *const content)
     char header[32];
     int len;
     int val;
-  } hd_types[] =
-  {
-    {"Transfer-encoding", 17, HEADER_TRANSFER_ENCODING},
-    {"Content-length", 14, HEADER_CONTENT_LENGTH},
-    {"Connection", 10, HEADER_CONNECTION},
-    {"Location", 8, HEADER_LOCATION},
-    {"Content-location", 16, HEADER_CONTLOCATION},
-    {"Host", 4, HEADER_HOST},
-    {"Referer", 7, HEADER_REFERER},
-    {"User-agent", 10, HEADER_USER_AGENT},
-    {"Destination", 11, HEADER_DESTINATION},
-    {"Expect", 6, HEADER_EXPECT},
-    {"Upgrade", 7, HEADER_UPGRADE},
-    {"", 0, HEADER_OTHER},
+  } hd_types[] = {
+#define S(s) s, sizeof (s) - 1
+    { S ("Transfer-encoding"), HEADER_TRANSFER_ENCODING },
+    { S ("Content-length"),    HEADER_CONTENT_LENGTH },
+    { S ("Connection"),        HEADER_CONNECTION },
+    { S ("Location"),          HEADER_LOCATION },
+    { S ("Content-location"),  HEADER_CONTLOCATION },
+    { S ("Host"),              HEADER_HOST },
+    { S ("Referer"),           HEADER_REFERER },
+    { S ("User-agent"),        HEADER_USER_AGENT },
+    { S ("Destination"),       HEADER_DESTINATION },
+    { S ("Expect"),            HEADER_EXPECT },
+    { S ("Upgrade"),           HEADER_UPGRADE },
+    { S ("Authorization"),     HEADER_AUTHORIZATION },
+    { S (""),                  HEADER_OTHER },
+#undef S
   };
   int i;
 
@@ -506,7 +508,10 @@ check_header (const char *header, char *const content)
 	    && strncasecmp (header + matches[1].rm_so, hd_types[i].header,
 			    hd_types[i].len) == 0)
 	  {
-	    /* we know that the original header was read into a buffer of size MAXBUF, so no overflow */
+	    /*
+	     * Both header and content should point to buffers of the same
+	     * size (MAXBUF), so no overflow is possible.
+	     */
 	    strncpy (content, header + matches[2].rm_so,
 		     matches[2].rm_eo - matches[2].rm_so);
 	    content[matches[2].rm_eo - matches[2].rm_so] = '\0';

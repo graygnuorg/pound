@@ -789,6 +789,86 @@ get_headers (BIO *in, BIO *cl, const LISTENER *lstn)
   listener_err_reply (cl, HTTP_STATUS_INTERNAL_SERVER_ERROR, lstn);
   return NULL;
 }
+
+/*
+ * Extrace username from the Basic Authorization header.
+ * Input:
+ *   hdrval   - value of the Authorization header;
+ * Output:
+ *   u_name   - output buffer;
+ *   u_len    - size of u_name;
+ * Return value:
+ *   0        - Success. Name copied to u_name. It is truncated to u_len
+ *              bytes.
+ *   1        - Not a Basic Authorization header.
+ *  -1        - Other error.
+ */
+static int
+get_user (char *hdrval, char *u_name, size_t u_len)
+{
+  size_t len;
+  BIO *bb, *b64;
+  int i, inlen;
+  char buf[MAXBUF];
+
+  if (strncasecmp (hdrval, "Basic", 5))
+    return 1;
+
+  hdrval += 5;
+  while (*hdrval && isspace (*hdrval))
+    hdrval++;
+
+  len = strlen (hdrval);
+  if (*hdrval == '"')
+    {
+      hdrval++;
+      len--;
+
+      while (len > 0 && isspace (hdrval[len-1]))
+	len--;
+
+      if (len == 0 || hdrval[len] != '"')
+	return 1;
+      len--;
+    }
+
+  if ((bb = BIO_new (BIO_s_mem ())) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_s_mem", POUND_TID ());
+      return -1;
+    }
+
+  if ((b64 = BIO_new (BIO_f_base64 ())) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_f_base64",
+	      POUND_TID ());
+      BIO_free (bb);
+      return -1;
+    }
+
+  b64 = BIO_push (b64, bb);
+  BIO_write (bb, hdrval, len);
+  BIO_write (bb, "\n", 1);
+  inlen = BIO_read (b64, buf, sizeof (buf));
+  BIO_free_all (b64);
+  if (inlen <= 0)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") Can't read BIO_f_base64",
+	      POUND_TID ());
+      BIO_free_all (b64);
+      return -1;
+    }
+
+  u_len--; /* Allocate slot for terminating \0 */
+  for (i = 0; i < inlen && u_len > 0 && buf[i] != ':'; i++)
+    {
+      *u_name++ = buf[i];
+      u_len--;
+    }
+  *u_name = 0;
+
+  return 0;
+}
 
 struct method_def
 {
@@ -1189,7 +1269,7 @@ do_http (THR_ARG *arg)
   BACKEND *backend, *cur_backend;
   struct addrinfo from_host;
   struct sockaddr_storage from_host_addr;
-  BIO *cl, *be, *bb, *b64;
+  BIO *cl, *be, *bb;
   X509 *x509;
   char request[MAXBUF],
     response[MAXBUF],
@@ -1495,9 +1575,10 @@ do_http (THR_ARG *arg)
 
 	    case HEADER_EXPECT:
 	      /*
-	       * we do NOT support the "Expect: 100-continue" headers
-	       * support may involve severe performance penalties (non-responding back-end, etc)
-	       * as a stop-gap measure we just skip these headers
+	       * We do NOT support the "Expect: 100-continue" headers;
+	       * Supporting them may involve severe performance penalties
+	       * (non-responding back-end, etc).
+	       * As a stop-gap measure we just skip these headers.
 	       */
 	      if (!strcasecmp ("100-continue", buf))
 		headers_ok[n] = 0;
@@ -1513,6 +1594,10 @@ do_http (THR_ARG *arg)
 		}
 	      headers_ok[n] = 0;
 	      break;
+
+	    case HEADER_AUTHORIZATION:
+	      get_user (buf, u_name, sizeof (u_name));
+	      break;
 	    }
 
 	  if (headers_ok[n] && !SLIST_EMPTY (&lstn->head_off))
@@ -1525,47 +1610,6 @@ do_http (THR_ARG *arg)
 	      SLIST_FOREACH (m, &lstn->head_off, next)
 		if (!(headers_ok[n] = regexec (&m->pat, headers[n], 0, NULL, 0)))
 		  break;
-	    }
-	  /*
-	   * get User name
-	   */
-	  if (!regexec (&AUTHORIZATION, headers[n], 2, matches, 0))
-	    {
-	      int inlen;
-
-	      if ((bb = BIO_new (BIO_s_mem ())) == NULL)
-		{
-		  logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_s_mem",
-			  POUND_TID ());
-		  continue;
-		}
-	      if ((b64 = BIO_new (BIO_f_base64 ())) == NULL)
-		{
-		  logmsg (LOG_WARNING, "(%"PRItid") Can't alloc BIO_f_base64",
-			  POUND_TID ());
-		  BIO_free (bb);
-		  continue;
-		}
-	      b64 = BIO_push (b64, bb);
-	      BIO_write (bb, headers[n] + matches[1].rm_so,
-			 matches[1].rm_eo - matches[1].rm_so);
-	      BIO_write (bb, "\n", 1);
-	      if ((inlen = BIO_read (b64, buf, sizeof (buf))) <= 0)
-		{
-		  logmsg (LOG_WARNING, "(%"PRItid") Can't read BIO_f_base64",
-			  POUND_TID ());
-		  BIO_free_all (b64);
-		  continue;
-		}
-	      BIO_free_all (b64);
-	      if ((mh = memchr (buf, ':', inlen)) == NULL)
-		{
-		  logmsg (LOG_WARNING, "(%"PRItid") Unknown authentication",
-			  POUND_TID ());
-		  continue;
-		}
-	      *mh = '\0';
-	      strcpy (u_name, buf);
 	    }
 	}
 

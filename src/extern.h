@@ -28,8 +28,7 @@ extern regex_t HEADER,		/* Allowed header */
   CHUNK_HEAD,			/* chunk header line */
   RESP_SKIP,			/* responses for which we skip response */
   RESP_IGN,			/* responses for which we ignore content */
-  LOCATION,			/* the host we are redirected to */
-  AUTHORIZATION;		/* the Authorisation header */
+  LOCATION;			/* the host we are redirected to */
 
 #ifndef  SOL_TCP
 /* for systems without the definition */
