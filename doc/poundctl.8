@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "January 10, 2023" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "January 13, 2023" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -148,6 +148,10 @@ uses the template "default".  You can request another template name
 using the
 .B \-T
 command line option.
+.PP
+The default
+.B poundctl.tmpl
+file defines two templates: \fBdefault\fR and \fBxml\fR.
 .SH OPTIONS
 .TP
 \fB\-f \fIFILE\fR

@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.69])
-AC_INIT([pound],[4.2.91],[gray@gnu.org],
+AC_INIT([pound],[4.3],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])

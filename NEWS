@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-01-10
+Pound -- history of user-visible changes. 2023-01-13
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,12 +7,12 @@ on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.2.91
+Version 4.3
 
 * Template support in poundctl
 
 The output of poundctl is controlled by a template.  Templates
-are read from a template file, which is looked up in a template
+are read from a template file, which is looked up in template
 search path (normally ~/.poundctl.tmpl:/usr/share/pound/poundctl.tmpl).
 The poundctl.tmpl file shipped with the distribution defines templates
 for the traditional (plain-text) and XML output.
@@ -20,6 +20,9 @@ for the traditional (plain-text) and XML output.
 The option "-t FILE" instructs poundctl to use FILE instead of the
 default template file.  The option "-T NAME" supplies the name of
 the template to be used.
+
+* Fix parsing of Subject in X509 certificates
+
 
 Version 4.2, 2022-12-31
 
