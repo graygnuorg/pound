@@ -1204,9 +1204,6 @@ parse_http_request (const char *req, int group,
 
 /*
  * HTTP Logging
- *
- * Function signatures are overly complex.  They will get simplified when
- * do_http gets revised.
  */
 
 static char *
@@ -1626,7 +1623,7 @@ do_http (THR_ARG *arg)
   SERVICE *svc;
   BACKEND *backend, *cur_backend;
   BIO *bb;
-  char buf1[MAXBUF],
+  char buf[MAXBUF],
     url[MAXBUF],
     caddr[MAX_ADDR_BUFSIZE], caddr2[MAX_ADDR_BUFSIZE];
   char duration_buf[LOG_TIME_SIZE];
@@ -2161,6 +2158,7 @@ do_http (THR_ARG *arg)
 				    val + matches[3].rm_so);
 		  if ((p = stringbuf_finish (&sb)) == NULL)
 		    {
+		      stringbuf_free (&sb);
 		      logmsg (LOG_WARNING,
 			      "(%"PRItid") rewrite Destination - out of memory: %s",
 			      POUND_TID (), strerror (errno));
@@ -2310,7 +2308,7 @@ do_http (THR_ARG *arg)
 	  /*
 	   * copy till EOF
 	   */
-	  while ((res = BIO_read (cl_unbuf, buf1, sizeof (buf1))) > 0)
+	  while ((res = BIO_read (cl_unbuf, buf, sizeof (buf))) > 0)
 	    {
 	      if ((res_bytes += res) > cont)
 		{
@@ -2319,7 +2317,7 @@ do_http (THR_ARG *arg)
 			  POUND_TID ());
 		  return;
 		}
-	      if (BIO_write (arg->be, buf1, res) != res)
+	      if (BIO_write (arg->be, buf, res) != res)
 		{
 		  if (errno)
 		    logmsg (LOG_NOTICE, "(%"PRItid") error copy request body: %s",
@@ -2519,6 +2517,7 @@ do_http (THR_ARG *arg)
 					    path);
 			  if ((p = stringbuf_finish (&sb)) == NULL)
 			    {
+			      stringbuf_free (&sb);
 			      logmsg (LOG_WARNING,
 				      "(%"PRItid") rewrite Location - out of memory: %s",
 				      POUND_TID (), strerror (errno));
@@ -2550,6 +2549,7 @@ do_http (THR_ARG *arg)
 					    path);
 			  if ((p = stringbuf_finish (&sb)) == NULL)
 			    {
+			      stringbuf_free (&sb);
 			      logmsg (LOG_WARNING,
 				      "(%"PRItid") rewrite Content-location - out of memory: %s",
 				      POUND_TID (), strerror (errno));
@@ -2685,9 +2685,9 @@ do_http (THR_ARG *arg)
 		      /*
 		       * copy till EOF
 		       */
-		      while ((res = BIO_read (be_unbuf, buf1, sizeof (buf1))) > 0)
+		      while ((res = BIO_read (be_unbuf, buf, sizeof (buf))) > 0)
 			{
-			  if (BIO_write (arg->cl, buf1, res) != res)
+			  if (BIO_write (arg->cl, buf, res) != res)
 			    {
 			      if (errno)
 				logmsg (LOG_NOTICE,
@@ -2810,12 +2810,12 @@ do_http (THR_ARG *arg)
 		   */
 		  if (p[0].revents)
 		    {
-		      res = BIO_read (cl_unbuf, buf1, sizeof (buf1));
+		      res = BIO_read (cl_unbuf, buf, sizeof (buf));
 		      if (res <= 0)
 			{
 			  break;
 			}
-		      if (BIO_write (arg->be, buf1, res) != res)
+		      if (BIO_write (arg->be, buf, res) != res)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
@@ -2831,12 +2831,12 @@ do_http (THR_ARG *arg)
 		    }
 		  if (p[1].revents)
 		    {
-		      res = BIO_read (be_unbuf, buf1, sizeof (buf1));
+		      res = BIO_read (be_unbuf, buf, sizeof (buf));
 		      if (res <= 0)
 			{
 			  break;
 			}
-		      if (BIO_write (arg->cl, buf1, res) != res)
+		      if (BIO_write (arg->cl, buf, res) != res)
 			{
 			  if (errno)
 			    logmsg (LOG_NOTICE,
