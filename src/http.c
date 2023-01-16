@@ -943,6 +943,7 @@ void
 http_request_free (struct http_request *req)
 {
   free (req->request);
+  free (req->user);
   http_header_list_free (&req->headers);
   http_request_init (req);
 }
@@ -1625,8 +1626,7 @@ do_http (THR_ARG *arg)
   SERVICE *svc;
   BACKEND *backend, *cur_backend;
   BIO *bb;
-  char loc_path[MAXBUF],
-    buf1[MAXBUF],
+  char buf1[MAXBUF],
     url[MAXBUF],
     caddr[MAX_ADDR_BUFSIZE], caddr2[MAX_ADDR_BUFSIZE];
   char duration_buf[LOG_TIME_SIZE];
@@ -2501,12 +2501,13 @@ do_http (THR_ARG *arg)
 		case HEADER_LOCATION:
 		  if ((val = http_header_get_value (hdr)) == NULL)
 		    goto err;
-		  else
+		  else if (arg->lstn->rewr_loc)
 		    {
 		      char const *v_host = http_request_host (&arg->request);
+		      char const *path;
 		      if (v_host && v_host[0] &&
-			  need_rewrite (arg->lstn->rewr_loc, val, loc_path, v_host,
-					arg->lstn, cur_backend))
+			  need_rewrite (val, v_host, arg->lstn, cur_backend,
+					&path))
 			{
 			  struct stringbuf sb;
 			  char *p;
@@ -2515,7 +2516,7 @@ do_http (THR_ARG *arg)
 			  stringbuf_printf (&sb, "Location: %s://%s/%s",
 					    (arg->ssl == NULL ? "http" : "https"),
 					    v_host,
-					    loc_path);
+					    path);
 			  if ((p = stringbuf_finish (&sb)) == NULL)
 			    {
 			      logmsg (LOG_WARNING,
@@ -2531,12 +2532,13 @@ do_http (THR_ARG *arg)
 		case HEADER_CONTLOCATION:
 		  if ((val = http_header_get_value (hdr)) == NULL)
 		    goto err;
-		  else
+		  else if (arg->lstn->rewr_loc)
 		    {
 		      char const *v_host = http_request_host (&arg->request);
+		      char const *path;
 		      if (v_host && v_host[0] &&
-			  need_rewrite (arg->lstn->rewr_loc, val, loc_path,
-					v_host, arg->lstn, cur_backend))
+			  need_rewrite (val, v_host, arg->lstn, cur_backend,
+					&path))
 			{
 			  struct stringbuf sb;
 			  char *p;
@@ -2545,7 +2547,7 @@ do_http (THR_ARG *arg)
 			  stringbuf_printf (&sb,
 					    "Content-location: %s://%s/%s",
 					    (arg->ssl == NULL ? "http" : "https"), v_host,
-					    loc_path);
+					    path);
 			  if ((p = stringbuf_finish (&sb)) == NULL)
 			    {
 			      logmsg (LOG_WARNING,

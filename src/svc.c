@@ -640,7 +640,7 @@ get_HEADERS (char *res, const SERVICE * svc, HTTP_HEADER_LIST *headers)
   int n, s;
   regmatch_t matches[4];
   struct http_header *hdr;
-  
+
   /* this will match SESS_COOKIE, SESS_HEADER and SESS_BASIC */
   res[0] = '\0';
   DLIST_FOREACH (hdr, headers, link)
@@ -937,19 +937,20 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
  * (1) if the redirect was done to the correct location with the wrong port
  * (2) if the redirect was done to the back-end rather than the listener
  */
-// FIXME: Revise
 int
-need_rewrite (const int rewr_loc, char *location, char *path,
-	      const char *v_host, const LISTENER * lstn, const BACKEND * be)
+need_rewrite (const char *location, const char *v_host,
+	      const LISTENER *lstn, const BACKEND *be, const char **ppath)
 {
   struct addrinfo addr;
   struct sockaddr_in in_addr, be_addr;
   struct sockaddr_in6 in6_addr, be6_addr;
   regmatch_t matches[4];
-  char *proto, *host, *port, *cp, buf[MAXBUF];
+  char const *proto;
+  char const *path;
+  char *host, *vhost, *port, *cp;
+  size_t len;
 
-  /* check if rewriting is required at all */
-  if (rewr_loc == 0)
+  if (lstn->rewr_loc == 0)
     return 0;
 
   /* applies only to INET/INET6 back-ends */
@@ -960,12 +961,20 @@ need_rewrite (const int rewr_loc, char *location, char *path,
   if (regexec (&LOCATION, location, 4, matches, 0))
     return 0;
   proto = location + matches[1].rm_so;
-  host = location + matches[2].rm_so;
+
   if (location[matches[3].rm_so] == '/')
     matches[3].rm_so++;
-  /* path is guaranteed to be large enough */
-  strcpy (path, location + matches[3].rm_so);
-  location[matches[1].rm_eo] = location[matches[2].rm_eo] = '\0';
+  path = location + matches[3].rm_so;
+
+  len = matches[2].rm_eo - matches[2].rm_so;
+  if ((host = malloc (len + 1)) == NULL)
+    {
+      lognomem ();
+      return 0;
+    }
+  memcpy (host, location + matches[2].rm_so, len);
+  host[len] = 0;
+
   if ((port = strchr (host, ':')) != NULL)
     *port++ = '\0';
 
@@ -982,6 +991,7 @@ need_rewrite (const int rewr_loc, char *location, char *path,
   if (addr.ai_family != be->addr.ai_family)
     {
       free (addr.ai_addr);
+      free (host);
       return 0;
     }
   if (addr.ai_family == AF_INET)
@@ -990,7 +1000,7 @@ need_rewrite (const int rewr_loc, char *location, char *path,
       memcpy (&be_addr, be->addr.ai_addr, sizeof (be_addr));
       if (port)
 	in_addr.sin_port = (in_port_t) htons (atoi (port));
-      else if (!strcasecmp (proto, "https"))
+      else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
 	in_addr.sin_port = (in_port_t) htons (443);
       else
 	in_addr.sin_port = (in_port_t) htons (80);
@@ -1003,6 +1013,8 @@ need_rewrite (const int rewr_loc, char *location, char *path,
 		     sizeof (in_addr.sin_port)) == 0)
 	{
 	  free (addr.ai_addr);
+	  free (host);
+	  *ppath = path;
 	  return 1;
 	}
     }
@@ -1012,7 +1024,7 @@ need_rewrite (const int rewr_loc, char *location, char *path,
       memcpy (&be6_addr, be->addr.ai_addr, sizeof (be6_addr));
       if (port)
 	in6_addr.sin6_port = (in_port_t) htons (atoi (port));
-      else if (!strcasecmp (proto, "https"))
+      else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
 	in6_addr.sin6_port = (in_port_t) htons (443);
       else
 	in6_addr.sin6_port = (in_port_t) htons (80);
@@ -1025,6 +1037,8 @@ need_rewrite (const int rewr_loc, char *location, char *path,
 		     sizeof (in6_addr.sin6_port)) == 0)
 	{
 	  free (addr.ai_addr);
+	  free (host);
+	  *ppath = path;
 	  return 1;
 	}
     }
@@ -1032,14 +1046,22 @@ need_rewrite (const int rewr_loc, char *location, char *path,
   /*
    * compare the listener
    */
-  if (rewr_loc != 1 || addr.ai_family != lstn->addr.ai_family)
+  if (lstn->rewr_loc != 1 || addr.ai_family != lstn->addr.ai_family)
     {
       free (addr.ai_addr);
+      free (host);
       return 0;
     }
-  memset (buf, '\0', sizeof (buf));
-  strncpy (buf, v_host, sizeof (buf) - 1);
-  if ((cp = strchr (buf, ':')) != NULL)
+
+  if ((vhost = strdup (v_host)) == NULL)
+    {
+      lognomem ();
+      free (addr.ai_addr);
+      free (host);
+      return 0;
+    }
+
+  if ((cp = strchr (vhost, ':')) != NULL)
     *cp = '\0';
   if (addr.ai_family == AF_INET)
     {
@@ -1050,14 +1072,17 @@ need_rewrite (const int rewr_loc, char *location, char *path,
        */
       if ((memcmp (&be_addr.sin_addr.s_addr, &in_addr.sin_addr.s_addr,
 		   sizeof (in_addr.sin_addr.s_addr)) == 0
-	   || strcasecmp (host, buf) == 0)
-	  &&
-	  (memcmp (&be_addr.sin_port, &in_addr.sin_port,
-		   sizeof (in_addr.sin_port)) != 0
-	   || strcasecmp (proto,
-			  !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http")))
+	   || strcasecmp (host, vhost) == 0)
+	  && (memcmp (&be_addr.sin_port, &in_addr.sin_port,
+		      sizeof (in_addr.sin_port)) != 0
+	      || strncasecmp (proto,
+			      !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
+			      matches[1].rm_eo - matches[1].rm_so)))
 	{
 	  free (addr.ai_addr);
+	  free (host);
+	  free (vhost);
+	  *ppath = path;
 	  return 1;
 	}
     }
@@ -1070,19 +1095,24 @@ need_rewrite (const int rewr_loc, char *location, char *path,
        */
       if ((memcmp (&be6_addr.sin6_addr.s6_addr, &in6_addr.sin6_addr.s6_addr,
 		   sizeof (in6_addr.sin6_addr.s6_addr)) == 0
-	   || strcasecmp (host, buf) == 0)
-	  &&
-	  (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
-		   sizeof (in6_addr.sin6_port)) != 0
-	   || strcasecmp (proto,
-			  !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http")))
+	   || strcasecmp (host, vhost) == 0)
+	  && (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
+		      sizeof (in6_addr.sin6_port)) != 0
+	      || strncasecmp (proto,
+			      !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
+			      matches[1].rm_eo - matches[1].rm_so)))
 	{
 	  free (addr.ai_addr);
+	  free (host);
+	  free (vhost);
+	  *ppath = path;
 	  return 1;
 	}
     }
 
   free (addr.ai_addr);
+  free (host);
+  free (vhost);
   return 0;
 }
 
