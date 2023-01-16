@@ -469,60 +469,6 @@ cpURL (char *res, char *src, int len)
   return res - kp_res;
 }
 
-/*
- * Parse a header
- * return a code and possibly content in the arg
- */
-int
-check_header (const char *header, char *content)
-{
-  regmatch_t matches[4];
-  static struct
-  {
-    char header[32];
-    int len;
-    int val;
-  } hd_types[] = {
-#define S(s) s, sizeof (s) - 1
-    { S ("Transfer-encoding"), HEADER_TRANSFER_ENCODING },
-    { S ("Content-length"),    HEADER_CONTENT_LENGTH },
-    { S ("Connection"),        HEADER_CONNECTION },
-    { S ("Location"),          HEADER_LOCATION },
-    { S ("Content-location"),  HEADER_CONTLOCATION },
-    { S ("Host"),              HEADER_HOST },
-    { S ("Referer"),           HEADER_REFERER },
-    { S ("User-agent"),        HEADER_USER_AGENT },
-    { S ("Destination"),       HEADER_DESTINATION },
-    { S ("Expect"),            HEADER_EXPECT },
-    { S ("Upgrade"),           HEADER_UPGRADE },
-    { S ("Authorization"),     HEADER_AUTHORIZATION },
-    { S (""),                  HEADER_OTHER },
-#undef S
-  };
-  int i;
-
-  if (!regexec (&HEADER, header, 4, matches, 0))
-    {
-      for (i = 0; hd_types[i].len > 0; i++)
-	if ((matches[1].rm_eo - matches[1].rm_so) == hd_types[i].len
-	    && strncasecmp (header + matches[1].rm_so, hd_types[i].header,
-			    hd_types[i].len) == 0)
-	  {
-	    /*
-	     * Both header and content should point to buffers of the same
-	     * size (MAXBUF), so no overflow is possible.
-	     */
-	    strncpy (content, header + matches[2].rm_so,
-		     matches[2].rm_eo - matches[2].rm_so);
-	    content[matches[2].rm_eo - matches[2].rm_so] = '\0';
-	    return hd_types[i].val;
-	  }
-      return HEADER_OTHER;
-    }
-  else
-    return HEADER_ILLEGAL;
-}
-
 static void
 submatch_init (struct submatch *sm)
 {
@@ -561,21 +507,21 @@ submatch_reset (struct submatch *sm)
 }
 
 static int
-match_headers (char **const headers, regex_t const *re)
+match_headers (HTTP_HEADER_LIST *headers, regex_t const *re)
 {
-  int i, found;
+  struct http_header *hdr;
 
-  for (i = found = 0; i < MAXHEADERS-1 && !found; i++)
+  DLIST_FOREACH (hdr, headers, link)
     {
-      if (headers[i])
-	found = regexec (re, headers[i], 0, NULL, 0) == 0;
+      if (hdr->header && regexec (re, hdr->header, 0, NULL, 0) == 0)
+	return 1;
     }
-  return found;
+  return 0;
 }
 
 static int
 match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
-	    const char *request, char **const headers,
+	    const char *request, HTTP_HEADER_LIST *headers,
 	    struct submatch *sm)
 {
   int res = 1;
@@ -624,7 +570,7 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 
 static int
 match_service (const SERVICE *svc, struct sockaddr *srcaddr,
-	       const char *request, char **const headers,
+	       const char *request, HTTP_HEADER_LIST *headers,
 	       struct submatch *sm)
 {
   return match_cond (&svc->cond, srcaddr, request, headers, sm);
@@ -635,7 +581,7 @@ match_service (const SERVICE *svc, struct sockaddr *srcaddr,
  */
 SERVICE *
 get_service (const LISTENER * lstn, struct sockaddr *srcaddr,
-	     const char *request, char **const headers,
+	     const char *request, HTTP_HEADER_LIST *headers,
 	     struct submatch *sm)
 {
   SERVICE *svc;
@@ -689,26 +635,26 @@ get_REQUEST (char *res, const SERVICE * svc, const char *request)
 }
 
 static int
-get_HEADERS (char *res, const SERVICE * svc, char **const headers)
+get_HEADERS (char *res, const SERVICE * svc, HTTP_HEADER_LIST *headers)
 {
-  int i, n, s;
+  int n, s;
   regmatch_t matches[4];
-
+  struct http_header *hdr;
+  
   /* this will match SESS_COOKIE, SESS_HEADER and SESS_BASIC */
   res[0] = '\0';
-  for (i = 0; i < (MAXHEADERS - 1); i++)
+  DLIST_FOREACH (hdr, headers, link)
     {
-      if (headers[i] == NULL)
-	continue;
-      if (regexec (&svc->sess_start, headers[i], 4, matches, 0))
+      if (regexec (&svc->sess_start, hdr->header, 4, matches, 0))
 	continue;
       s = matches[0].rm_eo;
-      if (regexec (&svc->sess_pat, headers[i] + s, 4, matches, 0))
+      if (regexec (&svc->sess_pat, hdr->header + s, 4, matches, 0))
 	continue;
       if ((n = matches[1].rm_eo - matches[1].rm_so) > KEY_SIZE)
 	n = KEY_SIZE;
-      strncpy (res, headers[i] + s + matches[1].rm_so, n);
+      strncpy (res, hdr->header + s + matches[1].rm_so, n);
       res[n] = '\0';
+      //FIXME: Break?
     }
   return res[0] != '\0';
 }
@@ -771,7 +717,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
  */
 BACKEND *
 get_backend (SERVICE * const svc, const struct addrinfo * from_host,
-	     const char *request, char **const headers)
+	     const char *request, HTTP_HEADER_LIST *headers)
 {
   BACKEND *res;
   char key[KEY_SIZE + 1];
@@ -869,7 +815,7 @@ get_backend (SERVICE * const svc, const struct addrinfo * from_host,
  * (for cookies/header only) possibly create session based on response headers
  */
 void
-upd_session (SERVICE *const svc, char **const headers, BACKEND * const be)
+upd_session (SERVICE *const svc, HTTP_HEADER_LIST *headers, BACKEND *be)
 {
   char key[KEY_SIZE + 1];
   int ret_val;
@@ -991,8 +937,9 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
  * (1) if the redirect was done to the correct location with the wrong port
  * (2) if the redirect was done to the back-end rather than the listener
  */
+// FIXME: Revise
 int
-need_rewrite (const int rewr_loc, char *const location, char *const path,
+need_rewrite (const int rewr_loc, char *location, char *path,
 	      const char *v_host, const LISTENER * lstn, const BACKEND * be)
 {
   struct addrinfo addr;

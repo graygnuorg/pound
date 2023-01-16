@@ -149,8 +149,6 @@
 # define MAXBUF      4096
 #endif
 
-#define MAXHEADERS  128
-
 #ifndef SYSCONFDIR
 # define SYSCONFDIR "/etc"
 #endif
@@ -265,6 +263,58 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 
 /* List definitions. */
 #include "list.h"
+
+/* Header types */
+enum
+  {
+    HEADER_ILLEGAL = -1,
+    HEADER_OTHER = 0,
+    HEADER_TRANSFER_ENCODING,
+    HEADER_CONTENT_LENGTH,
+    HEADER_CONNECTION,
+    HEADER_LOCATION,
+    HEADER_CONTLOCATION,
+    HEADER_HOST,
+    HEADER_REFERER,
+    HEADER_USER_AGENT,
+    HEADER_URI,
+    HEADER_DESTINATION,
+    HEADER_EXPECT,
+    HEADER_UPGRADE,
+    HEADER_AUTHORIZATION
+  };
+
+struct http_header
+{
+  char *header;
+  int code;
+  size_t name_start;
+  size_t name_end;
+  size_t val_start;
+  size_t val_end;
+  char *value;
+  DLIST_ENTRY (http_header) link;
+};
+
+typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
+
+int http_header_list_append (HTTP_HEADER_LIST *head, char *text);
+
+struct http_request
+{
+  char *request;
+  HTTP_HEADER_LIST headers;
+  char *user;
+};
+
+static inline void http_request_init (struct http_request *http)
+{
+  http->request = NULL;
+  http->user = NULL;
+  DLIST_INIT (&http->headers);
+}
+
+void http_request_free (struct http_request *);
 
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
@@ -460,7 +510,7 @@ typedef struct _listener
   POUND_CTX_HEAD ctx_head;	/* CTX for SSL connections */
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
-  char *add_head;		/* extra SSL header */
+  HTTP_HEADER_LIST add_header;	/* extra headers */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
@@ -503,26 +553,6 @@ typedef enum
     RENEG_ABORT
   }
   RENEG_STATE;
-
-/* Header types */
-enum
-  {
-    HEADER_ILLEGAL = -1,
-    HEADER_OTHER = 0,
-    HEADER_TRANSFER_ENCODING,
-    HEADER_CONTENT_LENGTH,
-    HEADER_CONNECTION,
-    HEADER_LOCATION,
-    HEADER_CONTLOCATION,
-    HEADER_HOST,
-    HEADER_REFERER,
-    HEADER_USER_AGENT,
-    HEADER_URI,
-    HEADER_DESTINATION,
-    HEADER_EXPECT,
-    HEADER_UPGRADE,
-    HEADER_AUTHORIZATION
-  };
 
 /* control request stuff */
 typedef enum
@@ -581,11 +611,11 @@ void submatch_free (struct submatch *sm);
 
 /* Find the right service for a request */
 SERVICE *get_service (const LISTENER *, struct sockaddr *,
-		      const char *, char **const, struct submatch *);
+		      const char *, HTTP_HEADER_LIST *, struct submatch *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
-		      const char *, char **const);
+		      const char *, HTTP_HEADER_LIST *);
 
 /* Search for a host name, return the addrinfo for it */
 int get_host (char *const, struct addrinfo *, int);
@@ -601,12 +631,7 @@ int need_rewrite (const int, char *const, char *const, const char *,
 /*
  * (for cookies only) possibly create session based on response headers
  */
-void upd_session (SERVICE * const, char **const, BACKEND * const);
-
-/*
- * Parse a header
- */
-int check_header (const char *, char *);
+void upd_session (SERVICE * const, HTTP_HEADER_LIST *, BACKEND *);
 
 #define BE_DISABLE  -1
 #define BE_KILL     1

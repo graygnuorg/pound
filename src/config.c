@@ -2606,25 +2606,26 @@ parse_rewritelocation (void *call_data, void *section_data)
 }
 
 static int
-append_string_line (void *call_data, void *section_data)
+append_header (void *call_data, void *section_data)
 {
-  char **dst = call_data;
-  char *s = *dst;
-  size_t len = s ? strlen (s) : 0;
+  HTTP_HEADER_LIST *hlist = call_data;
   struct token *tok;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  s = xrealloc (s, len + strlen (tok->str) + 3);
-  if (len == 0)
-    strcpy (s, tok->str);
-  else
+  switch (http_header_list_append (hlist, tok->str))
     {
-      strcpy (s + len, "\r\n");
-      strcpy (s + len + 2, tok->str);
+    case 0:
+      break;
+
+    case -1:
+      xnomem ();
+
+    case 1:
+      conf_error ("%s", "invalid header");
+      return PARSER_FAIL;
     }
-  *dst = s;
 
   return PARSER_OK;
 }
@@ -2656,8 +2657,8 @@ static PARSER_TABLE http_parsetab[] = {
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "HeaderAdd", append_string_line, NULL, offsetof (LISTENER, add_head) },
-  { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
+  { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
+  { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { NULL }
@@ -2678,6 +2679,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   SLIST_INIT (&lst->head_off);
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
+  DLIST_INIT (&lst->add_header);
   return lst;
 }
 
@@ -3173,8 +3175,8 @@ static PARSER_TABLE https_parsetab[] = {
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "HeaderAdd", append_string_line, NULL, offsetof (LISTENER, add_head) },
-  { "AddHeader", append_string_line, NULL, offsetof (LISTENER, add_head) },
+  { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
+  { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },
