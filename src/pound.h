@@ -534,11 +534,34 @@ typedef struct _listener
 
 typedef SLIST_HEAD(,_listener) LISTENER_HEAD;
 
+struct submatch
+{
+  size_t matchn;
+  size_t matchmax;
+  regmatch_t *matchv;
+};
+
+#define SUBMATCH_INITIALIZER { 0, 0, NULL }
+
+void submatch_free (struct submatch *sm);
+
 typedef struct _thr_arg
 {
+  /* Input parameters */
   int sock;
   LISTENER *lstn;
   struct addrinfo from_host;
+
+  /* Data used during http processing */
+  BIO *cl;
+  BIO *be;
+  X509 *x509;
+  SSL *ssl;
+  struct submatch sm;
+
+  struct http_request request;
+  struct http_request response;
+
   SLIST_ENTRY(_thr_arg) next;
 } THR_ARG;		/* argument to processing threads: socket, origin */
 
@@ -574,9 +597,11 @@ typedef struct
 } CTRL_CMD;
 
 /* add a request to the queue */
-int put_thr_arg (THR_ARG *);
+int thr_arg_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
 /* get a request from the queue */
-THR_ARG *get_thr_arg (void);
+THR_ARG *thr_arg_dequeue (void);
+/* Free the argument */
+void thr_arg_destroy (THR_ARG *arg);
 /* get the current queue length */
 int get_thr_qlen (void);
 /* Decrement number of active threads. */
@@ -597,17 +622,6 @@ char *addr2str (char *, int, const struct addrinfo *, int);
 
 /* Return a string representation for a back-end address */
 char *str_be (char *buf, size_t size, BACKEND *be);
-
-struct submatch
-{
-  size_t matchn;
-  size_t matchmax;
-  regmatch_t *matchv;
-};
-
-#define SUBMATCH_INITIALIZER { 0, 0, NULL }
-
-void submatch_free (struct submatch *sm);
 
 /* Find the right service for a request */
 SERVICE *get_service (const LISTENER *, struct sockaddr *,

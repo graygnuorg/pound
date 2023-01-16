@@ -145,16 +145,33 @@ worker_start (void)
  * add a request to the queue
  */
 int
-put_thr_arg (THR_ARG *arg)
+thr_arg_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen)
 {
   THR_ARG *res;
 
-  if ((res = malloc (sizeof (res[0]))) == NULL)
+  if ((res = calloc (1, sizeof (res[0]))) == NULL)
     {
-      logmsg (LOG_WARNING, "thr_arg malloc");
+      lognomem ();
       return -1;
     }
-  memcpy (res, arg, sizeof (*res));
+
+  if ((res->from_host.ai_addr = malloc (salen)) == NULL)
+    {
+      lognomem ();
+      free (res);
+      return -1;
+    }
+
+  res->sock = sock;
+  res->lstn = lstn;
+
+  memcpy (res->from_host.ai_addr, sa, salen);
+  res->from_host.ai_family = sa->sa_family;
+  res->from_host.ai_addrlen = salen;
+
+  http_request_init (&res->request);
+  http_request_init (&res->response);
+
   pthread_mutex_lock (&arg_mut);
   SLIST_PUSH (&thr_head, res, next);
   if (worker_count == active_threads)
@@ -170,7 +187,7 @@ put_thr_arg (THR_ARG *arg)
  * get a request from the queue
  */
 THR_ARG *
-get_thr_arg (void)
+thr_arg_dequeue (void)
 {
   THR_ARG *res;
   struct timespec ts;
@@ -229,6 +246,43 @@ get_thr_arg (void)
  end:
   pthread_mutex_unlock (&arg_mut);
   return res;
+}
+
+void
+thr_arg_destroy (THR_ARG *arg)
+{
+  free (arg->from_host.ai_addr);
+
+  http_request_free (&arg->request);
+  http_request_free (&arg->response);
+
+  if (arg->ssl != NULL)
+    {
+      SSL_set_shutdown (arg->ssl, SSL_SENT_SHUTDOWN | SSL_RECEIVED_SHUTDOWN);
+      BIO_ssl_shutdown (arg->cl);
+    }
+
+  if (arg->be != NULL)
+    {
+      BIO_flush (arg->be);
+      BIO_reset (arg->be);
+      BIO_free_all (arg->be);
+    }
+
+  if (arg->cl != NULL)
+    {
+      BIO_flush (arg->cl);
+      BIO_reset (arg->cl);
+      BIO_free_all (arg->cl);
+    }
+
+  if (arg->x509 != NULL)
+    {
+      X509_free (arg->x509);
+    }
+  submatch_free (&arg->sm);
+
+  free (arg);
 }
 
 /*
@@ -335,8 +389,6 @@ thr_dispatch (void *unused)
 		    }
 		  else
 		    {
-		      THR_ARG arg;
-
 		      if (lstn->disabled)
 			{
 			  /*
@@ -347,19 +399,9 @@ thr_dispatch (void *unused)
 			  continue;
 			}
 
-		      arg.sock = clnt;
-		      arg.lstn = lstn;
-
-		      if ((arg.from_host.ai_addr = malloc (clnt_length)) == NULL)
-			{
-			  logmsg (LOG_WARNING, "HTTP arg address: malloc");
-			  close (clnt);
-			  continue;
-			}
-		      memcpy (arg.from_host.ai_addr, &clnt_addr, clnt_length);
-		      arg.from_host.ai_family = clnt_addr.ss_family;
-		      arg.from_host.ai_addrlen = clnt_length;
-		      if (put_thr_arg (&arg))
+		      if (thr_arg_enqueue (clnt, lstn,
+					   (struct sockaddr *) &clnt_addr,
+					   clnt_length))
 			close (clnt);
 		    }
 		}
@@ -495,7 +537,7 @@ server (void)
    */
 
   /*
-   * Initialize worker_count to minimum to prevent get_thr_arg from
+   * Initialize worker_count to minimum to prevent thr_arg_dequeue from
    * counting idle timeout.
    */
   worker_count = worker_min_count;
