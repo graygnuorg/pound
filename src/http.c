@@ -943,6 +943,7 @@ void
 http_request_free (struct http_request *req)
 {
   free (req->request);
+  free (req->url);
   free (req->user);
   http_header_list_free (&req->headers);
   http_request_init (req);
@@ -1151,53 +1152,127 @@ find_method (const char *str, int group)
   return NULL;
 }
 
+/*
+ * Parse a URL, possibly decoding hexadecimal-encoded characters
+ */
 static int
-parse_http_request (const char *req, int group,
-		    int *ret_meth, char *ret_url, /* FIXME: size_t url_size, */
-		    int *ret_http_ver)
+decode_url (char **res, char const *src, int len)
 {
+  struct stringbuf sb;
+
+  stringbuf_init_log (&sb);
+  while (len)
+    {
+      char *p;
+      size_t n;
+
+      if ((p = memchr (src, '%', len)) != NULL)
+	n = p - src;
+      else
+	n = len;
+
+      if (n > 0)
+	{
+	  stringbuf_add (&sb, src, n);
+	  src += n;
+	  len -= n;
+	}
+
+      if (*src)
+	{
+	  static char xdig[] = "0123456789ABCDEFabcdef";
+	  int a, b;
+
+	  if (len < 3)
+	    {
+	      stringbuf_add (&sb, src, len);
+	      break;
+	    }
+
+	  if ((p = strchr (xdig, src[1])) == NULL)
+	    {
+	      stringbuf_add (&sb, src, 2);
+	      src += 2;
+	      len -= 2;
+	      continue;
+	    }
+
+	  if ((a = p - xdig) > 15)
+	    a -= 6;
+
+	  if ((p = strchr (xdig, src[2])) == NULL)
+	    {
+	      stringbuf_add (&sb, src, 3);
+	      src += 3;
+	      len -= 3;
+	      continue;
+	    }
+
+	  if ((b = p - xdig) > 15)
+	    b -= 6;
+
+	  a = (a << 4) + b;
+	  if (a == 0)
+	    {
+	      stringbuf_free (&sb);
+	      return 1;
+	    }
+	  stringbuf_add_char (&sb, a);
+
+	  src += 3;
+	  len -= 3;
+	}
+    }
+
+  if ((*res = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+  return 0;
+}
+
+static int
+parse_http_request (struct http_request *req, int group)
+{
+  char *str;
   size_t len;
   struct method_def *md;
   char const *url;
   int http_ver;
-  int n;
 
-  len = strcspn (req, " ");
-  if (len == 0 || req[len-1] == 0)
+  str = req->request;
+  len = strcspn (str, " ");
+  if (len == 0 || str[len-1] == 0)
     return -1;
 
-  if ((md = find_method (req, len)) == NULL)
+  if ((md = find_method (str, len)) == NULL)
     return -1;
 
   if (md->group > group)
     return -1;
 
-  req += len;
-  req += strspn (req, " ");
+  str += len;
+  str += strspn (str, " ");
 
-  if (*req == 0)
+  if (*str == 0)
     return -1;
 
-  url = req;
+  url = str;
   len = strcspn (url, " ");
 
-  req += len;
-  req += strspn (req, " ");
-  if (!(strncmp (req, "HTTP/1.", 7) == 0 &&
-	((http_ver = req[7]) == '0' || http_ver == '1') &&
-	req[8] == 0))
+  str += len;
+  str += strspn (str, " ");
+  if (!(strncmp (str, "HTTP/1.", 7) == 0 &&
+	((http_ver = str[7]) == '0' || http_ver == '1') &&
+	str[8] == 0))
     return -1;
 
-  *ret_meth = md->meth;
-  n = cpURL (ret_url, (char*) url, len);
-  if (n != strlen (ret_url))
-    /*
-     * the URL probably contained a %00 aka NULL - which we don't
-     * allow
-     */
+  req->method = md->meth;
+  if (decode_url (&req->url, url, len))
     return -1;
 
-  *ret_http_ver = http_ver;
+  req->version = http_ver - '0';
 
   return 0;
 }
@@ -1617,20 +1692,18 @@ socket_setup (int sock)
 void
 do_http (THR_ARG *arg)
 {
-  int cl_11, be_11, res, chunked, no_cont, skip, conn_closed,
-    force_10, sock_proto, is_rpc, is_ws;
-  int method;
-  SERVICE *svc;
-  BACKEND *backend, *cur_backend;
-  BIO *bb;
-  char buf[MAXBUF],
-    url[MAXBUF],
-    caddr[MAX_ADDR_BUFSIZE], caddr2[MAX_ADDR_BUFSIZE];
-  char duration_buf[LOG_TIME_SIZE];
-  LONG cont, res_bytes = 0;
-  struct timespec start_req;
-  RENEG_STATE reneg_state;
-  BIO_ARG ba1, ba2;
+  int cl_11;  /* Whether client connection is using HTTP/1.1 */
+  int be_11;  /* Whether backend connection is using HTTP/1.1. */
+  int res;  /* General-purpose result variable */
+  int chunked; /* True if request contains Transfer-Enconding: chunked
+		* FIXME: this belongs to struct http_request, perhaps.
+		*/
+  int no_cont; /* If 1, no content is expected */
+  int skip; /* Skip current response from backend (for 100 responses) */
+  int conn_closed;  /* True if the connection is closed */
+  int force_10; /* If 1, force using HTTP/1.0 (set by NoHTTP11) */
+  int is_rpc; /* RPC state */
+
   enum
   {
     WSS_REQ_GET = 0x01,
@@ -1645,6 +1718,19 @@ do_http (THR_ARG *arg)
       | WSS_REQ_HEADER_UPGRADE_WEBSOCKET | WSS_RESP_101 |
       WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
   };
+
+  int is_ws; /* WebSocket state (see WSS_* constants above) */
+
+  SERVICE *svc;
+  BACKEND *backend, *cur_backend;
+  BIO *bb;
+  char buf[MAXBUF],
+    caddr[MAX_ADDR_BUFSIZE], caddr2[MAX_ADDR_BUFSIZE];
+  char duration_buf[LOG_TIME_SIZE];
+  LONG cont, res_bytes = 0;
+  struct timespec start_req;
+  RENEG_STATE reneg_state;
+  BIO_ARG ba1, ba2;
   struct http_header *hdr, *hdrtemp;
   char *val;
 
@@ -1757,7 +1843,7 @@ do_http (THR_ARG *arg)
       /*
        * check for correct request
        */
-      if (parse_http_request (arg->request.request, arg->lstn->verb, &method, url, &cl_11))
+      if (parse_http_request (&arg->request, arg->lstn->verb))
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") e501 bad request \"%s\" from %s",
 		  POUND_TID (), arg->request.request,
@@ -1765,9 +1851,10 @@ do_http (THR_ARG *arg)
 	  http_err_reply (arg, HTTP_STATUS_NOT_IMPLEMENTED);
 	  return;
 	}
+      cl_11 = arg->request.version;
 
-      no_cont = method == METH_HEAD;
-      switch (method)
+      no_cont = arg->request.method == METH_HEAD;
+      switch (arg->request.method)
 	{
 	case METH_RPC_IN_DATA:
 	  is_rpc = 1;
@@ -1781,10 +1868,11 @@ do_http (THR_ARG *arg)
 	  is_ws |= WSS_REQ_GET;
 	}
 
-      if (arg->lstn->has_pat && regexec (&arg->lstn->url_pat, url, 0, NULL, 0))
+      if (arg->lstn->has_pat &&
+	  regexec (&arg->lstn->url_pat, arg->request.url, 0, NULL, 0))
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") e501 bad URL \"%s\" from %s",
-		  POUND_TID (), url,
+		  POUND_TID (), arg->request.url,
 		  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
 	  http_err_reply (arg, HTTP_STATUS_NOT_IMPLEMENTED);
 	  return;
@@ -1827,7 +1915,7 @@ do_http (THR_ARG *arg)
 		{
 		  logmsg (LOG_NOTICE,
 			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
-			  POUND_TID (), url,
+			  POUND_TID (), arg->request.url,
 			  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
 		  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Transfer-encoding values");
@@ -1842,7 +1930,7 @@ do_http (THR_ARG *arg)
 		{
 		  logmsg (LOG_NOTICE,
 			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
-			  POUND_TID (), url,
+			  POUND_TID (), arg->request.url,
 			  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
 		  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Content-length values");
@@ -1858,7 +1946,7 @@ do_http (THR_ARG *arg)
 		    {
 		      logmsg (LOG_NOTICE,
 			      "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
-			      POUND_TID (), url,
+			      POUND_TID (), arg->request.url,
 			      addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
 		      err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
 				 "Bad request: Content-length bad value");
@@ -1927,7 +2015,7 @@ do_http (THR_ARG *arg)
 	{
 	  logmsg (LOG_NOTICE,
 		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
-		  POUND_TID (), url,
+		  POUND_TID (), arg->request.url,
 		  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
 	  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
 		     "Bad request: Transfer-encoding and Content-length headers present");
@@ -1965,7 +2053,8 @@ do_http (THR_ARG *arg)
        * check that the requested URL still fits the old back-end (if
        * any)
        */
-      if ((svc = get_service (arg->lstn, arg->from_host.ai_addr, url,
+      if ((svc = get_service (arg->lstn, arg->from_host.ai_addr,
+			      arg->request.url,
 			      &arg->request.headers, &arg->sm)) == NULL)
 	{
 	  char const *v_host = http_request_host (&arg->request);
@@ -1977,7 +2066,8 @@ do_http (THR_ARG *arg)
 	  http_request_free (&arg->request);
 	  return;
 	}
-      if ((backend = get_backend (svc, &arg->from_host, url, &arg->request.headers)) == NULL)
+      if ((backend = get_backend (svc, &arg->from_host,
+				  arg->request.url, &arg->request.headers)) == NULL)
 	{
 	  char const *v_host = http_request_host (&arg->request);
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s %s",
@@ -1998,6 +2088,7 @@ do_http (THR_ARG *arg)
       while (arg->be == NULL && backend->be_type == BE_BACKEND)
 	{
 	  int sock;
+	  int sock_proto;
 
 	  switch (backend->addr.ai_family)
 	    {
@@ -2038,7 +2129,8 @@ do_http (THR_ARG *arg)
 	      shutdown (sock, 2);
 	      close (sock);
 	      kill_be (svc, backend, BE_KILL);
-	      if ((backend = get_backend (svc, &arg->from_host, url,
+	      if ((backend = get_backend (svc, &arg->from_host,
+					  arg->request.url,
 					  &arg->request.headers)) == NULL)
 		{
 		  logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s",
@@ -2378,15 +2470,15 @@ do_http (THR_ARG *arg)
 	  switch (cur_backend->be_type)
 	    {
 	    case BE_REDIRECT:
-	      code = redirect_reply (arg->cl, url, cur_backend, &arg->sm);
+	      code = redirect_reply (arg->cl, arg->request.url, cur_backend, &arg->sm);
 	      break;
 
 	    case BE_ACME:
-	      code = acme_reply (arg->cl, url, cur_backend, &arg->sm);
+	      code = acme_reply (arg->cl, arg->request.url, cur_backend, &arg->sm);
 	      break;
 
 	    case BE_CONTROL:
-	      code = control_reply (arg->cl, method, url, cur_backend);
+	      code = control_reply (arg->cl, arg->request.method, arg->request.url, cur_backend);
 	    }
 
 	  if (code != HTTP_STATUS_OK)

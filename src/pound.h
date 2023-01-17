@@ -302,14 +302,18 @@ int http_header_list_append (HTTP_HEADER_LIST *head, char *text);
 
 struct http_request
 {
-  char *request;
-  HTTP_HEADER_LIST headers;
-  char *user;
+  char *request;             /* Request line */
+  HTTP_HEADER_LIST headers;  /* Request headers */
+  int method;                /* Method code (see METH_* constants above) */
+  int version;               /* HTTP minor version: 0 or 1 */
+  char *url;                 /* URL part of the request */
+  char *user;                /* Username extracted from Authorization header */
 };
 
 static inline void http_request_init (struct http_request *http)
 {
   http->request = NULL;
+  http->url = NULL;
   http->user = NULL;
   DLIST_INIT (&http->headers);
 }
@@ -613,9 +617,6 @@ void *thr_http (void *);
 /* Log an error to the syslog or to stderr */
 void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
-
-/* Parse a URL, possibly decoding hexadecimal-encoded characters */
-int cpURL (char *, char *, int);
 
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);
