@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "December 15, 2022" "pound" "System Manager's Manual"
+.TH POUND 8 "January 17, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1249,8 +1249,9 @@ The cipher currently in use.
 The full client certificate (PEM-format multi-line)
 .PP
 It is the application's responsibility to actually use these
-headers -
-.P pound just passes this information without checking
+headers --
+.B pound
+just passes this information without checking
 it in any way (except for signature and encryption correctness).
 .SH SECURITY
 .PP

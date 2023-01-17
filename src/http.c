@@ -2268,13 +2268,10 @@ do_http (THR_ARG *arg)
 					    &arg->lstn->add_header))
 	    goto err;
 
-	  if (cur_backend->be_type == BE_BACKEND)
+	  if (arg->ssl != NULL)
 	    {
-	      if (arg->ssl != NULL)
-		{
-		  if (add_ssl_headers (arg))
-		    lognomem ();
-		}
+	      if (add_ssl_headers (arg))
+		lognomem ();
 	    }
 
 	  if (http_request_send (arg->be, &arg->request))
@@ -2291,13 +2288,10 @@ do_http (THR_ARG *arg)
 	      http_err_reply (arg, HTTP_STATUS_INTERNAL_SERVER_ERROR);
 	      return;
 	    }
-	}
 
-      /*
-       * put additional client IP header
-       */
-      if (cur_backend->be_type == BE_BACKEND)
-	{
+	  /*
+	   * put additional client IP header
+	   */
 	  addr2str (caddr, sizeof (caddr), &arg->from_host, 1);
 	  BIO_printf (arg->be, "X-Forwarded-For: %s\r\n", caddr);
 
