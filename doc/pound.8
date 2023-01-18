@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 17, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "January 18, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -294,6 +294,29 @@ directory.
 may also require access to
 .I /dev/syslog
 or similar.
+.TP
+\fBHeaderOption\fR \fIopt\fR...
+Sets default options for header addition.  \fIopt\fR is one of:
+\fBnone\fR to disable additional headers, \fBforwarded\fR to enable
+adding
+.BR X\-Forwarded\-For ,
+.BR X\-Forwarded\-Proto ,
+and
+.B X\-Forwarded\-Port
+headers, and
+.B ssl
+to enable passing information about SSL cerificates in various
+.B X\-SSL\-*
+headers.  The default is
+.IP
+.RS
+.B HeaderOption forwarded ssl
+.RE
+.IP
+This setting can be overridden on a per-listener basis.  See the
+description of \fBHeaderOption\fR directive in \fBHTTP Listener\fR
+section, and section \fBHEADER MODIFICATION\fR, for a detailed
+discussion of various header modification directives and their effect.
 .TP
 \fBDaemon\fR \fIbool\fR
 Have
@@ -611,12 +634,12 @@ unlimited.
 .TP
 \fBHeaderRemove\fR "header pattern"
 Remove certain headers from the incoming requests. All occurrences of the
-matching specified header will be removed. Please note that this filtering
-is done prior to other checks (such as \fBHeaderRequire\fR or \fBHeaderDeny\fR),
-so you should not try to check for these headers in later matches. Multiple
-directives may be specified in order to remove more than one header, and
-the header itself may be a regular pattern (though this should be used with
-caution).
+matching specified header will be removed. Multiple directives may be
+specified in order to remove more than one header, and the header
+itself may be a regular pattern (though this should be used with
+caution).  See the section
+.BR "HEADER MODIFICATION" ,
+for a detailed discussion of various header modification directives.
 .TP
 \fBHeadRemove\fR "header pattern"
 Same as \fBHeaderRemove\fR.
@@ -624,10 +647,49 @@ Same as \fBHeaderRemove\fR.
 \fBHeaderAdd\fR "header: to add"
 Add the defined header to the request passed to the backend server. The header
 is added verbatim. Use multiple \fBHeaderAdd\fR directives if you need
-to add more than one header.
+to add more than one header.  See the section
+.BR "HEADER MODIFICATION" ,
+for a detailed discussion of various header modification directives.
 .TP
 \fBAddHeader\fR "header: to add"
 Same as \fBHeaderAdd\fR.
+.TP
+\fBHeaderOption\fR \fIopt\fR...
+Modifies global header addition options for this listener.  Global
+options are set by the \fBHeaderOption\fR directive in the global
+scope and default to \fBforwarded ssl\fR.  \fIopt\fR is one of:
+.RS
+.TP
+.B none
+Disable all additional headers.
+.TP
+.B forwarded
+Enable adding
+.BR X\-Forwarded\-For ,
+.BR X\-Forwarded\-Proto ,
+and
+.B X\-Forwarded\-Port
+headers.
+.TP
+.B ssl
+Enable passing information about SSL cerificates in various
+.B X\-SSL\-*
+headers.
+.RE
+.IP
+Each option except \fBnone\fR can be prefixed with \fBno\-\fR to
+revert its meaning.
+.IP
+For example, to disable adding the \fBX\-SSL\-*\fR headers for a
+listener, one would use:
+.IP
+.RS
+.B HeaderOption no\-ssl
+.RE
+.IP
+See the description of \fBHeaderOption\fR directive in \fBGLOBAL
+DIRECTIVES\fR section, and section \fBHEADER MODIFICATION\fR, for a detailed
+discussion of various header modification directives and their effect.
 .TP
 \fBRewriteLocation\fR 0|1|2
 If set to 1, force
@@ -1195,37 +1257,91 @@ time. The default value of 30 seconds is probably a good choice.
 The clients that happen to hit a dead backend server will just receive a
 .I "503 Service Unavailable"
 message.
+.SH HEADER MODIFICATION
+Several directives are provided for adding and removing HTTP headers
+prior to passing the request on to the backend:
+.TP
+\fBHeaderRemove\fR "\fIpattern\fR"
+Removes headers matching \fIpattern\fR.
+.TP
+\fBHeaderAdd\fR "header: value"
+Adds the specified header line to the request.
+.TP
+\fBHeaderOption\fR \fIopt\fR...
+Controls addition of the built-in headers.  There are two kinds of
+such headers: \fIforwarded\fR headers that convey information about
+original destination of the request, and \fIssl\fR headers (for
+\fBHTTPS\fR connections), that hold information about server and
+client SSL certificates.  Thes are discussed in detail below.
+.IP
+By default, both kinds of built-in additional headers are enabled.
+This default can be changed by using the \fBHeaderOption\fR directive.
+Placed in global scope, this directive sets global options.  Used
+within a \fBListenHTTP\fR or \fBListenHTTPS\fR block, it affects only
+settings for that listener.
+.IP
+The \fIopt\fR values passed to the directive are:
+.RS
+.TP
+.B none
+Disable both kinds of additional headers.
+.TP
+.B forwarded
+Enable forwarded headers.
+.TP
+.B no\-forwarded
+Disable forwarded headers.
+.TP
+.B ssl
+Enable ssl headers.
+.TP
+.B no\-ssl
+Disable ssl headers.
+.RE
 .PP
-The
-.B HAport
-parameter specifies an additional port (and optionally an address)
-that is used only for viability checks: if this port is specified in a
-.B Backend
-directive,
-.B pound
-will attempt periodically (every
-.B Alive
-seconds) to connect to this port. If the port does not respond, the server is considered dead.
-.B "It never makes sense to have the"
-.I HAport
-.B "identical to the main backend port:"
-this would only generate extra, unnecessary activity (CPU, network traffic) for no good
-reason whatsoever.  The
-.B HAport
-is meant for applications that offer an additional health monitoring port or for installations
-that wish to take servers off-line in a controlled manner.
+Header modification directives are applied in the following order:
+.BR HeaderOptions ,
+.BR HeaderRemove ,
+.BR HeaderAdd .
+In other words, built-in headers are added first.  Then, header
+removal directives are applied.  Finally, headers requested by the
+user are added.  Added headers overwrite headers with the same
+name that may already be present in the request.  Thus, you can use
+.B HeaderRemove
+and
+.B HeaderAdd
+to trim down headers added by
+.BR HeaderOptions .
 .PP
-By default the address of the
-.B HAport
-health monitor is the same as that of the
-backend server. You may specify a different address though, for example if you have
-a monitoring program running on another host.
-.SH HTTPS HEADERS
+Header modification directives are applied after service matching
+directives (see
+.B "Service Matching Directives"
+above).
+.SS Forwarded Headers
+The headers in the \fIforwarded\fR header group are:
+.TP
+.B X\-Forwarded\-For
+The IP address of the HTTP client that sent the request,
+.TP
+.B X\-Forwarded\-Proto
+The protocol (\fBhttp\fR or \fBhttps\fR) that the client used to
+connect to
+.BR pound .
+.TP
+.B X\-Forwarded\-Port
+Destination port that the client used to connect to
+.BR pound .
+.SS HTTPS Headers
 If a client browser connects to
 .B pound
-via HTTPS and if it presents a client certificate,
-.B pound
-adds the following headers to the request it issues to the server:
+via HTTPS and the \fIssl\fR header group is enabled, then the
+following header is added:
+.TP
+.B X\-SSL\-Cipher
+Contains SSL version followed by a slash and active cipher algorithm.
+.PP
+Additionally, if the client presented its certificate,
+the following headers are added that describe the client certificate:
 .TP
 .B X\-SSL\-Subject
 Details about the certificate owner.
@@ -1242,17 +1358,8 @@ Ending date of certificate validity.
 .B X\-SSL\-Serial
 Certificate serial number (decimal).
 .TP
-.B X\-SSL\-cipher
-The cipher currently in use.
-.TP
 .B X\-SSL\-Certificate
 The full client certificate (PEM-format multi-line)
-.PP
-It is the application's responsibility to actually use these
-headers --
-.B pound
-just passes this information without checking
-it in any way (except for signature and encryption correctness).
 .SH SECURITY
 .PP
 In general,
@@ -1279,15 +1386,15 @@ other web servers, so that if you want to use a log tool:
 .PP
 Translating HTTPS to HTTP is an iffy proposition: no client
 information is passed to the server itself (certificates, etc) and the
-backend server may be misled if it uses absolute URLs.  In most cases
-this can be dealt with by adding the
-.B X\-Forwarded\-Proto: https
-header (see the \fBHeaderAdd\fR directive).  Besides, \fBpound\fR
-itself adds a number of
+backend server may be misled if it uses absolute URLs.
+.B Pound
+tries to handle this by adding various
+.B X\-Forwarded\-*
+and
 .B X\-SSL\-*
-certificates conveying information about the certificate used (see above,
-section
-.BR "HTTPS HEADERS" ).
+headers.  See
+.B "HEADER MODIFICATION"
+above, for a detailed discussion.
 .PP
 .B Pound
 deals with (and sanitizes) HTTP/1.1 requests. Thus even if you have an
@@ -1300,6 +1407,9 @@ requests and/or responses.  That means it needs a functioning resolver
 of some kind (be it
 .BR /etc/hosts ,
 DNS or something else).
+However, the use of DNS can be disabled using the
+.B \-W no\-dns
+command line option.
 .SH EXAMPLES
 To translate HTTPS requests to a local HTTP server (assuming your
 network address is 192.0.2.1):
@@ -1310,10 +1420,10 @@ ListenHTTPS
     Port    443
     Cert    "/etc/pound/server.pem"
     Service
-	Backend
-	    Address 127.0.0.1
-	    Port    80
-	End
+        Backend
+            Address 127.0.0.1
+            Port    80
+        End
     End
 End
 .EE
@@ -1335,19 +1445,19 @@ End
 
 Service
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Backend
-	Address 192.168.0.12
-	Port    80
-	Priority 3
+        Address 192.168.0.12
+        Port    80
+        Priority 3
     End
 End
 .EE
@@ -1365,8 +1475,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-	Address 192.168.0.12
-	Port    80
+        Address 192.168.0.12
+        Port    80
     End
 End
 
@@ -1380,18 +1490,18 @@ End
 # Catch-all server(s)
 Service
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Session
-	Type    BASIC
-	TTL     300
+        Type    BASIC
+        TTL     300
     End
 End
 .EE
@@ -1429,8 +1539,8 @@ End
 Service
     URL ".*.(jpg|gif)"
     Backend
-	Address 192.168.0.10
-	Port    80
+        Address 192.168.0.10
+        Port    80
     End
 End
 
@@ -1439,35 +1549,35 @@ Service
     URL         ".*sessid=.*"
     Host        "www.myserver.com"
     Backend
-	Address 192.168.0.11
-	Port    80
+        Address 192.168.0.11
+        Port    80
     End
 
     Session
-	Type    URL
-	ID      "sessid"
-	TTL     120
+        Type    URL
+        ID      "sessid"
+        TTL     120
     End
 End
 
 # Everybody else
 Service
     Backend
-	Address 192.168.0.20
-	Port    80
-	Priority 5
+        Address 192.168.0.20
+        Port    80
+        Priority 5
     End
 
     Backend
-	Address 192.168.0.21
-	Port    80
-	Priority 4
+        Address 192.168.0.21
+        Port    80
+        Priority 4
     End
 
     Session
-	Type    COOKIE
-	ID      "userid"
-	TTL     180
+        Type    COOKIE
+        ID      "userid"
+        TTL     180
     End
 End
 .EE
@@ -1523,4 +1633,5 @@ There is NO WARRANTY, to the extent permitted by law.
 .\" time-stamp-format: "%:B %:d, %:y"
 .\" time-stamp-end: "\""
 .\" time-stamp-line-limit: 20
+.\" indent-tabs-mode: nil
 .\" end:

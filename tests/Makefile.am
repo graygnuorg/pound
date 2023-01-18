@@ -75,6 +75,9 @@ TESTSUITE_AT = \
  https.at\
  maxrequest.at\
  not.at\
+ optfwd.at\
+ optorder.at\
+ optssl.at\
  or.at\
  prio.at\
  redirect.at\

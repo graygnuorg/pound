@@ -418,7 +418,7 @@ sub assert {
 		} else {
 		    (my $v = $self->{EXP}{HEADERS}{$h}) =~ s{^\\}{};
 		    if ($v ne $response->{headers}{$h}) {
-			print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h value mismatch\n";
+			print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: expected header $h value mismatch (expected \"$v\" got \"$response->{headers}{$h}\")\n";
 			return 0;
 		    }
 		}
@@ -634,17 +634,20 @@ sub parse_expect {
 
 sub replvar {
     my ($self, $var) = @_;
-    if ($var =~ m{LISTENER(\d+)?}) {
-	return $listeners->get($1//0)->address;
-    } elsif ($var =~ m{BACKEND(\d+)?}) {
-	return $backends->get($1//0)->address;
+    if ($var =~ m{(LISTENER|BACKEND)(\d+)?(?::(PORT|IP))?}) {
+	my $var = ($1 eq 'LISTENER') ? $listeners : $backends;
+	my $meth = 'address';
+	if (defined($3)) {
+	    $meth = ($3 eq 'PORT') ? 'port' : 'host';
+	}
+	return $var->get($2//0)->${ \$meth };
     }
     return '${' . $var . '}';
 }
 
 sub expandvars {
     my ($self, $v) = @_;
-    $v =~ s{ \$ \{ ([A-Za-z][A-Za-z0-9]*) \} }
+    $v =~ s{ \$ \{ ([A-Za-z][A-Za-z0-9:]*) \} }
 	   { $self->replvar($1) }xeg;
     return $v;
 }
@@ -1244,26 +1247,44 @@ Headers may be followed by a newline and response body (content).  If
 present, it will be matched literally against the actual response.
 The response is terminated with the word B<end> on a line alone.
 
-The values of both request and expeced headers may contain the following
+The values of both request and expected headers may contain the following
 I<variables>, which are expanded when reading the file:
 
 =over 4
 
 =item B<${LISTENERI<n>}>
 
-Expands to the address of the I<n>th listener (I<IP>:I<PORT>).
+Expands to the full address of the I<n>th listener (I<IP>:I<PORT>).
 
-=item B<${LISTENER}>
+=item B<${LISTENERI<n>:IP}>
 
-Same as B<${LISTENER0}>.
+Expands to the IP address of the I<n>th listener.
+
+= B<${LISTENERI<n>:PORT}>
+
+Expands to the port number of the I<n>th listener.
+
+=item B<${LISTENER}>, B<${LISTENER:IP}>, B<${LISTENER:PORT}>
+
+Same as B<${LISTENER0}>, B<${LISTENER0:IP}>, and B<${LISTENER0:PORT}>,
+correspondingly.
 
 =item B<${BACKENDI<n>}>
 
 Expands to the address of the I<n>th backend (I<IP>:I<PORT>).
 
-=item B<${BACKEND}>
+=item B<${BACKENDI<n>:IP}>
 
-Same as B<${BACKEND0}>.
+Expands to the IP address of the I<n>th backend.
+
+=item B<${BACKENDI<n>:PORT}>
+
+Expands to the port number of the I<n>th backend.
+
+=item B<${BACKEND}>, B<${BACKEND:IP}>, B<${BACKEND:PORT}>
+
+Same as B<${BACKEND0}>, B<${BACKEND0:IP}>, and B<${BACKEND0:PORT}>,
+correspondingly.
 
 =back
 

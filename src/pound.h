@@ -281,7 +281,7 @@ enum
     HEADER_DESTINATION,
     HEADER_EXPECT,
     HEADER_UPGRADE,
-    HEADER_AUTHORIZATION
+    HEADER_AUTHORIZATION,
   };
 
 struct http_header
@@ -298,7 +298,13 @@ struct http_header
 
 typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
 
-int http_header_list_append (HTTP_HEADER_LIST *head, char *text);
+enum
+  {
+    H_DROP,
+    H_REPLACE
+  };
+
+int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
 
 struct http_request
 {
@@ -506,6 +512,11 @@ typedef struct _pound_ctx
 
 typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 
+/* Additional listener options */
+#define HDROPT_NONE              0   /* Nothing special */
+#define HDROPT_FORWARDED_HEADERS 0x1 /* Add X-Forwarded headers */
+#define HDROPT_SSL_HEADERS       0x2 /* Add X-SSL- headers */
+
 /* Listener definition */
 typedef struct _listener
 {
@@ -514,6 +525,7 @@ typedef struct _listener
   POUND_CTX_HEAD ctx_head;	/* CTX for SSL connections */
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
+  int header_options;           /* additional header options */
   HTTP_HEADER_LIST add_header;	/* extra headers */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */

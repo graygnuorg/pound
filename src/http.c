@@ -839,12 +839,53 @@ http_header_get_value (struct http_header *hdr)
   return hdr->value;
 }
 
+static struct http_header *
+http_header_list_locate (HTTP_HEADER_LIST *head, int code)
+{
+  struct http_header *hdr;
+  DLIST_FOREACH (hdr, head, link)
+    {
+      if (hdr->code == code)
+	return hdr;
+    }
+  return NULL;
+}
+
+static struct http_header *
+http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name)
+{
+  struct http_header *hdr;
+  size_t len = strcspn (name, ":");
+  DLIST_FOREACH (hdr, head, link)
+    {
+      if (hdr->name_end - hdr->name_start == len &&
+	  memcmp (hdr->header + hdr->name_start, name, len) == 0)
+	return hdr;
+    }
+  return NULL;
+}
+
+/*
+ * Append header TEXT to the list HEAD.  TEXT must be a correctly
+ * formatted header line (NAME ":" VALUE).  Prior to appending, the
+ * header list is scanned for a header with that name.  If found, the
+ * REPLACE argument determines the further action: if it is 0, the list
+ * is not modified, otherwise, the existing header is replaced with the
+ * new value.
+ */
 int
-http_header_list_append (HTTP_HEADER_LIST *head, char *text)
+http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 {
   struct http_header *hdr;
 
-  if ((hdr = http_header_alloc (text)) == NULL)
+  if ((hdr = http_header_list_locate_name (head, text)) != NULL)
+    {
+      if (replace)
+	return http_header_change (hdr, text, 1);
+      else
+	return 0;
+    }
+  else if ((hdr = http_header_alloc (text)) == NULL)
     return -1;
   else if (hdr->code == HEADER_ILLEGAL)
     {
@@ -857,12 +898,13 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text)
 }
 
 int
-http_header_list_append_list (HTTP_HEADER_LIST *head, HTTP_HEADER_LIST *add)
+http_header_list_append_list (HTTP_HEADER_LIST *head, HTTP_HEADER_LIST *add,
+			      int replace)
 {
   struct http_header *hdr;
   DLIST_FOREACH (hdr, add, link)
     {
-      if (http_header_list_append (head, hdr->header))
+      if (http_header_list_append (head, hdr->header, replace))
 	return -1;
     }
   return 0;
@@ -898,18 +940,6 @@ http_header_list_filter (HTTP_HEADER_LIST *head, MATCHER *m)
 	  http_header_list_remove (head, hdr);
 	}
     }
-}
-
-static struct http_header *
-http_header_list_locate (HTTP_HEADER_LIST *head, int code)
-{
-  struct http_header *hdr;
-  DLIST_FOREACH (hdr, head, link)
-    {
-      if (hdr->code == code)
-	return hdr;
-    }
-  return NULL;
 }
 
 static char const *
@@ -1548,7 +1578,62 @@ http_request_send (BIO *be, struct http_request *req)
   return 0;
 }
 
-int
+static int
+add_forwarded_headers (THR_ARG *arg)
+{
+  char caddr[MAX_ADDR_BUFSIZE];
+  struct stringbuf sb;
+  char *str;
+  int port;
+
+  stringbuf_init_log (&sb);
+
+  stringbuf_printf (&sb, "X-Forwarded-For: %s",
+		    addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
+  if ((str = stringbuf_finish (&sb)) == NULL
+      || http_header_list_append (&arg->request.headers, str, H_REPLACE))
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+
+  stringbuf_reset (&sb);
+  stringbuf_printf (&sb, "X-Forwarded-Proto: %s",
+		    arg->ssl == NULL ? "http" : "https");
+  if ((str = stringbuf_finish (&sb)) == NULL
+      || http_header_list_append (&arg->request.headers, str, H_REPLACE))
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+
+  switch (arg->from_host.ai_family)
+    {
+    case AF_INET:
+      port = ntohs (((struct sockaddr_in *)arg->lstn->addr.ai_addr)->sin_port);
+      break;
+
+    case AF_INET6:
+      port = ntohs (((struct sockaddr_in6 *)arg->lstn->addr.ai_addr)->sin6_port);
+      break;
+
+    default:
+      return 0;
+    }
+
+  stringbuf_reset (&sb);
+  stringbuf_printf (&sb, "X-Forwarded-Port: %d", port);
+  if ((str = stringbuf_finish (&sb)) == NULL
+      || http_header_list_append (&arg->request.headers, str, H_REPLACE))
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+
+  return 0;
+}
+
+static int
 add_ssl_headers (THR_ARG *arg)
 {
   int res = 0;
@@ -1567,7 +1652,7 @@ add_ssl_headers (THR_ARG *arg)
 			SSL_get_version (arg->ssl),
 			buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1583,7 +1668,7 @@ add_ssl_headers (THR_ARG *arg)
       get_line (bio, buf, sizeof (buf));
       stringbuf_printf (&sb, "X-SSL-Subject: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1595,7 +1680,7 @@ add_ssl_headers (THR_ARG *arg)
       get_line (bio, buf, sizeof (buf));
       stringbuf_printf (&sb, "X-SSL-Issuer: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1606,7 +1691,7 @@ add_ssl_headers (THR_ARG *arg)
       get_line (bio, buf, sizeof (buf));
       stringbuf_printf (&sb, "X-SSL-notBefore: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1617,7 +1702,7 @@ add_ssl_headers (THR_ARG *arg)
       get_line (bio, buf, sizeof (buf));
       stringbuf_printf (&sb, "X-SSL-notAfter: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1627,7 +1712,7 @@ add_ssl_headers (THR_ARG *arg)
       stringbuf_printf (&sb, "X-SSL-serial: %ld",
 			ASN1_INTEGER_get (X509_get_serialNumber (arg->x509)));
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -1641,7 +1726,7 @@ add_ssl_headers (THR_ARG *arg)
 	  stringbuf_add_string (&sb, buf);
 	}
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&arg->request.headers, str))
+	  || http_header_list_append (&arg->request.headers, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -2000,14 +2085,6 @@ do_http (THR_ARG *arg)
 	    }
 	}
 
-      if (!SLIST_EMPTY (&arg->lstn->head_off))
-	{
-	  MATCHER *m;
-
-	  SLIST_FOREACH (m, &arg->lstn->head_off, next)
-	    http_header_list_filter (&arg->request.headers, m);
-	}
-
       /*
        * check for possible request smuggling attempt
        */
@@ -2262,18 +2339,42 @@ do_http (THR_ARG *arg)
 	    }
 
 	  /*
-	   * add headers if required
+	   * Add "canned" headers.
 	   */
-	  if (http_header_list_append_list (&arg->request.headers,
-					    &arg->lstn->add_header))
-	    goto err;
+	  if (arg->lstn->header_options & HDROPT_FORWARDED_HEADERS)
+	    {
+	      if (add_forwarded_headers (arg))
+		lognomem ();
+	    }
 
-	  if (arg->ssl != NULL)
+	  if (arg->ssl != NULL && (arg->lstn->header_options & HDROPT_SSL_HEADERS))
 	    {
 	      if (add_ssl_headers (arg))
 		lognomem ();
 	    }
 
+	  /*
+	   * Remove headers
+	   */
+	  if (!SLIST_EMPTY (&arg->lstn->head_off))
+	    {
+	      MATCHER *m;
+
+	      SLIST_FOREACH (m, &arg->lstn->head_off, next)
+		http_header_list_filter (&arg->request.headers, m);
+	    }
+
+	  /*
+	   * Add headers if required
+	   */
+	  if (http_header_list_append_list (&arg->request.headers,
+					    &arg->lstn->add_header,
+					    H_REPLACE))
+	    goto err;
+
+	  /*
+	   * Send the request and its headers
+	   */
 	  if (http_request_send (arg->be, &arg->request))
 	    {
 	      if (errno)
@@ -2288,12 +2389,6 @@ do_http (THR_ARG *arg)
 	      http_err_reply (arg, HTTP_STATUS_INTERNAL_SERVER_ERROR);
 	      return;
 	    }
-
-	  /*
-	   * put additional client IP header
-	   */
-	  addr2str (caddr, sizeof (caddr), &arg->from_host, 1);
-	  BIO_printf (arg->be, "X-Forwarded-For: %s\r\n", caddr);
 
 	  /*
 	   * final CRLF

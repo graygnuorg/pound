@@ -821,6 +821,7 @@ typedef struct
   unsigned ws_to;
   unsigned be_connto;
   unsigned ignore_case;
+  int header_options;
 } POUND_DEFAULTS;
 
 static int
@@ -2614,7 +2615,7 @@ append_header (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  switch (http_header_list_append (hlist, tok->str))
+  switch (http_header_list_append (hlist, tok->str, H_REPLACE))
     {
     case 0:
       break;
@@ -2634,6 +2635,62 @@ static int
 parse_log_level (void *call_data, void *section_data)
 {
   return assign_int_range (call_data, 0, 5);
+}
+
+static int
+parse_header_options (void *call_data, void *section_data)
+{
+  int *opt = call_data;
+  int n;
+  struct token *tok;
+  static struct kwtab options[] = {
+    { "forwarded", HDROPT_FORWARDED_HEADERS },
+    { "ssl",       HDROPT_SSL_HEADERS },
+    { NULL }
+  };
+
+  for (;;)
+    {
+      char *name;
+      int neg;
+
+      if ((tok = gettkn_any ()) == NULL)
+	return PARSER_FAIL;
+      if (tok->type == '\n')
+	break;
+      if (!(tok->type == T_IDENT || tok->type == T_LITERAL))
+	{
+	  conf_error ("unexpected %s", token_type_str (tok->type));
+	  return PARSER_FAIL;
+	}
+
+      name = tok->str;
+      if (strcasecmp (name, "none") == 0)
+	*opt = 0;
+      else
+	{
+	  if (strncasecmp (name, "no-", 3) == 0)
+	    {
+	      neg = 1;
+	      name += 3;
+	    }
+	  else
+	    neg = 0;
+
+	  if (kw_to_tok (options, name, 1, &n))
+	    {
+	      conf_error ("%s", "unknown option");
+	      return PARSER_FAIL;
+	    }
+
+	  if (neg)
+	    *opt &= ~n;
+	  else
+	    *opt |= n;
+	}
+    }
+
+  return PARSER_OK_NONL;
 }
 
 static PARSER_TABLE http_parsetab[] = {
@@ -2659,6 +2716,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
   { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
+  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { NULL }
@@ -2676,6 +2734,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->rewr_loc = 1;
   lst->log_level = dfl->log_level;
   lst->verb = 0;
+  lst->header_options = dfl->header_options;
   SLIST_INIT (&lst->head_off);
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
@@ -3177,6 +3236,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
   { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
+  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },
@@ -3354,6 +3414,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "WSTimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, ws_to) },
   { "ConnTO", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_connto) },
   { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case) },
+  { "HeaderOption", parse_header_options, NULL, offsetof (POUND_DEFAULTS, header_options) },
   { "ECDHCurve", parse_ECDHCurve },
   { "SSLEngine", parse_SSLEngine },
   { "Control", parse_control_global },
@@ -3378,7 +3439,8 @@ parse_config_file (char const *file)
     .be_to = 15,
     .ws_to = 600,
     .be_connto = 15,
-    .ignore_case = 0
+    .ignore_case = 0,
+    .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS
   };
 
   if (push_input (file) == 0)
@@ -3399,11 +3461,12 @@ parse_config_file (char const *file)
   return res;
 }
 
-enum {
-	F_OFF,
-	F_ON,
-	F_DFL
-};
+enum
+  {
+    F_OFF,
+    F_ON,
+    F_DFL
+  };
 
 struct pound_feature
 {

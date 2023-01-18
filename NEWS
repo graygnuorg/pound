@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-01-13
+Pound -- history of user-visible changes. 2023-01-18
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,49 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.3.90 (git)
+
+* New directive: HeaderOption
+
+The HeaderOption directive controls what kind of "canned" headers
+pound adds to the HTTP request before passing it on to the backend.
+By default, it adds "forwarded" headers (X-Forwarded-For,
+X-Forwarded-Proto, and X-Forwarded-Port) and, if serving a HTTPS
+session, X-SSL-* headers.
+
+The arguments to the HeaderOption directive enable or disable these
+canned headers.  The default corresponds to
+
+  HeaderOption forwarded ssl
+
+To disable any kind of headers, precede its name with a "no-":
+
+  HeaderOption no-forwarded
+
+The special keywords "none" and "all", can be used to disable or
+enable all canned headers.
+
+The HeaderOption directive can appear in the global scope or within
+a ListenerHTTP (or ListenerHTTPS) section.
+
+* Header modification and service matching
+
+Header modification directives are applied after service matching
+directives (such as Header or HeadRequire).  This is a disruptive
+change: in previous pound version header removal was done prior to
+service selection.
+
+* Header modification order
+
+Header modification directives are applied in the following order:
+HeaderOptions, HeaderRemove, HeaderAdd.  In other words, built-in headers
+are added first.  Then, header removal directives are applied.
+Finally, headers requested by the user are added.  Added headers
+overwrite headers with the same name that may already be present in the
+request.  Thus, you can use HeaderRemove and HeaderAdd to trim down
+headers added by HeaderOptions.
+
 
 Version 4.3
 

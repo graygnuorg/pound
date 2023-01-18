@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2022-2023 Sergey Poznyakoff
+# Copyright (C) 2023 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,39 +13,49 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([HTTPS listener])
-AT_KEYWORDS([https])
+AT_SETUP([Header directives ordering])
+AT_KEYWORDS([order])
 
-AT_CHECK([openssl req -new -newkey rsa:2048 -days 1 -nodes -x509 \
- -subj "/CN=www.example.com" -keyout key.pem -out crt.pem || exit 77
-cat crt.pem key.pem > example.pem
-],
-[0],
-[ignore],
-[ignore])
-
-PT_CHECK(
-[Service
-	Backend
-		Address 127.0.0.1
-		Port 8081
+PT_CHECK([ListenHTTP
+	Service
+		Backend
+			Address
+			Port
+		End
 	End
 End
-
-ListenHTTPS
-	Address 127.0.0.1
-	Port 8080
-	Cert "example.pem"
-End
 ],
-[GET /echo/foo/bar
-Host: www.example.com
+[GET /echo/X
+Host: example.com
+X-Forwarded-For: 192.0.2.2
 end
 
 200
-x-orig-uri: /echo/foo/bar
-x-orig-header-x-ssl-cipher: /TLSv1\./
+x-orig-header-X-Forwarded-For: 127.0.0.1
+end
+])
+
+PT_CHECK([ListenHTTP
+	HeaderOption forwarded
+	HeaderAdd "X-Forwarded-For: 192.0.2.2"
+	HeaderRemove "X-Forwarded-Port"
+	Service
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/X
+Host: example.com
+end
+
+200
+x-orig-header-X-Forwarded-For: 192.0.2.2
+-x-orig-header-X-Forwarded-Port:
 end
 ])
 
 AT_CLEANUP
+
