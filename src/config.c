@@ -2646,6 +2646,7 @@ parse_header_options (void *call_data, void *section_data)
   static struct kwtab options[] = {
     { "forwarded", HDROPT_FORWARDED_HEADERS },
     { "ssl",       HDROPT_SSL_HEADERS },
+    { "all",       HDROPT_FORWARDED_HEADERS|HDROPT_SSL_HEADERS },
     { NULL }
   };
 
