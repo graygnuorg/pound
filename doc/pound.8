@@ -748,7 +748,7 @@ between
 and
 .B End
 are specific to a single HTTPS listener. At the very least you must specify
-and address, a port and a server certificate for each listener. All directives
+an address, a port and a server certificate for each listener. All directives
 defined for HTTP listeners are applicable to HTTPS listeners as well. The
 following additional directives are also available:
 .TP
@@ -847,9 +847,12 @@ will use to reply to incoming requests. A service may be defined as part
 of a listener (in which case it will be used only by that listener), or
 globally (which makes it available to all listeners).
 .B Pound
-will always try the private services in the order defined, followed by
-the global ones.
-.P
+selects a listener based on user-supplied conditions that analyze the
+incoming request URL and/or headers.  It will always scan
+listener-specific services first.  If none matches, it
+will try the global ones.  Services are tried in the same order as
+they are defined in configuration.
+.PP
 All configuration directives enclosed between
 .B Service
 and
@@ -1027,7 +1030,7 @@ replies immediately with a redirection to the given URL. You may
 define multiple redirectors in a service, as well as mixing them with
 regular backends.
 .IP
-The address the client is redirected to is determined by the actual
+The redirection destination is determined by the actual
 .I url
 you specify.  It can contain references to parenthesized subexpressions
 in the most recently matched
@@ -1038,9 +1041,9 @@ and
 statements of the enclosing
 .BR Service .
 Syntactically, \fB$\fIN\fR (\fIN\fR is a decimal number)
-refers to the \fIN\fRth parenthesized subexpression of the most
+refers to \fIN\fRth parenthesized subexpression of the most
 recently matched \fBURL\fR statement, and \fB%\fIN\fR refers to
-the \fIN\fRth parenthesized subexpression of the most
+\fIN\fRth parenthesized subexpression of the most
 recently matched \fBHeader\fR or \fBHost\fR.  Numbering of
 subexpressions starts at 1.  \fB$0\fR is replaced
 with the entire matching URL and \fB%0\fR with the entire matching
@@ -1051,7 +1054,8 @@ To insert a literal dollar or percent sign in
 use
 .B $$
 or
-.BR $% .
+.BR $% ,
+correspondingly.
 .IP
 For compatibility with previous \fBpound\fR versions, if no
 \fB$\fIN\fR references are found in
@@ -1166,7 +1170,7 @@ enclosed between
 .B Backend
 and
 .B End
-are specific to a single service. The following directives are available:
+are specific to a single backend. The following directives are available:
 .TP
 \fBAddress\fR \fIaddress\fR
 The address that
@@ -1627,7 +1631,7 @@ End
 # redirect all requests for /forbidden
 
 Service
-    Url         "/forbidden.*"
+    Url         -beg "/forbidden"
     Redirect    "https://xyzzy.com"
 End
 
@@ -1653,10 +1657,13 @@ End
 Here is a more complex example: assume your static images (GIF/JPEG)
 are to be served from a single backend 192.168.0.10. In addition,
 192.168.0.11 is to do the hosting for \fIwww.myserver.com\fR with
-URL-based sessions, and 192.168.0.20 (a 1GHz PIII) and 192.168.0.21
-(800Mhz Duron) are for all other requests (cookie-based sessions).
-The logging will be done by backend servers.  The configuration file
-may look like this:
+URL-based sessions.  Two backends, 192.168.0.20 and 192.168.0.21,
+will handle the rest of requests (cookie-based sessions).  Among
+these, the latter (192.168.0.21) is less powerful than the former,
+so care should be taken that it gets less requests.  The logging will
+be done by backend servers.  All plain HTTP requests are to be
+redirected to HTTPS and all requests directed to \fImyserver.com\fR -
+to \fIwww.myserver.com\fR.  The configuration file may look like this:
 .PP
 .EX
 User        "nobody"
@@ -1665,11 +1672,16 @@ RootJail    "/var/pound/jail"
 Alive       60
 LogLevel    0
 
-# Main listening ports
+# HTTP: redirect all requests to the corresponding HTTPS server.
 ListenHTTP
     Address 192.0.2.1
     Port    80
     Client  10
+    Service
+        Host -re ".+"
+        URL ".*"
+        Redirect 301 "https://%0$0"
+    End
 End
 
 ListenHTTPS
@@ -1702,6 +1714,13 @@ Service
         ID      "sessid"
         TTL     120
     End
+End
+
+# Virtual host myserver.com - redirects to www.
+Service
+    Host        "myserver.com"
+    URL         ".*"
+    Redirect 301 "https://www.myserver.com$0"
 End
 
 # Everybody else
