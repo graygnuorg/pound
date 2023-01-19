@@ -2086,7 +2086,7 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
+  SERVICE_COND *cond = service_cond_append (call_data, COND_HOST);
   struct stringbuf sb;
   xstringbuf_init (&sb);
   stringbuf_add_string (&sb, "Host:[[:space:]]*");

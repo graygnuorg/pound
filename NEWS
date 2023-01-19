@@ -59,9 +59,9 @@ expanded to the entire URL or header (host).  For example, to redirect
 all requests to https:
 
 	Service
-		Host ".+"
-		URL ".+"
-		Redirect "https://%0$1"
+		Host -re ".+"
+		URL ".*"
+		Redirect "https://%0$0"
 	End
 
 Version 4.3

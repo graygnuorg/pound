@@ -443,10 +443,12 @@ struct bool_service_cond
 
 enum service_cond_type
   {
-    COND_BOOL,
-    COND_ACL,
-    COND_URL,
-    COND_HDR,
+    COND_BOOL,  /* Boolean operation. */
+    COND_ACL,   /* ACL match. */
+    COND_URL,   /* URL match. */
+    COND_HDR,   /* Header match. */
+    COND_HOST,  /* Special case od COND_HDR: matches the value of the
+		   Host: header */
   };
 
 typedef struct _service_cond

@@ -115,7 +115,7 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 	    }
 	  else
 	    {
-	      if (n < sm->matchn)
+	      if (n <= sm->matchn)
 		{
 		  stringbuf_add (&sb, smu->subject + smu->matchv[n].rm_so,
 				 smu->matchv[n].rm_eo - smu->matchv[n].rm_so);

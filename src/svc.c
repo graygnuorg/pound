@@ -479,6 +479,39 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       res = match_headers (headers, &cond->re, &sm[SM_HDR]);
       break;
 
+    case COND_HOST:
+      res = match_headers (headers, &cond->re, &sm[SM_HDR]);
+      if (res)
+	{
+	  /*
+	   * On match, adjust subgroup references and subject pointer
+	   * to refer to the Host: header value.
+	   */
+	  int n, i;
+	  char const *s = sm[SM_HDR].subject;
+	  regmatch_t *mv = sm[SM_HDR].matchv;
+	  int mc = sm[SM_HDR].matchn;
+
+	  /* Skip initial whitespace and "host:" */
+	  s += strspn (s, " \t\n") + 5;
+	  /* Skip whitespace after header name. */
+	  s += strspn (s, " \t\n");
+	  /* Compute fix-up offset. */
+	  n = s - sm[SM_HDR].subject;
+	  /* Adjust all subgroups. */
+	  /* rm_so of the 0th group is always 0, so adjust only rm_eo: */
+	  mv->rm_eo -= n;
+	  for (i = 1; i < mc; i++)
+	    {
+	      ++mv;
+	      mv->rm_so -= n;
+	      mv->rm_eo -= n;
+	    }
+	  /* Adjust subject. */
+	  sm[SM_HDR].subject = s;
+	}
+      break;
+
     case COND_BOOL:
       if (cond->bool.op == BOOL_NOT)
 	{
