@@ -422,16 +422,36 @@ static void
 submatch_reset (struct submatch *sm)
 {
   sm->matchn = 0;
+  sm->subject = NULL;
 }
 
 static int
-match_headers (HTTP_HEADER_LIST *headers, regex_t const *re)
+submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
+{
+  int res;
+
+  submatch_reset (sm);
+  if (submatch_realloc (sm, re))
+    {
+      logmsg (LOG_ERR, "memory allocation failed");
+      return 0;
+    }
+  res = regexec (re, subject, sm->matchn, sm->matchv, 0) == 0;
+  if (res)
+    {
+      sm->subject = subject;
+    }
+  return res;
+}
+
+static int
+match_headers (HTTP_HEADER_LIST *headers, regex_t const *re, struct submatch *sm)
 {
   struct http_header *hdr;
 
   DLIST_FOREACH (hdr, headers, link)
     {
-      if (hdr->header && regexec (re, hdr->header, 0, NULL, 0) == 0)
+      if (hdr->header && submatch_exec (re, hdr->header, sm))
 	return 1;
     }
   return 0;
@@ -452,20 +472,14 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       break;
 
     case COND_URL:
-      if (submatch_realloc (sm, &cond->re))
-	{
-	  logmsg (LOG_ERR, "memory allocation failed");
-	  return 0;
-	}
-      res = regexec (&cond->re, request, sm->matchn, sm->matchv, 0) == 0;
+      res = submatch_exec (&cond->re, request, &sm[SM_URL]);
       break;
 
     case COND_HDR:
-      res = match_headers (headers, &cond->re);
+      res = match_headers (headers, &cond->re, &sm[SM_HDR]);
       break;
 
     case COND_BOOL:
-      submatch_reset (sm);
       if (cond->bool.op == BOOL_NOT)
 	{
 	  subcond = SLIST_FIRST (&cond->bool.head);

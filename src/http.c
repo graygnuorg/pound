@@ -87,22 +87,24 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 {
   struct stringbuf sb;
   char *p;
+  char const *expr = url; /* For error reporting */
 
   stringbuf_init_log (&sb);
   while (*url)
     {
-      size_t len = strcspn (url, "$");
+      size_t len = strcspn (url, "$%");
       stringbuf_add (&sb, url, len);
       url += len;
       if (*url == 0)
 	break;
-      else if (url[1] == '$' || url[1] == 0)
+      else if ((url[0] == '$' && (url[1] == '$' || url[1] == '%')) || url[1] == 0)
 	{
 	  stringbuf_add_char (&sb, url[0]);
 	  url += 2;
 	}
       else if (isdigit (url[1]))
 	{
+	  struct submatch *smu = &sm[url[0] == '$' ? SM_URL : SM_HDR];
 	  long n;
 	  errno = 0;
 	  n = strtoul (url + 1, &p, 10);
@@ -115,12 +117,14 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 	    {
 	      if (n < sm->matchn)
 		{
-		  stringbuf_add (&sb, orig_url + sm->matchv[n].rm_so,
-				 sm->matchv[n].rm_eo - sm->matchv[n].rm_so);
+		  stringbuf_add (&sb, smu->subject + smu->matchv[n].rm_so,
+				 smu->matchv[n].rm_eo - smu->matchv[n].rm_so);
 		}
 	      else
 		{
-		  stringbuf_add (&sb, url, p - url);
+		  int n = p - url;
+		  stringbuf_add (&sb, url, n);
+		  logmsg (LOG_WARNING, "Redirect expression \"%s\" refers to non-existing group %*.*s", expr, n, n, url);
 		}
 	      redir_req = 1;
 	      url = p;
@@ -2132,7 +2136,7 @@ do_http (THR_ARG *arg)
        */
       if ((svc = get_service (arg->lstn, arg->from_host.ai_addr,
 			      arg->request.url,
-			      &arg->request.headers, &arg->sm)) == NULL)
+			      &arg->request.headers, arg->sm)) == NULL)
 	{
 	  char const *v_host = http_request_host (&arg->request);
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",
@@ -2559,11 +2563,11 @@ do_http (THR_ARG *arg)
 	  switch (cur_backend->be_type)
 	    {
 	    case BE_REDIRECT:
-	      code = redirect_reply (arg->cl, arg->request.url, cur_backend, &arg->sm);
+	      code = redirect_reply (arg->cl, arg->request.url, cur_backend, arg->sm);
 	      break;
 
 	    case BE_ACME:
-	      code = acme_reply (arg->cl, arg->request.url, cur_backend, &arg->sm);
+	      code = acme_reply (arg->cl, arg->request.url, cur_backend, arg->sm);
 	      break;
 
 	    case BE_CONTROL:

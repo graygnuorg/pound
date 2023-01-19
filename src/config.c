@@ -1913,6 +1913,139 @@ service_cond_append (SERVICE_COND *cond, int type)
   return sc;
 }
 
+static void
+stringbuf_escape_regex (struct stringbuf *sb, char *p)
+{
+  while (*p)
+    {
+      size_t len = strcspn (p, "\\[]{}().*+?");
+      if (len > 0)
+	stringbuf_add (sb, p, len);
+      p += len;
+      if (*p)
+	{
+	  stringbuf_add_char (sb, '\\');
+	  stringbuf_add_char (sb, *p);
+	  p++;
+	}
+    }
+}
+
+enum match_mode
+  {
+    MATCH_EXACT,
+    MATCH_RE,
+    MATCH_BEG,
+    MATCH_END,
+    MATCH__MAX
+  };
+
+static int
+parse_match_mode (int *mode, int *re_flags)
+{
+  struct token *tok;
+
+  enum
+  {
+    MATCH_ICASE = MATCH__MAX,
+    MATCH_CASE
+  };
+
+  static struct kwtab optab[] = {
+    { "-re",    MATCH_RE },
+    { "-exact", MATCH_EXACT },
+    { "-beg",   MATCH_BEG },
+    { "-end",   MATCH_END },
+    { "-icase", MATCH_ICASE },
+    { "-case",  MATCH_CASE },
+    { NULL }
+  };
+
+  for (;;)
+    {
+      int n;
+
+      if ((tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_LITERAL))) == NULL)
+	return PARSER_FAIL;
+
+      if (tok->type == T_STRING)
+	break;
+
+      if (kw_to_tok (optab, tok->str, 0, &n))
+	{
+	  conf_error ("unexpected token: %s", tok->str);
+	  return PARSER_FAIL;
+	}
+
+      switch (n)
+	{
+	case MATCH_CASE:
+	  *re_flags &= ~REG_ICASE;
+	  break;
+
+	case MATCH_ICASE:
+	  *re_flags |= REG_ICASE;
+	  break;
+
+	default:
+	  *mode = n;
+	}
+    }
+  putback_tkn ();
+  return PARSER_OK;
+}
+
+static int
+parse_cond_matcher (SERVICE_COND *cond, int mode, int flags, struct stringbuf *sb)
+{
+  struct token *tok;
+  char *p;
+  int rc;
+
+  if (parse_match_mode (&mode, &flags))
+    return PARSER_FAIL;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  switch (mode)
+    {
+    case MATCH_EXACT:
+      stringbuf_escape_regex (sb, tok->str);
+      break;
+
+    case MATCH_RE:
+      stringbuf_add_string (sb, tok->str);
+      break;
+
+    case MATCH_BEG:
+      stringbuf_escape_regex (sb, tok->str);
+      stringbuf_add_string (sb, ".*");
+      break;
+
+    case MATCH_END:
+      stringbuf_add_string (sb, ".*");
+      stringbuf_escape_regex (sb, tok->str);
+      stringbuf_add_char (sb, '$');
+      break;
+
+    default:
+      abort ();
+    }
+
+  p = stringbuf_finish (sb);
+
+  rc = regcomp (&cond->re, p, flags);
+  stringbuf_free (sb);
+  if (rc)
+    {
+      conf_regcomp_error (rc, &cond->re, NULL);
+      return PARSER_FAIL;
+    }
+
+  return PARSER_OK;
+}
+
 static int
 parse_cond_acl (void *call_data, void *section_data)
 {
@@ -1925,15 +2058,20 @@ parse_cond_url_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
   SERVICE_COND *cond = service_cond_append (call_data, COND_URL);
-  int flags = REG_NEWLINE | REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  return parse_regex (&cond->re, flags);
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  struct stringbuf sb;
+  xstringbuf_init (&sb);
+  return parse_cond_matcher (cond, MATCH_RE, flags, &sb);
 }
 
 static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
-  return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
+  struct stringbuf sb;
+  xstringbuf_init (&sb);
+  return parse_cond_matcher (cond, MATCH_RE,
+			     REG_NEWLINE | REG_EXTENDED | REG_ICASE, &sb);
 }
 
 static int
@@ -1948,43 +2086,11 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
-  struct token *tok;
-  struct stringbuf sb;
-  char *p;
-  int rc;
   SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
-
+  struct stringbuf sb;
   xstringbuf_init (&sb);
   stringbuf_add_string (&sb, "Host:[[:space:]]*");
-  p = tok->str;
-  while (*p)
-    {
-      size_t len = strcspn (p, "\\[]{}().*+?");
-      if (len > 0)
-	stringbuf_add (&sb, p, len);
-      p += len;
-      if (*p)
-	{
-	  stringbuf_add_char (&sb, '\\');
-	  stringbuf_add_char (&sb, *p);
-	  p++;
-	}
-    }
-
-  p = stringbuf_finish (&sb);
-
-  rc = regcomp (&cond->re, p, REG_EXTENDED | REG_ICASE);
-  stringbuf_free (&sb);
-  if (rc)
-    {
-      conf_regcomp_error (rc, &cond->re, NULL);
-      return PARSER_FAIL;
-    }
-
-  return PARSER_OK;
+  return parse_cond_matcher (cond, MATCH_EXACT, REG_EXTENDED | REG_ICASE, &sb);
 }
 
 static int

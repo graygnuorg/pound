@@ -280,7 +280,8 @@ thr_arg_destroy (THR_ARG *arg)
     {
       X509_free (arg->x509);
     }
-  submatch_free (&arg->sm);
+  submatch_free (&arg->sm[SM_URL]);
+  submatch_free (&arg->sm[SM_HDR]);
 
   free (arg);
 }

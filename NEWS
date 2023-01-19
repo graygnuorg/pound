@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-01-18
+Pound -- history of user-visible changes. 2023-01-19
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -49,6 +49,20 @@ overwrite headers with the same name that may already be present in the
 request.  Thus, you can use HeaderRemove and HeaderAdd to trim down
 headers added by HeaderOptions.
 
+* Back-references in Redirect and ACME statements
+
+Arguments to Redirect and ACME statements can contain references to
+parenthesized subexpressions in the most recently matched URL, Header,
+or Host statements.  Syntactically, $N refers to URL subexpression and
+%N refers to subexpression of Header (or Host).  $0 and %0 are
+expanded to the entire URL or header (host).  For example, to redirect
+all requests to https:
+
+	Service
+		Host ".+"
+		URL ".+"
+		Redirect "https://%0$1"
+	End
 
 Version 4.3
 

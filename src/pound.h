@@ -555,11 +555,19 @@ struct submatch
   size_t matchn;
   size_t matchmax;
   regmatch_t *matchv;
+  char const *subject;
 };
 
-#define SUBMATCH_INITIALIZER { 0, 0, NULL }
+#define SUBMATCH_INITIALIZER { 0, 0, NULL, NULL }
 
 void submatch_free (struct submatch *sm);
+
+enum
+  {
+    SM_URL,
+    SM_HDR,
+    SM__MAX
+  };
 
 typedef struct _thr_arg
 {
@@ -573,7 +581,7 @@ typedef struct _thr_arg
   BIO *be;
   X509 *x509;
   SSL *ssl;
-  struct submatch sm;
+  struct submatch sm[SM__MAX];
 
   struct http_request request;
   struct http_request response;

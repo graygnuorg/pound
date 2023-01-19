@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 18, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "January 19, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -172,12 +172,13 @@ The following command line options are available:
 \fB\-c\fR
 Check only:
 .B pound
-will exit immediately after parsing the configuration file. This may be used for
-running a quick syntax check before actually activating a server.
+will exit immediately after parsing the configuration file. This may
+be used for running a quick syntax check before actually activating a
+server.
 .TP
 \fB\-f\fR \fIFILE\fR
-Location of the configuration file (see below for a full description of the format).
-Default is
+Location of the configuration file (see below for a full description
+of the format).  Default is
 .IR $sysconfdir/pound.cfg ,
 where \fI$sysconfdir\fR stands for the system configuration directory,
 as determined at build time.  Most often it is either
@@ -204,7 +205,8 @@ Verbose mode: error messages will be sent to stdout even if
 .B pound
 was configured to log to syslog. This applies only to startup messages, before
 .B pound
-puts itself in the background. Normal operational messages will still go to syslog.
+puts itself in the background. Normal operational messages will still
+go to syslog.
 .TP
 \fB\-V\fR
 Print version:
@@ -224,8 +226,9 @@ by their IP addresses, in order to suppress potentially lengthy
 network host address lookups.
 .RE
 .PP
-In general, any number of backend servers may be specified. Use the priority to
-affect the load distribution among unequal-performance servers.
+In general, any number of backend servers may be specified. Use the
+priority to affect the load distribution among unequal-performance
+servers.
 .SH "CONFIGURATION FILE"
 Each line in the file is considered a complete configuration
 directive. Empty lines and comments are ignored. Comments are
@@ -287,9 +290,9 @@ will run as (must be defined in the system group database).
 \fBRootJail\fR "directory_path_and_name"
 Specify the directory that
 .B pound
-will chroot to at runtime. Please note that OpenSSL requires access to /dev/urandom,
-so make sure you create a device by that name, accessible from the root jail
-directory.
+will chroot to at runtime. Please note that OpenSSL requires access to
+/dev/urandom, so make sure you create a device by that name,
+accessible from the root jail directory.
 .B pound
 may also require access to
 .I /dev/syslog
@@ -305,7 +308,7 @@ and
 .B X\-Forwarded\-Port
 headers, and
 .B ssl
-to enable passing information about SSL cerificates in various
+to enable passing information about SSL certificates in various
 .B X\-SSL\-*
 headers.  The default is
 .IP
@@ -407,6 +410,12 @@ This value can be overridden for specific listeners.
 \fBIgnoreCase\fR \fIbool\fR
 Ignore case when matching URLs (default: \fIfalse\fR). This value can be
 overridden for specific services.
+.IP
+This statement is deprecated and will be removed in future versions.
+Please, use the \fB\-icase\fR option to the \fBURL\fR directive
+instead.  See the discussion of \fIoptions\fR in
+.B Service Matching Directives
+section below.
 .TP
 \fBAlive\fR \fIn\fR
 Specify how often
@@ -628,14 +637,14 @@ A file with the text to be displayed if an Error 503 occurs.
 Default: "The service is not available. Please try again later.".
 .TP
 \fBMaxRequest\fR \fIn\fR
-Request maximal size. All requests will be limited to these many bytes. If
-a request contains more data than allowed, an error 413 is returned. Default:
-unlimited.
+Request maximal size. All requests will be limited to these many
+bytes. If a request contains more data than allowed, an error 413 is
+returned. Default: unlimited.
 .TP
 \fBHeaderRemove\fR "header pattern"
-Remove certain headers from the incoming requests. All occurrences of the
-matching specified header will be removed. Multiple directives may be
-specified in order to remove more than one header, and the header
+Remove certain headers from the incoming requests. All occurrences of
+the matching specified header will be removed. Multiple directives may
+be specified in order to remove more than one header, and the header
 itself may be a regular pattern (though this should be used with
 caution).  See the section
 .BR "HEADER MODIFICATION" ,
@@ -645,9 +654,9 @@ for a detailed discussion of various header modification directives.
 Same as \fBHeaderRemove\fR.
 .TP
 \fBHeaderAdd\fR "header: to add"
-Add the defined header to the request passed to the backend server. The header
-is added verbatim. Use multiple \fBHeaderAdd\fR directives if you need
-to add more than one header.  See the section
+Add the defined header to the request passed to the backend
+server. The header is added verbatim. Use multiple \fBHeaderAdd\fR
+directives if you need to add more than one header.  See the section
 .BR "HEADER MODIFICATION" ,
 for a detailed discussion of various header modification directives.
 .TP
@@ -675,7 +684,7 @@ and
 headers.
 .TP
 .B ssl
-Enable passing information about SSL cerificates in various
+Enable passing information about SSL certificates in various
 .B X\-SSL\-*
 headers.
 .RE
@@ -691,8 +700,9 @@ listener, one would use:
 .RE
 .IP
 See the description of \fBHeaderOption\fR directive in \fBGLOBAL
-DIRECTIVES\fR section, and section \fBHEADER MODIFICATION\fR, for a detailed
-discussion of various header modification directives and their effect.
+DIRECTIVES\fR section, and section \fBHEADER MODIFICATION\fR, for a
+detailed discussion of various header modification directives and
+their effect.
 .TP
 \fBRewriteLocation\fR 0|1|2
 If set to 1, force
@@ -707,8 +717,9 @@ the same server as the HTTP listener.
 \fBRewriteDestination\fR \fIbool\fR
 If set to \fItrue\fI, force
 .B pound
-to change the "Destination:" header in requests. The header is changed to point
-to the backend itself with the correct protocol. Default: \fIfalse\fR.
+to change the "Destination:" header in requests. The header is changed
+to point to the backend itself with the correct protocol. Default:
+\fIfalse\fR.
 .TP
 \fBLogLevel\fR value
 Override the global
@@ -716,9 +727,9 @@ Override the global
 value.
 .TP
 \fBService\fR [ "name" ]
-This defines a private service (see below for service definition syntax). This
-service will be used only by this listener. The service may be optionally
-named, with the name showing in the
+This defines a private service (see below for service definition
+syntax). This service will be used only by this listener. The service
+may be optionally named, with the name showing in the
 .BR poundctl (8)
 listings.
 .TP
@@ -744,8 +755,8 @@ following additional directives are also available:
 \fBCert\fR "certificate file"
 Specify the server certificate. The
 .I certificate file
-is the file containing the certificate, possibly a certificate chain and the signature
-for this server. This directive is
+is the file containing the certificate, possibly a certificate chain
+and the signature for this server. This directive is
 .B mandatory
 for HTTPS listeners.
 .IP
@@ -776,14 +787,14 @@ certificates that must be verified.
 .TP
 \fBDisable\fR SSLv2|SSLv3|TLSv1|TLSv1_1|TLSv1_2
 Disable the protocol \fBand all lower protocols as well\fR.
-This is due to a limitation in OpenSSL, which does not support disabling a single
-protocol. For example,
+This is due to a limitation in OpenSSL, which does not support
+disabling a single protocol. For example,
 .B Disable TLSv1
 would disable SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1 and TLSv1_2.
 .TP
 \fBCiphers\fR "acceptable:cipher:list"
-This is the list of ciphers that will be accepted by the SSL connection; it is a
-string in the same format as in OpenSSL
+This is the list of ciphers that will be accepted by the SSL
+connection; it is a string in the same format as in OpenSSL
 .I ciphers(1)
 and
 .I SSL_CTX_set_cipher_list(3).
@@ -796,31 +807,32 @@ value is \fIfalse\fR, the server will accept any cipher from the
 list.  Default value is \fIfalse\fR.
 .TP
 \fBSSLAllowClientRenegotiation\fR 0|1|2
-If this value is 0, client initiated renegotiation will be disabled.  This will
-mitigate DoS exploits based on client renegotiation, regardless of the patch status
-of clients and servers related to "Secure renegotiation".  If the value is 1, secure
-renegotiation is supported.  If the value is 2, insecure renegotiation is supported,
-with unpatched clients. \fBThis can lead to a DoS and a Man in the Middle attack!\fR
-The default value is 0.
+If this value is 0, client initiated renegotiation will be disabled.
+This will mitigate DoS exploits based on client renegotiation,
+regardless of the patch status of clients and servers related to
+"Secure renegotiation".  If the value is 1, secure renegotiation is
+supported.  If the value is 2, insecure renegotiation is supported,
+with unpatched clients. \fBThis can lead to a DoS and a Man in the
+Middle attack!\fR The default value is 0.
 .TP
 \fBCAlist\fR "CAcert_file"
-Set the list of "trusted" CA's for this server. The CAcert_file is a file containing
-a sequence of CA certificates (PEM format). The names of the defined CA certificates
-will be sent to the client on connection.
+Set the list of "trusted" CA's for this server. The CAcert_file is a
+file containing a sequence of CA certificates (PEM format). The names
+of the defined CA certificates will be sent to the client on connection.
 .TP
 \fBVerifyList\fR "Verify_file"
-Set the CA (Certificate Authority). The Verify_file is a file that contains the CA
-root certificates (in PEM format).
+Set the CA (Certificate Authority). The Verify_file is a file that
+contains the CA root certificates (in PEM format).
 .IP
 .IR "Please note":
 there is an important difference between the CAlist and the VerifyList. The
-CAlist tells the client (browser) which client certificates it should send. The
-VerifyList defines which CAs are actually used for the verification of the
-returned certificate.
+CAlist tells the client (browser) which client certificates it should
+send. The VerifyList defines which CAs are actually used for the
+verification of the returned certificate.
 .TP
 \fBCRLlist\fR "CRL_file"
-Set the CRL (Certificate Revocation List) file. The CRL_file is a file that contains
-the CRLs (in PEM format).
+Set the CRL (Certificate Revocation List) file. The CRL_file is a file
+that contains the CRLs (in PEM format).
 .TP
 \fBNoHTTPS11\fR 0|1|2
 Behave like an HTTP/1.0 server for HTTPS clients. If this value is
@@ -878,25 +890,35 @@ keyword on a line by itself.
 .sp
 Semantically it is equivalent to the named ACL reference described above.
 .TP
-\fBURL\fR "pattern"
-Match the URL of the incoming request. The matching is by default case-sensitive,
-but this can be overridden by specifying
-.BR IgnoreCase .
+\fBURL\fR [\fIoptions\fR] "\fIpattern\fR"
+Match the URL of the incoming request.  By default, \fIpattern\fR is
+treated as case-sensitive regular expression.  This can be changed by
+\fIoptions\fR, described below.
 .TP
-\fBHeader\fR "pattern"
-The request must contain at least one header matching the given pattern.
+\fBHeader\fR [\fIoptions\fR] "\fIpattern\fR"
+The request must contain at least one header matching the given
+\fIpattern\fR.  By default, \fIpattern\fR is treated as
+case-insensitive regular expression.  This can be changed by
+\fIoptions\fR, described below.
 .TP
 \fBHeadRequire\fR "pattern"
-Same as \fBHeader\fR.
+Same as \fBHeader\fR.  This form is retained for compatibility with
+previous versions of
+.BR pound .
 .TP
-\fBHost\fR "hostname"
-This is a shortcut for:
+\fBHost\fR [\fIoptions\fR] "\fIhostname\fR"
+The request must contain a \fBHost\fR header whose value matches
+\fIhostname\fR.  In the absence of \fIoptions\fR, case-insensitive
+exact match is assumed, i.e. this construct is equivalent to
 .IP
 \fBHeader\fR "Host:[[:space:]]*\fIqhost\fR"
 .IP
-where \fIqhost\fR is the "hostname" argument in quoted form, i.e. with
+where \fIqhost\fR is the "\fIhostname\fR" argument in quoted form, i.e. with
 all characters that have special meaning in regular expressions
 escaped.
+.IP
+See below for the discussion of \fIoptions\fR and their effect on
+matching.
 .IP
 This statement is provided to facilitate handling of \fIvirtual
 hosts\fR.  See the
@@ -918,12 +940,34 @@ This form is retained for backward compatibility with older versions
 of
 .BR pound .
 .PP
-.IR "Please note":
-if the listener defined a
-.B HeaderRemove
-directive, the matching headers are removed
-.B before
-the service matching is attempted.
+The \fIoptions\fR argument in the above directives can be used to
+select the comparison method.  It consists of zero or more option
+flags from the following list:
+.TP
+.B \-re
+Use regular expression matching.
+.TP
+.B \-exact
+Use exact string matching.
+.TP
+.B \-beg
+Exact match at the beginning of string (prefix match).
+.TP
+.B \-end
+Exact match at the end of string (suffix match).
+.TP
+.B \-case
+Case-sensitive comparison.
+.TP
+.B \-icase
+Case-insensitive comparison.
+.PP
+For example, the following will match any request whose \fBHost\fR
+header begins with "www." (case-insensitive):
+.PP
+.EE
+Host -icase -beg "www."
+.EX
 .SS Negation
 Prefixing any of the directives discussed above with \fBnot\fR will
 revert the sense of comparison.  For example,
@@ -932,7 +976,7 @@ revert the sense of comparison.  For example,
 not url "^/static/"
 .EE
 .PP
-will match any request, whose URL \fIdoes not\fR begin with "/static".
+will match any request, whose URL \fIdoes not\fR begin with "/static/".
 .PP
 Negating compound statements is allowed as well, e.g.:
 .PP
@@ -961,7 +1005,7 @@ Prefixing \fBMatch\fR directive with a word \fBnot\fR reverts its result.
 .PP
 \fBMatch\fR directives can be nested to any depth.
 .PP
-Techically, an implicit \fBMatch AND\fR block is created around
+Technically, an implicit \fBMatch AND\fR block is created around
 unenclosed matching directives on the top level of a \fBService\fR block.
 .SS Backend definitions
 .TP
@@ -979,24 +1023,36 @@ will attempt to load-balance between them.
 \fBRedirect\fR [\fIcode\fR] "url"
 This is a special type of backend. Instead of sending the request to a backend
 .B pound
-replies immediately with a redirection to the given URL. You may define multiple
-redirectors in a service, as well as mixing them with regular backends.
+replies immediately with a redirection to the given URL. You may
+define multiple redirectors in a service, as well as mixing them with
+regular backends.
 .IP
 The address the client is redirected to is determined by the actual
 .I url
-you specify.  It can contain references to parethesized subexpressions
+you specify.  It can contain references to parenthesized subexpressions
 in the most recently matched
-.B URL
-statement of the enclosing
+.BR URL ,
+.BR Header ,
+and
+.B Host
+statements of the enclosing
 .BR Service .
-Syntactically, a reference is \fB$\fIN\fR, where \fIN\fR is the number
-of the parenthesized subexpression it refers to.  \fB$0\fR is replaced
-with the entire matching part.
-.sp
-To insert a literal dollar sign in
+Syntactically, \fB$\fIN\fR (\fIN\fR is a decimal number)
+refers to the \fIN\fRth parenthesized subexpression of the most
+recently matched \fBURL\fR statement, and \fB%\fIN\fR refers to
+the \fIN\fRth parenthesized subexpression of the most
+recently matched \fBHeader\fR or \fBHost\fR.  Numbering of
+subexpressions starts at 1.  \fB$0\fR is replaced
+with the entire matching URL and \fB%0\fR with the entire matching
+\fBHeader\fR or \fBHost\fR.
+.IP
+To insert a literal dollar or percent sign in
 .IR url ,
-use \fB$$\fR.
-.sp
+use
+.B $$
+or
+.BR $% .
+.IP
 For compatibility with previous \fBpound\fR versions, if no
 \fB$\fIN\fR references are found in
 .IR url ,
@@ -1007,14 +1063,18 @@ appended. If your
 .I url
 does contain a path, then the request path is ignored.
 .IP
-Examples: the following reverts first two path components of the original URL:
+Examples: the following reverts first two path components of the
+original URL:
 .IP
 .EX
 Service
+    Host -re "(.+)"
     URL "^/([^/]+)/([^/]+)(/.*)?"
-    Redirect "http://example.com/$2/$1$3"
+    Redirect "http://%0/$2/$1$3"
 End
 .EE
+.IP
+Notice the use of \fBHost\fR to supply hostname part for the redirect.
 .IP
 Compatibility syntax: if you specified
 .IP
@@ -1038,11 +1098,12 @@ it will be sent to
 .IR "Technical note":
 in an ideal world
 .B pound
-should reply with a "307 Temporary Redirect" status. Unfortunately, that is not
-yet supported by all clients (in particular HTTP 1.0 ones), so
+should reply with a "307 Temporary Redirect" status. Unfortunately,
+that is not yet supported by all clients (in particular HTTP 1.0 ones), so
 .B pound
-currently replies by default with a "302 Found" instead. You may override this
-behaviour by specifying the \fIcode\fR to be used (301, 302 or 307).
+currently replies by default with a "302 Found" instead. You may
+override this behaviour by specifying the \fIcode\fR to be used (301,
+302 or 307).
 .TP
 \fBEmergency\fR
 Directives enclosed between an
@@ -1050,8 +1111,8 @@ Directives enclosed between an
 and
 the following
 .B End
-directives define an emergency backend server (see below for details). You may define
-only one emergency server per service, which
+directives define an emergency backend server (see below for
+details). You may define only one emergency server per service, which
 .B pound
 will attempt to use if all backends are down.
 .TP
@@ -1061,14 +1122,20 @@ Directives enclosed between a
 and
 the following
 .B End
-directives define a session-tracking mechanism for the current service. See below
-for details.
+directives define a session-tracking mechanism for the current
+service. See below for details.
 .SS Other directives
 .TP
 \fBIgnoreCase\fR \fIbool\fR
 Override the global
 .B IgnoreCase
 setting.
+.IP
+This statement is deprecated and will be removed in future versions.
+Please, use the \fB\-icase\fR option to the \fBURL\fR directive
+instead.  See the discussion of \fIoptions\fR in
+.B Service Matching Directives
+section above.
 .TP
 \fBDisabled\fR \fIbool\fR
 Start
@@ -1081,14 +1148,21 @@ This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see
 .BR https://letsencrypt.org/docs/challenge-types/#http-01-challenge ).
 It takes a single argument specifying a directory where ACME
-challenges are stored.  It is supposed that another program is started
+challenges are stored.  The argument is subject to \fIbackreference
+expansions\fR as discussed in the description of the \fBRedirect\fR
+statement, in section
+.B Service
+above.
+.PP
+It is supposed that another program is started
 periodically, which checks for certificates approaching their
 expiration, issues renewal requests and stores the obtained ACME
 challenges in that directory.
 .SH "Backend"
 A backend is a definition of a single backend server
 .B pound
-will use to reply to incoming requests.  All configuration directives enclosed between
+will use to reply to incoming requests.  All configuration directives
+enclosed between
 .B Backend
 and
 .B End
@@ -1120,15 +1194,16 @@ Specify the certificate that
 .B pound
 will use as a client. The
 .I certificate file
-is the file containing the certificate, possibly a certificate chain and the signature.
+is the file containing the certificate, possibly a certificate chain
+and the signature.
 This directive may appear only after the
 .B HTTPS
 directive.
 .TP
 \fBDisable\fR SSLv2|SSLv3|TLSv1|TLSv1_1|TLSv1_2
 Disable the protocol \fBand all lower protocols as well\fR.
-This is due to a limitation in OpenSSL, which does not support disabling a single
-protocol. For example,
+This is due to a limitation in OpenSSL, which does not support
+disabling a single protocol. For example,
 .B Disable TLSv1
 would disable SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1 and TLSv1_2.
 This directive may appear only after the
@@ -1136,8 +1211,8 @@ This directive may appear only after the
 directive.
 .TP
 \fBCiphers\fR "acceptable:cipher:list"
-This is the list of ciphers that will be accepted by the SSL connection; it is a
-string in the same format as in OpenSSL
+This is the list of ciphers that will be accepted by the SSL
+connection; it is a string in the same format as in OpenSSL
 .I ciphers(1)
 and
 .I SSL_CTX_set_cipher_list(3).
@@ -1250,12 +1325,14 @@ that
 .B pound
 cannot establish a connection to will be considered dead). However, every
 .B Alive
-seconds, an attempt is made to connect to the dead servers in case they have become
-active again. If this attempt succeeds, connections will be initiated to them again.
+seconds, an attempt is made to connect to the dead servers in case
+they have become active again. If this attempt succeeds, connections
+will be initiated to them again.
 .PP
-In general it is a good idea to set this time interval as low as is consistent with
-your resources in order to benefit from resurrected servers at the earliest possible
-time. The default value of 30 seconds is probably a good choice.
+In general it is a good idea to set this time interval as low as is
+consistent with your resources in order to benefit from resurrected
+servers at the earliest possible time. The default value of 30 seconds
+is probably a good choice.
 .PP
 The clients that happen to hit a dead backend server will just receive a
 .I "503 Service Unavailable"
@@ -1275,7 +1352,7 @@ Controls addition of the built-in headers.  There are two kinds of
 such headers: \fIforwarded\fR headers that convey information about
 original destination of the request, and \fIssl\fR headers (for
 \fBHTTPS\fR connections), that hold information about server and
-client SSL certificates.  Thes are discussed in detail below.
+client SSL certificates.  These are discussed in detail below.
 .IP
 By default, both kinds of built-in additional headers are enabled.
 This default can be changed by using the \fBHeaderOption\fR directive.
@@ -1367,25 +1444,89 @@ The full client certificate (PEM-format multi-line)
 .PP
 In general,
 .B pound
-does not read or write to the hard-disk. The exceptions are reading the configuration file
-and (possibly) the server certificate file(s) and error message(s), which are opened read-only
-on startup, read,
-and closed, and the pid file which is opened on start-up, written to and immediately closed.
-Following this there is no disk access whatsoever, so using a RootJail directive is only
-for extra security bonus points.
+does not read or write to the hard-disk. The exceptions are reading
+the configuration file and (possibly) the server certificate file(s)
+and error message(s), which are opened read-only on startup, read, and
+closed, and the pid file which is opened on start-up, written to and
+immediately closed. Following this there is no disk access whatsoever,
+so using a RootJail directive is only for extra security bonus points.
 .PP
 .B Pound
-tries to sanitize all HTTP/HTTPS requests: the request itself, the headers and the contents
-are checked for conformance to the RFC's and only valid requests are passed to the backend
-servers. This is not absolutely fool-proof - as the recent Apache problem with chunked
-transfers demonstrated. However, given the current standards, this is the best that can
-be done - HTTP is an inherently weak protocol.
+tries to sanitize all HTTP/HTTPS requests: the request itself, the
+headers and the contents are checked for conformance to the RFC's and
+only valid requests are passed to the backend servers. This is not
+absolutely fool-proof - as the recent Apache problem with chunked
+transfers demonstrated. However, given the current standards, this is
+the best that can be done - HTTP is an inherently weak protocol.
+.SH DEPRECATED FEATURES
+The following configuration statements are retained for backward
+compatibility with earlier
+.B pound
+versions.  They will disappear from future releases:
+.TP
+.B HeadRequire
+Use
+.B Header
+instead.  See
+.BR "Service Matching Directives" ,
+for details.
+.TP
+.B HeadDeny
+Use
+.BR "Not Header" .
+For details, see the
+.B Negation
+subsection in
+.BR "Service Matching Directives" .
+.TP
+.B AddHeader
+Use
+.B HeaderAdd
+instead.  See the
+.B "HTTP Listener"
+section, for details.
+.TP
+.B IgnoreCase
+Use the \fB\-icase\fR option to the \fBURL\fR directive
+instead.  See the discussion of \fIoptions\fR in the
+.B Service Matching Directives
+section.
+.PP
+The use of the \fIredirect request\fR hack in the \fBRedirect\fR
+statement is deprecated as well.
+Instead of relying on the trailing slash to append the original URL
+to the redirect location, use URL backreferences.  For example,
+instead of
+.PP
+.EX
+  Redirect "http://example.org/"
+.EE
+.PP
+use:
+.PP
+.EX
+  URL ".*"
+  Redirect "http://example.org$0"
+.EE
 .SH ADDITIONAL NOTES
 .B Pound
-uses the system log for messages (default facility LOG_DAEMON). The format is very similar to
-other web servers, so that if you want to use a log tool:
-.TP
-    fgrep pound /var/log/messages | your_log_tool
+uses the system log for messages (default facility \fBLOG_DAEMON\fR).
+If using
+.BR rsyslog ,
+you can use the following configuration fragment to redirect
+.B pound
+messages to a separate file:
+.PP
+.EX
+:programname, startswith, "pound" {
+  /var/log/pound.log
+  stop
+}
+.EE
+.PP
+The format requested by
+.B "LogLevel 3"
+is understood by most log analyzers.
 .PP
 Translating HTTPS to HTTP is an iffy proposition: no client
 information is passed to the server itself (certificates, etc) and the

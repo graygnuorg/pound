@@ -73,4 +73,36 @@ location: http://example.org/bar/foo
 end
 ])
 
+PT_CHECK([[ListenHTTP
+	Service
+		Host -re "www\\.(.+)"
+		URL "^/([^/]+)/(.*)"
+		Redirect "http://%1/$2/$1"
+	End
+End
+]],
+[GET /foo/bar
+Host: www.example.org
+end
+
+302
+location: http://example.org:${LISTENER:PORT}/bar/foo
+end
+])
+
+PT_CHECK([[ListenHTTP
+	Service
+		Redirect "http://%1$1"
+	End
+End
+]],
+[GET /foo/bar
+Host: www.example.org
+end
+
+302
+location: http://%251%241
+end
+])
+
 AT_CLEANUP

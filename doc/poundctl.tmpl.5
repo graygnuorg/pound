@@ -75,7 +75,7 @@ well:
 .TP
 .BI {{ pipeline }}
 .I Pipeline
-is avaluated, and the default textual representation of its
+is evaluated, and the default textual representation of its
 value is copied to the output.
 .TP
 .BI "{{if " pipeline }} " T1 " {{end}}
@@ -107,7 +107,7 @@ A shortcut to simplify writing the if-else chains.  Equivalent to
 .BI "{{range " pipeline }} " T1 " {{end}}
 The value of
 .I pipeline
-must be an object or array.  If it is of length zero, nothng is
+must be an object or array.  If it is of length zero, nothing is
 output.  Otherwise, dot is set to the successive elements of the array
 or object and
 .I T1
@@ -193,7 +193,7 @@ A variable reference: \fB$\fIvar\fR.
 Here, \fIvar\fR is the name of the variable defined in the \fBrange\fR
 action.  See the subsection \fBVariables\fR, below.
 .TP
-Function call in parenteses, for gouping.
+Function call in parentheses, for grouping.
 .SS Pipelines
 A \fIpipeline\fR is a series of one or more \fIcommands\fR delimited
 by pipe sign (\fB|\fR).  Each \fIcommand\fR is either an argument or
@@ -280,7 +280,7 @@ value, is divisible by 2.
 Implements the
 .BR printf (3)
 function.  \fIFMT\fR must evaluate to a string.  Rest of arguments is
-interpreded according to the conversion specifications in \fIFMT\fR.  The
+interpreted according to the conversion specifications in \fIFMT\fR.  The
 result is a formatted string.
 .IP
 In addition to the standard conversion specifications described in
@@ -333,7 +333,7 @@ can receive as its argument (\fIdot\fR) an object of the following
 types: full listing, listener, service, or backend.
 .PP
 Since there is no explicit indication of the object type being passed,
-templates normally use heuristics based on the presense or absense of
+templates normally use heuristics based on the presence or absence of
 certain attribute to deduce the object type in question.  The
 recommended approach is described in the following pseudo-code
 fragment:
@@ -345,7 +345,7 @@ fragment:
 {{else if exists . "services"}}
   {{/* Single listener, as requested by \fBpoundctl list /\fIL\fR.
        Notice that this attribute is present in the full listing as
-       well, so presense of "listeners" should be checked first. */}}
+       well, so presence of "listeners" should be checked first. */}}
   ...
 {{else if exists . "backends"}}
   {{/* Single service, as requested by \fBpoundctl list /\fIL\fB/\fIS\fR. */}}
