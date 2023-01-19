@@ -17,13 +17,6 @@
  *
  * You should have received a copy of the GNU General Public License
  * along with this program.  If not, see <http://www.gnu.org/licenses/>.
- *
- * Contact information:
- * Apsis GmbH
- * P.O.Box
- * 8707 Uetikon am See
- * Switzerland
- * EMail: roseg@apsis.ch
  */
 
 #include "config.h"

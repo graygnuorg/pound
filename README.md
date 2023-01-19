@@ -7,9 +7,9 @@ servers that do not offer it natively. __Pound__ is distributed under the
 GNU General Public License, Version 3, or (at your option) any later
 version.
 
-The original version of __pound__ was written by Robert Segall
-<roseg@apsis.ch>, at [Apsis GmbH](http://www.apsis.ch).  In 2018,
-Sergey Poznyakoff added support for OpenSSL 1.x to the then current
+The original version of __pound__ was written by Robert Segall at
+[Apsis GmbH](https://web.archive.org/web/20221202094441/https://apsis.ch/).
+In 2018, Sergey Poznyakoff added support for OpenSSL 1.x to the then current
 version of the program (2.8).  This version of __pound__, hosted on
 *github* was further modified by Rick O'Sullivan and Frank Schmirler,
 who added WebSocket support.
