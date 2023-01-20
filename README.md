@@ -76,7 +76,7 @@ As of current release, __pound__ still supports OpenSSL 1.0, but
 this support will soon be discontinued.
 
 If you compile it on a Debian-based system, you need to install the
-`libssl-dev` package prior to building __pound__:
+`libssl-dev` package prior to building __pound__.
 
 ## Compilation
 
@@ -340,8 +340,6 @@ ListenHTTPS
 	CAlist /etc/ssl/acme/lets-encrypt-root.pem"
 	# Disable obsolete protocols (SSLv2, SSLv3 and TLSv1).
 	Disable TLSv1
-	# Inform backend that it's HTTPS
-	AddHeader "X-Forwarded-Proto: https"
 	Service
 		Backend
 			Address 10.10.0.1
@@ -391,7 +389,12 @@ End
 The same can be done using `ListenHTTPS`.
 
 If you want to use the same service for both the hostname and the
-hostname prefixed with `www.`, use the `Match` statement, as in:
+hostname prefixed with `www.`, you can either use the `Match` statement,
+or a regular expression.
+
+A `Match` statement groups several conditions using boolean shortcut
+evaluation.  In the following example, boolean __or__ is used to group
+two `Host` statements:
 
 ```
 	Service
@@ -405,6 +408,24 @@ hostname prefixed with `www.`, use the `Match` statement, as in:
 		End
 	End
 ```
+
+By default, the `Host` directive uses exact case-insensitive string match.
+This can be altered by supplying one or more options to it.  In the example
+below, we use regular expression matching to achieve the same result as in
+the configuration above:
+
+```
+	Service
+		Host -re "^(www\\.)?server0\\.com$"
+		Backend
+			Address 192.168.0.10
+			Port    80
+		End
+	End
+```
+
+Notice double-slashes: a slash is an escape character and must be escaped
+if intended to be used literally.
 
 ### Sessions
 
@@ -605,25 +626,48 @@ Currently it is used in __pound__ testsuite.
 ## Request Modification
 
 Normally, __pound__ passes all incoming requests to backends
-verbatim, with the following exceptions:
+verbatim.  Several request modification directives are provided, that
+allow you to add or remove headers from the request.  The following
+two groups of headers are added by default.  Each of them can be turned
+off using the `HeaderOption` directive.
 
-1. `X-Forwarded-For:` header is added to each request. The value of
-this header is the actual IP address of the client machine that sent
-the request.
+1. The __forwarded__ headers:
 
-2. If a client connects via HTTPS, the following HTTP headers are
-added to the request:
+* `X-Forwarded-For:` header passes the actual IP address of the client
+machine that sent the request.
 
-* `X-SSL-Subject`: information about the certificate owner
+* `X-Forwarded-Proto:` header contains the original protocol (`http` or
+`https`).
+
+* `X-Forwarded-Port:` header contains the port on the server that the
+client connected to.
+
+2. Second group contains _ssl_ headers that are added only if the client
+connected using HTTPS.  The `X-SSL-Cipher` header is always present if
+this header group is enabled.  The rest of headers below is added only if
+the client certificate was supplied:
+
+* `X-SSL-Cipher`: SSL version followed by a slash and active cipher algorithm.
+* `X-SSL-Certificate`: the full client certificate (multi-line)
 * `X-SSL-Issuer`: information about the certificate issuer (CA)
-* `X-SSL-notBefore`: start of validity date for the certificate
+* `X-SSL-Subject`: information about the certificate owner
 * `X-SSL-notAfter`: end od validity date for the certificate
+* `X-SSL-notBefore`: start of validity date for the certificate
 * `X-SSL-serial`: certificate serial number (in decimal)
-* `X-SSL-cipher`: the cipher currently in use
-* `X-SSL-certificate`: the full client certificate (multi-line)
 
-3. Any additions and removals requested by the `HeaderAdd` and
-`HeaderRemove` configuration statements in the listener section.
+The `HeaderOption` directive can be used (either globally or in listener
+block) to disable any or both of these groups, e.g.:
+```
+HeaderOption no-ssl forwarded
+```
+
+Any number of headers can be added or removed using the `HeaderAdd` and
+`HeaderRemove` directives in the listener section.  The order in which these
+directives are applied is:
+
+1. Headers controlled by the `HeaderOption` directive are added.
+2. Headers requested by `HeaderRemove` directives are removed.
+3. Headers from `HeaderAdd` directives are added.
 
 ## Using `RootJail`
 
