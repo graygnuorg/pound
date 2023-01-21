@@ -631,7 +631,7 @@ allow you to add or remove headers from the request.  The following
 two groups of headers are added by default.  Each of them can be turned
 off using the `HeaderOption` directive.
 
-1. The __forwarded__ headers:
+1. The _forwarded_ headers:
 
 * `X-Forwarded-For:` header passes the actual IP address of the client
 machine that sent the request.
