@@ -2563,7 +2563,7 @@ parse_acme (void *call_data, void *section_data)
 static int
 listener_parse_xhttp (void *call_data, void *section_data)
 {
-  return assign_int_range (call_data, 0, 4);
+  return assign_int_range (call_data, 0, 3);
 }
 
 static int

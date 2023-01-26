@@ -199,8 +199,6 @@ enum
     METH_BPROPFIND,
     METH_NOTIFY,
     METH_CONNECT,
-    METH_RPC_IN_DATA,
-    METH_RPC_OUT_DATA,
   };
 
 /* HTTP errors */

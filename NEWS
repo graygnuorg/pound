@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-01-19
+Pound -- history of user-visible changes. 2023-01-26
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,13 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+
+* RPC over HTTP support withdrawn
+
+It has been officially discontinued by Microsoft on 2017-10-31.  It's
+no use trying to support it five years after.
+
 
 Version 4.4, 2023-01-19
 

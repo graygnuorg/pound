@@ -1207,8 +1207,6 @@ static struct method_def methods[] = {
   { S("BPROPFIND"),    METH_BPROPFIND,     3 },
   { S("NOTIFY"),       METH_NOTIFY,        3 },
   { S("CONNECT"),      METH_CONNECT,       3 },
-  { S("RPC_IN_DATA"),  METH_RPC_IN_DATA,   4 },
-  { S("RPC_OUT_DATA"), METH_RPC_OUT_DATA,  4 },
 #undef S
   { NULL }
 };
@@ -1856,7 +1854,6 @@ do_http (THR_ARG *arg)
   int no_cont; /* If 1, no content is expected */
   int skip; /* Skip current response from backend (for 100 responses) */
   int conn_closed;  /* True if the connection is closed */
-  int is_rpc; /* RPC state */
 
   enum
   {
@@ -1971,7 +1968,6 @@ do_http (THR_ARG *arg)
       http_request_free (&arg->response);
 
       res_bytes = L0;
-      is_rpc = -1;
       is_ws = 0;
       conn_closed = 0;
       if (http_request_read (arg->cl, arg->lstn, &arg->request))
@@ -2008,19 +2004,8 @@ do_http (THR_ARG *arg)
       cl_11 = arg->request.version;
 
       no_cont = arg->request.method == METH_HEAD;
-      switch (arg->request.method)
-	{
-	case METH_RPC_IN_DATA:
-	  is_rpc = 1;
-	  break;
-
-	case METH_RPC_OUT_DATA:
-	  is_rpc = 0;
-	  break;
-
-	case METH_GET:
-	  is_ws |= WSS_REQ_GET;
-	}
+      if (arg->request.method == METH_GET)
+	is_ws |= WSS_REQ_GET;
 
       if (arg->lstn->has_pat &&
 	  regexec (&arg->lstn->url_pat, arg->request.url, 0, NULL, 0))
@@ -2113,8 +2098,6 @@ do_http (THR_ARG *arg)
 		  http_header_list_remove (&arg->request.headers, hdr);
 		  hdr = NULL;
 		}
-	      if (is_rpc == 1 && (cont < 0x20000L || cont > 0x80000000L))
-		is_rpc = -1;
 	      break;
 
 	    case HEADER_EXPECT:
@@ -2174,8 +2157,7 @@ do_http (THR_ARG *arg)
       /*
        * possibly limited request size
        */
-      if (arg->lstn->max_req > L0 && cont > L0 && cont > arg->lstn->max_req
-	  && is_rpc != 1)
+      if (arg->lstn->max_req > L0 && cont > L0 && cont > arg->lstn->max_req)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRILONG") from %s",
 		  POUND_TID (), cont,
@@ -2489,7 +2471,7 @@ do_http (THR_ARG *arg)
 	      return;
 	    }
 	}
-      else if (cont > L0 && is_rpc != 1)
+      else if (cont > L0)
 	{
 	  /*
 	   * had Content-length, so do raw reads/writes for the length
@@ -2505,82 +2487,6 @@ do_http (THR_ARG *arg)
 		      log_duration (duration_buf, sizeof (duration_buf), &start_req));
 	      http_err_reply (arg, HTTP_STATUS_INTERNAL_SERVER_ERROR);
 	      return;
-	    }
-	}
-      else if (cont > 0L && is_readable (arg->cl, arg->lstn->to))
-	{
-	  char one;
-	  BIO *cl_unbuf;
-	  /*
-	   * special mode for RPC_IN_DATA - content until EOF
-	   * force HTTP/1.0 - client closes connection when done.
-	   */
-	  cl_11 = be_11 = 0;
-
-	  /*
-	   * first read whatever is already in the input buffer
-	   */
-	  while (BIO_pending (arg->cl))
-	    {
-	      if (BIO_read (arg->cl, &one, 1) != 1)
-		{
-		  logmsg (LOG_NOTICE, "(%"PRItid") error read request pending: %s",
-			  POUND_TID (), strerror (errno));
-		  return;
-		}
-	      if (++res_bytes > cont)
-		{
-		  logmsg (LOG_NOTICE,
-			  "(%"PRItid") error read request pending: max. RPC length exceeded",
-			  POUND_TID ());
-		  return;
-		}
-	      if (BIO_write (arg->be, &one, 1) != 1)
-		{
-		  if (errno)
-		    logmsg (LOG_NOTICE,
-			    "(%"PRItid") error write request pending: %s",
-			    POUND_TID (), strerror (errno));
-		  return;
-		}
-	    }
-	  BIO_flush (arg->be);
-
-	  /*
-	   * find the socket BIO in the chain
-	   */
-	  if ((cl_unbuf = BIO_find_type (arg->cl,
-					 SLIST_EMPTY (&arg->lstn->ctx_head)
-					   ? BIO_TYPE_SOCKET : BIO_TYPE_SSL)) == NULL)
-	    {
-	      logmsg (LOG_WARNING, "(%"PRItid") error get unbuffered: %s",
-		      POUND_TID (), strerror (errno));
-	      return;
-	    }
-
-	  /*
-	   * copy till EOF
-	   */
-	  while ((res = BIO_read (cl_unbuf, buf, sizeof (buf))) > 0)
-	    {
-	      if ((res_bytes += res) > cont)
-		{
-		  logmsg (LOG_NOTICE,
-			  "(%"PRItid") error copy request body: max. RPC length exceeded",
-			  POUND_TID ());
-		  return;
-		}
-	      if (BIO_write (arg->be, buf, res) != res)
-		{
-		  if (errno)
-		    logmsg (LOG_NOTICE, "(%"PRItid") error copy request body: %s",
-			    POUND_TID (), strerror (errno));
-		  return;
-		}
-	      else
-		{
-		  BIO_flush (arg->be);
-		}
 	    }
 	}
 
@@ -2634,17 +2540,6 @@ do_http (THR_ARG *arg)
 	  if (!cl_11 || conn_closed)
 	    break;
 	  continue;
-	}
-      else if (is_rpc == 1)
-	{
-	  http_log (&arg->from_host, &start_req,
-		    arg->lstn, cur_backend,
-		    &arg->request, NULL,
-		    0, res_bytes); //FIXME: response code
-	  /*
-	   * no response expected - bail out
-	   */
-	  break;
 	}
 
       /*
@@ -2717,17 +2612,9 @@ do_http (THR_ARG *arg)
 		  if ((val = http_header_get_value (hdr)) == NULL)
 		    goto err;
 		  cont = ATOL (val);
-		  /*
-		   * treat RPC_OUT_DATA like reply without
-		   * content-length
-		   */
-		  if (is_rpc == 0)
-		    {
-		      if (cont >= 0x20000L && cont <= 0x80000000L)
-			cont = -1L;
-		      else
-			is_rpc = -1;
-		    }
+		  //FIXME: limits?
+		  if (cont >= 0x20000L && cont <= 0x80000000L)
+		    cont = -1L;
 		  break;
 
 		case HEADER_LOCATION:
@@ -2939,11 +2826,6 @@ do_http (THR_ARG *arg)
 		}
 	      if (BIO_flush (arg->cl) != 1)
 		{
-		  /*
-		   * client closes RPC_OUT_DATA connection - no error
-		   */
-		  if (is_rpc == 0 && res_bytes > 0L)
-		    break;
 		  if (errno)
 		    {
 		      logmsg (LOG_NOTICE, "(%"PRItid") error final flush to %s: %s",
