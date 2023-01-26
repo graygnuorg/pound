@@ -21,6 +21,46 @@
 #include "extern.h"
 
 /*
+ * Emit to BIO response line with the given CODE, descriptive TEXT and
+ * HEADERS (may be NULL).  TYPE and LEN supply values for Content-Type
+ * and Content-Length, correspondingly.  PROTO gives the minor version
+ * of the HTTP protocol version: 0 or 1.  If it is 1, the Connection:
+ * close header will be added to response.
+ */
+static void
+bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
+		      char const *headers,
+		      char const *type, LONG len)
+{
+  BIO_printf (bio, "HTTP/1.%d %d %s\r\n"
+	      "Content-Type: %s\r\n"
+	      "Content-Length: %"PRILONG"\r\n",
+	      proto,
+	      code,
+	      text,
+	      type, len);
+  if (proto == 1)
+    BIO_printf (bio, "Connection: close\r\n");
+  BIO_printf (bio, "%s\r\n", headers ? headers : "");
+}
+
+/*
+ * Emit to BIO response line with the given CODE and descriptive TEXT,
+ * followed by HEADERS (may be NULL) and given CONTENT.  TYPE and
+ * PROTO are same as for bio_http_reply_start.
+ */
+static void
+bio_http_reply (BIO *bio, int proto, int code, char const *text,
+		char const *headers,
+		char const *type, char const *content)
+{
+  size_t len = strlen (content);
+  bio_http_reply_start (bio, proto, code, text, headers, type, len);
+  BIO_write (bio, content, len);
+  BIO_flush (bio);
+}
+
+/*
  * HTTP error replies
  */
 typedef struct
@@ -40,21 +80,19 @@ static HTTP_STATUS http_status[] = {
   [HTTP_STATUS_SERVICE_UNAVAILABLE] = { 503, "Service Unavailable" },
 };
 
-static char *err_response =
-	"HTTP/1.0 %d %s\r\n"
-	"Content-Type: text/html\r\n"
-	"Content-Length: %d\r\n"
-	"Expires: now\r\n"
-	"Pragma: no-cache\r\n"
-	"Cache-control: no-cache,no-store\r\n"
-	"\r\n"
-	"%s";
+static char err_headers[] =
+  "Expires: now\r\n"
+  "Pragma: no-cache\r\n"
+  "Cache-control: no-cache,no-store\r\n";
 
 /*
- * Reply with an error
+ * Write to BIO an error HTTP 1.PROTO response.  ERR is one of
+ * HTTP_STATUS_* constants.  TXT supplies the error page content.
+ * If it is NULL, the default text from the http_status table is
+ * used.
  */
 static void
-err_reply (BIO *c, int err, char const *txt)
+bio_err_reply (BIO *bio, int proto, int err, char const *txt)
 {
   if (!(err >= 0 && err < HTTP_STATUS_MAX))
     {
@@ -63,16 +101,24 @@ err_reply (BIO *c, int err, char const *txt)
     }
   if (!txt)
     txt = http_status[err].text;
-  BIO_printf (c, err_response, http_status[err].code, http_status[err].text,
-	      strlen (txt), txt);
-  BIO_flush (c);
+  bio_http_reply (bio, proto, http_status[err].code, http_status[err].text,
+		  err_headers, "text/html", txt);
   return;
+}
+
+/*
+ * Reply with an error.  See above for the description of ERR and TXT.
+ */
+static void
+err_reply (THR_ARG *arg, int err, char const *txt)
+{
+  bio_err_reply (arg->cl, arg->request.version, err, txt);
 }
 
 static void
 http_err_reply (THR_ARG *arg, int err)
 {
-  err_reply (arg->cl, err, arg->lstn->http_err[err]);
+  err_reply (arg, err, arg->lstn->http_err[err]);
 }
 
 static char *
@@ -138,12 +184,12 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
  * Reply with a redirect
  */
 static int
-redirect_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
+redirect_reply (BIO *c, int proto, const char *url, BACKEND *be, struct submatch *sm)
 {
   int code = be->redir_code;
-  char const *code_msg, *cont;
+  char const *code_msg, *cont, *hdr;
   char *xurl;
-  struct stringbuf cont_buf, url_buf;
+  struct stringbuf sb_url, sb_cont, sb_loc;
   int i;
 
   switch (code)
@@ -171,52 +217,56 @@ redirect_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
    * Make sure to return a safe version of the URL (otherwise CSRF
    * becomes a possibility)
    */
-  stringbuf_init_log (&url_buf);
+  stringbuf_init_log (&sb_url);
   for (i = 0; xurl[i]; i++)
     {
       if (isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
 	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?' || xurl[i] == '&'
 	  || xurl[i] == ';' || xurl[i] == '-' || xurl[i] == '=')
-	stringbuf_add_char (&url_buf, xurl[i]);
+	stringbuf_add_char (&sb_url, xurl[i]);
       else
-	stringbuf_printf (&url_buf, "%%%02x", xurl[i]);
+	stringbuf_printf (&sb_url, "%%%02x", xurl[i]);
     }
-  url = stringbuf_finish (&url_buf);
+  url = stringbuf_finish (&sb_url);
   free (xurl);
 
   if (!url)
     {
-      stringbuf_free (&url_buf);
+      stringbuf_free (&sb_url);
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  stringbuf_init_log (&cont_buf);
-  stringbuf_printf (&cont_buf,
+  stringbuf_init_log (&sb_cont);
+  stringbuf_printf (&sb_cont,
 		    "<html><head><title>Redirect</title></head>"
 		    "<body><h1>Redirect</h1>"
 		    "<p>You should go to <a href=\"%s\">%s</a></p>"
 		    "</body></html>",
 		    url, url);
 
-  if ((cont = stringbuf_finish (&cont_buf)) == NULL)
+  if ((cont = stringbuf_finish (&sb_cont)) == NULL)
     {
-      stringbuf_free (&cont_buf);
-      stringbuf_free (&url_buf);
+      stringbuf_free (&sb_url);
+      stringbuf_free (&sb_cont);
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  BIO_printf (c,
-	      "HTTP/1.0 %d %s\r\n"
-	      "Location: %s\r\n"
-	      "Content-Type: text/html\r\n"
-	      "Content-Length: %"PRILONG"\r\n\r\n"
-	      "%s",
-	      code, code_msg, url, (LONG)strlen (cont), cont);
+  stringbuf_init_log (&sb_loc);
+  stringbuf_printf (&sb_loc, "Location: %s\r\n", url);
 
-  BIO_flush (c);
+  if ((hdr = stringbuf_finish (&sb_loc)) == NULL)
+    {
+      stringbuf_free (&sb_url);
+      stringbuf_free (&sb_cont);
+      stringbuf_free (&sb_loc);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
 
-  stringbuf_free (&cont_buf);
-  stringbuf_free (&url_buf);
+  bio_http_reply (c, proto, code, code_msg, hdr, "text/html", cont);
+
+  stringbuf_free (&sb_url);
+  stringbuf_free (&sb_cont);
+  stringbuf_free (&sb_loc);
 
   return HTTP_STATUS_OK;
 }
@@ -250,7 +300,7 @@ copy_bin (BIO *cl, BIO *be, LONG cont, LONG *res_bytes, int no_write)
 }
 
 static int
-acme_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
+acme_reply (BIO *c, int proto, const char *url, BACKEND *be, struct submatch *sm)
 {
   int fd;
   struct stat st;
@@ -282,11 +332,8 @@ acme_reply (BIO *c, const char *url, BACKEND *be, struct submatch *sm)
     {
       bin = BIO_new_fd (fd, BIO_CLOSE);
 
-      BIO_printf (c,
-		  "HTTP/1.0 %d %s\r\n"
-		  "Content-Type: text/plain\r\n"
-		  "Content-Length: %"PRILONG"\r\n\r\n",
-		  200, "OK", (LONG) st.st_size);
+      bio_http_reply_start (c, proto, 200, "OK", NULL, "text/html",
+			    (LONG) st.st_size);
 
       if (copy_bin (bin, c, st.st_size, NULL, 0))
 	{
@@ -1018,7 +1065,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 	  /*
 	   * this is not necessarily an error, EOF/timeout are possible
 	   * logmsg(LOG_WARNING, "(%lx) e500 can't read header",
-	   * pthread_self()); err_reply(cl, h500, lstn->err500);
+	   * pthread_self()); err_reply(arg, h500, lstn->err500);
 	   */
 	  return -1;
 	}
@@ -1768,6 +1815,32 @@ socket_setup (int sock)
   setsockopt (sock, SOL_TCP, TCP_NODELAY, (void *) &n, sizeof (n));
 }
 
+static int
+force_http_10 (THR_ARG *arg)
+{
+  /*
+   * check the value if nohttps11:
+   *  - if 0 ignore
+   *  - if 1 and SSL force HTTP/1.0
+   *  - if 2 and SSL and MSIE force HTTP/1.0
+   */
+  switch (arg->lstn->noHTTPS11)
+    {
+    case 1:
+      return (arg->ssl != NULL);
+
+    case 2:
+      {
+	char const *agent = http_request_header_value (&arg->request, HEADER_USER_AGENT);
+	return (arg->ssl != NULL && agent != NULL && strstr (agent, "MSIE") != NULL);
+      }
+
+    default:
+      break;
+    }
+  return 0;
+}
+
 /*
  * handle an HTTP request
  */
@@ -1783,7 +1856,6 @@ do_http (THR_ARG *arg)
   int no_cont; /* If 1, no content is expected */
   int skip; /* Skip current response from backend (for 100 responses) */
   int conn_closed;  /* True if the connection is closed */
-  int force_10; /* If 1, force using HTTP/1.0 (set by NoHTTP11) */
   int is_rpc; /* RPC state */
 
   enum
@@ -1913,7 +1985,7 @@ do_http (THR_ARG *arg)
 			  addr2str (caddr, sizeof (caddr), &arg->from_host, 1),
 			  strerror (errno));
 		  /*
-		   * err_reply(cl, h500, lstn->err500);
+		   * err_reply(arg, h500, lstn->err500);
 		   */
 		}
 	    }
@@ -1999,7 +2071,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
 			  POUND_TID (), arg->request.url,
 			  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
-		  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
+		  err_reply (arg, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Transfer-encoding values");
 		  return;
 		}
@@ -2014,7 +2086,7 @@ do_http (THR_ARG *arg)
 			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
 			  POUND_TID (), arg->request.url,
 			  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
-		  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
+		  err_reply (arg, HTTP_STATUS_BAD_REQUEST,
 			     "Bad request: multiple Content-length values");
 		  return;
 		}
@@ -2030,7 +2102,7 @@ do_http (THR_ARG *arg)
 			      "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
 			      POUND_TID (), arg->request.url,
 			      addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
-		      err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
+		      err_reply (arg, HTTP_STATUS_BAD_REQUEST,
 				 "Bad request: Content-length bad value");
 		      return;
 		    }
@@ -2062,7 +2134,10 @@ do_http (THR_ARG *arg)
 	      break;
 
 	    case HEADER_ILLEGAL:
-	      //FIXME: should not happen
+	      /*
+	       * FIXME: This should not happen.  See the handling of
+	       * HEADER_ILLEGAL in http_header_list_append.
+	       */
 	      if (arg->lstn->log_level > 0)
 		{
 		  logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
@@ -2091,7 +2166,7 @@ do_http (THR_ARG *arg)
 		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
 		  POUND_TID (), arg->request.url,
 		  addr2str (caddr, sizeof (caddr), &arg->from_host, 1));
-	  err_reply (arg->cl, HTTP_STATUS_BAD_REQUEST,
+	  err_reply (arg, HTTP_STATUS_BAD_REQUEST,
 		     "Bad request: Transfer-encoding and Content-length headers present");
 	  return;
 	}
@@ -2525,29 +2600,8 @@ do_http (THR_ARG *arg)
 	  return;
 	}
 
-      /*
-       * check on no_https_11:
-       *  - if 0 ignore
-       *  - if 1 and SSL force HTTP/1.0
-       *  - if 2 and SSL and MSIE force HTTP/1.0
-       */
-      switch (arg->lstn->noHTTPS11)
-	{
-	case 1:
-	  force_10 = (arg->ssl != NULL);
-	  break;
-
-	case 2:
-	  {
-	    char const *agent = http_request_header_value (&arg->request, HEADER_USER_AGENT);
-	    force_10 = (arg->ssl != NULL && agent != NULL && strstr (agent, "MSIE") != NULL);
-	  }
-	  break;
-
-	default:
-	  force_10 = 0;
-	  break;
-	}
+      if (force_http_10 (arg))
+	conn_closed = 1;
 
       if (cur_backend->be_type != BE_BACKEND)
 	{
@@ -2556,11 +2610,13 @@ do_http (THR_ARG *arg)
 	  switch (cur_backend->be_type)
 	    {
 	    case BE_REDIRECT:
-	      code = redirect_reply (arg->cl, arg->request.url, cur_backend, arg->sm);
+	      code = redirect_reply (arg->cl, arg->request.version,
+				     arg->request.url, cur_backend, arg->sm);
 	      break;
 
 	    case BE_ACME:
-	      code = acme_reply (arg->cl, arg->request.url, cur_backend, arg->sm);
+	      code = acme_reply (arg->cl, arg->request.version,
+				 arg->request.url, cur_backend, arg->sm);
 	      break;
 
 	    case BE_CONTROL:
@@ -2575,7 +2631,7 @@ do_http (THR_ARG *arg)
 		    &arg->request, NULL,
 		    code, 0); //FIXME: number of bytes
 
-	  if (!cl_11 || conn_closed || force_10)
+	  if (!cl_11 || conn_closed)
 	    break;
 	  continue;
 	}
@@ -3053,10 +3109,8 @@ do_http (THR_ARG *arg)
        *  - client is not HTTP/1.1
        *      or
        *  - we had a "Connection: closed" header
-       *      or
-       *  - this is an SSL connection and we had a NoHTTPS11 directive
        */
-      if (!cl_11 || conn_closed || force_10)
+      if (!cl_11 || conn_closed)
 	break;
     }
 
