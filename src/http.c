@@ -110,13 +110,13 @@ bio_err_reply (BIO *bio, int proto, int err, char const *txt)
  * Reply with an error.  See above for the description of ERR and TXT.
  */
 static void
-err_reply (THR_ARG *arg, int err, char const *txt)
+err_reply (POUND_HTTP *arg, int err, char const *txt)
 {
   bio_err_reply (arg->cl, arg->request.version, err, txt);
 }
 
 static void
-http_err_reply (THR_ARG *arg, int err)
+http_err_reply (POUND_HTTP *arg, int err)
 {
   err_reply (arg, err, arg->lstn->http_err[err]);
 }
@@ -184,7 +184,7 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
  * Reply with a redirect
  */
 static int
-redirect_response (THR_ARG *arg, BACKEND *be)
+redirect_response (POUND_HTTP *arg, BACKEND *be)
 {
   int code = be->redir_code;
   char const *code_msg, *cont, *hdr;
@@ -303,7 +303,7 @@ copy_bin (BIO *cl, BIO *be, LONG cont, LONG *res_bytes, int no_write)
 }
 
 static int
-acme_response (THR_ARG *arg, BACKEND *be)
+acme_response (POUND_HTTP *arg, BACKEND *be)
 {
   int fd;
   struct stat st;
@@ -1418,13 +1418,13 @@ log_duration (char *buf, size_t size, struct timespec const *start)
 }
 
 static void
-http_log_0 (THR_ARG *arg, BACKEND *be)
+http_log_0 (POUND_HTTP *arg, BACKEND *be)
 {
   /* nothing */
 }
 
 static void
-http_log_1 (THR_ARG *arg, BACKEND *be)
+http_log_1 (POUND_HTTP *arg, BACKEND *be)
 {
   char buf[MAX_ADDR_BUFSIZE];
   logmsg (LOG_INFO, "%s %s - %s",
@@ -1453,7 +1453,7 @@ be_service_name (BACKEND *be)
 }
 
 static void
-http_log_2 (THR_ARG *arg, BACKEND *be)
+http_log_2 (POUND_HTTP *arg, BACKEND *be)
 {
   char caddr[MAX_ADDR_BUFSIZE];
   char baddr[MAX_ADDR_BUFSIZE];
@@ -1481,7 +1481,7 @@ http_log_2 (THR_ARG *arg, BACKEND *be)
 }
 
 static void
-http_log_3 (THR_ARG *arg, BACKEND *be)
+http_log_3 (POUND_HTTP *arg, BACKEND *be)
 {
   char caddr[MAX_ADDR_BUFSIZE];
   char timebuf[LOG_TIME_SIZE];
@@ -1511,7 +1511,7 @@ http_log_3 (THR_ARG *arg, BACKEND *be)
 }
 
 static void
-http_log_4 (THR_ARG *arg, BACKEND *be)
+http_log_4 (POUND_HTTP *arg, BACKEND *be)
 {
   struct http_request *req = &arg->request;
   char caddr[MAX_ADDR_BUFSIZE];
@@ -1539,7 +1539,7 @@ http_log_4 (THR_ARG *arg, BACKEND *be)
 }
 
 static void
-http_log_5 (THR_ARG *arg, BACKEND *be)
+http_log_5 (POUND_HTTP *arg, BACKEND *be)
 {
   struct http_request *req = &arg->request;
   char caddr[MAX_ADDR_BUFSIZE];
@@ -1572,7 +1572,7 @@ http_log_5 (THR_ARG *arg, BACKEND *be)
 	  log_duration (dbuf, sizeof (dbuf), &arg->start_req));
 }
 
-static void (*http_logger[]) (THR_ARG *arg, BACKEND *be) = {
+static void (*http_logger[]) (POUND_HTTP *arg, BACKEND *be) = {
   http_log_0,
   http_log_1,
   http_log_2,
@@ -1582,7 +1582,7 @@ static void (*http_logger[]) (THR_ARG *arg, BACKEND *be) = {
 };
 
 static void
-http_log (THR_ARG *arg, BACKEND *be)
+http_log (POUND_HTTP *arg, BACKEND *be)
 {
   http_logger[arg->lstn->log_level] (arg, be);
 }
@@ -1603,7 +1603,7 @@ http_request_send (BIO *be, struct http_request *req)
 }
 
 static int
-add_forwarded_headers (THR_ARG *arg)
+add_forwarded_headers (POUND_HTTP *arg)
 {
   char caddr[MAX_ADDR_BUFSIZE];
   struct stringbuf sb;
@@ -1658,7 +1658,7 @@ add_forwarded_headers (THR_ARG *arg)
 }
 
 static int
-add_ssl_headers (THR_ARG *arg)
+add_ssl_headers (POUND_HTTP *arg)
 {
   int res = 0;
   const SSL_CIPHER *cipher;
@@ -1796,7 +1796,7 @@ socket_setup (int sock)
 }
 
 static int
-force_http_10 (THR_ARG *arg)
+force_http_10 (POUND_HTTP *arg)
 {
   /*
    * check the value if nohttps11:
@@ -1825,7 +1825,7 @@ force_http_10 (THR_ARG *arg)
  * get the response
  */
 static int
-backend_response (THR_ARG *arg, SERVICE *svc, BACKEND *cur_backend)
+backend_response (POUND_HTTP *arg, SERVICE *svc, BACKEND *cur_backend)
 {
   int skip = 0;
   int be_11 = 0;  /* Whether backend connection is using HTTP/1.1. */
@@ -2288,7 +2288,7 @@ backend_response (THR_ARG *arg, SERVICE *svc, BACKEND *cur_backend)
  * handle an HTTP request
  */
 void
-do_http (THR_ARG *arg)
+do_http (POUND_HTTP *arg)
 {
   int cl_11;  /* Whether client connection is using HTTP/1.1 */
   int res;  /* General-purpose result variable */
@@ -2976,13 +2976,13 @@ do_http (THR_ARG *arg)
 void *
 thr_http (void *dummy)
 {
-  THR_ARG *arg;
+  POUND_HTTP *arg;
 
-  while ((arg = thr_arg_dequeue ()) != NULL)
+  while ((arg = pound_http_dequeue ()) != NULL)
     {
       do_http (arg);
       clear_error (arg->ssl);
-      thr_arg_destroy (arg);
+      pound_http_destroy (arg);
       active_threads_decr ();
     }
   logmsg (LOG_NOTICE, "thread %"PRItid" terminating on idle timeout",

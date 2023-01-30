@@ -578,7 +578,7 @@ enum
     WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
   };
 
-typedef struct _thr_arg
+typedef struct _pound_http
 {
   /* Input parameters */
   int sock;
@@ -605,10 +605,10 @@ typedef struct _thr_arg
 
   LONG res_bytes;
 
-  SLIST_ENTRY(_thr_arg) next;
-} THR_ARG;		/* argument to processing threads: socket, origin */
+  SLIST_ENTRY(_pound_http) next;
+} POUND_HTTP;
 
-typedef SLIST_HEAD(,_thr_arg) THR_ARG_HEAD;
+typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
 /* Track SSL handshare/renegotiation so we can reject client-renegotiations. */
 typedef enum
@@ -640,11 +640,11 @@ typedef struct
 } CTRL_CMD;
 
 /* add a request to the queue */
-int thr_arg_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
+int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
 /* get a request from the queue */
-THR_ARG *thr_arg_dequeue (void);
+POUND_HTTP *pound_http_dequeue (void);
 /* Free the argument */
-void thr_arg_destroy (THR_ARG *arg);
+void pound_http_destroy (POUND_HTTP *arg);
 /* get the current queue length */
 int get_thr_qlen (void);
 /* Decrement number of active threads. */
@@ -809,7 +809,7 @@ void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data)
 void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
 
 char const *sess_type_to_str (int type);
-int control_response (THR_ARG *arg, BACKEND *be);
+int control_response (POUND_HTTP *arg, BACKEND *be);
 void pound_atexit (void (*func) (void *), void *arg);
 void unlink_file (void *arg);
 

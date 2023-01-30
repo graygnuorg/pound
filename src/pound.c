@@ -105,7 +105,7 @@ l_id (void)
 /*
  * work queue stuff
  */
-static THR_ARG_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
+static POUND_HTTP_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
 static pthread_cond_t arg_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t active_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t arg_mut = PTHREAD_MUTEX_INITIALIZER;
@@ -138,9 +138,9 @@ worker_start (void)
  * add a request to the queue
  */
 int
-thr_arg_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen)
+pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen)
 {
-  THR_ARG *res;
+  POUND_HTTP *res;
 
   if ((res = calloc (1, sizeof (res[0]))) == NULL)
     {
@@ -179,10 +179,10 @@ thr_arg_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen)
 /*
  * get a request from the queue
  */
-THR_ARG *
-thr_arg_dequeue (void)
+POUND_HTTP *
+pound_http_dequeue (void)
 {
-  THR_ARG *res;
+  POUND_HTTP *res;
   struct timespec ts;
 
   pthread_mutex_lock (&arg_mut);
@@ -242,7 +242,7 @@ thr_arg_dequeue (void)
 }
 
 void
-thr_arg_destroy (THR_ARG *arg)
+pound_http_destroy (POUND_HTTP *arg)
 {
   free (arg->from_host.ai_addr);
 
@@ -286,7 +286,7 @@ int
 get_thr_qlen (void)
 {
   int res = 0;
-  THR_ARG *tap;
+  POUND_HTTP *tap;
 
   pthread_mutex_lock (&arg_mut);
   SLIST_FOREACH (tap, &thr_head, next)
@@ -393,7 +393,7 @@ thr_dispatch (void *unused)
 			  continue;
 			}
 
-		      if (thr_arg_enqueue (clnt, lstn,
+		      if (pound_http_enqueue (clnt, lstn,
 					   (struct sockaddr *) &clnt_addr,
 					   clnt_length))
 			close (clnt);
@@ -531,7 +531,7 @@ server (void)
    */
 
   /*
-   * Initialize worker_count to minimum to prevent thr_arg_dequeue from
+   * Initialize worker_count to minimum to prevent pound_http_dequeue from
    * counting idle timeout.
    */
   worker_count = worker_min_count;
