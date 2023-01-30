@@ -2439,15 +2439,16 @@ find_endpoint (int method, const char *uri, int *errcode)
 }
 
 int
-control_reply (BIO *c, int method, const char *url, BACKEND *be)
+control_response (THR_ARG *arg, BACKEND *be)
 {
   struct endpoint *ep;
   int code;
 
-  ep = find_endpoint (method, url, &code);
-  if (ep == NULL)
-    return code;
-  return ep->endfn (c, url + ep->uri_len);
+  ep = find_endpoint (arg->request.method, arg->request.url, &code);
+  if (ep != NULL)
+    code = ep->endfn (arg->cl, arg->request.url + ep->uri_len);
+  arg->response_code = 0;
+  return code;
 }
 
 #ifndef SSL3_ST_SR_CLNT_HELLO_A

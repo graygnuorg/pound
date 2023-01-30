@@ -562,6 +562,22 @@ enum
     SM__MAX
   };
 
+enum
+  {
+    WSS_INIT = 0,
+    WSS_REQ_GET = 0x01,
+    WSS_REQ_HEADER_CONNECTION_UPGRADE = 0x02,
+    WSS_REQ_HEADER_UPGRADE_WEBSOCKET = 0x04,
+
+    WSS_RESP_101 = 0x08,
+    WSS_RESP_HEADER_CONNECTION_UPGRADE = 0x10,
+    WSS_RESP_HEADER_UPGRADE_WEBSOCKET = 0x20,
+    WSS_COMPLETE = WSS_REQ_GET
+    | WSS_REQ_HEADER_CONNECTION_UPGRADE
+    | WSS_REQ_HEADER_UPGRADE_WEBSOCKET | WSS_RESP_101 |
+    WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
+  };
+
 typedef struct _thr_arg
 {
   /* Input parameters */
@@ -576,8 +592,18 @@ typedef struct _thr_arg
   SSL *ssl;
   struct submatch sm[SM__MAX];
 
+  int ws_state;  /* Websocket state */
+  int no_cont;   /* True if no content is expected */
+  int conn_closed; /* True if the connection is closed */
+
   struct http_request request;
   struct http_request response;
+
+  struct timespec start_req; /* Time when original request was received */
+
+  int response_code;
+
+  LONG res_bytes;
 
   SLIST_ENTRY(_thr_arg) next;
 } THR_ARG;		/* argument to processing threads: socket, origin */
@@ -783,7 +809,7 @@ void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data)
 void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
 
 char const *sess_type_to_str (int type);
-int control_reply (BIO *c, int method, const char *url, BACKEND *be);
+int control_response (THR_ARG *arg, BACKEND *be);
 void pound_atexit (void (*func) (void *), void *arg);
 void unlink_file (void *arg);
 
