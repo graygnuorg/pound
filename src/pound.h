@@ -578,6 +578,16 @@ enum
     WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
   };
 
+/* Track SSL handshare/renegotiation so we can reject client-renegotiations. */
+typedef enum
+  {
+    RENEG_INIT = 0,
+    RENEG_REJECT,
+    RENEG_ALLOW,
+    RENEG_ABORT
+  }
+  RENEG_STATE;
+
 typedef struct _pound_http
 {
   /* Input parameters */
@@ -585,12 +595,17 @@ typedef struct _pound_http
   LISTENER *lstn;
   struct addrinfo from_host;
 
+  /* Deduced information */
+  SERVICE *svc;
+  BACKEND *backend;
+
   /* Data used during http processing */
   BIO *cl;
   BIO *be;
   X509 *x509;
   SSL *ssl;
   struct submatch sm[SM__MAX];
+  RENEG_STATE reneg_state;
 
   int ws_state;  /* Websocket state */
   int no_cont;   /* True if no content is expected */
@@ -609,16 +624,6 @@ typedef struct _pound_http
 } POUND_HTTP;
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
-
-/* Track SSL handshare/renegotiation so we can reject client-renegotiations. */
-typedef enum
-  {
-    RENEG_INIT = 0,
-    RENEG_REJECT,
-    RENEG_ALLOW,
-    RENEG_ABORT
-  }
-  RENEG_STATE;
 
 /* control request stuff */
 typedef enum
@@ -809,7 +814,7 @@ void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data)
 void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
 
 char const *sess_type_to_str (int type);
-int control_response (POUND_HTTP *arg, BACKEND *be);
+int control_response (POUND_HTTP *arg);
 void pound_atexit (void (*func) (void *), void *arg);
 void unlink_file (void *arg);
 
