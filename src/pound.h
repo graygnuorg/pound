@@ -813,7 +813,7 @@ int control_response (POUND_HTTP *arg, BACKEND *be);
 void pound_atexit (void (*func) (void *), void *arg);
 void unlink_file (void *arg);
 
-char const *progname;
+extern char const *progname;
 
 enum string_value_type
   {
