@@ -1873,22 +1873,35 @@ backend_response (POUND_HTTP *phttp)
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
+      be_11 = (phttp->response.request[7] == '1');
       phttp->response_code = strtol (phttp->response.request+9, NULL, 10);
 
-      be_11 = (phttp->response.request[7] == '1');
+      switch (phttp->response_code)
+	{
+	case 100:
+	  /*
+	   * responses with code 100 are never passed back to the client
+	   */
+	  skip = 1;
+	  break;
 
-      /*
-       * responses with code 100 are never passed back to the client
-       */
-      skip = !regexec (&RESP_SKIP, phttp->response.request, 0, NULL, 0);
+	case 101:
+	  phttp->ws_state |= WSS_RESP_101;
+	  phttp->no_cont = 1;
+	  break;
 
-      /*
-       * some response codes (1xx, 204, 304) have no content
-       */
-      if (!phttp->no_cont && !regexec (&RESP_IGN, phttp->response.request, 0, NULL, 0))
-	phttp->no_cont = 1;
-      if (!strncasecmp ("101", phttp->response.request + 9, 3))
-	phttp->ws_state |= WSS_RESP_101;
+	case 204:
+	case 304:
+	case 305:
+	case 306:
+	  /* No content is expected */
+	  phttp->no_cont = 1;
+	  break;
+
+	default:
+	  if (phttp->response_code / 100 == 1)
+	    phttp->no_cont = 1;
+	}
 
       chunked = 0;
       content_length = L_1;
