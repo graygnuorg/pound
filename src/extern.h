@@ -25,7 +25,6 @@ extern int print_log;		/* print log messages to stdout/stderr */
 
 extern regex_t HEADER,		/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
-  CHUNK_HEAD,			/* chunk header line */
   LOCATION;			/* the host we are redirected to */
 
 #ifndef  SOL_TCP

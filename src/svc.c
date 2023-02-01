@@ -256,6 +256,8 @@ service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
     service_rearm_expire_sessions (svc);
 }
 
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
 /*
  * Log an error to the syslog or to stderr
  */
@@ -266,10 +268,12 @@ vlogmsg (const int priority, const char *fmt, va_list ap)
     {
       FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
 		     ? stdout : stderr;
+      pthread_mutex_lock (&log_mutex);
       if (progname)
 	fprintf (fp, "%s: ", progname);
       vfprintf (fp, fmt, ap);
       fputc ('\n', fp);
+      pthread_mutex_unlock (&log_mutex);
     }
   else
     {
@@ -2001,10 +2005,10 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
   BIO_printf (c,
 	      "HTTP/1.1 %d %s\r\n"
 	      "Content-Type: application/json\r\n"
-	      "Content-Length: %"PRILONG"\r\n"
+	      "Content-Length: %"PRICLEN"\r\n"
 	      "Connection: close\r\n\r\n"
 	      "%s",
-	      200, "OK", (LONG) strlen (str), str);
+	      200, "OK", (CONTENT_LENGTH) strlen (str), str);
   BIO_flush (c);
   stringbuf_free (&sb);
 

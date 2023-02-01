@@ -103,20 +103,16 @@
 #endif
 
 #ifdef  HAVE_LONG_LONG_INT
-# define LONG    long long
-# define L0      0LL
-# define L_1     -1LL
-# define STRTOL  strtoll
-# define ATOL    atoll
-# define PRILONG "lld"
+typedef long long CONTENT_LENGTH;
+# define STRTOCLEN strtoll
+# define PRICLEN "lld"
 #else
-# define LONG    long
-# define L0      0L
-# define L_1     -1L
-# define STRTOL  strtol
-# define ATOL    atol
-# define PRILONG "ld"
+typedef long CONTENT_LENGTH;
+# define STRTOCLEN strtol
+# define PRICLEN "ld"
 #endif
+
+#define NO_CONTENT_LENGTH ((CONTENT_LENGTH) -1)
 
 #ifndef DEFAULT_WORKER_MIN
 # define DEFAULT_WORKER_MIN 5
@@ -525,7 +521,7 @@ typedef struct _listener
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
-  LONG max_req;			/* max. request size */
+  CONTENT_LENGTH max_req;	/* max. request size */
   MATCHER_HEAD head_off;	/* headers to remove */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
@@ -618,7 +614,7 @@ typedef struct _pound_http
 
   int response_code;
 
-  LONG res_bytes;
+  CONTENT_LENGTH res_bytes;
 
   SLIST_ENTRY(_pound_http) next;
 } POUND_HTTP;

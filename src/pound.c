@@ -44,7 +44,6 @@ int n_listeners;                /* Number of listeners */
 
 regex_t HEADER,			/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
-  CHUNK_HEAD,			/* chunk header line */
   LOCATION;			/* the host we are redirected to */
 
 #ifndef  SOL_TCP
@@ -737,8 +736,6 @@ main (const int argc, char **argv)
   if (regcomp (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",
 	       REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&CONN_UPGRD, "(^|[ \t,])upgrade([ \t,]|$)",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CHUNK_HEAD, "^([0-9a-f]+).*$",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&LOCATION, "(http|https)://([^/]+)(.*)",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED))

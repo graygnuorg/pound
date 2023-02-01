@@ -982,9 +982,9 @@ assign_int_range (int *dst, int min, int max)
 }
 
 static int
-assign_LONG (void *call_data, void *section_data)
+assign_CONTENT_LENGTH (void *call_data, void *section_data)
 {
-  LONG n;
+  CONTENT_LENGTH n;
   char *p;
   struct token *tok = gettkn_expect (T_NUMBER);
 
@@ -992,13 +992,13 @@ assign_LONG (void *call_data, void *section_data)
     return PARSER_FAIL;
 
   errno = 0;
-  n = STRTOL (tok->str, &p, 10);
+  n = STRTOCLEN (tok->str, &p, 10);
   if (errno || *p)
     {
       conf_error ("%s", "bad long number");
       return PARSER_FAIL;
     }
-  *(LONG *)call_data = n;
+  *(CONTENT_LENGTH *)call_data = n;
   return 0;
 }
 
@@ -2815,7 +2815,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
-  { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
+  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
   { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
@@ -3335,7 +3335,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
-  { "MaxRequest", assign_LONG, NULL, offsetof (LISTENER, max_req) },
+  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
   { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },

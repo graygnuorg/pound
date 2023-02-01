@@ -30,11 +30,11 @@
 static void
 bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
 		      char const *headers,
-		      char const *type, LONG len)
+		      char const *type, CONTENT_LENGTH len)
 {
   BIO_printf (bio, "HTTP/1.%d %d %s\r\n"
 	      "Content-Type: %s\r\n"
-	      "Content-Length: %"PRILONG"\r\n",
+	      "Content-Length: %"PRICLEN"\r\n",
 	      proto,
 	      code,
 	      text,
@@ -279,12 +279,12 @@ redirect_response (POUND_HTTP *phttp)
  * Read and write some binary data
  */
 static int
-copy_bin (BIO *cl, BIO *be, LONG cont, LONG *res_bytes, int no_write)
+copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, CONTENT_LENGTH *res_bytes, int no_write)
 {
   char buf[MAXBUF];
   int res;
 
-  while (cont > L0)
+  while (cont > 0)
     {
       if ((res = BIO_read (cl, buf, cont > sizeof (buf) ? sizeof (buf) : cont)) < 0)
 	return -1;
@@ -338,7 +338,7 @@ acme_response (POUND_HTTP *phttp)
 
       phttp->response_code = 200;
       bio_http_reply_start (phttp->cl, phttp->request.version, 200, "OK", NULL,
-			    "text/html", (LONG) st.st_size);
+			    "text/html", (CONTENT_LENGTH) st.st_size);
 
       if (copy_bin (bin, phttp->cl, st.st_size, NULL, 0))
 	{
@@ -463,18 +463,30 @@ strip_eol (char *lin)
   return 0;
 }
 
+CONTENT_LENGTH
+get_content_length (char const *arg, int base)
+{
+  char *p;
+  CONTENT_LENGTH n;
+
+  errno = 0;
+  n = STRTOCLEN (arg, &p, base);
+  if (errno || n < 0 || (*p && !isspace (*p)))
+    return NO_CONTENT_LENGTH;
+  return n;
+}
+
 /*
  * Copy chunked
  */
 static int
-copy_chunks (BIO *cl, BIO *be, LONG * res_bytes, int no_write, LONG max_size)
+copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write, CONTENT_LENGTH max_size)
 {
   char buf[MAXBUF];
-  LONG cont, tot_size;
-  regmatch_t matches[2];
+  CONTENT_LENGTH cont, tot_size;
   int res;
 
-  for (tot_size = 0L;;)
+  for (tot_size = 0;;)
     {
       if ((res = get_line (cl, buf, sizeof (buf))) < 0)
 	{
@@ -488,9 +500,8 @@ copy_chunks (BIO *cl, BIO *be, LONG * res_bytes, int no_write, LONG max_size)
 	 * EOF
 	 */
 	return 0;
-      if (!regexec (&CHUNK_HEAD, buf, 2, matches, 0))
-	cont = STRTOL (buf, NULL, 16);
-      else
+
+      if ((cont = get_content_length (buf, 16)) == NO_CONTENT_LENGTH)
 	{
 	  /*
 	   * not chunk header
@@ -508,14 +519,14 @@ copy_chunks (BIO *cl, BIO *be, LONG * res_bytes, int no_write, LONG max_size)
 	  }
 
       tot_size += cont;
-      if (max_size > L0 && tot_size > max_size)
+      if (max_size > 0 && tot_size > max_size)
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") chunk content too large",
 		  POUND_TID ());
 	  return -4;
 	}
 
-      if (cont > L0)
+      if (cont > 0)
 	{
 	  if (copy_bin (cl, be, cont, res_bytes, no_write))
 	    {
@@ -1416,10 +1427,10 @@ log_time_str (char *res, size_t size, struct timespec const *ts)
  * Apache log-file-style number format
  */
 static char *
-log_bytes (char *res, size_t size, LONG cnt)
+log_bytes (char *res, size_t size, CONTENT_LENGTH cnt)
 {
-  if (cnt > L0)
-    snprintf (res, size, "%"PRILONG, cnt);
+  if (cnt > 0)
+    snprintf (res, size, "%"PRICLEN, cnt);
   else
     strcpy (res, "-");
   return res;
@@ -1848,7 +1859,7 @@ backend_response (POUND_HTTP *phttp)
 {
   int skip = 0;
   int be_11 = 0;  /* Whether backend connection is using HTTP/1.1. */
-  LONG content_length;
+  CONTENT_LENGTH content_length;
   char caddr[MAX_ADDR_BUFSIZE], caddr2[MAX_ADDR_BUFSIZE];
   char duration_buf[LOG_TIME_SIZE];
   char buf[MAXBUF];
@@ -1904,7 +1915,7 @@ backend_response (POUND_HTTP *phttp)
 	}
 
       chunked = 0;
-      content_length = L_1;
+      content_length = NO_CONTENT_LENGTH;
       DLIST_FOREACH (hdr, &phttp->response.headers, link)
 	{
 	  switch (hdr->code)
@@ -1941,10 +1952,12 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_CONTENT_LENGTH:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      content_length = ATOL (val);
-	      //FIXME: limits?
-	      if (content_length >= 0x20000L && content_length <= 0x80000000L)
-		content_length = -1L;
+	      if ((content_length = get_content_length (val, 10)) == NO_CONTENT_LENGTH)
+		{
+		  logmsg (LOG_WARNING, "(%"PRItid") invalid content length: %s",
+			  POUND_TID (), val);
+		  http_header_list_remove (&phttp->response.headers, hdr);
+		}
 	      break;
 
 	    case HEADER_LOCATION:
@@ -2061,7 +2074,7 @@ backend_response (POUND_HTTP *phttp)
 	       * had Transfer-encoding: chunked so read/write all
 	       * the chunks (HTTP/1.1 only)
 	       */
-	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes, skip, L0))
+	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes, skip, 0))
 		{
 		  /*
 		   * copy_chunks() has its own error messages
@@ -2069,7 +2082,7 @@ backend_response (POUND_HTTP *phttp)
 		  return -1;
 		}
 	    }
-	  else if (content_length >= L0)
+	  else if (content_length >= 0)
 	    {
 	      /*
 	       * may have had Content-length, so do raw reads/writes
@@ -2321,7 +2334,7 @@ backend_response (POUND_HTTP *phttp)
  * http error number otherwise.
  */
 static int
-send_to_backend (POUND_HTTP *phttp, int chunked, LONG content_length)
+send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 {
   struct http_header *hdr;
   char const *val;
@@ -2446,7 +2459,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, LONG content_length)
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
     }
-  else if (content_length > L0)
+  else if (content_length > 0)
     {
       /*
        * had Content-length, so do raw reads/writes for the length
@@ -2651,7 +2664,7 @@ do_http (POUND_HTTP *phttp)
 		*/
   BIO *bb;
   char caddr[MAX_ADDR_BUFSIZE];
-  LONG content_length;
+  CONTENT_LENGTH content_length;
   struct http_header *hdr, *hdrtemp;
   char *val;
 
@@ -2776,7 +2789,7 @@ do_http (POUND_HTTP *phttp)
        * check headers
        */
       chunked = 0;
-      content_length = L_1;
+      content_length = NO_CONTENT_LENGTH;
       DLIST_FOREACH_SAFE (hdr, hdrtemp, &phttp->request.headers, link)
 	{
 	  switch (hdr->code)
@@ -2820,7 +2833,7 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_CONTENT_LENGTH:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (content_length != L_1 || strchr (val, ','))
+	      if (content_length != NO_CONTENT_LENGTH || strchr (val, ','))
 		{
 		  logmsg (LOG_NOTICE,
 			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
@@ -2830,25 +2843,18 @@ do_http (POUND_HTTP *phttp)
 			     "Bad request: multiple Content-length values");
 		  return;
 		}
-	      else
+	      else if ((content_length = get_content_length (val, 10)) == NO_CONTENT_LENGTH)
 		{
-		  char *p;
-
-		  errno = 0;
-		  content_length = STRTOL (val, &p, 10);
-		  if (errno || *p)
-		    {
-		      logmsg (LOG_NOTICE,
-			      "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
-			      POUND_TID (), phttp->request.url,
-			      addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
-		      err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
-				 "Bad request: Content-length bad value");
-		      return;
-		    }
+		  logmsg (LOG_NOTICE,
+			  "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
+			  POUND_TID (), phttp->request.url,
+			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
+		  err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
+			     "Bad request: Content-length bad value");
+		  return;
 		}
 
-	      if (content_length < 0L)
+	      if (content_length == NO_CONTENT_LENGTH)
 		{
 		  http_header_list_remove (&phttp->request.headers, hdr);
 		  hdr = NULL;
@@ -2898,7 +2904,7 @@ do_http (POUND_HTTP *phttp)
       /*
        * check for possible request smuggling attempt
        */
-      if (chunked != 0 && content_length != L_1)
+      if (chunked != 0 && content_length != NO_CONTENT_LENGTH)
 	{
 	  logmsg (LOG_NOTICE,
 		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
@@ -2912,10 +2918,10 @@ do_http (POUND_HTTP *phttp)
       /*
        * possibly limited request size
        */
-      if (phttp->lstn->max_req > L0 && content_length > L0
+      if (phttp->lstn->max_req > 0 && content_length > 0
 	  && content_length > phttp->lstn->max_req)
 	{
-	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRILONG") from %s",
+	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRICLEN") from %s",
 		  POUND_TID (), content_length,
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
 	  http_err_reply (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE);
