@@ -203,6 +203,12 @@ pound_http_dequeue (void)
 	  if (rc == ETIMEDOUT)
 	    {
 	      /*
+	       * worker_count might have changed while we were waiting,
+	       * so check again if the mimnimal worker count is reached.
+	       */
+	      if (worker_count == worker_min_count)
+		continue;
+	      /*
 	       * If there are more workers than the predefined minimum,
 	       * decrease worker_count and return NULL.  The calling thread
 	       * will then terminate.
