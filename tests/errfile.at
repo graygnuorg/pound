@@ -17,9 +17,10 @@ AT_SETUP([Custom Error Response])
 AT_KEYWORDS([errfile])
 m4_pushdef([ERR501],
 [<html>
-<head><title>Bad Method</title></head>
+<head><title>Custom Bad Method Error</title></head>
 <body>
 <p>This method is not allowed.</p>
+<p>This is custom error page was supplied using the Err501 directive.</p>
 </body>
 ])
 

@@ -66,24 +66,68 @@ bio_http_reply (BIO *bio, int proto, int code, char const *text,
 typedef struct
 {
   int code;
+  char const *reason;
   char const *text;
 } HTTP_STATUS;
 
 static HTTP_STATUS http_status[] = {
-  [HTTP_STATUS_OK] = { 200, "OK" },
-  [HTTP_STATUS_BAD_REQUEST] = { 400, "Bad Request" },
-  [HTTP_STATUS_NOT_FOUND] = { 404, "Not Found" },
-  [HTTP_STATUS_PAYLOAD_TOO_LARGE] = { 413, "Payload Too Large" },
-  [HTTP_STATUS_URI_TOO_LONG] = { 414, "URI Too Long" },
-  [HTTP_STATUS_INTERNAL_SERVER_ERROR] = { 500, "Internal Server Error" },
-  [HTTP_STATUS_NOT_IMPLEMENTED] = { 501, "Not Implemented" },
-  [HTTP_STATUS_SERVICE_UNAVAILABLE] = { 503, "Service Unavailable" },
+  [HTTP_STATUS_OK] = { 200, "OK", "Success" },
+  [HTTP_STATUS_BAD_REQUEST] = {
+    400,
+    "Bad Request",
+    "Your browser (or proxy) sent a request that"
+    " this server could not understand."
+  },
+  [HTTP_STATUS_NOT_FOUND] = {
+    404,
+    "Not Found",
+    "The requested URL was not found on this server."
+  },
+  [HTTP_STATUS_PAYLOAD_TOO_LARGE] = {
+    413,
+    "Payload Too Large",
+    "The request content is larger than the proxy server is able to process."
+  },
+  [HTTP_STATUS_URI_TOO_LONG] = {
+    414,
+    "URI Too Long",
+    "The length of the requested URL exceeds the capacity limit for"
+    " this server."
+  },
+  [HTTP_STATUS_INTERNAL_SERVER_ERROR] = {
+    500,
+    "Internal Server Error",
+    "The server encountered an internal error and was"
+    " unable to complete your request."
+  },
+  [HTTP_STATUS_NOT_IMPLEMENTED] = {
+    501,
+    "Not Implemented",
+    "The server does not support the action requested."
+  },
+  [HTTP_STATUS_SERVICE_UNAVAILABLE] = {
+    503,
+    "Service Unavailable",
+    "The server is temporarily unable to service your"
+    " request due to maintenance downtime or capacity"
+    " problems. Please try again later."
+  },
 };
 
 static char err_headers[] =
   "Expires: now\r\n"
   "Pragma: no-cache\r\n"
   "Cache-control: no-cache,no-store\r\n";
+
+static char default_error_page[] = "\
+<!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\
+<html><head>\
+<title>%d %s</title>\
+</head><body>\
+<h1>%s</h1>\
+<p>%s</p>\
+</body></html>\
+";
 
 /*
  * Write to BIO an error HTTP 1.PROTO response.  ERR is one of
@@ -92,33 +136,44 @@ static char err_headers[] =
  * used.
  */
 static void
-bio_err_reply (BIO *bio, int proto, int err, char const *txt)
+bio_err_reply (BIO *bio, int proto, int err, char const *content)
 {
+  struct stringbuf sb;
+
   if (!(err >= 0 && err < HTTP_STATUS_MAX))
     {
+      logmsg (LOG_NOTICE, "INTERNAL ERROR: unsupported error code in call to bio_err_reply");
       err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-      txt = "Bad error code returned";
     }
-  if (!txt)
-    txt = http_status[err].text;
-  bio_http_reply (bio, proto, http_status[err].code, http_status[err].text,
-		  err_headers, "text/html", txt);
-  return;
+
+  stringbuf_init_log (&sb);
+  if (!content)
+    {
+      stringbuf_printf (&sb, default_error_page,
+			http_status[err].code,
+			http_status[err].reason,
+			http_status[err].reason,
+			http_status[err].text);
+      if ((content = stringbuf_finish (&sb)) == NULL)
+	content = http_status[err].text;
+    }
+  bio_http_reply (bio, proto, http_status[err].code, http_status[err].reason,
+		  err_headers, "text/html", content);
+  stringbuf_free (&sb);
 }
 
 /*
- * Reply with an error.  See above for the description of ERR and TXT.
+ * Send error response to the client BIO.  ERR is one of HTTP_STATUS_*
+ * constants.  Status code and reason phrase will be taken from the
+ * http_status array.  If custom error page is defined in the listener,
+ * it will be used, otherwise the default error page for the ERR code
+ * will be generated
  */
-static void
-err_reply (POUND_HTTP *phttp, int err, char const *txt)
-{
-  bio_err_reply (phttp->cl, phttp->request.version, err, txt);
-}
-
 static void
 http_err_reply (POUND_HTTP *phttp, int err)
 {
-  err_reply (phttp, err, phttp->lstn->http_err[err]);
+  bio_err_reply (phttp->cl, phttp->request.version, err,
+		 phttp->lstn->http_err[err]);
 }
 
 static char *
@@ -2860,8 +2915,7 @@ do_http (POUND_HTTP *phttp)
 			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
 			  POUND_TID (), phttp->request.url,
 			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
-		  err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
-			     "Bad request: multiple Transfer-encoding values");
+		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
 		}
 	      break;
@@ -2875,8 +2929,7 @@ do_http (POUND_HTTP *phttp)
 			  "(%"PRItid") e400 multiple Content-length \"%s\" from %s",
 			  POUND_TID (), phttp->request.url,
 			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
-		  err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
-			     "Bad request: multiple Content-length values");
+		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
 		}
 	      else if ((content_length = get_content_length (val, 10)) == NO_CONTENT_LENGTH)
@@ -2885,8 +2938,7 @@ do_http (POUND_HTTP *phttp)
 			  "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
 			  POUND_TID (), phttp->request.url,
 			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
-		  err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
-			     "Bad request: Content-length bad value");
+		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
 		}
 
@@ -2943,8 +2995,7 @@ do_http (POUND_HTTP *phttp)
 		  "(%"PRItid") e501 Transfer-encoding and Content-length \"%s\" from %s",
 		  POUND_TID (), phttp->request.url,
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
-	  err_reply (phttp, HTTP_STATUS_BAD_REQUEST,
-		     "Bad request: Transfer-encoding and Content-length headers present");
+	  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 	  return;
 	}
 
