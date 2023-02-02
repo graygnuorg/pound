@@ -1851,6 +1851,17 @@ force_http_10 (POUND_HTTP *phttp)
   return 0;
 }
 
+static void
+close_backend (POUND_HTTP *phttp)
+{
+  if (phttp->be)
+    {
+      BIO_reset (phttp->be);
+      BIO_free_all (phttp->be);
+      phttp->be = NULL;
+    }
+}
+
 /*
  * get the response
  */
@@ -2320,11 +2331,7 @@ backend_response (POUND_HTTP *phttp)
   while (skip);
 
   if (!be_11)
-    {
-      BIO_reset (phttp->be);
-      BIO_free_all (phttp->be);
-      phttp->be = NULL;
-    }
+    close_backend (phttp);
 
   return HTTP_STATUS_OK;
 }
@@ -2572,76 +2579,105 @@ select_backend (POUND_HTTP *phttp)
   char const *v_host;
   char caddr[MAX_ADDR_BUFSIZE];
 
-  while ((backend = get_backend (phttp->svc, &phttp->from_host,
-				 phttp->request.url, &phttp->request.headers)) != NULL)
+  if ((backend = get_backend (phttp->svc, &phttp->from_host,
+			      phttp->request.url,
+			      &phttp->request.headers)) != NULL)
     {
-      if (phttp->be != NULL && backend != phttp->backend)
+      if (phttp->be != NULL)
 	{
-	  BIO_reset (phttp->be);
-	  BIO_free_all (phttp->be);
-	  phttp->be = NULL;
+	  if (backend == phttp->backend)
+	    /* Same backend as before: nothing to do */
+	    return 0;
+	  else
+	    close_backend (phttp);
 	}
 
-      if (backend->be_type == BE_BACKEND)
+      do
 	{
-	  int sock_proto;
-
-	  switch (backend->addr.ai_family)
+	  if (backend->be_type == BE_BACKEND)
 	    {
-	    case AF_INET:
-	      sock_proto = PF_INET;
-	      break;
+	      /*
+	       * Try to open connection to this backend.
+	       */
+	      int sock_proto;
 
-	    case AF_INET6:
-	      sock_proto = PF_INET6;
-	      break;
+	      switch (backend->addr.ai_family)
+		{
+		case AF_INET:
+		  sock_proto = PF_INET;
+		  break;
 
-	    case AF_UNIX:
-	      sock_proto = PF_UNIX;
-	      break;
+		case AF_INET6:
+		  sock_proto = PF_INET6;
+		  break;
 
-	    default:
-	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
-		      POUND_TID (), backend->addr.ai_family);
-	      return HTTP_STATUS_SERVICE_UNAVAILABLE;
-	    }
+		case AF_UNIX:
+		  sock_proto = PF_UNIX;
+		  break;
 
-	  if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
-	    {
-	      logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
+		default:
+		  logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
+			  POUND_TID (), backend->addr.ai_family);
+		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
+		}
+
+	      if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
+		{
+		  logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
+			  POUND_TID (),
+			  str_be (caddr, sizeof (caddr), backend),
+			  strerror (errno));
+		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
+		}
+
+	      if (connect_nb (sock, &backend->addr, backend->conn_to) == 0)
+		{
+		  int res;
+
+		  /*
+		   * Connected successfully.  Open the backend connection.
+		   */
+		  if (sock_proto == PF_INET || sock_proto == PF_INET6)
+		    socket_setup (sock);
+		  if ((res = open_backend (phttp, backend, sock)) != 0)
+		    {
+		      close_backend (phttp);
+		      return res;
+		    }
+		  /* New backend selected. */
+		  phttp->backend = backend;
+		  return 0;
+		}
+
+	      logmsg (LOG_WARNING, "(%"PRItid") backend %s connect: %s",
 		      POUND_TID (),
 		      str_be (caddr, sizeof (caddr), backend),
 		      strerror (errno));
-	      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+	      shutdown (sock, 2);
+	      close (sock);
+	      /*
+	       * The following will close all sessions associated with
+	       * this backend, and mark the backend itself as dead, so
+	       * that it won't be returned again by the call to get_backed
+	       * below.
+	       */
+	      kill_be (phttp->svc, backend, BE_KILL);
+	      /* Try next backend now. */
 	    }
-
-	  if (connect_nb (sock, &backend->addr, backend->conn_to) == 0)
+	  else
 	    {
-	      int res;
-
-	      if (sock_proto == PF_INET || sock_proto == PF_INET6)
-		socket_setup (sock);
-	      if ((res = open_backend (phttp, backend, sock)) != 0)
-		return res;
+	      /* New backend selected. */
 	      phttp->backend = backend;
 	      return 0;
 	    }
-
-	  logmsg (LOG_WARNING, "(%"PRItid") backend %s connect: %s",
-		  POUND_TID (),
-		  str_be (caddr, sizeof (caddr), backend),
-		  strerror (errno));
-	  shutdown (sock, 2);
-	  close (sock);
-	  kill_be (phttp->svc, backend, BE_KILL);
 	}
-      else
-	{
-	  phttp->backend = backend;
-	  return 0;
-	}
+      while ((backend = get_backend (phttp->svc, &phttp->from_host,
+				     phttp->request.url, &phttp->request.headers)) != NULL);
     }
 
+  /*
+   * No backend found or is available.
+   */
   v_host = http_request_host (&phttp->request);
   logmsg (LOG_NOTICE, "(%"PRItid") e503 no back-end \"%s\" from %s %s",
 	  POUND_TID (), phttp->request.request,
@@ -2857,7 +2893,6 @@ do_http (POUND_HTTP *phttp)
 	      if (content_length == NO_CONTENT_LENGTH)
 		{
 		  http_header_list_remove (&phttp->request.headers, hdr);
-		  hdr = NULL;
 		}
 	      break;
 
@@ -2873,7 +2908,6 @@ do_http (POUND_HTTP *phttp)
 	      if (!strcasecmp ("100-continue", val))
 		{
 		  http_header_list_remove (&phttp->request.headers, hdr);
-		  hdr = NULL;
 		}
 	      break;
 
@@ -2890,7 +2924,6 @@ do_http (POUND_HTTP *phttp)
 			  hdr->header);
 		}
 	      http_header_list_remove (&phttp->request.headers, hdr);
-	      hdr = NULL;
 	      break;
 
 	    case HEADER_AUTHORIZATION:
@@ -2936,9 +2969,7 @@ do_http (POUND_HTTP *phttp)
 	       * The only way it's readable is if it's at EOF, so close
 	       * it!
 	       */
-	      BIO_reset (phttp->be);
-	      BIO_free_all (phttp->be);
-	      phttp->be = NULL;
+	      close_backend (phttp);
 	    }
 	}
 
@@ -2969,11 +3000,7 @@ do_http (POUND_HTTP *phttp)
        * if we have anything but a BACK_END we close the channel
        */
       if (phttp->be != NULL && phttp->backend->be_type != BE_BACKEND)
-	{
-	  BIO_reset (phttp->be);
-	  BIO_free_all (phttp->be);
-	  phttp->be = NULL;
-	}
+	close_backend (phttp);
 
       if (phttp->backend->be_type == BE_BACKEND)
 	{
