@@ -1553,32 +1553,32 @@ backend_parse_https (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct stringbuf sb;
 
-  if ((be->ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
+  if ((be->v.reg.ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
     {
       conf_openssl_error ("SSL_CTX_new");
       return PARSER_FAIL;
     }
 
-  SSL_CTX_set_app_data (be->ctx, be);
-  SSL_CTX_set_verify (be->ctx, SSL_VERIFY_NONE, NULL);
-  SSL_CTX_set_mode (be->ctx, SSL_MODE_AUTO_RETRY);
+  SSL_CTX_set_app_data (be->v.reg.ctx, be);
+  SSL_CTX_set_verify (be->v.reg.ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_mode (be->v.reg.ctx, SSL_MODE_AUTO_RETRY);
 #ifdef SSL_MODE_SEND_FALLBACK_SCSV
-  SSL_CTX_set_mode (be->ctx, SSL_MODE_SEND_FALLBACK_SCSV);
+  SSL_CTX_set_mode (be->v.reg.ctx, SSL_MODE_SEND_FALLBACK_SCSV);
 #endif
-  SSL_CTX_set_options (be->ctx, SSL_OP_ALL);
+  SSL_CTX_set_options (be->v.reg.ctx, SSL_OP_ALL);
 #ifdef  SSL_OP_NO_COMPRESSION
-  SSL_CTX_set_options (be->ctx, SSL_OP_NO_COMPRESSION);
+  SSL_CTX_set_options (be->v.reg.ctx, SSL_OP_NO_COMPRESSION);
 #endif
-  SSL_CTX_clear_options (be->ctx,
+  SSL_CTX_clear_options (be->v.reg.ctx,
 			 SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
-  SSL_CTX_clear_options (be->ctx, SSL_OP_LEGACY_SERVER_CONNECT);
+  SSL_CTX_clear_options (be->v.reg.ctx, SSL_OP_LEGACY_SERVER_CONNECT);
 
   xstringbuf_init (&sb);
   stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
-  SSL_CTX_set_session_id_context (be->ctx, (unsigned char *) sb.base, sb.len);
+  SSL_CTX_set_session_id_context (be->v.reg.ctx, (unsigned char *) sb.base, sb.len);
   stringbuf_free (&sb);
 
-  POUND_SSL_CTX_init (be->ctx);
+  POUND_SSL_CTX_init (be->v.reg.ctx);
 
   return PARSER_OK;
 }
@@ -1589,7 +1589,7 @@ backend_parse_cert (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
 
-  if (be->ctx == NULL)
+  if (be->v.reg.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
       return PARSER_FAIL;
@@ -1598,19 +1598,19 @@ backend_parse_cert (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  if (SSL_CTX_use_certificate_chain_file (be->ctx, tok->str) != 1)
+  if (SSL_CTX_use_certificate_chain_file (be->v.reg.ctx, tok->str) != 1)
     {
       conf_openssl_error ("SSL_CTX_use_certificate_chain_file");
       return PARSER_FAIL;
     }
 
-  if (SSL_CTX_use_PrivateKey_file (be->ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+  if (SSL_CTX_use_PrivateKey_file (be->v.reg.ctx, tok->str, SSL_FILETYPE_PEM) != 1)
     {
       conf_openssl_error ("SSL_CTX_use_PrivateKey_file");
       return PARSER_FAIL;
     }
 
-  if (SSL_CTX_check_private_key (be->ctx) != 1)
+  if (SSL_CTX_check_private_key (be->v.reg.ctx) != 1)
     {
       conf_openssl_error ("SSL_CTX_check_private_key failed");
       return PARSER_FAIL;
@@ -1625,7 +1625,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
 
-  if (be->ctx == NULL)
+  if (be->v.reg.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
       return PARSER_FAIL;
@@ -1634,7 +1634,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  SSL_CTX_set_cipher_list (be->ctx, tok->str);
+  SSL_CTX_set_cipher_list (be->v.reg.ctx, tok->str);
   return PARSER_OK;
 }
 
@@ -1710,12 +1710,12 @@ static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "Address",
     .parser = assign_address,
-    .off = offsetof (BACKEND, addr)
+    .off = offsetof (BACKEND, v.reg.addr)
   },
   {
     .name = "Port",
     .parser = assign_port,
-    .off = offsetof (BACKEND, addr)
+    .off = offsetof (BACKEND, v.reg.addr)
   },
   {
     .name = "Priority",
@@ -1725,17 +1725,17 @@ static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "TimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, to)
+    .off = offsetof (BACKEND, v.reg.to)
   },
   {
     .name = "WSTimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, ws_to)
+    .off = offsetof (BACKEND, v.reg.ws_to)
   },
   {
     .name = "ConnTO",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, conn_to)
+    .off = offsetof (BACKEND, v.reg.conn_to)
   },
   {
     .name = "HTTPS",
@@ -1752,7 +1752,7 @@ static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "Disable",
     .parser = disable_proto,
-    .off = offsetof (BACKEND, ctx)
+    .off = offsetof (BACKEND, v.reg.ctx)
   },
   {
     .name = "Disabled",
@@ -1764,15 +1764,15 @@ static PARSER_TABLE backend_parsetab[] = {
 
 static PARSER_TABLE emergency_parsetab[] = {
   { "End", parse_end },
-  { "Address", assign_address, NULL, offsetof (BACKEND, addr) },
-  { "Port", assign_port, NULL, offsetof (BACKEND, addr) },
-  { "TimeOut", assign_timeout, NULL, offsetof (BACKEND, to) },
-  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, ws_to) },
-  { "ConnTO", assign_timeout, NULL, offsetof (BACKEND, conn_to) },
+  { "Address", assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
+  { "Port", assign_port, NULL, offsetof (BACKEND, v.reg.addr) },
+  { "TimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.to) },
+  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.ws_to) },
+  { "ConnTO", assign_timeout, NULL, offsetof (BACKEND, v.reg.conn_to) },
   { "HTTPS", backend_parse_https },
   { "Cert", backend_parse_cert },
   { "Ciphers", backend_assign_ciphers },
-  { "Disable", disable_proto, NULL, offsetof (BACKEND, ctx) },
+  { "Disable", disable_proto, NULL, offsetof (BACKEND, v.reg.ctx) },
   { NULL }
 };
 
@@ -1804,20 +1804,19 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
 
   XZALLOC (be);
   be->be_type = BE_BACKEND;
-  be->addr.ai_socktype = SOCK_STREAM;
-  be->to = dfl->be_to;
-  be->conn_to = dfl->be_connto;
-  be->ws_to = dfl->ws_to;
-  be->alive = 1;
-  memset (&be->addr, 0, sizeof (be->addr));
+  be->v.reg.addr.ai_socktype = SOCK_STREAM;
+  be->v.reg.to = dfl->be_to;
+  be->v.reg.conn_to = dfl->be_connto;
+  be->v.reg.ws_to = dfl->ws_to;
+  be->v.reg.alive = 1;
+  memset (&be->v.reg.addr, 0, sizeof (be->v.reg.addr));
   be->priority = 5;
-  be->url = NULL;
   pthread_mutex_init (&be->mut, NULL);
 
   if (parser_loop (table, be, dfl, &range))
     return NULL;
 
-  if (check_addrinfo (&be->addr, &range, "Backend") != PARSER_OK)
+  if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
     return NULL;
 
   return be;
@@ -2135,21 +2134,21 @@ assign_redirect (void *call_data, void *section_data)
 
   XZALLOC (be);
   be->be_type = BE_REDIRECT;
-  be->redir_code = code;
   be->priority = 1;
-  be->alive = 1;
   pthread_mutex_init (&be->mut, NULL);
-  be->url = xstrdup (tok->str);
 
-  if (regexec (&LOCATION, be->url, 4, matches, 0))
+  be->v.redirect.status = code;
+  be->v.redirect.url = xstrdup (tok->str);
+
+  if (regexec (&LOCATION, be->v.redirect.url, 4, matches, 0))
     {
       conf_error ("%s", "Redirect bad URL");
       return PARSER_FAIL;
     }
 
-  if ((be->redir_req = matches[3].rm_eo - matches[3].rm_so) == 1)
+  if ((be->v.redirect.append_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
     /* the path is a single '/', so remove it */
-    be->url[matches[3].rm_so] = '\0';
+    be->v.redirect.url[matches[3].rm_so] = '\0';
 
   SLIST_PUSH (head, be, next);
 
@@ -2546,16 +2545,15 @@ parse_acme (void *call_data, void *section_data)
   XZALLOC (be);
   be->be_type = BE_ACME;
   be->priority = 1;
-  be->alive = 1;
   pthread_mutex_init (&be->mut, NULL);
 
   len = strlen (tok->str);
   if (tok->str[len-1] == '/')
     len--;
 
-  be->url = xmalloc (len + suf_acme_size + 1);
-  memcpy (be->url, tok->str, len);
-  strcpy (be->url + len, suf_acme);
+  be->v.acme.dir = xmalloc (len + suf_acme_size + 1);
+  memcpy (be->v.acme.dir, tok->str, len);
+  strcpy (be->v.acme.dir + len, suf_acme);
 
   /* Register backend in service */
   SLIST_PUSH (&svc->backends, be, next);
@@ -3500,7 +3498,6 @@ parse_control_global (void *call_data, void *section_data)
   XZALLOC (be);
   be->be_type = BE_CONTROL;
   be->priority = 1;
-  be->alive = 1;
   pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
   SLIST_PUSH (&svc->backends, be, next);

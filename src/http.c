@@ -177,7 +177,7 @@ http_err_reply (POUND_HTTP *phttp, int err)
 }
 
 static char *
-expand_url (char const *url, char const *orig_url, struct submatch *sm, int redir_req)
+expand_url (char const *url, char const *orig_url, struct submatch *sm, int append_uri)
 {
   struct stringbuf sb;
   char *p;
@@ -220,14 +220,14 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 		  stringbuf_add (&sb, url, n);
 		  logmsg (LOG_WARNING, "Redirect expression \"%s\" refers to non-existing group %*.*s", expr, n, n, url);
 		}
-	      redir_req = 1;
+	      append_uri = 1;
 	      url = p;
 	    }
 	}
     }
 
   /* For compatibility with previous versions */
-  if (!redir_req)
+  if (!append_uri)
     stringbuf_add_string (&sb, orig_url);
 
   if ((p = stringbuf_finish (&sb)) == NULL)
@@ -241,8 +241,8 @@ expand_url (char const *url, char const *orig_url, struct submatch *sm, int redi
 static int
 redirect_response (POUND_HTTP *phttp)
 {
-  BACKEND *be = phttp->backend;
-  int code = be->redir_code;
+  struct be_redirect const *redirect = &phttp->backend->v.redirect;
+  int code = redirect->status;
   char const *code_msg, *cont, *hdr;
   char *xurl, *url;
   struct stringbuf sb_url, sb_cont, sb_loc;
@@ -279,7 +279,7 @@ redirect_response (POUND_HTTP *phttp)
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  xurl = expand_url (be->url, phttp->request.url, phttp->sm, be->redir_req);
+  xurl = expand_url (redirect->url, phttp->request.url, phttp->sm, redirect->append_uri);
   if (!xurl)
     {
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -383,7 +383,7 @@ acme_response (POUND_HTTP *phttp)
   char *file_name;
   int rc = HTTP_STATUS_OK;
 
-  file_name = expand_url (phttp->backend->url, phttp->request.url, phttp->sm, 1);
+  file_name = expand_url (phttp->backend->v.acme.dir, phttp->request.url, phttp->sm, 1);
 
   if ((fd = open (file_name, O_RDONLY)) == -1)
     {
@@ -2181,7 +2181,7 @@ backend_response (POUND_HTTP *phttp)
 	    }
 	  else if (!skip)
 	    {
-	      if (is_readable (phttp->be, phttp->backend->to))
+	      if (is_readable (phttp->be, phttp->backend->v.reg.to))
 		{
 		  char one;
 		  BIO *be_unbuf;
@@ -2221,7 +2221,10 @@ backend_response (POUND_HTTP *phttp)
 		   * find the socket BIO in the chain
 		   */
 		  if ((be_unbuf =
-			   BIO_find_type (phttp->be, phttp->backend->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
+			   BIO_find_type (phttp->be,
+					  backend_is_https (phttp->backend)
+					    ? BIO_TYPE_SSL
+					    : BIO_TYPE_SOCKET)) == NULL)
 		    {
 		      logmsg (LOG_WARNING,
 			      "(%"PRItid") error get unbuffered: %s",
@@ -2283,7 +2286,7 @@ backend_response (POUND_HTTP *phttp)
 	  p[1].events = POLLIN | POLLPRI;
 
 	  while (BIO_pending (phttp->cl) || BIO_pending (phttp->be)
-		 || poll (p, 2, phttp->backend->ws_to * 1000) > 0)
+		 || poll (p, 2, phttp->backend->v.reg.ws_to * 1000) > 0)
 	    {
 
 	      /*
@@ -2342,7 +2345,10 @@ backend_response (POUND_HTTP *phttp)
 			  POUND_TID (), strerror (errno));
 		  return -1;
 		}
-	      if ((be_unbuf = BIO_find_type (phttp->be, phttp->backend->ctx ? BIO_TYPE_SSL : BIO_TYPE_SOCKET)) == NULL)
+	      if ((be_unbuf = BIO_find_type (phttp->be,
+					     backend_is_https (phttp->backend)
+					       ? BIO_TYPE_SSL
+					       : BIO_TYPE_SOCKET)) == NULL)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") error get unbuffered: %s",
 			  POUND_TID (), strerror (errno));
@@ -2445,7 +2451,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	  str_be (caddr, sizeof (caddr), phttp->backend);
 	  stringbuf_printf (&sb,
 			    "Destination: %s://%s%s",
-			    phttp->backend->ctx ? "https" : "http",
+			    backend_is_https (phttp->backend) ? "https" : "http",
 			    caddr,
 			    val + matches[3].rm_so);
 	  if ((p = stringbuf_finish (&sb)) == NULL)
@@ -2589,20 +2595,20 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 
   /* Configure it */
   BIO_set_close (phttp->be, BIO_CLOSE);
-  if (backend->to > 0)
+  if (backend->v.reg.to > 0)
     {
-      set_callback (phttp->be, backend->to, &phttp->reneg_state);
+      set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state);
     }
 
   /*
    * Set up SSL, if requested.
    */
-  if (backend->ctx != NULL)
+  if (backend_is_https (backend))
     {
       SSL *be_ssl;
       BIO *bb;
 
-      if ((be_ssl = SSL_new (backend->ctx)) == NULL)
+      if ((be_ssl = SSL_new (backend->v.reg.ctx)) == NULL)
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") be SSL_new: failed", POUND_TID ());
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
@@ -2672,7 +2678,7 @@ select_backend (POUND_HTTP *phttp)
 	       */
 	      int sock_proto;
 
-	      switch (backend->addr.ai_family)
+	      switch (backend->v.reg.addr.ai_family)
 		{
 		case AF_INET:
 		  sock_proto = PF_INET;
@@ -2688,7 +2694,7 @@ select_backend (POUND_HTTP *phttp)
 
 		default:
 		  logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
-			  POUND_TID (), backend->addr.ai_family);
+			  POUND_TID (), backend->v.reg.addr.ai_family);
 		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 		}
 
@@ -2701,7 +2707,7 @@ select_backend (POUND_HTTP *phttp)
 		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 		}
 
-	      if (connect_nb (sock, &backend->addr, backend->conn_to) == 0)
+	      if (connect_nb (sock, &backend->v.reg.addr, backend->v.reg.conn_to) == 0)
 		{
 		  int res;
 
@@ -3069,16 +3075,6 @@ do_http (POUND_HTTP *phttp)
       if (phttp->be != NULL && phttp->backend->be_type != BE_BACKEND)
 	close_backend (phttp);
 
-      if (phttp->backend->be_type == BE_BACKEND)
-	{
-	  /*
-	   * send the request
-	   */
-	  res = send_to_backend (phttp, cl_11 && chunked, content_length);
-	  if (res)
-	    goto err;
-	}
-
       if (force_http_10 (phttp))
 	phttp->conn_closed = 1;
 
@@ -3099,7 +3095,11 @@ do_http (POUND_HTTP *phttp)
 	  break;
 
 	case BE_BACKEND:
-	  res = backend_response (phttp);
+	  /* Send the request. */
+	  res = send_to_backend (phttp, cl_11 && chunked, content_length);
+	  if (res == 0)
+	    /* Process the response. */
+	    res = backend_response (phttp);
 	  break;
 	}
 

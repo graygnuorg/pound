@@ -367,15 +367,15 @@ str_be (char *buf, size_t size, BACKEND *be)
   switch (be->be_type)
     {
     case BE_BACKEND:
-      addr2str (buf, size, &be->addr, 0);
+      addr2str (buf, size, &be->v.reg.addr, 0);
       break;
 
     case BE_REDIRECT:
-      snprintf (buf, size, "redirect:%s", be->url);
+      snprintf (buf, size, "redirect:%s", be->v.redirect.url);
       break;
 
     case BE_ACME:
-      snprintf (buf, size, "acme:%s", be->url);
+      snprintf (buf, size, "acme:%s", be->v.acme.dir);
       break;
 
     case BE_CONTROL:
@@ -630,7 +630,7 @@ rand_backend (BACKEND_HEAD *head, int pri)
   BACKEND *be;
   SLIST_FOREACH (be, head, next)
     {
-      if (!be->alive || be->disabled)
+      if (!backend_is_alive (be) || be->disabled)
 	continue;
       if ((pri -= be->priority) < 0)
 	break;
@@ -662,7 +662,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
   if (!tb)
     /* should NEVER happen */
     return NULL;
-  for (res = tb; !res->alive || res->disabled;)
+  for (res = tb; !backend_is_alive (res) || res->disabled;)
     {
       res = SLIST_NEXT (res, next);
       if (res == NULL)
@@ -809,6 +809,10 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
   int ret_val;
   char buf[MAXBUF];
 
+  /* This function operates on regular backends only. */
+  if (be->be_type != BE_BACKEND)
+    return;
+
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
   svc->tot_pri = 0;
@@ -827,7 +831,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 	      break;
 
 	    case BE_KILL:
-	      b->alive = 0;
+	      b->v.reg.alive = 0;
 	      str_be (buf, sizeof (buf), b);
 	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
 		      POUND_TID (), buf);
@@ -848,7 +852,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 	      break;
 	    }
 	}
-      if (b->alive && !b->disabled)
+      if (backend_is_alive (b) && !b->disabled)
 	svc->tot_pri += b->priority;
     }
   if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
@@ -916,7 +920,7 @@ need_rewrite (const char *location, const char *v_host,
     return 0;
 
   /* applies only to INET/INET6 back-ends */
-  if (be->addr.ai_family != AF_INET && be->addr.ai_family != AF_INET6)
+  if (be->v.reg.addr.ai_family != AF_INET && be->v.reg.addr.ai_family != AF_INET6)
     return 0;
 
   /* split the location into its fields */
@@ -944,13 +948,13 @@ need_rewrite (const char *location, const char *v_host,
    * Check if the location has the same address as the listener or the back-end
    */
   memset (&addr, 0, sizeof (addr));
-  if (get_host (host, &addr, be->addr.ai_family))
+  if (get_host (host, &addr, be->v.reg.addr.ai_family))
     return 0;
 
   /*
    * compare the back-end
    */
-  if (addr.ai_family != be->addr.ai_family)
+  if (addr.ai_family != be->v.reg.addr.ai_family)
     {
       free (addr.ai_addr);
       free (host);
@@ -959,7 +963,7 @@ need_rewrite (const char *location, const char *v_host,
   if (addr.ai_family == AF_INET)
     {
       memcpy (&in_addr, addr.ai_addr, sizeof (in_addr));
-      memcpy (&be_addr, be->addr.ai_addr, sizeof (be_addr));
+      memcpy (&be_addr, be->v.reg.addr.ai_addr, sizeof (be_addr));
       if (port)
 	in_addr.sin_port = (in_port_t) htons (atoi (port));
       else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
@@ -983,7 +987,7 @@ need_rewrite (const char *location, const char *v_host,
   else				/* AF_INET6 */
     {
       memcpy (&in6_addr, addr.ai_addr, sizeof (in6_addr));
-      memcpy (&be6_addr, be->addr.ai_addr, sizeof (be6_addr));
+      memcpy (&be6_addr, be->v.reg.addr.ai_addr, sizeof (be6_addr));
       if (port)
 	in6_addr.sin6_port = (in_port_t) htons (atoi (port));
       else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
@@ -1185,7 +1189,7 @@ backend_probe (BACKEND *be)
   int family;
   int rc;
 
-  switch (be->addr.ai_family)
+  switch (be->v.reg.addr.ai_family)
     {
     case AF_INET:
       family = PF_INET;
@@ -1207,7 +1211,7 @@ backend_probe (BACKEND *be)
   if ((sock = socket (family, SOCK_STREAM, 0)) < 0)
     return BACKEND_ERR;
 
-  rc = connect_nb (sock, &be->addr, be->conn_to);
+  rc = connect_nb (sock, &be->v.reg.addr, be->v.reg.conn_to);
   shutdown (sock, 2);
   close (sock);
 
@@ -1225,11 +1229,15 @@ touch_be (void *data)
   BACKEND *be = data;
   char buf[MAXBUF];
 
-  if (!be->alive)
+  /* This function operates on regular backends only. */
+  if (be->be_type != BE_BACKEND)
+    return;
+
+  if (!be->v.reg.alive)
     {
       if (backend_probe (be) == BACKEND_OK)
 	{
-	  be->alive = 1;
+	  be->v.reg.alive = 1;
 	  str_be (buf, sizeof (buf), be);
 	  logmsg (LOG_NOTICE, "Backend %s resurrect", buf);
 	  if (!be->disabled)
@@ -1760,12 +1768,12 @@ backend_serialize (BACKEND *be)
 			       json_new_string (backend_type_str (be->be_type)))
 	      || json_object_set (obj, "priority",
 				  json_new_integer (be->priority))
-	      || json_object_set (obj, "alive", json_new_bool (be->alive))
+	      || json_object_set (obj, "alive", json_new_bool (backend_is_alive (be)))
 	      || json_object_set (obj, "enabled", json_new_bool (!be->disabled))
-	      || json_object_set (obj, "io_to", json_new_integer (be->to))
-	      || json_object_set (obj, "conn_to", json_new_integer (be->conn_to))
-	      || json_object_set (obj, "ws_to", json_new_integer (be->ws_to))
-	      || json_object_set (obj, "protocol", json_new_string (be->ctx ? "https" : "http")))
+	      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
+	      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
+	      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
+	      || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http")))
 	    {
 	      err = 1;
 	    }
@@ -1773,17 +1781,17 @@ backend_serialize (BACKEND *be)
 	    switch (be->be_type)
 	      {
 	      case BE_BACKEND:
-		err = json_object_set (obj, "address", addrinfo_serialize (&be->addr));
+		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr));
 		break;
 
 	      case BE_REDIRECT:
-		err = json_object_set (obj, "url", json_new_string (be->url))
-		      || json_object_set (obj, "code", json_new_integer (be->redir_code))
-		      || json_object_set (obj, "redir_req", json_new_bool (be->redir_req));
+		err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
+		  || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
+		  || json_object_set (obj, "append_uri", json_new_bool (be->v.redirect.append_uri));
 		break;
 
 	      case BE_ACME:
-		err = json_object_set (obj, "path", json_new_string (be->url));
+		err = json_object_set (obj, "path", json_new_string (be->v.acme.dir));
 		break;
 
 	      case BE_CONTROL:

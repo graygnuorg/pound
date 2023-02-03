@@ -360,20 +360,36 @@ typedef enum
   }
   BACKEND_TYPE;
 
+struct be_regular
+{
+  struct addrinfo addr;	/* IPv4/6 address */
+  int alive;		/* false if the back-end is dead */
+  unsigned to;		/* read/write time-out */
+  unsigned conn_to;	/* connection time-out */
+  unsigned ws_to;	/* websocket time-out */
+  SSL_CTX *ctx;		/* CTX for SSL connections */
+};
+
+struct be_redirect
+{
+  char *url;		 /* for redirectors */
+  int status;            /* Redirection status (301, 302, 303, 307, or 308 ) */
+  int append_uri;	 /* Append original URI to the new location. */
+};
+
+struct be_acme
+{
+  char *dir;             /* Name of the directory for ACME challenges. */
+};
+
 /* back-end definition */
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
   BACKEND_TYPE be_type;         /* Backend type */
-  struct addrinfo addr;		/* IPv4/6 address */
   int priority;			/* priority */
-  unsigned to;			/* read/write time-out */
-  unsigned conn_to;		/* connection time-out */
-  unsigned ws_to;		/* websocket time-out */
-  char *url;			/* for redirectors */
-  int redir_code;               /* Redirection code (301, 302, or 307) */
-  int redir_req;		/* the redirect should include the request path */
-  SSL_CTX *ctx;			/* CTX for SSL connections */
+  int disabled;			/* true if the back-end is disabled */
+  SLIST_ENTRY (_backend) next;
 
   /* FIXME: The following four fields are currently not used: */
   pthread_mutex_t mut;		/* mutex for this back-end */
@@ -381,12 +397,27 @@ typedef struct _backend
   double t_requests;		/* time to answer these requests */
   double t_average;		/* average time to answer requests */
 
-  int alive;			/* false if the back-end is dead */
-  int disabled;			/* true if the back-end is disabled */
-  SLIST_ENTRY (_backend) next;
+  union
+  {
+    struct be_regular reg;
+    struct be_acme acme;
+    struct be_redirect redirect;
+  } v;
+
 } BACKEND;
 
 typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
+
+static inline int backend_is_https (BACKEND *be)
+{
+  return be->be_type == BE_BACKEND && be->v.reg.ctx != NULL;
+}
+
+static inline int backend_is_alive (BACKEND *be)
+{
+  /* Redirects, ACME, and control backends are always alive */
+  return be->be_type != BE_BACKEND || be->v.reg.alive;
+}
 
 typedef struct session
 {
