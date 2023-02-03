@@ -46,7 +46,7 @@ end
 
 PT_CHECK([ListenHTTP
 	Service
-		Redirect "http://example.org/"
+		Redirect 302 "http://example.org/"
 	End
 End
 ],
@@ -55,6 +55,48 @@ end
 
 302
 location: http://example.org
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Redirect 303 "http://example.org"
+	End
+End
+],
+[GET /foo/bar
+end
+
+303
+location: http://example.org/foo/bar
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Redirect 307 "http://example.org"
+	End
+End
+],
+[GET /foo/bar
+end
+
+307
+location: http://example.org/foo/bar
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Redirect 308 "http://example.org"
+	End
+End
+],
+[GET /foo/bar
+end
+
+308
+location: http://example.org/foo/bar
 end
 ])
 

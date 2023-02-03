@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 26, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 3, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1027,6 +1027,15 @@ replies immediately with a redirection to the given URL. You may
 define multiple redirectors in a service, as well as mixing them with
 regular backends.
 .IP
+Optional \fIcode\fR can be one of:
+.BR 301 ,
+.B 302
+(the default),
+.BR 303 ,
+.BR 307 ,
+or
+.BR 308 .
+.IP
 The redirection destination is determined by the actual
 .I url
 you specify.  It can contain references to parenthesized subexpressions
@@ -1095,16 +1104,6 @@ Redirect "http://abc.example/index.html"
 .IP
 it will be sent to
 .IR "http://abc.example/index.html".
-.IP
-.IR "Technical note":
-in an ideal world
-.B pound
-should reply with a "307 Temporary Redirect" status. Unfortunately,
-that is not yet supported by all clients (in particular HTTP 1.0 ones), so
-.B pound
-currently replies by default with a "302 Found" instead. You may
-override this behaviour by specifying the \fIcode\fR to be used (301,
-302 or 307).
 .TP
 \fBEmergency\fR
 Directives enclosed between an

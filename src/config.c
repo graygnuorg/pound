@@ -2108,10 +2108,17 @@ assign_redirect (void *call_data, void *section_data)
   if (tok->type == T_NUMBER)
     {
       int n = atoi (tok->str);
-      if (n == 301 || n == 302 || n == 307)
-	code = n;
-      else
+      switch (n)
 	{
+	case 301:
+	case 302:
+	case 303:
+	case 307:
+	case 308:
+	  code = n;
+	  break;
+
+	default:
 	  conf_error ("%s", "invalid status code");
 	  return PARSER_FAIL;
 	}

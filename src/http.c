@@ -248,19 +248,35 @@ redirect_response (POUND_HTTP *phttp)
   struct stringbuf sb_url, sb_cont, sb_loc;
   int i;
 
+  /*
+   * Notice: the codes below must be in sync with the ones accepted
+   * by the assign_redirect function in config.c
+   */
   switch (code)
     {
     case 301:
       code_msg = "Moved Permanently";
       break;
 
+    case 302:
+      code_msg = "Found";
+      break;
+
+    case 303:
+      code_msg = "See Other";
+      break;
+
     case 307:
       code_msg = "Temporary Redirect";
       break;
 
-    default:
-      code_msg = "Found";
+    case 308:
+      code_msg = "Permanent Redirect";
       break;
+
+    default:
+      logmsg (LOG_NOTICE, "INTERNAL ERROR: unsupported status code %d passed to redirect_response; please report", code);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
   xurl = expand_url (be->url, phttp->request.url, phttp->sm, be->redir_req);
