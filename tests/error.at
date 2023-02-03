@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2022-2023 Sergey Poznyakoff
+# Copyright (C) 2023 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,38 +13,65 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Custom Error Response])
-AT_KEYWORDS([errfile])
-m4_pushdef([ERR501],
-[<html>
-<head><title>Custom Bad Method Error</title></head>
-<body>
-<p>This method is not allowed.</p>
-<p>This is custom error page was supplied using the Err501 directive.</p>
-</body>
-])
 
-AT_DATA([501.html],[ERR501])
+AT_SETUP([Error backend])
+AT_KEYWORDS([error])
 
 PT_CHECK([ListenHTTP
-	Err501 "501.html"
 	Service
-		Backend
-			Address
-			Port
-		End
+		Error 404
 	End
 End
 ],
-[PUT /echo/file
+[GET /foo/bar
 end
 
-501
-
-ERR501
+404
 end
 ])
 
-m4_popdef([ERR501])
+m4_pushdef([ERR404],
+[<html>
+<head><title>Custom Not Found Error</title></head>
+<body>
+<p>The requested resource is not found on that server.</p>
+<p>This is custom error page was supplied using the Err404 directive.</p>
+</body>
+])
+
+AT_DATA([404.html],[ERR404])
+
+PT_CHECK([ListenHTTP
+	Err404 "404.html"
+	Service
+		Error 404
+	End
+End
+],
+[GET /foo/bar
+end
+
+404
+
+ERR404
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Error 404 "404.html"
+	End
+End
+],
+[GET /foo/bar
+end
+
+404
+
+ERR404
+end
+])
+
+m4_popdef([ERR404])
 
 AT_CLEANUP

@@ -1105,6 +1105,19 @@ Redirect "http://abc.example/index.html"
 it will be sent to
 .IR "http://abc.example/index.html".
 .TP
+\fBError \fISTATUS\fR [\fIFILE\fR]
+Special case of backend that returns HTTP error page.  The \fISTATUS\fR
+argument supplies HTTP status code.  Optional \fIFILE\fR argument is
+the name of a disk file with the error page content (HTML).  If not
+supplied, the text is determined as usual: first the
+.BI Err STATUS
+statement for the enclosing listener is consulted.  If it is not present, the
+default error page is used.
+.IP
+The \fBError\fR directive is useful in a catch-all service, which
+outputs an error page if no service matching the incoming request was
+found.  See the \fBEXAMPLES\fR section for details.
+.TP
 \fBEmergency\fR
 Directives enclosed between an
 .B Emergency
@@ -1719,8 +1732,9 @@ Service
     Redirect 301 "https://www.myserver.com$0"
 End
 
-# Everybody else
+# Virtual host server1.com and www.server1.com
 Service
+    Host        -re "^(www\.)?server1\.com$"
     Backend
         Address 192.168.0.20
         Port    80
@@ -1738,6 +1752,11 @@ Service
         ID      "userid"
         TTL     180
     End
+End
+
+# Return custom error page if no matching service was found.
+Service
+    Error 404 "/var/lib/pound/notfound.html"
 End
 .EE
 .SH FILES

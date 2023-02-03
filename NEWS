@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-01-26
+Pound -- history of user-visible changes. 2023-02-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -12,6 +12,23 @@ Please send pound bug reports to <gray@gnu.org>
 
 It has been officially discontinued by Microsoft on 2017-10-31.  It's
 no use trying to support it five years after.
+
+* Support for 303 and 308 redirection codes
+
+* Improved default error responses
+
+* New special backend: Error
+
+The Error statement defines a special backend that returns the
+HTTP error page.  It takes one to two arguments:
+
+  Error STATUS [FILE]
+
+The STATUS argument supplies HTTP status code.  Optional FILE argument is
+the name of a disk file with the error page content (HTML).  If not
+supplied, the text is determined as usual: first the Err<STATUS> statement
+for the enclosing listener is consulted.  If it is not present, the
+default error page is used.
 
 
 Version 4.4, 2023-01-19

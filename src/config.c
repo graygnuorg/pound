@@ -2093,7 +2093,7 @@ parse_cond_host (void *call_data, void *section_data)
 }
 
 static int
-assign_redirect (void *call_data, void *section_data)
+parse_redirect_backend (void *call_data, void *section_data)
 {
   BACKEND_HEAD *head = call_data;
   struct token *tok;
@@ -2153,6 +2153,51 @@ assign_redirect (void *call_data, void *section_data)
   SLIST_PUSH (head, be, next);
 
   return PARSER_OK;
+}
+
+static int
+parse_error_backend (void *call_data, void *section_data)
+{
+  BACKEND_HEAD *head = call_data;
+  struct token *tok;
+  int n, status;
+  char *file;
+  BACKEND *be;
+
+  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
+    return PARSER_FAIL;
+
+  n = atoi (tok->str);
+  if ((status = http_status_to_pound (n)) == -1)
+    {
+      conf_error ("%s", "unsupported status code");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type == T_STRING)
+    {
+      file = tok->str;
+    }
+  else if (tok->type != '\n')
+    {
+      conf_error ("%s", "string or newline expected");
+      return PARSER_FAIL;
+    }
+
+  XZALLOC (be);
+  be->be_type = BE_ERROR;
+  be->priority = 1;
+  pthread_mutex_init (&be->mut, NULL);
+
+  be->v.error.status = status;
+  be->v.error.file = file ? xstrdup (file) : NULL;
+
+  SLIST_PUSH (head, be, next);
+
+  return tok->type == '\n' ? PARSER_OK_NONL : PARSER_OK;
 }
 
 struct service_session
@@ -2421,7 +2466,8 @@ static PARSER_TABLE service_parsetab[] = {
   { "NOT", parse_not_cond, NULL, offsetof (SERVICE, cond) },
   { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
-  { "Redirect", assign_redirect, NULL, offsetof (SERVICE, backends) },
+  { "Redirect", parse_redirect_backend, NULL, offsetof (SERVICE, backends) },
+  { "Error", parse_error_backend, NULL, offsetof (SERVICE, backends) },
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
   { "Session", parse_session },

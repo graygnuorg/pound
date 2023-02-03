@@ -380,6 +380,15 @@ str_be (char *buf, size_t size, BACKEND *be)
 
     case BE_CONTROL:
       strncpy (buf, "control", size);
+      break;
+
+    case BE_ERROR:
+      if (be->v.error.file)
+	snprintf (buf, size, "error:%s %d", be->v.error.file,
+		  pound_to_http_status (be->v.error.status));
+      else
+	snprintf (buf, size, "error:%d",
+		  pound_to_http_status (be->v.error.status));
     }
   return buf;
 }
@@ -1736,6 +1745,9 @@ backend_type_str (BACKEND_TYPE t)
 
     case BE_CONTROL:
       return "control";
+
+    case BE_ERROR:
+      return "error";
     }
 
   return "UNKNOWN";
@@ -1796,6 +1808,13 @@ backend_serialize (BACKEND *be)
 
 	      case BE_CONTROL:
 		/* FIXME */
+		break;
+
+	      case BE_ERROR:
+		err = json_object_set (obj, "status",
+				       json_new_integer (pound_to_http_status (be->v.error.status)))
+		  || json_object_set (obj, "file",
+				      be->v.error.file ? json_new_string (be->v.error.file) : json_new_null ());
 		break;
 	      }
 	}

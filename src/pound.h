@@ -356,7 +356,8 @@ typedef enum
     BE_BACKEND,
     BE_REDIRECT,
     BE_ACME,
-    BE_CONTROL
+    BE_CONTROL,
+    BE_ERROR
   }
   BACKEND_TYPE;
 
@@ -382,6 +383,12 @@ struct be_acme
   char *dir;             /* Name of the directory for ACME challenges. */
 };
 
+struct be_error
+{
+  int status;            /* Pound HTTP status index */
+  char *file;            /* File with error content page */
+};
+
 /* back-end definition */
 typedef struct _backend
 {
@@ -397,11 +404,13 @@ typedef struct _backend
   double t_requests;		/* time to answer these requests */
   double t_average;		/* average time to answer requests */
 
+  /* Data specific for each backend type. */
   union
   {
     struct be_regular reg;
     struct be_acme acme;
     struct be_redirect redirect;
+    struct be_error error;
   } v;
 
 } BACKEND;
@@ -894,3 +903,6 @@ void template_free (TEMPLATE tmpl);
 
 void errormsg (int ex, int ec, char const *fmt, ...);
 void json_error (struct json_value *val, char const *fmt, ...);
+
+int http_status_to_pound (int status);
+int pound_to_http_status (int err);

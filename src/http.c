@@ -129,6 +129,25 @@ static char default_error_page[] = "\
 </body></html>\
 ";
 
+int
+http_status_to_pound (int status)
+{
+  int i;
+
+  for (i = 0; i < HTTP_STATUS_MAX; i++)
+    if (http_status[i].code == status)
+      return i;
+  return -1;
+}
+
+int
+pound_to_http_status (int err)
+{
+  if (!(err >= 0 && err < HTTP_STATUS_MAX))
+    err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  return http_status[err].code;
+}
+
 /*
  * Write to BIO an error HTTP 1.PROTO response.  ERR is one of
  * HTTP_STATUS_* constants.  TXT supplies the error page content.
@@ -423,6 +442,58 @@ acme_response (POUND_HTTP *phttp)
     }
   free (file_name);
   return rc;
+}
+
+static int
+error_response (POUND_HTTP *phttp)
+{
+  int err = phttp->backend->v.error.status;
+  char *file_name = phttp->backend->v.error.file;
+
+  if (file_name)
+    {
+      int fd;
+      struct stat st;
+
+      if ((fd = open (file_name, O_RDONLY)) != -1)
+	{
+	  if (fstat (fd, &st) == 0)
+	    {
+	      BIO *bin;
+
+	      bin = BIO_new_fd (fd, BIO_CLOSE);
+	      bio_http_reply_start (phttp->cl, phttp->request.version,
+				    http_status[err].code,
+				    http_status[err].reason,
+				    err_headers, "text/html",
+				    (CONTENT_LENGTH) st.st_size);
+	      if (copy_bin (bin, phttp->cl, st.st_size, NULL, 0))
+		{
+		  if (errno)
+		    logmsg (LOG_NOTICE, "(%"PRItid") error copying file %s: %s",
+			    POUND_TID (), file_name, strerror (errno));
+		}
+
+	      BIO_free (bin);
+	      BIO_flush (phttp->cl);
+
+	      return err;
+	    }
+	  else
+	    {
+	      logmsg (LOG_ERR, "(%"PRItid") failed to stat error file %s: %s",
+		      POUND_TID (), file_name, strerror (errno));
+	      close (fd);
+	    }
+	}
+      else
+	logmsg (LOG_ERR, "(%"PRItid") failed to open error file %s: %s",
+		POUND_TID (), file_name, strerror (errno));
+    }
+
+  http_err_reply (phttp, err);
+
+  return err;
 }
 
 /*
@@ -1548,6 +1619,8 @@ be_service_name (BACKEND *be)
       return "(acme)";
     case BE_CONTROL:
       return "(control)";
+    case BE_ERROR:
+      return "(error)";
     }
   return "-";
 }
@@ -3092,6 +3165,10 @@ do_http (POUND_HTTP *phttp)
 
 	case BE_CONTROL:
 	  res = control_response (phttp);
+	  break;
+
+	case BE_ERROR:
+	  res = error_response (phttp);
 	  break;
 
 	case BE_BACKEND:
