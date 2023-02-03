@@ -32,6 +32,7 @@ int daemonize = 1;		/* run as daemon */
 int enable_supervisor = SUPERVISOR; /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
 int print_log;			/* print log messages to stdout/stderr */
+int enable_backend_stats;
 
 unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
 unsigned grace = DEFAULT_GRACE_TO;    /* grace period before shutdown */

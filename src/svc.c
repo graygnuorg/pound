@@ -1781,11 +1781,7 @@ backend_serialize (BACKEND *be)
 	      || json_object_set (obj, "priority",
 				  json_new_integer (be->priority))
 	      || json_object_set (obj, "alive", json_new_bool (backend_is_alive (be)))
-	      || json_object_set (obj, "enabled", json_new_bool (!be->disabled))
-	      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
-	      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
-	      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-	      || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http")))
+	      || json_object_set (obj, "enabled", json_new_bool (!be->disabled)))
 	    {
 	      err = 1;
 	    }
@@ -1793,7 +1789,11 @@ backend_serialize (BACKEND *be)
 	    switch (be->be_type)
 	      {
 	      case BE_BACKEND:
-		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr));
+		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
+		  || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
+		  || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
+		  || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
+		  || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"));
 		break;
 
 	      case BE_REDIRECT:
@@ -1817,6 +1817,14 @@ backend_serialize (BACKEND *be)
 				      be->v.error.file ? json_new_string (be->v.error.file) : json_new_null ());
 		break;
 	      }
+	  if (enable_backend_stats)
+	    {
+	      pthread_mutex_lock (&be->mut);
+	      if (be->n_requests > 0)
+		err |= json_object_set (obj, "avg_request_time",
+					json_new_number (be->t_requests));
+	      pthread_mutex_unlock (&be->mut);
+	    }
 	}
     }
   if (err)

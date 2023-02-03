@@ -2837,6 +2837,21 @@ select_backend (POUND_HTTP *phttp)
   return HTTP_STATUS_SERVICE_UNAVAILABLE;
 }
 
+static void
+backend_update_stats (BACKEND *be, struct timespec const *start)
+{
+  struct timespec diff, end;
+  double t;
+
+  clock_gettime (CLOCK_REALTIME, &end);
+  pthread_mutex_lock (&be->mut);
+  diff = timespec_sub (&end, start);
+  t = (double) diff.tv_sec * 1e9 + diff.tv_nsec;
+  be->t_requests = (be->n_requests * be->t_requests + t) / (be->n_requests + 1);
+  be->n_requests++;
+  pthread_mutex_unlock (&be->mut);
+}
+
 /*
  * handle an HTTP request
  */
@@ -2853,6 +2868,7 @@ do_http (POUND_HTTP *phttp)
   CONTENT_LENGTH content_length;
   struct http_header *hdr, *hdrtemp;
   char *val;
+  struct timespec be_start;
 
   if (phttp->lstn->allow_client_reneg)
     phttp->reneg_state = RENEG_ALLOW;
@@ -3153,6 +3169,8 @@ do_http (POUND_HTTP *phttp)
 
       phttp->res_bytes = 0;
       http_request_free (&phttp->response);
+
+      clock_gettime (CLOCK_REALTIME, &be_start);
       switch (phttp->backend->be_type)
 	{
 	case BE_REDIRECT:
@@ -3179,6 +3197,9 @@ do_http (POUND_HTTP *phttp)
 	    res = backend_response (phttp);
 	  break;
 	}
+
+      if (enable_backend_stats)
+	backend_update_stats (phttp->backend, &be_start);
 
       if (res == -1)
 	break;

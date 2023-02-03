@@ -398,11 +398,10 @@ typedef struct _backend
   int disabled;			/* true if the back-end is disabled */
   SLIST_ENTRY (_backend) next;
 
-  /* FIXME: The following four fields are currently not used: */
+  /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
-  int n_requests;		/* number of requests seen */
-  double t_requests;		/* time to answer these requests */
-  double t_average;		/* average time to answer requests */
+  double n_requests;		/* number of requests seen */
+  double t_requests;		/* Avg. time per request */
 
   /* Data specific for each backend type. */
   union

@@ -19,9 +19,9 @@
 {{- /* The code below deduces the type of object passed to it by
        presence of certain attributes:
 
-         "listeners"  -  entire listing as requested by poundctl list
+	 "listeners"  -  entire listing as requested by poundctl list
 	 "services"   -  single listener as requested by poundctl list /L
-	                 Notice that this attribute is present in the full
+			 Notice that this attribute is present in the full
 			 listing as well, so presense of "listeners" should
 			 be checked first.
 	 "backends"   -  single service as requested by poundctl list /L/S
@@ -45,16 +45,16 @@
 {{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
      {{- else if eq .type "redirect" -}}
 {{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
-     {{- end}} {{if .enabled}}active{{else}}disabled{{end}}
+     {{- end}} {{if .enabled}}active{{else}}disabled{{end}}{{if exists . "avg_request_time"}} - {{.avg_request_time}} ns{{end}}
    {{- end}}{{ /* block default.print_backend */ }}
   {{- end}}{{ /* iterating over backends */ }}
   {{- /* Show session type supported by the service */ }}
      Session type: {{.session_type}}
        {{- if len .sessions}}
-         {{- /* List all sessions */ }}
-         {{- range $i, $sess = .sessions}}
+	 {{- /* List all sessions */ }}
+	 {{- range $i, $sess = .sessions}}
        {{$i}}. Session {{$sess.key}} {{$sess.backend}} {{$sess.expire}}
-         {{- end}}{{ /* ranging over sessions */ -}}
+	 {{- end}}{{ /* ranging over sessions */ -}}
        {{end}}{{ /* if len */ }}
  {{- end}}{{ /* block default.print_service */ }}
  {{- end}}{{ /* iterating over services */ }}
@@ -89,10 +89,10 @@ Global services:
       {{block "xml.print_service" $svc -}}
       <service {{if typeof $sno | ne "null"}}index="{{ $sno }}" {{end}}name="{{ .name }}" status="{{if .enabled}}active{{else}}DISABLED{{end}}" session_type="{{.session_type}}">
       {{- range $bno,$be = .backends }}
-        {{block "xml.print_backend" $be -}}
-        <backend index="{{ $bno }}" type="{{ .type }}"
-        {{- if eq .type "backend"}} address="{{ .address }}"
-        {{- else if eq .type "redirect"}} url="{{ .url }}" code="{{ .code }}"
+	{{block "xml.print_backend" $be -}}
+	<backend index="{{ $bno }}" type="{{ .type }}"
+	{{- if eq .type "backend"}} address="{{ .address }}"
+	{{- else if eq .type "redirect"}} url="{{ .url }}" code="{{ .code }}"
 	{{- end}} priority="{{ .priority }}" alive="{{if .alive}}yes{{else}}no{{end}}" status="{{if .enabled}}active{{else}}disabled{{end}}" />
 	{{- end}}
       {{- end}}

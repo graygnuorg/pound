@@ -3582,6 +3582,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "ListenHTTPS", parse_listen_https, &listeners },
   { "ACL", parse_named_acl, NULL },
   { "PidFile", assign_string, &pid_name },
+  { "BackendStats", assign_bool, &enable_backend_stats },
   { NULL }
 };
 
