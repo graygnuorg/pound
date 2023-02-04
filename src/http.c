@@ -33,14 +33,17 @@ bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
 		      char const *type, CONTENT_LENGTH len)
 {
   BIO_printf (bio, "HTTP/1.%d %d %s\r\n"
-	      "Content-Type: %s\r\n"
-	      "Content-Length: %"PRICLEN"\r\n",
+	      "Content-Type: %s\r\n",
 	      proto,
 	      code,
 	      text,
-	      type, len);
+	      type);
   if (proto == 1)
-    BIO_printf (bio, "Connection: close\r\n");
+    {
+      BIO_printf (bio, 
+		  "Content-Length: %"PRICLEN"\r\n"
+		  "Connection: close\r\n", len);
+    }
   BIO_printf (bio, "%s\r\n", headers ? headers : "");
 }
 
@@ -193,6 +196,7 @@ http_err_reply (POUND_HTTP *phttp, int err)
 {
   bio_err_reply (phttp->cl, phttp->request.version, err,
 		 phttp->lstn->http_err[err]);
+  phttp->conn_closed = 1;
 }
 
 static char *
@@ -477,7 +481,8 @@ error_response (POUND_HTTP *phttp)
 	      BIO_free (bin);
 	      BIO_flush (phttp->cl);
 
-	      return err;
+	      phttp->response_code = http_status[err].code;
+	      return 0;
 	    }
 	  else
 	    {
@@ -493,7 +498,8 @@ error_response (POUND_HTTP *phttp)
 
   http_err_reply (phttp, err);
 
-  return err;
+  phttp->response_code = http_status[err].code;
+  return 0;
 }
 
 /*

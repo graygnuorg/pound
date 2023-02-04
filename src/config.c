@@ -2161,7 +2161,7 @@ parse_error_backend (void *call_data, void *section_data)
   BACKEND_HEAD *head = call_data;
   struct token *tok;
   int n, status;
-  char *file;
+  char *file = NULL;
   BACKEND *be;
 
   if ((tok = gettkn_expect (T_NUMBER)) == NULL)
