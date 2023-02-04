@@ -14,6 +14,21 @@
      * You should have received a copy of the GNU General Public License
      * along with pound.  If not, see <http://www.gnu.org/licenses/>.
      */ -}}
+
+{{define "default.core" -}}
+Server time: {{ .timestamp }}
+Pound version: {{ .version }}
+PID: {{ .pid }}
+{{with .workers -}}
+Workers:
+  Min:     {{ .min }}
+  Max:     {{ .max }}
+  Current: {{ .count }}
+  Active:  {{ .active }}
+Idle timeout: {{ .timeout }}
+{{end}}{{ /* with */ -}}
+{{end}}{{ /* define */ }}
+
 {{define "default" -}}
 
 {{- /* The code below deduces the type of object passed to it by
@@ -30,6 +45,9 @@
 
 {{if exists . "listeners" -}}
 {{- /* Iterate over all listeners */ -}}
+{{block "default.core" .}}
+Listeners:
+
 {{range $lno,$lstn = .listeners -}}
 {{printf "%3d" $lno}}. {{block "default.print_listener" $lstn -}}
  Listener {{.protocol}}://{{.address}} {{if .enabled}}enabled{{else}}disabled{{end}}
@@ -77,9 +95,25 @@ Global services:
 
 {{define "xml" -}}
 <pound>
-{{if exists . "listeners" -}}
+{{- if exists . "listeners" }}
   {{ /* This is a full listing. */ -}}
-  <queue size="{{ .queue_len }}" />
+  <core>
+    <timestamp>{{ .timestamp }}</timestamp>
+    <server>
+      <version>{{ .version }}</version>
+      <pid>{{ .pid }}</pid>
+    <server>
+    <workers>
+      {{with .workers -}}
+      <min>{{ .min }}</min>
+      <max>{{ .max }}</max>
+      <current>{{ .count }}</current>
+      <active>{{ .active }}</active>
+      <timeout>{{ .timeout }}</timeout>
+      {{- end -}}
+    </workers>
+    <queue size="{{ .queue_len }}" />
+  </core>
   {{- /* Iterate over all listeners */ -}}
   {{- range $lno,$lstn = .listeners }}
     {{block "xml.print_listener" $lstn -}}

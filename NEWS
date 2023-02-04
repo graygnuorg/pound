@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-03
+Pound -- history of user-visible changes. 2023-02-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -30,6 +30,24 @@ the name of a disk file with the error page content (HTML).  If not
 supplied, the text is determined as usual: first the Err<STATUS> statement
 for the enclosing listener is consulted.  If it is not present, the
 default error page is used.
+
+* Backend statistics
+
+Backend usage statistics is enabled by the BackendStats configuration
+directive:
+
+  BackendStats true
+
+Currently it consists of a single additional parameter in the
+"backend" output object: avg_request_time.  This parameter reflects
+average time spend when processing the request by that backend.
+
+* Core statistics
+
+The default output returned by pound control thread now includes
+additional core statistics: pound version, PID, worker subsystem
+configuration and state.  The default poundctl template has been
+changed to reflect it.
 
 
 Version 4.4, 2023-01-19

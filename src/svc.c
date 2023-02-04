@@ -1936,26 +1936,44 @@ listener_serialize (LISTENER *lstn)
 }
 
 static struct json_value *
+pound_core_serialize (void)
+{
+  struct json_value *obj;
+
+  if ((obj = json_new_object ()) != NULL)
+    {
+      int err = 0;
+      struct timespec ts;
+
+      clock_gettime (CLOCK_REALTIME, &ts);
+      err = json_object_set (obj, "version", json_new_string (PACKAGE_VERSION))
+	|| json_object_set (obj, "pid", json_new_integer (getpid ()))
+	|| json_object_set (obj, "timestamp", timespec_serialize (&ts))
+	|| json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()))
+	|| json_object_set (obj, "workers", workers_serialize ());
+      if (err)
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
+  return obj;
+}
+
+static struct json_value *
 pound_serialize (void)
 {
   struct json_value *obj, *p;
   LISTENER *lstn;
   SERVICE *svc;
-  struct timespec ts;
 
-  obj = json_new_object ();
+  obj = pound_core_serialize ();
 
   if (obj)
     {
       int err = 0;
 
-      clock_gettime (CLOCK_REALTIME, &ts);
-      if (json_object_set (obj, "timestamp", timespec_serialize (&ts))
-	  || json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ())))
-	{
-	  err = 1;
-	}
-      else if ((p = json_new_array ()) == NULL)
+      if ((p = json_new_array ()) == NULL)
 	err = 1;
       else if (json_object_set (obj, "listeners", p))
 	{
@@ -2048,6 +2066,22 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
   stringbuf_free (&sb);
 
   return HTTP_STATUS_OK;
+}
+
+static int
+control_list_core (BIO *c, char const *url)
+{
+  struct json_value *val;
+  int rc;
+
+  if ((val = pound_core_serialize ()) == NULL)
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  else
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
+  return rc;
 }
 
 static int
@@ -2431,6 +2465,7 @@ struct endpoint
 static struct endpoint control_endpoint[] = {
 #define S(s) s, sizeof(s)-1
   { S(""), METH_GET, control_list_all },
+  { S("/core"), METH_GET, control_list_core },
   { S("/listener"), METH_GET, control_list_listener },
   { S("/listener"), METH_DELETE, control_disable_listener },
   { S("/listener"), METH_PUT, control_enable_listener },

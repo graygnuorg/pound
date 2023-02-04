@@ -118,6 +118,34 @@ unsigned worker_min_count = DEFAULT_WORKER_MIN;
 unsigned worker_max_count = DEFAULT_WORKER_MAX;
 unsigned worker_idle_timeout = DEFAULT_WORKER_IDLE_TIMEOUT;
 
+struct json_value *
+workers_serialize (void)
+{
+  struct json_value *obj;
+  int err = 0;
+
+  obj = json_new_object ();
+  if (obj)
+    {
+      err = json_object_set (obj, "min", json_new_number (worker_min_count))
+	|| json_object_set (obj, "max", json_new_number (worker_max_count))
+	|| json_object_set (obj, "timeout", json_new_number (worker_idle_timeout));
+      if (err == 0)
+	{
+	  pthread_mutex_lock (&arg_mut);
+	  err = json_object_set (obj, "count", json_new_number (worker_count))
+	    || json_object_set (obj, "active", json_new_number (active_threads));
+	  pthread_mutex_unlock (&arg_mut);
+	}
+    }
+  if (err)
+    {
+      json_value_free (obj);
+      obj = NULL;
+    }
+  return obj;
+}
+
 static void
 worker_start (void)
 {

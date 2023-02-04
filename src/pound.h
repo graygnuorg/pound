@@ -905,3 +905,5 @@ void json_error (struct json_value *val, char const *fmt, ...);
 
 int http_status_to_pound (int status);
 int pound_to_http_status (int err);
+
+struct json_value *workers_serialize (void);
