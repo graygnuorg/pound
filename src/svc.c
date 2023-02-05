@@ -1718,6 +1718,55 @@ addrinfo_serialize (struct addrinfo *addr)
   return json_new_string (buf);
 }
 
+static double
+nabs (double a)
+{
+  return (a < 0) ? -a : a;
+}
+
+double
+nsqrt (double a, double prec)
+{
+  double x0, x1;
+
+  if (a < 0)
+    return 0;
+  if (a < prec)
+    return 0;
+  x1 = a / 2;
+  do
+    {
+      x0 = x1;
+      x1 = (x0 + a / x0) / 2;
+    }
+  while (nabs (x1 - x0) > prec);
+
+  return x1;
+}
+
+static struct json_value *
+backend_stats_serialize (BACKEND *be)
+{
+  struct json_value *obj;
+
+  if ((obj = json_new_object ()) != NULL)
+    {
+      int err = 0;
+
+      pthread_mutex_lock (&be->mut);
+      err |= json_object_set (obj, "request_count", json_new_number (be->n_requests));
+      if (be->n_requests > 0)
+	{
+	  err |= json_object_set (obj, "request_time_avg",
+				  json_new_number (be->t_requests))
+	    || json_object_set (obj, "request_time_stddev",
+				json_new_number (nsqrt (be->sqavg - be->t_requests * be->t_requests, 0.5)));
+	}
+      pthread_mutex_unlock (&be->mut);
+    }
+  return obj;
+}
+
 static struct json_value *
 backend_serialize (BACKEND *be)
 {
@@ -1774,13 +1823,7 @@ backend_serialize (BACKEND *be)
 		break;
 	      }
 	  if (enable_backend_stats)
-	    {
-	      pthread_mutex_lock (&be->mut);
-	      if (be->n_requests > 0)
-		err |= json_object_set (obj, "avg_request_time",
-					json_new_number (be->t_requests));
-	      pthread_mutex_unlock (&be->mut);
-	    }
+	    err |= json_object_set (obj, "stats", backend_stats_serialize (be));
 	}
     }
   if (err)

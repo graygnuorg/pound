@@ -63,7 +63,11 @@ Listeners:
 {{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
      {{- else if eq .type "redirect" -}}
 {{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
-     {{- end}} {{if .enabled}}active{{else}}disabled{{end}}{{if exists . "avg_request_time"}} - {{.avg_request_time}} ns{{end}}
+     {{- end}} {{if .enabled}}active{{else}}disabled{{end}}
+     {{- if exists . "stats"}} - {{with .stats -}}
+       {{.request_count}} requests{{if gt .request_count 0}}, {{.request_time_avg}} ns avg, {{.request_time_stddev}} stddev{{end}}
+       {{- end}}
+     {{- end}}
    {{- end}}{{ /* block default.print_backend */ }}
   {{- end}}{{ /* iterating over backends */ }}
   {{- /* Show session type supported by the service */ }}
