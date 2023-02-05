@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-04
+Pound -- history of user-visible changes. 2023-02-05
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -48,6 +48,22 @@ The default output returned by pound control thread now includes
 additional core statistics: pound version, PID, worker subsystem
 configuration and state.  The default poundctl template has been
 changed to reflect it.
+
+* New options: -F and -e
+
+The -F option forces the foreground mode: the program won't detach
+itself from the controlling terminal and remain in foreground even
+if configuration settings require otherwise.
+
+The -e option directs error diagnostics to stderr (stdout for
+LOG_DEBUG and LOG_INFO facilities).  It implies foreground mode.
+
+* Changes in verbose mode (-v)
+
+Error messages emitted to stderr (stdout) are duplicated in the
+syslog, if the configuration settings require so.
+
+* Fixed the LogFacility configuration statement
 
 
 Version 4.4, 2023-01-19

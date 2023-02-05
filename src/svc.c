@@ -256,45 +256,6 @@ service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
     service_rearm_expire_sessions (svc);
 }
 
-static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
-
-/*
- * Log an error to the syslog or to stderr
- */
-void
-vlogmsg (const int priority, const char *fmt, va_list ap)
-{
-  if (log_facility == -1 || print_log)
-    {
-      FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
-		     ? stdout : stderr;
-      pthread_mutex_lock (&log_mutex);
-      if (progname)
-	fprintf (fp, "%s: ", progname);
-      vfprintf (fp, fmt, ap);
-      fputc ('\n', fp);
-      pthread_mutex_unlock (&log_mutex);
-    }
-  else
-    {
-      struct stringbuf sb;
-      xstringbuf_init (&sb);
-      stringbuf_vprintf (&sb, fmt, ap);
-      syslog (priority, "%s", stringbuf_value (&sb));
-      stringbuf_free (&sb);
-    }
-  return;
-}
-
-void
-logmsg (const int priority, const char *fmt, ...)
-{
-  va_list ap;
-  va_start (ap, fmt);
-  vlogmsg (priority, fmt, ap);
-  va_end (ap);
-}
-
 /*
  * Translate inet/inet6 address/port into a string
  */
@@ -1409,10 +1370,8 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
   /* This generates a EC_KEY structure with no key, but a group defined */
   EC_KEY *ecdh;
   if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-    {
-      logmsg (LOG_ERR, "Unable to generate temp ECDH key");
-      exit (1);
-    }
+    abend ("Unable to generate temp ECDH key");
+
   SSL_CTX_set_tmp_ecdh (ctx, ecdh);
   SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
   EC_KEY_free (ecdh);
@@ -1564,11 +1523,8 @@ thr_timer (void *arg)
       if (rc == 0)
 	continue;
       if (rc != ETIMEDOUT)
-	{
-	  logmsg (LOG_CRIT, "unexpected error from pthread_cond_timedwait: %s",
-		  strerror (errno));
-	  exit (1);
-	}
+	abend ("unexpected error from pthread_cond_timedwait: %s",
+	       strerror (errno));
 
       if (job != DLIST_FIRST (&job_head))
 	/* Job was removed or its time changed */

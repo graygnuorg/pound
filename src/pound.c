@@ -31,7 +31,7 @@ int anonymise;			/* anonymise client address */
 int daemonize = 1;		/* run as daemon */
 int enable_supervisor = SUPERVISOR; /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
-int print_log;			/* print log messages to stdout/stderr */
+int print_log;                  /* print log messages to stdout/stderr during startup */
 int enable_backend_stats;
 
 unsigned alive_to = DEFAULT_ALIVE_TO; /* check interval for resurrection */
@@ -51,7 +51,87 @@ regex_t HEADER,			/* Allowed header */
 /* for systems without the definition */
 int SOL_TCP;
 #endif
+
+/*
+ * Error reporting.
+ */
 
+/* Serialize access to the log stream */
+static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/*
+ * Log an error to the syslog or to stderr
+ */
+void
+vlogmsg (const int priority, const char *fmt, va_list ap)
+{
+  if (log_facility == -1 || print_log)
+    {
+      FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
+		     ? stdout : stderr;
+      pthread_mutex_lock (&log_mutex);
+      if (progname)
+	fprintf (fp, "%s: ", progname);
+      vfprintf (fp, fmt, ap);
+      fputc ('\n', fp);
+      pthread_mutex_unlock (&log_mutex);
+    }
+
+  if (log_facility != -1)
+    {
+      struct stringbuf sb;
+      xstringbuf_init (&sb);
+      stringbuf_vprintf (&sb, fmt, ap);
+      syslog (priority, "%s", stringbuf_value (&sb));
+      stringbuf_free (&sb);
+    }
+  return;
+}
+
+void
+logmsg (const int priority, const char *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vlogmsg (priority, fmt, ap);
+  va_end (ap);
+}
+
+/*
+ * This is used as exit point if memory allocation failures occur at program
+ * startup (e.g. when parsing config or the like).
+ */
+void
+xnomem (void)
+{
+  logmsg (LOG_CRIT, "out of memory");
+  exit (1);
+}
+
+/*
+ * This is used as json_memabrt hook.  The code in svc.c handles memory
+ * allocation failures gracefully and returns 500 if any occurs.
+ */
+void
+lognomem (void)
+{
+  logmsg (LOG_CRIT, "out of memory");
+}
+
+/*
+ * Log a message at LOG_CRIT and terminate the program.
+ */
+void
+abend (char const *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vlogmsg (LOG_CRIT, fmt, ap);
+  va_end (ap);
+  logmsg (LOG_NOTICE, "pound terminated");
+  _exit (1);
+}
+
 /*
  * OpenSSL thread support stuff
  */
@@ -153,10 +233,7 @@ worker_start (void)
   int rc;
 
   if ((rc = pthread_create (&thr, &attr, thr_http, NULL)) != 0)
-    {
-      logmsg (LOG_ERR, "create thr_http: %s - aborted", strerror (rc));
-      exit (1);
-    }
+    abend ("can't create worker thread: %s", strerror (rc));
   worker_count++;
 }
 
@@ -417,10 +494,6 @@ thr_dispatch (void *unused)
 		    {
 		      if (lstn->disabled)
 			{
-			  /*
-			    addr2str(tmp, MAXBUF - 1, &clnt_addr, 1);
-			    logmsg(LOG_WARNING, "HTTP disabled listener from %s", tmp);
-			  */
 			  close (clnt);
 			  continue;
 			}
@@ -545,18 +618,11 @@ server (void)
 
   /* set new stack size  */
   if (pthread_attr_setstacksize (&attr, 1 << 18))
-    {
-      logmsg (LOG_ERR, "can't set stack size - aborted");
-      exit (1);
-    }
+    abend ("can't set stack size");
 
   /* start timer */
   if (pthread_create (&thr, &attr, thr_timer, NULL))
-    {
-      logmsg (LOG_ERR, "create thr_resurect: %s - aborted",
-	      strerror (errno));
-      exit (1);
-    }
+    abend ("can't create timer thread: %s", strerror (errno));
 
   /*
    * Create the worker threads
@@ -719,25 +785,49 @@ supervisor (void)
 }
 #endif
 
-/*
- * This is used as exit point if memory allocation failures occur at program
- * startup (e.g. when parsing config or the like).
- */
 void
-xnomem (void)
+detach (void)
 {
-  logmsg (LOG_CRIT, "out of memory");
-  exit (1);
-}
+  struct sigaction oldsa, sa;
+  pid_t pid;
+  int ec;
 
-/*
- * This is used as json_memabrt hook.  The code in svc.c handles memory
- * allocation failures gracefully and returns 500 if any occurs.
- */
-void
-lognomem (void)
-{
-  logmsg (LOG_CRIT, "out of memory");
+  sigemptyset (&sa.sa_mask);
+  sa.sa_handler = SIG_IGN;
+  sa.sa_flags = 0;
+
+  if (sigaction (SIGHUP, &sa, &oldsa))
+    abend ("sigaction: %s", strerror (errno));
+
+  switch (fork ())
+    {
+    case -1:
+      abend ("fork: %s", strerror (errno));
+      _exit (1);
+
+    case 0:
+      break;
+
+    default:
+      _exit (0);
+    }
+
+  pid = setsid ();
+  ec = errno;
+
+  sigaction (SIGHUP, &oldsa, NULL);
+
+  if (pid == -1)
+    abend ("setsid: %s", strerror (ec));
+
+  chdir ("/");
+
+  close (0);
+  close (1);
+  close (2);
+  open ("/dev/null", O_RDONLY);
+  open ("/dev/null", O_WRONLY);
+  dup (1);
 }
 
 int
@@ -768,10 +858,7 @@ main (const int argc, char **argv)
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
       || regcomp (&LOCATION, "(http|https)://([^/]+)(.*)",
 		  REG_ICASE | REG_NEWLINE | REG_EXTENDED))
-    {
-      logmsg (LOG_ERR, "bad essential Regex - aborted");
-      exit (1);
-    }
+    abend ("bad essential Regex");
 
 #ifndef SOL_TCP
   /* for systems without the definition */
@@ -789,7 +876,7 @@ main (const int argc, char **argv)
   config_parse (argc, argv);
 
   if (log_facility != -1)
-    openlog (progname, LOG_CONS | LOG_NDELAY | LOG_PID, LOG_DAEMON);
+    openlog (progname, LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
 
   logmsg (LOG_NOTICE, "starting...");
 
@@ -820,22 +907,18 @@ main (const int argc, char **argv)
 	      abort ();
 	    }
 	  if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
-	    {
-	      logmsg (LOG_ERR, "HTTP socket %s create: %s - aborted",
-		      addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		      strerror (errno));
-	      exit (1);
-	    }
+	    abend ("can't create HTTP socket %s: %s",
+		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		   strerror (errno));
+
 	  opt = 1;
 	  setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
 	  if (bind (lstn->sock, lstn->addr.ai_addr,
 		    (socklen_t) lstn->addr.ai_addrlen) < 0)
-	    {
-	      logmsg (LOG_ERR, "HTTP socket bind %s: %s - aborted",
-		      addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		      strerror (errno));
-	      exit (1);
-	    }
+	    abend ("can't bind HTTP socket to %s: %s",
+		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		   strerror (errno));
+
 	  listen (lstn->sock, 512);
 	}
       n_listeners++;
@@ -847,10 +930,7 @@ main (const int argc, char **argv)
       struct passwd *pw;
 
       if ((pw = getpwnam (user)) == NULL)
-	{
-	  logmsg (LOG_ERR, "no such user %s - aborted", user);
-	  exit (1);
-	}
+	abend ("no such user %s", user);
       user_id = pw->pw_uid;
     }
 
@@ -860,41 +940,13 @@ main (const int argc, char **argv)
       struct group *gr;
 
       if ((gr = getgrnam (group)) == NULL)
-	{
-	  logmsg (LOG_ERR, "no such group %s - aborted", group);
-	  exit (1);
-	}
+	abend ("no such group %s", group);
       group_id = gr->gr_gid;
     }
 
-  /* Turn off verbose messages (if necessary) */
   print_log = 0;
-
   if (daemonize)
-    {
-      /* daemonize - make ourselves a subprocess. */
-      switch (fork ())
-	{
-	case 0:
-	  if (log_facility != -1)
-	    {
-	      close (0);
-	      close (1);
-	      close (2);
-	      open ("/dev/null", O_RDONLY);
-	      open ("/dev/null", O_WRONLY);
-	    }
-	  break;
-
-	case -1:
-	  logmsg (LOG_ERR, "fork: %s - aborted", strerror (errno));
-	  exit (1);
-
-	default:
-	  _exit (0);
-	}
-      setsid ();
-    }
+    detach ();
 
   pidfile_create ();
 
@@ -907,29 +959,19 @@ main (const int argc, char **argv)
       RAND_bytes (&random, 1);
 
       if (chroot (root_jail))
-	{
-	  logmsg (LOG_ERR, "chroot: %s - aborted", strerror (errno));
-	  exit (1);
-	}
+	abend ("chroot: %s", strerror (errno));
+
       if (chdir ("/"))
-	{
-	  logmsg (LOG_ERR, "chroot/chdir: %s - aborted", strerror (errno));
-	  exit (1);
-	}
+	abend ("chdir /: %s", strerror (errno));
     }
 
   if (group)
     if (setgid (group_id) || setegid (group_id))
-      {
-	logmsg (LOG_ERR, "setgid: %s - aborted", strerror (errno));
-	exit (1);
-      }
+      abend ("setgid: %s", strerror (errno));
+
   if (user)
     if (setuid (user_id) || seteuid (user_id))
-      {
-	logmsg (LOG_ERR, "setuid: %s - aborted", strerror (errno));
-	exit (1);
-      }
+      abend ("setuid: %s", strerror (errno));
 
 #if SUPERVISOR
   if (enable_supervisor && daemonize)

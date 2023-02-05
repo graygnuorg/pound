@@ -21,7 +21,8 @@ extern unsigned alive_to;	/* check interval for resurrection */
 extern int daemonize;		/* run as daemon */
 extern int enable_supervisor;   /* run supervisor process */
 extern int log_facility;	/* log facility to use */
-extern int print_log;		/* print log messages to stdout/stderr */
+extern int print_log;           /* print log messages to stdout/stderr during startupb
+				 */
 extern int enable_backend_stats;
 
 extern regex_t HEADER,		/* Allowed header */

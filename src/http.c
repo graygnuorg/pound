@@ -40,7 +40,7 @@ bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
 	      type);
   if (proto == 1)
     {
-      BIO_printf (bio, 
+      BIO_printf (bio,
 		  "Content-Length: %"PRICLEN"\r\n"
 		  "Connection: close\r\n", len);
     }
@@ -1224,9 +1224,6 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
       /*
        * this is expected to occur only on client reads
        */
-      /*
-       * logmsg(LOG_NOTICE, "headers: bad starting read");
-       */
       return -1;
     }
 
@@ -1245,8 +1242,6 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 	  http_request_free (req);
 	  /*
 	   * this is not necessarily an error, EOF/timeout are possible
-	   * logmsg(LOG_WARNING, "(%lx) e500 can't read header",
-	   * pthread_self()); err_reply(arg, h500, lstn->err500);
 	   */
 	  return -1;
 	}

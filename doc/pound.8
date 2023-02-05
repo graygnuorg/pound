@@ -14,13 +14,13 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 3, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 5, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
 .TP
 .B pound
-[\fB\-chVv\fR]
+[\fB\-FVcehv\fR]
 [\fB\-W [\fBno\-]\fIFEATURE\fR]
 [\fB\-f \fICONF-FILE\fR]
 [\fB\-p \fIPID-FILE\fR]
@@ -176,6 +176,18 @@ will exit immediately after parsing the configuration file. This may
 be used for running a quick syntax check before actually activating a
 server.
 .TP
+\fB\-e\fR
+Log to stdandard error (standard output for \fBLOG_DEBUG\fR and
+\fBLOG_INFO\fR facilities).  This option implies \fIforeground mode\fR
+(\fB\-F\fR) and overrides the \fILogLevel\fR configuration setting.
+.TP
+\fB\-F\fR
+Foreground mode.  The program will not detach from the controlling
+terminal and will remain in foreground after startup.  This overrides
+the \fBDaemon\fR configuration setting.  The log stream (syslog
+facility or stderr) requested in the configuration remains in effect.
+See also the \fB\-e\fR option, above.
+.TP
 \fB\-f\fR \fIFILE\fR
 Location of the configuration file (see below for a full description
 of the format).  Default is
@@ -201,12 +213,11 @@ statement in the
 section below, for a detailed discussion of this file.
 .TP
 \fB\-v\fR
-Verbose mode: error messages will be sent to stdout even if
+Verbose mode: during startup, error messages will be sent to stderr
+(stdout for \fBLOG_DEBUG\fR and \fBLOG_INFO\fR facilities).  If
 .B pound
-was configured to log to syslog. This applies only to startup messages, before
-.B pound
-puts itself in the background. Normal operational messages will still
-go to syslog.
+was configured to log to syslog, error diagnostics will be duplicated
+there as well.  After startup the configuration settings take effect.
 .TP
 \fB\-V\fR
 Print version:

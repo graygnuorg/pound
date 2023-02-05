@@ -696,6 +696,8 @@ void *thr_http (void *);
 /* Log an error to the syslog or to stderr */
 void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
+void abend (char const *fmt, ...)
+  ATTR_PRINTFLIKE(1,2);
 
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);

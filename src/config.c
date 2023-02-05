@@ -3609,10 +3609,7 @@ parse_config_file (char const *file)
 	  if (cur_input)
 	    exit (1);
 	  if (worker_min_count > worker_max_count)
-	    {
-	      logmsg (LOG_ERR, "WorkerMinCount is greater than WorkerMaxCount");
-	      exit (1);
-	    }
+	    abend ("WorkerMinCount is greater than WorkerMaxCount");
 	  log_facility = pound_defaults.facility;
 	}
     }
@@ -3717,16 +3714,18 @@ print_help (void)
 {
   int i;
 
-  printf ("usage: %s [-Vchv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
+  printf ("usage: %s [-FVcehv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
   printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
   printf ("\nOptions are:\n\n");
   printf ("   -c               check configuration file syntax and exit\n");
+  printf ("   -e               print errors on stderr (implies -F)\n");
+  printf ("   -F               remain in foreground after startup\n");
   printf ("   -f FILE          read configuration from FILE\n");
   printf ("                    (default: %s)\n", POUND_CONF);
   printf ("   -p FILE          write PID to FILE\n");
   printf ("                    (default: %s)\n", POUND_PID);
   printf ("   -V               print program version, compilation settings, and exit\n");
-  printf ("   -v               verbose mode\n");
+  printf ("   -v               print log messages to stdout/stderr during startup\n");
   printf ("   -W [no-]FEATURE  enable or disable optional feature\n");
   printf ("\n");
   printf ("FEATUREs are:\n");
@@ -3746,14 +3745,24 @@ config_parse (int argc, char **argv)
   int check_only = 0;
   char *conf_name = POUND_CONF;
   char *pid_file_option = NULL;
+  int foreground_option = 0;
+  int stderr_option = 0;
 
   set_progname (argv[0]);
 
-  while ((c = getopt (argc, argv, "cf:hp:VvW:")) > 0)
+  while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
     switch (c)
       {
       case 'c':
 	check_only = 1;
+	break;
+
+      case 'e':
+	stderr_option = foreground_option = 1;
+	break;
+
+      case 'F':
+	foreground_option = 1;
 	break;
 
       case 'f':
@@ -3805,11 +3814,22 @@ config_parse (int argc, char **argv)
     }
 
   if (SLIST_EMPTY (&listeners))
-    {
-      logmsg (LOG_ERR, "no listeners defined");
-      exit (1);
-    }
+    abend ("no listeners defined");
 
   if (pid_file_option)
     pid_name = pid_file_option;
+
+  if (foreground_option)
+    daemonize = 0;
+
+  if (daemonize == 0)
+    {
+      if (stderr_option)
+	log_facility = -1;
+    }
+  else
+    {
+      if (log_facility == -1)
+	log_facility = LOG_DAEMON;
+    }
 }
