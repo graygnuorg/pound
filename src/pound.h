@@ -400,9 +400,9 @@ typedef struct _backend
 
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
-  double n_requests;		/* number of requests seen */
-  double t_requests;		/* Avg. time per request */
-  double sqavg;                 /* Avg. squared time per request */
+  double numreq;		/* number of requests seen */
+  double avgtime;		/* Avg. time per request */
+  double avgsqtime;             /* Avg. squared time per request */
 
   /* Data specific for each backend type. */
   union

@@ -2848,9 +2848,9 @@ backend_update_stats (BACKEND *be, struct timespec const *start)
   pthread_mutex_lock (&be->mut);
   diff = timespec_sub (&end, start);
   t = (double) diff.tv_sec * 1e9 + diff.tv_nsec;
-  be->t_requests = (be->n_requests * be->t_requests + t) / (be->n_requests + 1);
-  be->sqavg = (be->n_requests * be->sqavg + t*t) / (be->n_requests + 1);
-  be->n_requests++;
+  be->avgtime = (be->numreq * be->avgtime + t) / (be->numreq + 1);
+  be->avgsqtime = (be->numreq * be->avgsqtime + t*t) / (be->numreq + 1);
+  be->numreq++;
   pthread_mutex_unlock (&be->mut);
 }
 

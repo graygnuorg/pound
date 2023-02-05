@@ -1754,13 +1754,13 @@ backend_stats_serialize (BACKEND *be)
       int err = 0;
 
       pthread_mutex_lock (&be->mut);
-      err |= json_object_set (obj, "request_count", json_new_number (be->n_requests));
-      if (be->n_requests > 0)
+      err |= json_object_set (obj, "request_count", json_new_number (be->numreq));
+      if (be->numreq > 0)
 	{
 	  err |= json_object_set (obj, "request_time_avg",
-				  json_new_number (be->t_requests))
+				  json_new_number (be->avgtime))
 	    || json_object_set (obj, "request_time_stddev",
-				json_new_number (nsqrt (be->sqavg - be->t_requests * be->t_requests, 0.5)));
+				json_new_number (nsqrt (be->avgsqtime - be->avgtime * be->avgtime, 0.5)));
 	}
       pthread_mutex_unlock (&be->mut);
     }
