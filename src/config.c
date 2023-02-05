@@ -3687,20 +3687,9 @@ feature_set (char const *name)
   return -1;
 }
 
-static char const *
-supervisor_status (void)
-{
-#if SUPERVISOR
-  return "enabled";
-#else
-  return "disabled";
-#endif
-}
-
 struct string_value pound_settings[] = {
   { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
   { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
-  { "Supervisor", STRING_FUNCTION, { .s_func = supervisor_status } },
   { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
 #if ! SET_DH_AUTO
   { "DH bits",         STRING_INT, { .s_int = DH_LEN } },

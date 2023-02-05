@@ -128,18 +128,6 @@ file.
 
 By default, its presence is determined automatically.
 
-* `--enable-super` or `--disable-super`
-
-Enable (the default) or disable compilation of the supervisor process
-code.  This feature is used when __pound__ runs in daemon mode.  If it
-is enabled, an extra supervisor process is launched that controls
-execution of the __pound__ daemon process.  If the daemon process
-terminates abnormally, the supervisor immediately restarts it and
-reflects the fact in the log file.
-
-This can also be disabled or enabled on runtime, by the configuration
-settings.
-
 * `--with-maxbuf=`*n*
 
 Sets the value of `MAXBUF` parameter - the size of a generic buffer

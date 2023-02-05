@@ -92,18 +92,6 @@ AC_ARG_WITH([group],
  [AS_HELP_STRING([--with-group=name],[The group that will own the files installed by Pound])],
  [I_GRP="${with_group}"])
 
-AC_ARG_ENABLE([super],
- [AS_HELP_STRING([--enable-super],[enable or disable running with supervisor process (default: enabled)])],
- [if test ${enableval} = "yes"; then
-    SUPERVISOR=1
-  else
-    SUPERVISOR=0
-  fi],
- [SUPERVISOR=1])
-
-AC_DEFINE_UNQUOTED([SUPERVISOR],[$SUPERVISOR],
- [Compile supervisor code])
-
 AC_ARG_ENABLE([pcreposix],
  [AS_HELP_STRING([--enable-pcreposix],[enable or disable using the pcreposix library (default: enabled if available)])],
  [status_pcreposix=${enableval}],
@@ -215,7 +203,6 @@ Pound configuration parameters:
 Buffer size ................................... $bufsize
 Owner user .................................... $owner_user
 Owner group ................................... $owner_group
-Supervisor process ............................ $status_supervisor
 PCRE POSIX library ............................ $status_pcreposix
 Memory allocator .............................. $memory_allocator
 
@@ -226,11 +213,6 @@ EOF
 [bufsize=$MAXBUF
 owner_user=$I_OWNER
 owner_group=$I_GRP
-if test $SUPERVISOR = 1; then
-  status_supervisor=yes
-else
-  status_supervisor=no
-fi
 status_pcreposix=$status_pcreposix
 memory_allocator=$memory_allocator
 ])

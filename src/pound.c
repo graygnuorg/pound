@@ -29,7 +29,7 @@ char *pid_name = POUND_PID;     /* file to record pid in */
 
 int anonymise;			/* anonymise client address */
 int daemonize = 1;		/* run as daemon */
-int enable_supervisor = SUPERVISOR; /* enable supervisor process */
+int enable_supervisor = 1;      /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
 int print_log;                  /* print log messages to stdout/stderr during startup */
 int enable_backend_stats;
@@ -668,7 +668,6 @@ server (void)
   exit (0);
 }
 
-#if SUPERVISOR
 static void
 supervisor (void)
 {
@@ -783,7 +782,6 @@ supervisor (void)
 	}
     }
 }
-#endif
 
 void
 detach (void)
@@ -973,11 +971,9 @@ main (const int argc, char **argv)
     if (setuid (user_id) || seteuid (user_id))
       abend ("setuid: %s", strerror (errno));
 
-#if SUPERVISOR
   if (enable_supervisor && daemonize)
     supervisor ();
   else
-#endif
     server ();
 
   return 0;
