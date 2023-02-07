@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-05
+Pound -- history of user-visible changes. 2023-02-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -38,9 +38,12 @@ directive:
 
   BackendStats true
 
-Currently it consists of a single additional parameter in the
-"backend" output object: avg_request_time.  This parameter reflects
-average time spend when processing the request by that backend.
+When enabled, the "stats" object will be added to the JSON output for
+each backend.  This object holds the following fields:
+
+  request_count          Number of requests processed by this backend.
+  request_time_avg       Average request processing time.
+  request_time_stddev    Standard deviation of the above.
 
 * Core statistics
 

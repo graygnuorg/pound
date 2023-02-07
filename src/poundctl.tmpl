@@ -29,6 +29,10 @@ Idle timeout: {{ .timeout }}
 {{end}}{{ /* with */ -}}
 {{end}}{{ /* define */ }}
 
+{{define "milliseconds" -}}
+{{ 1000000 | div . | printf "%.2f" }}
+{{- end}}
+
 {{define "default" -}}
 
 {{- /* The code below deduces the type of object passed to it by
@@ -65,7 +69,7 @@ Listeners:
 {{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
      {{- end}} {{if .enabled}}active{{else}}disabled{{end}}
      {{- if exists . "stats"}} - {{with .stats -}}
-       {{.request_count}} requests{{if gt .request_count 0}}, {{.request_time_avg}} ns avg, {{.request_time_stddev}} stddev{{end}}
+       {{.request_count}} requests{{if gt .request_count 0}}, {{template "milliseconds" .request_time_avg}} ms avg, {{template "milliseconds" .request_time_stddev}} stddev{{end}}
        {{- end}}
      {{- end}}
    {{- end}}{{ /* block default.print_backend */ }}

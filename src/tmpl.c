@@ -366,6 +366,13 @@ is_true (struct json_value *val)
   return !is_empty (val);
 }
 
+static void
+assert_args (ACTUAL_ARG_HEAD const *head, char const *funcname)
+{
+  if (SLIST_EMPTY (head))
+    errormsg (1, 0, "not enough arguments for %s", funcname);
+}
+
 static struct tmpl_actual_arg *
 single_arg (ACTUAL_ARG_HEAD const *head, char const *funcname)
 {
@@ -760,6 +767,84 @@ func_exists (ACTUAL_ARG_HEAD const *head)
   return json_new_bool (rc);
 }
 
+static void
+assert_numeric_value (struct json_value *val, char const *func, int n)
+{
+  if (val->type != json_number && val->type != json_integer)
+    errormsg (1, 0, "bad type of argument %d to %s", n, func);
+}
+
+static struct json_value *
+func_add (ACTUAL_ARG_HEAD const *head)
+{
+  double n;
+  int i;
+  struct tmpl_actual_arg *arg;
+
+  assert_args (head, "add");
+  arg = SLIST_FIRST (head);
+  assert_numeric_value (arg->val, "add", 1);
+  n = arg->val->v.n;
+  i = 2;
+  while ((arg = SLIST_NEXT (arg, next)) != NULL)
+    {
+      assert_numeric_value (arg->val, "add", i++);
+      n += arg->val->v.n;
+    }
+  return json_new_number (n);
+}
+
+static struct json_value *
+func_sub (ACTUAL_ARG_HEAD const *head)
+{
+  double n;
+  int i;
+  struct tmpl_actual_arg *arg;
+
+  assert_args (head, "sub");
+  arg = SLIST_FIRST (head);
+  assert_numeric_value (arg->val, "sub", 1);
+  n = arg->val->v.n;
+  i = 2;
+  while ((arg = SLIST_NEXT (arg, next)) != NULL)
+    {
+      assert_numeric_value (arg->val, "sub", i++);
+      n -= arg->val->v.n;
+    }
+  return json_new_number (n);
+}
+
+static struct json_value *
+func_mul (ACTUAL_ARG_HEAD const *head)
+{
+  double n;
+  int i;
+  struct tmpl_actual_arg *arg;
+
+  assert_args (head, "mul");
+  arg = SLIST_FIRST (head);
+  assert_numeric_value (arg->val, "mul", 1);
+  n = arg->val->v.n;
+  i = 2;
+  while ((arg = SLIST_NEXT (arg, next)) != NULL)
+    {
+      assert_numeric_value (arg->val, "mul", i++);
+      n *= arg->val->v.n;
+    }
+  return json_new_number (n);
+}
+
+static struct json_value *
+func_div (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *a, *b;
+
+  two_args (head, "div", &a, &b);
+  assert_numeric_value (a, "div", 1);
+  assert_numeric_value (b, "div", 2);
+  return json_new_number (a->v.n / b->v.n);
+}
+
 /*
  * Implementation of the printf function, written along the lines of
  * sprintf built-in function in mailfromd
@@ -817,6 +902,14 @@ tmpl_va_arg_n (struct tmpl_actual_arg *arg, unsigned n, int type, void *retval)
 	}
       break;
 
+    case json_number:
+      if (arg->val->type == type || arg->val->type == json_integer)
+	{
+	  *(double*)retval = arg->val->v.n;
+	  return;
+	}
+      break;
+
     case json_string:
       {
 	struct json_value *jv = json_cast_to_string (arg->val);
@@ -868,6 +961,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
   int flags = 0;
   unsigned width = 0;
   unsigned prec = 0;
+  int has_prec = 0;
   unsigned argnum;
   char const *format;
   struct stringbuf sb, tmpbuf;
@@ -893,6 +987,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
       unsigned n;
       char *str;
       long num;
+      double d;
       int negative;
       char fmtbuf[] = { '%', 'x', 0 };
 
@@ -907,6 +1002,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	      flags = 0;
 	      width = 0;
 	      prec = 0;
+	      has_prec = 0;
 	    }
 	  else
 	    stringbuf_add_char (&sb, format[cur]);
@@ -1034,6 +1130,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 		  cur++;
 		  state = fmts_prec_arg;
 		}
+	      has_prec = 1;
 	    }
 	  break;
 
@@ -1106,6 +1203,9 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	       */
 	      if (prec || (flags & FMT_ADJUST_LEFT))
 		flags &= ~FMT_PADZERO;
+	      /* A + overrides a ' ' if both are given. */
+	      if (flags & FMT_SIGNPFX)
+		flags &= ~FMT_SPACEPFX;
 
 	      /* Reset temp buffer */
 	      stringbuf_reset (&tmpbuf);
@@ -1122,7 +1222,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 		  memset (str, '0', prec - n);
 		}
 
-	      /* Provide sign if requestes */
+	      /* Provide sign if requested */
 	      if (flags & FMT_SIGNPFX)
 		{
 		  *--str = negative ? '-' : '+';
@@ -1169,6 +1269,10 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	       */
 	      if (prec || (flags & FMT_ADJUST_LEFT))
 		flags &= ~FMT_PADZERO;
+	      /* A + overrides a ' ' if both are given. */
+	      if (flags & FMT_SIGNPFX)
+		flags &= ~FMT_SPACEPFX;
+
 	      stringbuf_reset (&tmpbuf);
 	      stringbuf_printf (&tmpbuf, "%lu", num);
 	      str = stringbuf_finish (&tmpbuf);
@@ -1205,6 +1309,10 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	       */
 	      if (prec || (flags & FMT_ADJUST_LEFT))
 		flags &= ~FMT_PADZERO;
+	      /* A + overrides a ' ' if both are given. */
+	      if (flags & FMT_SIGNPFX)
+		flags &= ~FMT_SPACEPFX;
+
 	      fmtbuf[1] = format[cur];
 	      /* Reset temp buffer */
 	      stringbuf_reset (&tmpbuf);
@@ -1261,6 +1369,10 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	       */
 	      if (prec || (flags & FMT_ADJUST_LEFT))
 		flags &= ~FMT_PADZERO;
+	      /* A + overrides a ' ' if both are given. */
+	      if (flags & FMT_SIGNPFX)
+		flags &= ~FMT_SPACEPFX;
+
 	      stringbuf_reset (&tmpbuf);
 	      stringbuf_set (&tmpbuf, ' ', 1);
 	      stringbuf_printf (&tmpbuf, "%lo", num);
@@ -1290,6 +1402,71 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 		}
 	      else
 		stringbuf_add (&sb, str, n);
+	      break;
+
+	    case 'e':
+	    case 'E':
+	    case 'f':
+	    case 'F':
+	    case 'g':
+	    case 'G':
+	      {
+		char ffmt[sizeof("%#0-+ *.*f")];
+		int i = 0;
+
+		tmpl_va_arg_n (argstart, argnum, json_number, &d);
+
+		/* Prepare the format */
+
+		if (prec || (flags & FMT_ADJUST_LEFT))
+		  flags &= ~FMT_PADZERO;
+		/* A + overrides a ' ' if both are given. */
+		if (flags & FMT_SIGNPFX)
+		  flags &= ~FMT_SPACEPFX;
+
+		ffmt[i++] = '%';
+		if (flags & FMT_ALTERNATE)
+		  ffmt[i++] = '#';
+		if (flags & FMT_PADZERO)
+		  ffmt[i++] = '0';
+		if (flags & FMT_ADJUST_LEFT)
+		  ffmt[i++] = '-';
+		if (flags & FMT_SPACEPFX)
+		  ffmt[i++] = ' ';
+		if (flags & FMT_SIGNPFX)
+		  ffmt[i++] = '+';
+
+		if (width)
+		  ffmt[i++] = '*';
+		if (has_prec)
+		  {
+		    ffmt[i++] = '.';
+		    ffmt[i++] = '*';
+		  }
+		ffmt[i++] = format[cur];
+		ffmt[i] = 0;
+
+		/* Reset temp buffer */
+		stringbuf_reset (&tmpbuf);
+
+		/* Format the value */
+		if (width)
+		  {
+		    if (has_prec)
+		      stringbuf_printf (&tmpbuf, ffmt, width, prec, d);
+		    else
+		      stringbuf_printf (&tmpbuf, ffmt, prec, d);
+		  }
+		else
+		  {
+		    if (has_prec)
+		      stringbuf_printf (&tmpbuf, ffmt, prec, d);
+		    else
+		      stringbuf_printf (&tmpbuf, ffmt, d);
+		  }
+	      }
+	      str = stringbuf_finish (&tmpbuf);
+	      stringbuf_add_string (&sb, str);
 	      break;
 
 	    case 'v':
@@ -1338,6 +1515,10 @@ static struct func_def funtab[] = {
   { "printf", func_printf },
   { "typeof", func_typeof },
   { "exists", func_exists },
+  { "add", func_add },
+  { "sub", func_sub },
+  { "mul", func_mul },
+  { "div", func_div },
   { NULL }
 };
 

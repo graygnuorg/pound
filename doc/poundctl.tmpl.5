@@ -13,7 +13,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL.TMPL 5 "January 10, 2023" "pound" "File Formats Manual"
+.TH POUNDCTL.TMPL 5 "February 7, 2023" "pound" "File Formats Manual"
 .SH NAME
 poundctl.tmpl \- templates for poundctl.
 .SH DESCRIPTION
@@ -129,7 +129,7 @@ action, the following two keywords may appear:
 The innermost
 .BI "{{range " pipeline }}
 loop is ended early, stopping the current iteration and bypassing all
-remaining iterations. 
+remaining iterations.
 .TP
 .B {{continue}}
 The current iteration of the innermost
@@ -254,7 +254,7 @@ Returns \fItrue\fR if its argument evaluates to \fIfalse\fR.
 .TP
 .BI eq " A1 A2"
 Returns \fItrue\fR if both its arguments are equal.  This applies only
-if both \fIA1\fR and \fIA2\fR are numeric or if they both are strings. 
+if both \fIA1\fR and \fIA2\fR are numeric or if they both are strings.
 .TP
 .BI ne " A1 A2"
 Returns \fItrue\fR if its arguments (both must be numeric or strings)
@@ -302,6 +302,18 @@ Evaluates to the type of its argument, one of:
 \fBA1\fR must evaluate to an object and \fBA2\fR to string.  The
 function evaluates to \fBtrue\fR if the attribute \fIA2\fR is present
 in \fIA1\fR.
+.TP
+\fBadd \fIA1 A2\fR...
+Returns the sum of its arguments.
+.TP
+\fBsub \fIA1 A2\fR
+Returns the difference \fIA1\fR \- \fIA2\fR.
+.TP
+\fBmul \fIA1 A2\fR
+Multiplies \fIA1\fR by \fIA2\fR.
+.TP
+\fBdiv \fIA1 A2\fR
+Divides \fIA1\fR by \fIA2\fR.
 .SS Variables
 Variables (referred to as \fB$\fIname\fR) can be defined in
 \fBrange\fR and \fBwith\fR actions.  For \fBrange\fR, the syntax is:
@@ -349,7 +361,7 @@ fragment:
   ...
 {{else if exists . "backends"}}
   {{/* Single service, as requested by \fBpoundctl list /\fIL\fB/\fIS\fR. */}}
-  ...  
+  ...
 {{else}}
   {{/* Backend listing (\fBpoundctl list /\fIL\fB/\fIS\fB/\fIB\fR) */}}
   ...
@@ -547,4 +559,3 @@ There is NO WARRANTY, to the extent permitted by law.
 .\" time-stamp-end: "\""
 .\" time-stamp-line-limit: 20
 .\" end:
-
