@@ -379,6 +379,36 @@ An array of \fIlistener\fR objects.  See below for a description.
 An array of \fIservices\fR objects, representing services defined in
 the global scope of the \fBpound\fR configuration file.
 .TP
+.B pid
+PID of the running
+.B pound
+daemon.
+.TP
+.B version
+.B Pound
+version number (string).
+.TP
+.B workers
+Workers statistics.  This is a JSON object with the following
+attributes:
+.RS
+.TP
+.B active
+Number of active threads.
+.TP
+.B count
+Number of threads currently running.
+.TP
+.B max
+Maximum number of threads.
+.TP
+.B min
+Minimum number of threads.
+.TP
+.B timeout
+Thread idle timeout.
+.RE
+.TP
 .B queue_len
 Number of incoming HTTP requests in the queue (integer).
 .TP
@@ -537,6 +567,19 @@ HTTP code for redirection responses.  One of: 301, 302, 307.
 .BR Boolean .
 Whether to append the original request path to the resulting location.
 .RE
+.PP
+If backend statistics is enabled (see \fBBackendStats\fR in
+.BR pound (8)),
+the \fBstats\fR object will be present, with the following attributes:
+.TP
+.B request_count
+Total number of requests processed by this backend.
+.TP
+.B request_time_avg
+Average time per request, in nanoseconds.
+.TP
+.B request_time_stddev
+Standard deviation of the above.
 .SH SEE ALSO
 .BR pound (8),
 .BR poundctl (8).
