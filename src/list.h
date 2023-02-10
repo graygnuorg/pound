@@ -162,6 +162,8 @@
     }								\
   while (0)
 
+#define DLIST_PUSH DLIST_INSERT_TAIL
+
 #define DLIST_INSERT_AFTER(head, anchor, elt, field)			\
   do									\
     {									\

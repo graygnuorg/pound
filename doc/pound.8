@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 5, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 9, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1140,6 +1140,12 @@ details). You may define only one emergency server per service, which
 .B pound
 will attempt to use if all backends are down.
 .TP
+.B Metrics
+Special backend type that implements Openmetrics protocol output.  See
+the section
+.B Metrics
+below for a detailed discussion.
+.TP
 \fBSession\fR
 Directives enclosed between a
 .B Session
@@ -1341,6 +1347,25 @@ URL (the name of the request parameter we need to track), COOKIE (the name of
 the cookie) and HEADER (the header name).
 .PP
 See below for some examples.
+.SH Metrics
+The following service definition enables Openmetric telemetry output
+on endpoint
+.BR /metrics:
+.PP
+.EX
+Service
+    URL "/metrics"
+    Metrics
+End
+.EE
+.PP
+To control access to the telemetry endpoint, use the
+.B ACL
+statement.
+.PP
+The metrics output is sufficiently self-documented by
+.B # HELP
+descriptor lines.
 .SH HIGH-AVAILABILITY
 .B Pound
 attempts to keep track of active backend servers, and will temporarily disable

@@ -1856,6 +1856,20 @@ parse_emergency (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
+
+static int
+parse_metrics (void *call_data, void *section_data)
+{
+  BACKEND_HEAD *head = call_data;
+  BACKEND *be;
+
+  XZALLOC (be);
+  be->be_type = BE_METRICS;
+  be->priority = 1;
+  pthread_mutex_init (&be->mut, NULL);
+  SLIST_PUSH (head, be, next);
+  return PARSER_OK;
+}
 
 static int
 parse_regex (regex_t *re, int flags)
@@ -2470,6 +2484,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Error", parse_error_backend, NULL, offsetof (SERVICE, backends) },
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
+  { "Metrics", parse_metrics, NULL, offsetof (SERVICE, backends) },
   { "Session", parse_session },
   { NULL }
 };

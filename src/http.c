@@ -1622,6 +1622,8 @@ be_service_name (BACKEND *be)
       return "(control)";
     case BE_ERROR:
       return "(error)";
+    case BE_METRICS:
+      return "(metrics)";
     }
   return "-";
 }
@@ -3189,6 +3191,10 @@ do_http (POUND_HTTP *phttp)
 
 	case BE_ERROR:
 	  res = error_response (phttp);
+	  break;
+
+	case BE_METRICS:
+	  res = metrics_response (phttp);
 	  break;
 
 	case BE_BACKEND:

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-06
+Pound -- history of user-visible changes. 2023-02-09
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -30,6 +30,16 @@ the name of a disk file with the error page content (HTML).  If not
 supplied, the text is determined as usual: first the Err<STATUS> statement
 for the enclosing listener is consulted.  If it is not present, the
 default error page is used.
+
+* New special backend: Metrics
+
+This backend type implements openmetrics telemetry endpoint.  The
+minimal configuration is:
+
+  Service
+      URL "/metrics"
+      Metrics
+  End
 
 * Backend statistics
 

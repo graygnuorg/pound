@@ -350,6 +350,14 @@ str_be (char *buf, size_t size, BACKEND *be)
       else
 	snprintf (buf, size, "error:%d",
 		  pound_to_http_status (be->v.error.status));
+      break;
+
+    case BE_METRICS:
+      strncpy (buf, "metrics", size);
+      break;
+
+    default:
+      abort ();
     }
   return buf;
 }
@@ -1704,6 +1712,9 @@ backend_type_str (BACKEND_TYPE t)
 
     case BE_ERROR:
       return "error";
+
+    case BE_METRICS:
+      return "metrics";
     }
 
   return "UNKNOWN";
@@ -1812,6 +1823,7 @@ backend_serialize (BACKEND *be)
 		break;
 
 	      case BE_CONTROL:
+	      case BE_METRICS:
 		/* FIXME */
 		break;
 
@@ -1959,7 +1971,7 @@ pound_core_serialize (void)
   return obj;
 }
 
-static struct json_value *
+struct json_value *
 pound_serialize (void)
 {
   struct json_value *obj, *p;
