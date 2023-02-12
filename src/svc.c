@@ -575,7 +575,7 @@ get_REQUEST (char *res, const SERVICE * svc, const char *request)
 }
 
 static int
-get_HEADERS (char *res, const SERVICE * svc, HTTP_HEADER_LIST *headers)
+get_HEADERS (char *res, const SERVICE *svc, HTTP_HEADER_LIST *headers)
 {
   int n, s;
   regmatch_t matches[4];

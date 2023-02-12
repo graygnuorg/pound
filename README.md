@@ -187,7 +187,7 @@ code.
 
 To test __pound__ you will need [Perl](https://www.perl.org) version
 5.26.3 or later and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass)
-module.  To install the later on a debian-based system, run
+module.  To install the latter on a debian-based system, run
 
 ```sh
  apt install libio-fdpass-perl
@@ -240,8 +240,8 @@ also the [Bug Reporting](#user-content-bug-reporting) section below.
 
 ## Installing
 
-If both building and testing succeeded, install __pound__.  To do
-so, run the following command as root:
+If both building and testing succeeded, it's time to install __pound__.
+To do so, run the following command as root:
 
 ```sh
  make install
@@ -424,7 +424,7 @@ to allow keeping track of sessions, and none of them works
 perfectly.  What's worse, sessions are critical in order to allow
 web-based applications to function correctly - it is vital that once a
 session is established all subsequent requests from the same browser
-be directed to the same back-end server.
+be directed to the same backend server.
 
 Six possible ways of detecting a session have been implemented in
 __pound__ (hopefully the most useful ones): by client address, by Basic
@@ -438,7 +438,7 @@ session tracking is declared with the `Type` statement.
 * `Type IP`:  Session tracking by address
 
   In this scheme __pound__ directs all requests from the same client
-  IP address to the same back-end server. Put the lines
+  IP address to the same backend server. Put the lines
 
   ```
   Session
@@ -469,7 +469,7 @@ session tracking is declared with the `Type` statement.
   This type is a special case of the `Type Header`, described below.
 
   WARNING: given the constraints of the HTTP protocol it may very well be
-  that the authenticated request will go to a different back-end server than
+  that the authenticated request will go to a different backend server than
   the one originally requesting it. Make sure all your servers support
   the same authentication scheme!
 
@@ -636,12 +636,12 @@ this header group is enabled.  The rest of headers below is added only if
 the client certificate was supplied:
 
 * `X-SSL-Cipher`: SSL version followed by a slash and active cipher algorithm.
-* `X-SSL-Certificate`: the full client certificate (multi-line)
-* `X-SSL-Issuer`: information about the certificate issuer (CA)
-* `X-SSL-Subject`: information about the certificate owner
-* `X-SSL-notAfter`: end od validity date for the certificate
-* `X-SSL-notBefore`: start of validity date for the certificate
-* `X-SSL-serial`: certificate serial number (in decimal)
+* `X-SSL-Certificate`: the full client certificate (multi-line).
+* `X-SSL-Issuer`: information about the certificate issuer (CA).
+* `X-SSL-Subject`: information about the certificate owner.
+* `X-SSL-notAfter`: end od validity date for the certificate.
+* `X-SSL-notBefore`: start of validity date for the certificate.
+* `X-SSL-serial`: certificate serial number (in decimal).
 
 The `HeaderOption` directive can be used (either globally or in listener
 block) to disable any or both of these groups, e.g.:

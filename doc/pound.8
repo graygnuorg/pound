@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 9, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 12, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -177,7 +177,7 @@ be used for running a quick syntax check before actually activating a
 server.
 .TP
 \fB\-e\fR
-Log to stdandard error (standard output for \fBLOG_DEBUG\fR and
+Log to standard error (standard output for \fBLOG_DEBUG\fR and
 \fBLOG_INFO\fR facilities).  This option implies \fIforeground mode\fR
 (\fB\-F\fR) and overrides the \fILogLevel\fR configuration setting.
 .TP
@@ -803,9 +803,9 @@ would disable SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1 and TLSv1_2.
 \fBCiphers\fR "acceptable:cipher:list"
 This is the list of ciphers that will be accepted by the SSL
 connection; it is a string in the same format as in OpenSSL
-.I ciphers(1)
+.BR ciphers (1)
 and
-.I SSL_CTX_set_cipher_list(3).
+.BR SSL_CTX_set_cipher_list (3).
 .TP
 \fBSSLHonorCipherOrder\fR \fIbool\fR
 If set to \fItrue\fR, the server will broadcast a preference to use
@@ -1008,7 +1008,7 @@ End
 .EE
 .PP
 where \fIOP\fR is \fBAND\fR to use boolean and, and \fBOR\fR
-(case-insensitive) to use boolean or, and \fIdirectives\fR stand for
+(case-insensitive) to use boolean \fIor\fR, and \fIdirectives\fR stand for
 any number of matching directives discussed above (including the
 \fBMatch\fR directive).
 .PP
@@ -1243,9 +1243,9 @@ directive.
 \fBCiphers\fR "acceptable:cipher:list"
 This is the list of ciphers that will be accepted by the SSL
 connection; it is a string in the same format as in OpenSSL
-.I ciphers(1)
+.BR ciphers (1)
 and
-.I SSL_CTX_set_cipher_list(3).
+.BR SSL_CTX_set_cipher_list (3).
 This directive may appear only after the
 .B HTTPS
 directive.
