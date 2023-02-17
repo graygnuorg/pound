@@ -362,167 +362,21 @@ str_be (char *buf, size_t size, BACKEND *be)
   return buf;
 }
 
-static void
-submatch_init (struct submatch *sm)
-{
-  sm->matchn = 0;
-  sm->matchmax = 0;
-  sm->matchv = NULL;
-}
-
-static int
-submatch_realloc (struct submatch *sm, regex_t const *re)
-{
-  size_t n = re->re_nsub + 1;
-  if (n > sm->matchmax)
-    {
-      regmatch_t *p = realloc (sm->matchv, n * sizeof (p[0]));
-      if (!p)
-	return -1;
-      sm->matchmax = n;
-      sm->matchv = p;
-    }
-  sm->matchn = n;
-  return 0;
-}
-
-void
-submatch_free (struct submatch *sm)
-{
-  free (sm->matchv);
-  submatch_init (sm);
-}
-
-static void
-submatch_reset (struct submatch *sm)
-{
-  sm->matchn = 0;
-  sm->subject = NULL;
-}
-
-static int
-submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
-{
-  int res;
-
-  submatch_reset (sm);
-  if (submatch_realloc (sm, re))
-    {
-      logmsg (LOG_ERR, "memory allocation failed");
-      return 0;
-    }
-  res = regexec (re, subject, sm->matchn, sm->matchv, 0) == 0;
-  if (res)
-    {
-      sm->subject = subject;
-    }
-  return res;
-}
-
-static int
-match_headers (HTTP_HEADER_LIST *headers, regex_t const *re, struct submatch *sm)
-{
-  struct http_header *hdr;
-
-  DLIST_FOREACH (hdr, headers, link)
-    {
-      if (hdr->header && submatch_exec (re, hdr->header, sm))
-	return 1;
-    }
-  return 0;
-}
-
-static int
-match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
-	    const char *request, HTTP_HEADER_LIST *headers,
-	    struct submatch *sm)
-{
-  int res = 1;
-  SERVICE_COND *subcond;
-
-  switch (cond->type)
-    {
-    case COND_ACL:
-      res = acl_match (cond->acl, srcaddr) == 0;
-      break;
-
-    case COND_URL:
-      res = submatch_exec (&cond->re, request, &sm[SM_URL]);
-      break;
-
-    case COND_HDR:
-      res = match_headers (headers, &cond->re, &sm[SM_HDR]);
-      break;
-
-    case COND_HOST:
-      res = match_headers (headers, &cond->re, &sm[SM_HDR]);
-      if (res)
-	{
-	  /*
-	   * On match, adjust subgroup references and subject pointer
-	   * to refer to the Host: header value.
-	   */
-	  int n, i;
-	  char const *s = sm[SM_HDR].subject;
-	  regmatch_t *mv = sm[SM_HDR].matchv;
-	  int mc = sm[SM_HDR].matchn;
-
-	  /* Skip initial whitespace and "host:" */
-	  s += strspn (s, " \t\n") + 5;
-	  /* Skip whitespace after header name. */
-	  s += strspn (s, " \t\n");
-	  /* Compute fix-up offset. */
-	  n = s - sm[SM_HDR].subject;
-	  /* Adjust all subgroups. */
-	  /* rm_so of the 0th group is always 0, so adjust only rm_eo: */
-	  mv->rm_eo -= n;
-	  for (i = 1; i < mc; i++)
-	    {
-	      ++mv;
-	      mv->rm_so -= n;
-	      mv->rm_eo -= n;
-	    }
-	  /* Adjust subject. */
-	  sm[SM_HDR].subject = s;
-	}
-      break;
-
-    case COND_BOOL:
-      if (cond->bool.op == BOOL_NOT)
-	{
-	  subcond = SLIST_FIRST (&cond->bool.head);
-	  res = ! match_cond (subcond, srcaddr, request, headers, sm);
-	}
-      else
-	{
-	  SLIST_FOREACH (subcond, &cond->bool.head, next)
-	    {
-	      res = match_cond (subcond, srcaddr, request, headers, sm);
-	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
-		break;
-	    }
-	}
-      break;
-    }
-
-  return res;
-}
-
 static int
 match_service (const SERVICE *svc, struct sockaddr *srcaddr,
-	       const char *request, HTTP_HEADER_LIST *headers,
-	       struct submatch *sm)
+	       struct http_request *req,
+	       struct submatch_queue *smq)
 {
-  return match_cond (&svc->cond, srcaddr, request, headers, sm);
+  return match_cond (&svc->cond, srcaddr, req, smq);
 }
 
 /*
  * Find the right service for a request
  */
 SERVICE *
-get_service (const LISTENER * lstn, struct sockaddr *srcaddr,
-	     const char *request, HTTP_HEADER_LIST *headers,
-	     struct submatch *sm)
+get_service (const LISTENER *lstn, struct sockaddr *srcaddr,
+	     struct http_request *req,
+	     struct submatch_queue *smq)
 {
   SERVICE *svc;
 
@@ -530,7 +384,7 @@ get_service (const LISTENER * lstn, struct sockaddr *srcaddr,
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, srcaddr, request, headers, sm))
+      if (match_service (svc, srcaddr, req, smq))
 	return svc;
     }
 
@@ -539,7 +393,7 @@ get_service (const LISTENER * lstn, struct sockaddr *srcaddr,
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, srcaddr, request, headers, sm))
+      if (match_service (svc, srcaddr, req, smq))
 	return svc;
     }
 
@@ -1815,7 +1669,7 @@ backend_serialize (BACKEND *be)
 	      case BE_REDIRECT:
 		err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
 		  || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
-		  || json_object_set (obj, "append_uri", json_new_bool (be->v.redirect.append_uri));
+		  || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
 		break;
 
 	      case BE_ACME:

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 12, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 17, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -329,7 +329,7 @@ headers.  The default is
 .IP
 This setting can be overridden on a per-listener basis.  See the
 description of \fBHeaderOption\fR directive in \fBHTTP Listener\fR
-section, and section \fBHEADER MODIFICATION\fR, for a detailed
+section, and section \fBBUILT-IN HEADERS\fR, for a detailed
 discussion of various header modification directives and their effect.
 .TP
 \fBDaemon\fR \fIbool\fR
@@ -649,27 +649,41 @@ Request maximal size. All requests will be limited to these many
 bytes. If a request contains more data than allowed, an error 413 is
 returned. Default: unlimited.
 .TP
-\fBHeaderRemove\fR "header pattern"
-Remove certain headers from the incoming requests. All occurrences of
-the matching specified header will be removed. Multiple directives may
-be specified in order to remove more than one header, and the header
-itself may be a regular pattern (though this should be used with
-caution).  See the section
-.BR "HEADER MODIFICATION" ,
-for a detailed discussion of various header modification directives.
+\fBRewriteLocation\fR 0|1|2
+If set to 1, force
+.B pound
+to change the Location: and Content-location: headers in responses. If they
+point to the backend itself or to the listener (but with the wrong protocol),
+the response will be changed to show the virtual host in the request. Default:
+1 (active).  If the value is set to 2, only the backend address is compared;
+this is useful for redirecting a request to an HTTPS listener on
+the same server as the HTTP listener.
 .TP
-\fBHeadRemove\fR "header pattern"
-Same as \fBHeaderRemove\fR.
+\fBRewriteDestination\fR \fIbool\fR
+If set to \fItrue\fI, force
+.B pound
+to change the "Destination:" header in requests. The header is changed
+to point to the backend itself with the correct protocol. Default:
+\fIfalse\fR.
 .TP
-\fBHeaderAdd\fR "header: to add"
-Add the defined header to the request passed to the backend
-server. The header is added verbatim. Use multiple \fBHeaderAdd\fR
-directives if you need to add more than one header.  See the section
-.BR "HEADER MODIFICATION" ,
-for a detailed discussion of various header modification directives.
+\fBLogLevel\fR value
+Override the global
+.B LogLevel
+value.
 .TP
-\fBAddHeader\fR "header: to add"
-Same as \fBHeaderAdd\fR.
+\fBService\fR [ "name" ]
+This defines a private service (see below for service definition
+syntax). This service will be used only by this listener. The service
+may be optionally named, with the name showing in the
+.BR poundctl (8)
+listings.
+.TP
+\fBACME\fR "directory"
+Serve ACME challenge requests from the given
+.IR directory .
+See the section
+.B ACME
+below.
 .TP
 \fBHeaderOption\fR \fIopt\fR...
 Modifies global header addition options for this listener.  Global
@@ -708,45 +722,61 @@ listener, one would use:
 .RE
 .IP
 See the description of \fBHeaderOption\fR directive in \fBGLOBAL
-DIRECTIVES\fR section, and section \fBHEADER MODIFICATION\fR, for a
+DIRECTIVES\fR section, and section \fBBUILT-IN HEADERS\fR, for a
 detailed discussion of various header modification directives and
 their effect.
-.TP
-\fBRewriteLocation\fR 0|1|2
-If set to 1, force
-.B pound
-to change the Location: and Content-location: headers in responses. If they
-point to the backend itself or to the listener (but with the wrong protocol),
-the response will be changed to show the virtual host in the request. Default:
-1 (active).  If the value is set to 2, only the backend address is compared;
-this is useful for redirecting a request to an HTTPS listener on
-the same server as the HTTP listener.
-.TP
-\fBRewriteDestination\fR \fIbool\fR
-If set to \fItrue\fI, force
-.B pound
-to change the "Destination:" header in requests. The header is changed
-to point to the backend itself with the correct protocol. Default:
-\fIfalse\fR.
-.TP
-\fBLogLevel\fR value
-Override the global
-.B LogLevel
-value.
-.TP
-\fBService\fR [ "name" ]
-This defines a private service (see below for service definition
-syntax). This service will be used only by this listener. The service
-may be optionally named, with the name showing in the
-.BR poundctl (8)
-listings.
-.TP
-\fBACME\fR "directory"
-Serve ACME challenge requests from the given
-.IR directory .
-See the section
-.B ACME
+.SS Modification directives
+The following directives modify the incoming request prior to passing
+it to the selected service.  These are discussed in detail
+in the section
+.BR "REQUEST MODIFICATION" ,
 below.
+.TP
+\fBDeleteHeader\fR "header: pattern"
+Remove certain headers from the incoming requests. All occurrences of
+the matching specified header will be removed. See the section
+for a detailed discussion of various header modification directives.
+.TP
+\fBSetHeader\fR "header: to add"
+Add the defined header to the request passed to the backend
+server. The header is added verbatim. Use multiple \fBHeaderAdd\fR
+directives if you need to add more than one header.
+.TP
+\fBSetURL\fR "value"
+Sets the URL part of the request.
+.TP
+\fBSetPath\fR "value"
+Sets the path part.
+.TP
+\fBSetQuery\fR "value"
+Sets the query part.
+.TP
+\fBSetQueryParam\fR "name" "value"
+Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
+.TP
+\fBSetFragment\fB "value"
+Sets the fragment part.
+.TP
+.BR Rewrite " ... [ " Else " ... ] " End
+Conditionally apply request modification depending on whether request
+matches certain conditions.
+.SS Compatibility directives
+The following directives are retained for compatibility with previous
+versions of
+.BR pound .
+They will be removed in future releases.
+.TP
+\fBHeaderAdd\fR "header: to add"
+Same as \fBSetHeader\fR.
+.TP
+\fBAddHeader\fR "header: to add"
+Same as \fBSetHeader\fR.
+.TP
+\fBHeaderRemove\fR "pattern"
+Same as \fBDeleteHeader\fR.
+.TP
+\fBHeadRemove\fR "pattern"
+Same as \fBDeleteHeader\fR.
 .SH "HTTPS Listener"
 An HTTPS listener defines an address and port that
 .B pound
@@ -912,11 +942,6 @@ The request must contain at least one header matching the given
 case-insensitive regular expression.  This can be changed by
 \fIoptions\fR, described below.
 .TP
-\fBHeadRequire\fR "pattern"
-Same as \fBHeader\fR.  This form is retained for compatibility with
-previous versions of
-.BR pound .
-.TP
 \fBHost\fR [\fIoptions\fR] "\fIhostname\fR"
 The request must contain a \fBHost\fR header whose value matches
 \fIhostname\fR.  In the absence of \fIoptions\fR, case-insensitive
@@ -936,20 +961,19 @@ hosts\fR.  See the
 .B EXAMPLES
 section.
 .TP
-\fBHeadDeny\fR "pattern"
-A shortcut for
-.IP
-\fBNot header\fR "pattern"
-.IP
-In other words: the request may
-.B not
-contain any header matching the given pattern.  See the
-.B Negation
-section, below.
-.IP
-This form is retained for backward compatibility with older versions
-of
-.BR pound .
+\fBPath\fR [\fIoptions\fR] "\fIpattern\fR"
+Match the path part of the incoming request.
+.TP
+\fBQuery\fR [\fIoptions\fR] "\fIpattern\fR"
+Match the query part of the incoming request.
+.TP
+\fBQueryParam\fR "\fIname\fR" [\fIoptions\fR] "\fIpattern\fR"
+Match the value of the query parameter \fIname\fR.  The value is
+decoded prior to use.
+.TP
+\fBFragment\fR [\fIoptions\fR] "\fIpattern\fR"
+Match the fragment part of the incoming request.  The value is
+decoded prior to use.
 .PP
 The \fIoptions\fR argument in the above directives can be used to
 select the comparison method.  It consists of zero or more option
@@ -979,12 +1003,31 @@ header begins with "www." (case-insensitive):
 .EE
 Host -icase -beg "www."
 .EX
+.SS Compatibility directives
+The following directives are provided for backward compatibility with
+older versions of
+.BR pound .
+They will be removed in future versions.
+.TP
+\fBHeadRequire\fR "pattern"
+Same as \fBHeader\fR.
+.TP
+\fBHeadDeny\fR "pattern"
+A shortcut for
+.IP
+\fBNot header\fR "pattern"
+.IP
+In other words: the request may
+.B not
+contain any header matching the given pattern.  See the
+.B Negation
+section, below.
 .SS Negation
 Prefixing any of the directives discussed above with \fBnot\fR will
 revert the sense of comparison.  For example,
 .PP
 .EX
-not url "^/static/"
+Not url "^/static/"
 .EE
 .PP
 will match any request, whose URL \fIdoes not\fR begin with "/static/".
@@ -992,7 +1035,7 @@ will match any request, whose URL \fIdoes not\fR begin with "/static/".
 Negating compound statements is allowed as well, e.g.:
 .PP
 .EX
-not ACL
+Not ACL
    "192.0.2.0/26"
    "203.0.113.0/24"
 End
@@ -1018,6 +1061,38 @@ Prefixing \fBMatch\fR directive with a word \fBnot\fR reverts its result.
 .PP
 Technically, an implicit \fBMatch AND\fR block is created around
 unenclosed matching directives on the top level of a \fBService\fR block.
+.SS Modification directives
+The following directives modify the incoming request prior to passing
+it to the selected backend.  These are discussed in detail
+in the section
+.BR "REQUEST MODIFICATION" ,
+below.
+.TP
+\fBDeleteHeader\fR "header: pattern"
+Remove matching headers from the incoming requests.
+.TP
+\fBSetHeader\fR "header: to add"
+Add the defined header to the request passed to the backend
+server.
+.TP
+\fBSetURL\fR "value"
+Sets the URL part of the request.
+.TP
+\fBSetPath\fR "value"
+Sets the path part.
+.TP
+\fBSetQuery\fR "value"
+Sets the query part.
+.TP
+\fBSetQueryParam\fR "name" "value"
+Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
+.TP
+\fBSetFragment\fB "value"
+Sets the fragment part.
+.TP
+.BR Rewrite " ... [ " Else " ... ] " End
+Conditionally apply request modification depending on whether request
+matches certain conditions.
 .SS Backend definitions
 .TP
 \fBBackend\fR
@@ -1050,21 +1125,31 @@ or
 The redirection destination is determined by the actual
 .I url
 you specify.  It can contain references to parenthesized subexpressions
-in the most recently matched
-.BR URL ,
-.BR Header ,
-and
-.B Host
-statements of the enclosing
+in the eight recently matched request matching directives of the enclosing
 .BR Service .
 Syntactically, \fB$\fIN\fR (\fIN\fR is a decimal number)
 refers to \fIN\fRth parenthesized subexpression of the most
-recently matched \fBURL\fR statement, and \fB%\fIN\fR refers to
-\fIN\fRth parenthesized subexpression of the most
-recently matched \fBHeader\fR or \fBHost\fR.  Numbering of
-subexpressions starts at 1.  \fB$0\fR is replaced
-with the entire matching URL and \fB%0\fR with the entire matching
-\fBHeader\fR or \fBHost\fR.
+recently matched statement, and \fB$\fIN\fB(\fIM\fB)\fR refers to
+\fIN\fRth parenthesized subexpression of \fIM\fRth recently matched
+statement.  Numbering of subexpressions starts at 1 (\fB$0\fR refers
+to the entire matching string).  Numbering of matches starts
+at 0.
+.IP
+For example, given the following statements 
+.IP
+.EX
+Host -re "www\\.(.+)"
+Header -re -icase "^Content-Type: *(.*)"
+Path "^/static(/.*)?"
+.EE
+.IP
+\fB$1\fR refers to the subgroup of \fBPath\fR, \fB$1(1)\fR - to that of
+\fBHeader\fR, and \fB$1(2)\fR - to that of \fBHost\fR.
+.IP
+Curly braces may be used to avoid incorrectly parsing text fragment
+that follows the reference as being its part.  This is useful if the
+reference is immediately followed by a decimal digit or opening
+parenthesis, as in: \fB"${1}(text)"\fR.
 .IP
 To insert a literal dollar or percent sign in
 .IR url ,
@@ -1073,6 +1158,32 @@ use
 or
 .BR $% ,
 correspondingly.
+.IP
+Beside these constructs,
+.I request accessors
+can be used.  A request accessor is
+.IP
+.RS
+.EX
+.IR %[ name ]
+.EE
+.RE
+.IP
+where \fIname\fR is one of:
+.BR url ,
+.BR path ,
+.BR query ,
+.BR param ,
+.BR fragment ,
+and
+.BR header ,
+denoting the corresponding part of the request.  The
+.B param
+and
+.B header
+accessors take a single argument: the name of the query parameter or
+HTPP header.  Accessors are explained in detail in section
+.BR "REQUEST MODIFICATION DIRECTIVES" .
 .IP
 For compatibility with previous \fBpound\fR versions, if no
 \fB$\fIN\fR references are found in
@@ -1096,6 +1207,15 @@ End
 .EE
 .IP
 Notice the use of \fBHost\fR to supply hostname part for the redirect.
+.IP
+Using request accessors, the above example can be rewritten as:
+.IP
+.EX
+Service
+    URL "^/([^/]+)/([^/]+)(/.*)?"
+    Redirect "http://%[header host]/$2/$1$3"
+End
+.EE
 .IP
 Compatibility syntax: if you specified
 .IP
@@ -1386,22 +1506,200 @@ is probably a good choice.
 The clients that happen to hit a dead backend server will just receive a
 .I "503 Service Unavailable"
 message.
-.SH HEADER MODIFICATION
-Several directives are provided for adding and removing HTTP headers
-prior to passing the request on to the backend:
+.SH REQUEST MODIFICATION DIRECTIVES
+Several statements are provided to modify the incoming requests prior
+to passing them to the backend.  These statements can be present both in
+.B ListenHTTP
+.RB ( ListenHTTPS )
+and in
+.B Service
+sections.
+.PP
+Basic request modification directives are:
 .TP
-\fBHeaderRemove\fR "\fIpattern\fR"
-Removes headers matching \fIpattern\fR.
+\fBSetURL\fR "\fIVALUE\fR"
+Set the URL of the incoming request to \fIVALUE\fR.
 .TP
-\fBHeaderAdd\fR "header: value"
-Adds the specified header line to the request.
+\fBSetPath\fR "\fIVALUE\fR"
+Set the path part of the URL to the given string.
+.TP
+\fBSetQuery\fR "\fIVALUE\fR"
+Set the query part of the URL to the given string.  \fIVALUE\fR must be
+a valid query with the special characters properly encoded using
+percent encoding.
+.TP
+\fBSetQueryParam\fR "\fINAME\fR" "\fIVALUE\fR"
+Set the query parameter \fINAME\fR to the \fIVALUE\fR.  When
+reassembling the URL,
+.B pound
+will encode special characters in \fIVALUE\fR.
+.TP
+\fBSetFragment\fR "\fIVALUE\fR"
+Sets the fragment part of the URL to \fIVALUE\fR.  The argument can
+contain whitespace and special characters,
+.B pound
+will encode them when reassembling the URL.
+.TP
+\fBSetHeader\fR "\fINAME\fB: \fIVALUE\fR"
+Sets the HTTP header.  If the header \fINAME\fR already exists, it
+will be overwritten.  Otherwise, new header will be added to the end
+of the header list.
+.TP
+\fBDeleteHeader\fR [\fIoptions\fR] "\fIPATTERN\fR"
+Remove from the request all headers matchibg \fIPATTERN\fR.  By
+default, \fIPATTERN\fR is treated as extended POSIX regular
+expression.  One or more \fIoptions\fR can be supplied to modify
+the default behavior.  The \fIoptions\fR argument in the above
+directives can be used to select the comparison method.  It consists
+of zero or more option flags from the following list:
+.RS
+.TP
+.B \-re
+Use regular expression matching.
+.TP
+.B \-exact
+Use exact string matching.
+.TP
+.B \-beg
+Exact match at the beginning of string (prefix match).
+.TP
+.B \-end
+Exact match at the end of string (suffix match).
+.TP
+.B \-case
+Case-sensitive comparison.
+.TP
+.B \-icase
+Case-insensitive comparison.
+.RE
+.PP
+The \fIVALUE\fR argument in the above directives is subject to
+.IR "request evaluation", during which ny occurrence of
+.I request accessors
+found in it is replaced them with the values they produce.
+Syntactically, a request accessor is:
+.PP
+.EX
+\fB%[ \fINAME\fR [\fIARG\fR] \fB]\fR
+.EE
+.PP
+where \fINAME\fR is the accessor name and \fIARG\fR is optional
+argument.  Notice, that square brackets shown in bold are part
+of the accessor, whereas those enclosing \fIARG\fR are used to
+denote its optional nature.
+.PP
+The following accessors are defined:
+.TP
+.B url
+Returns the URL part of the request.
+.TP
+.B path
+Returns the path part of the request.
+.TP
+.B query
+Returns the query part of the request.
+.TP
+.BI param " NAME"
+Returns the value of the query parameter \fINAME\fR.  The value is
+percent decoded.
+.TP
+.B fragment
+Returns the fragment part of the request.  The value is
+percent decoded.
+.TP
+.BI header " NAME"
+Returns the value of the HTTP header \fINAME\fR.
+.PP
+The
+.B Rewrite
+block statement is used to associate one or more of the above
+directives with request matching directives (discussed in the subsection
+.B Service Matching Directives
+above), so that request modification takes place only when the request
+matches certain conditions.
+.PP
+Syntactically, the
+.B Rewrite
+block is:
+.PP
+.EX
+.B Rewrite
+\&.
+\&.
+\&.
+.B Else
+\&.
+\&.
+\&.
+.B End
+.EE
+.PP
+where dots stand for any number of request matching and request
+modification statements.  The \fBElse\fR part is optional; any number
+of \fBElse\fR blocks can be supplied, providing conditional branching.
+The following concocted example illustrates it:
+.PP
+.EX
+Rewrite
+   Path "\\.(jpg|gif)$"
+   SetPath "/images%[path]"
+Else
+   Match AND
+     Host "example.org"
+     Path "\\.[^.]+$"
+   End
+   SetPath "/static%[path]"
+Else
+   Path "\\.[^.]+$"
+   SetPath "/assets%[path]"
+End
+.EE
+.PP
+Here, if a path ends with a filename with suffix ".jpg" or ".gif",
+"/images" is prepended to it (notice that path always starts with
+a slash, hence it should not be used explicitly).  If the path ends
+with any other extension, the action depends on the host being
+addressed.  The path is prefixed with "/static" if the host is
+"example.org", and with "/assets" otherwise.
+.PP
+When used in this context, arguments to request modification
+directives are also subject to
+.I backreference expansion
+similar to that discussed in the description of the \fBRedirect\fR
+statement, in section
+.B Service
+above.  To illustrate this, here's the
+above example rewritten using backreferences instead of accessors:
+.PP
+.EX
+Rewrite
+   Path ".*\\.(jpg|gif)$"
+   SetPath "/images$0"
+Else
+   Match AND
+     Host "example.org"
+     Path ".*\\.[^.]+$"
+   End
+   SetPath "/static$0"
+Else
+   Path ".*\\.[^.]+$"
+   SetPath "/assets$0"
+End
+.EE
+.PP
+Request modification directives are applied in the same order as they
+appear in the configuration file.
+.SH BUILT-IN HEADERS
+In addition to the \fBSetHeader\fR and \fBDeleteHeader\fR directives
+discussed above, the \fBHeaderOption\fR directive controls addition
+of the built-in headers:
 .TP
 \fBHeaderOption\fR \fIopt\fR...
-Controls addition of the built-in headers.  There are two kinds of
-such headers: \fIforwarded\fR headers that convey information about
-original destination of the request, and \fIssl\fR headers (for
-\fBHTTPS\fR connections), that hold information about server and
-client SSL certificates.  These are discussed in detail below.
+.PP
+There are two kinds of such headers: \fIforwarded\fR headers that
+convey information about original destination of the request, and
+\fIssl\fR headers (for \fBHTTPS\fR connections), that hold information
+about server and client SSL certificates.  These are discussed in detail below.
 .IP
 By default, both kinds of built-in additional headers are enabled.
 This default can be changed by using the \fBHeaderOption\fR directive.
@@ -1428,24 +1726,13 @@ Enable ssl headers.
 Disable ssl headers.
 .RE
 .PP
-Header modification directives are applied in the following order:
-.BR HeaderOptions ,
-.BR HeaderRemove ,
-.BR HeaderAdd .
-In other words, built-in headers are added first.  Then, header
-removal directives are applied.  Finally, headers requested by the
-user are added.  Added headers overwrite headers with the same
-name that may already be present in the request.  Thus, you can use
-.B HeaderRemove
+The built-in headers are added before request modification directives
+are applied.  Thus, you can use
+.B DeleteHeader
 and
-.B HeaderAdd
+.B SetHeader
 to trim down headers added by
 .BR HeaderOptions .
-.PP
-Header modification directives are applied after service matching
-directives (see
-.B "Service Matching Directives"
-above).
 .SS Forwarded Headers
 The headers in the \fIforwarded\fR header group are:
 .TP
@@ -1528,12 +1815,12 @@ For details, see the
 subsection in
 .BR "Service Matching Directives" .
 .TP
-.B AddHeader
+.BR AddHeader " and " HeaderAdd
 Use
-.B HeaderAdd
-instead.  See the
-.B "HTTP Listener"
-section, for details.
+.B SetHeader
+instead.  See the section
+.BR "REQUEST MODIFICATION DIRECTIVES" ,
+for details.
 .TP
 .B IgnoreCase
 Use the \fB\-icase\fR option to the \fBURL\fR directive

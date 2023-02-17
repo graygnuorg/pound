@@ -267,6 +267,10 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 
   http_request_init (&res->request);
   http_request_init (&res->response);
+  /*
+   * Note: submatch_queue_init is not called, because res is already
+   * filled with zeros.  Revise this if submatch_queue stuff changes.
+   */
 
   pthread_mutex_lock (&arg_mut);
   SLIST_PUSH (&thr_head, res, next);
@@ -382,8 +386,8 @@ pound_http_destroy (POUND_HTTP *arg)
     {
       X509_free (arg->x509);
     }
-  submatch_free (&arg->sm[SM_URL]);
-  submatch_free (&arg->sm[SM_HDR]);
+
+  submatch_queue_free (&arg->smq);
 
   free (arg);
 }

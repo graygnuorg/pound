@@ -65,6 +65,7 @@ TESTSUITE_AT = \
  addheader.at\
  balancing.at\
  checkurl.at\
+ chgvis.at\
  config.at\
  echo.at\
  errfile.at\
@@ -81,14 +82,17 @@ TESTSUITE_AT = \
  optssl.at\
  or.at\
  prio.at\
+ reqacc.at\
  redirect.at\
  rewriteloc.at\
+ rwchain.at\
  sessauth.at\
  sesscookie.at\
  sesshdr.at\
  sessip.at\
  sessparm.at\
  sessurl.at\
+ set.at\
  template.at\
  url.at\
  virthost.at\

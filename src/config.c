@@ -207,6 +207,8 @@ kw_to_str (struct kwtab *kwt, int t)
   return kwt->name;
 }
 
+#define MAX_PUTBACK 3
+
 /* Input stream */
 struct input
 {
@@ -219,7 +221,8 @@ struct input
   struct locus_point locus;       /* Current location */
   int prev_col;                   /* Last column in the previous line. */
   struct token token;             /* Current token. */
-  int ready;                      /* Token already parsed and put back */
+  struct token putback[MAX_PUTBACK]; /* Putback space */
+  int putback_index;              /* Index of the next free slot in putback */
 
   /* Input buffer: */
   struct stringbuf buf;
@@ -452,14 +455,21 @@ input_gettkn (struct input *input, struct token **tok)
 {
   int c;
 
-  if (input->ready)
+  stringbuf_reset (&input->buf);
+
+  if (input->putback_index > 0)
     {
-      input->ready = 0;
+      input->token = input->putback[--input->putback_index];
+      if (input->token.str != NULL)
+	{
+	  stringbuf_add_string (&input->buf, input->token.str);
+	  free (input->token.str);
+	  input->token.str = stringbuf_finish (&input->buf);
+	}
       *tok = &input->token;
       return input->token.type;
     }
 
-  stringbuf_reset (&input->buf);
   for (;;)
     {
       c = input_getc (input);
@@ -523,9 +533,8 @@ input_gettkn (struct input *input, struct token **tok)
 		}
 	      stringbuf_add_char (&input->buf, c);
 	    }
-	  stringbuf_add_char (&input->buf, 0);
 	  input->token.type = T_STRING;
-	  input->token.str = input->buf.base;
+	  input->token.str = stringbuf_finish (&input->buf);
 	  break;
 	}
 
@@ -539,9 +548,8 @@ input_gettkn (struct input *input, struct token **tok)
 	  if (c == EOF || isspace (c))
 	    {
 	      input_ungetc (input, c);
-	      stringbuf_add_char (&input->buf, 0);
 	      input->token.type = T_IDENT;
-	      input->token.str = input->buf.base;
+	      input->token.str = stringbuf_finish (&input->buf);
 	      break;
 	    }
 	  /* It is a literal */
@@ -561,8 +569,7 @@ input_gettkn (struct input *input, struct token **tok)
       while ((c = input_getc (input)) != EOF && !isspace (c));
 
       input_ungetc (input, c);
-      stringbuf_add_char (&input->buf, 0);
-      input->token.str = input->buf.base;
+      input->token.str = stringbuf_finish (&input->buf);
       break;
     }
  end:
@@ -572,20 +579,31 @@ input_gettkn (struct input *input, struct token **tok)
 }
 
 static void
-input_putback (struct input *input)
+input_putback (struct input *input, struct token *tok)
 {
-  assert (input->ready == 0);
-  input->ready = 1;
+  assert (input->putback_index < MAX_PUTBACK);
+  input->putback[input->putback_index] = *tok;
+  if (tok->type >= T__BASE && tok->type < T__END)
+    input->putback[input->putback_index].str = xstrdup (tok->str);
+  else
+    input->putback[input->putback_index].str = NULL;
+  input->putback_index++;
 }
 
 
 struct input *cur_input;
 
+static inline struct token *
+cur_token (void)
+{
+  return &cur_input->token;
+}
+
 static struct locus_range *
 last_token_locus_range (void)
 {
   if (cur_input)
-    return &cur_input->token.locus;
+    return &cur_token()->locus;
   else
     return NULL;
 }
@@ -694,9 +712,9 @@ gettkn_expect (int type)
 }
 
 static void
-putback_tkn (void)
+putback_tkn (struct token *tok)
 {
-  input_putback (cur_input);
+  input_putback (cur_input, tok ? tok : cur_token ());
 }
 
 enum
@@ -1419,7 +1437,7 @@ parse_acl (ACL *acl)
 	continue;
       if (tok->type == T_IDENT && strcasecmp (tok->str, "end") == 0)
 	break;
-      putback_tkn ();
+      putback_tkn (tok);
       if ((rc = parse_cidr (acl)) != PARSER_OK)
 	return rc;
     }
@@ -1469,7 +1487,7 @@ parse_acl_ref (ACL **ret_acl)
 
   if (tok->type == '\n')
     {
-      putback_tkn ();
+      putback_tkn (tok);
       acl = new_acl (NULL);
       *ret_acl = acl;
       return parse_acl (acl);
@@ -1871,48 +1889,6 @@ parse_metrics (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
-static int
-parse_regex (regex_t *re, int flags)
-{
-  int rc;
-
-  struct token *tok = gettkn_expect (T_STRING);
-  if (!tok)
-    return PARSER_FAIL;
-
-  rc = regcomp (re, tok->str, flags);
-  if (rc)
-    {
-      conf_regcomp_error (rc, re, NULL);
-      return PARSER_FAIL;
-    }
-
-  return PARSER_OK;
-}
-
-static int
-assign_matcher (void *call_data, void *section_data)
-{
-  MATCHER_HEAD *head = call_data;
-  MATCHER *m;
-  int rc;
-
-  struct token *tok = gettkn_expect (T_STRING);
-  if (!tok)
-    return PARSER_FAIL;
-
-  XZALLOC (m);
-  rc = regcomp (&m->pat, tok->str, REG_ICASE | REG_NEWLINE | REG_EXTENDED);
-  if (rc)
-    {
-      conf_regcomp_error (rc, &m->pat, NULL);
-      return PARSER_FAIL;
-    }
-  SLIST_PUSH (head, m, next);
-
-  return PARSER_OK;
-}
-
 static SERVICE_COND *
 service_cond_append (SERVICE_COND *cond, int type)
 {
@@ -2004,16 +1980,17 @@ parse_match_mode (int *mode, int *re_flags)
 	  *mode = n;
 	}
     }
-  putback_tkn ();
+  putback_tkn (tok);
   return PARSER_OK;
 }
 
 static int
-parse_cond_matcher (SERVICE_COND *cond, int mode, int flags, struct stringbuf *sb)
+parse_regex (regex_t *regex, int mode, int flags, char *pfx)
 {
   struct token *tok;
   char *p;
   int rc;
+  struct stringbuf sb;
 
   if (parse_match_mode (&mode, &flags))
     return PARSER_FAIL;
@@ -2021,42 +1998,58 @@ parse_cond_matcher (SERVICE_COND *cond, int mode, int flags, struct stringbuf *s
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
+  xstringbuf_init (&sb);
   switch (mode)
     {
     case MATCH_EXACT:
-      stringbuf_escape_regex (sb, tok->str);
+      if (pfx)
+	stringbuf_add_string (&sb, pfx);
+      stringbuf_escape_regex (&sb, tok->str);
       break;
 
     case MATCH_RE:
-      stringbuf_add_string (sb, tok->str);
+      if (pfx)
+	stringbuf_add_string (&sb, pfx);
+      stringbuf_add_string (&sb, tok->str);
       break;
 
     case MATCH_BEG:
-      stringbuf_escape_regex (sb, tok->str);
-      stringbuf_add_string (sb, ".*");
+      stringbuf_add_char (&sb, '^');
+      if (pfx)
+	stringbuf_add_string (&sb, pfx);
+      stringbuf_escape_regex (&sb, tok->str);
+      stringbuf_add_string (&sb, ".*");
       break;
 
     case MATCH_END:
-      stringbuf_add_string (sb, ".*");
-      stringbuf_escape_regex (sb, tok->str);
-      stringbuf_add_char (sb, '$');
+      stringbuf_add_string (&sb, ".*");
+      if (pfx)
+	stringbuf_add_string (&sb, pfx);
+      stringbuf_escape_regex (&sb, tok->str);
+      stringbuf_add_char (&sb, '$');
       break;
 
     default:
       abort ();
     }
 
-  p = stringbuf_finish (sb);
+  p = stringbuf_finish (&sb);
 
-  rc = regcomp (&cond->re, p, flags);
-  stringbuf_free (sb);
+  rc = regcomp (regex, p, flags);
+  stringbuf_free (&sb);
   if (rc)
     {
-      conf_regcomp_error (rc, &cond->re, NULL);
+      conf_regcomp_error (rc, regex, NULL);
       return PARSER_FAIL;
     }
 
   return PARSER_OK;
+}
+
+static int
+parse_cond_matcher (SERVICE_COND *cond, int mode, int flags)
+{
+  return parse_regex (&cond->re, mode, flags, NULL);
 }
 
 static int
@@ -2072,19 +2065,67 @@ parse_cond_url_matcher (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = section_data;
   SERVICE_COND *cond = service_cond_append (call_data, COND_URL);
   int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  struct stringbuf sb;
-  xstringbuf_init (&sb);
-  return parse_cond_matcher (cond, MATCH_RE, flags, &sb);
+  return parse_cond_matcher (cond, MATCH_RE, flags);
+}
+
+static int
+parse_cond_path_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_PATH);
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  return parse_cond_matcher (cond, MATCH_RE, flags);
+}
+
+static int
+parse_cond_query_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_QUERY);
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  return parse_cond_matcher (cond, MATCH_RE, flags);
+}
+
+static int
+parse_cond_query_param_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_QUERY_PARAM);
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  struct token *tok;
+  char *name;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  name = xstrdup (tok->str);
+
+  if ((rc = parse_cond_matcher (cond, MATCH_RE, flags)) == PARSER_OK)
+    {
+      regex_t re = cond->re;
+      cond->qp.re = re;
+      cond->qp.name = name;
+    }
+
+  return rc;
+}
+
+static int
+parse_cond_fragment_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  SERVICE_COND *cond = service_cond_append (call_data, COND_FRAG);
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  return parse_cond_matcher (cond, MATCH_RE, flags);
 }
 
 static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
-  struct stringbuf sb;
-  xstringbuf_init (&sb);
   return parse_cond_matcher (cond, MATCH_RE,
-			     REG_NEWLINE | REG_EXTENDED | REG_ICASE, &sb);
+			     REG_NEWLINE | REG_EXTENDED | REG_ICASE);
 }
 
 static int
@@ -2092,18 +2133,16 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
   cond->bool.op = BOOL_NOT;
-  cond = service_cond_append (cond, COND_HDR);
-  return parse_regex (&cond->re, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
+  return parse_cond_matcher (service_cond_append (cond, COND_HDR),
+			     MATCH_RE, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
 }
 
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_HOST);
-  struct stringbuf sb;
-  xstringbuf_init (&sb);
-  stringbuf_add_string (&sb, "Host:[[:space:]]*");
-  return parse_cond_matcher (cond, MATCH_EXACT, REG_EXTENDED | REG_ICASE, &sb);
+  return parse_regex (&cond->re, MATCH_EXACT, REG_EXTENDED | REG_ICASE,
+		      "Host:[[:space:]]*");
 }
 
 static int
@@ -2160,7 +2199,7 @@ parse_redirect_backend (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((be->v.redirect.append_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
+  if ((be->v.redirect.has_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
     /* the path is a single '/', so remove it */
     be->v.redirect.url[matches[3].rm_so] = '\0';
 
@@ -2378,18 +2417,6 @@ assign_dfl_ignore_case (void *call_data, void *section_data)
 static int parse_cond (int op, SERVICE_COND *cond, void *section_data);
 
 static int
-parse_and_cond (void *call_data, void *section_data)
-{
-  return parse_cond (BOOL_AND, call_data, section_data);
-}
-
-static int
-parse_or_cond (void *call_data, void *section_data)
-{
-  return parse_cond (BOOL_OR, call_data, section_data);
-}
-
-static int
 parse_match (void *call_data, void *section_data)
 {
   struct token *tok;
@@ -2410,24 +2437,30 @@ parse_match (void *call_data, void *section_data)
 	}
     }
   else
-    putback_tkn ();
+    putback_tkn (tok);
 
   return parse_cond (op, call_data, section_data);
 }
 
 static int parse_not_cond (void *call_data, void *section_data);
 
+#define MATCH_CONDITIONS(data, off)				\
+  { "ACL", parse_cond_acl, data, off },				\
+  { "URL", parse_cond_url_matcher, data, off },			\
+  { "Path", parse_cond_path_matcher, data, off },		\
+  { "Query", parse_cond_query_matcher, data, off },		\
+  { "QueryParam", parse_cond_query_param_matcher, data, off },	\
+  { "Fragment", parse_cond_fragment_matcher, data, off },	\
+  { "Header", parse_cond_hdr_matcher, data, off },		\
+  { "Host", parse_cond_host, data, off },			\
+  { "Match", parse_match, data, off },				\
+  { "NOT", parse_not_cond, data, off },				\
+    /* compatibility keywords */				\
+  { "HeadRequire", parse_cond_hdr_matcher, data, off },         \
+  { "HeadDeny", parse_cond_head_deny_matcher, data, off }
+
 static PARSER_TABLE negate_parsetab[] = {
-  { "ACL", parse_cond_acl },
-  { "URL", parse_cond_url_matcher },
-  { "Header", parse_cond_hdr_matcher },
-  { "HeadRequire", parse_cond_hdr_matcher },    /* compatibility keyword */
-  { "HeadDeny", parse_cond_head_deny_matcher }, /* compatibility keyword */
-  { "Host", parse_cond_host },
-  { "Match", parse_match },
-  { "AND", parse_and_cond, },
-  { "OR", parse_or_cond, },
-  { "NOT", parse_not_cond, },
+  MATCH_CONDITIONS (NULL, 0),
   { NULL }
 };
 
@@ -2441,16 +2474,7 @@ parse_not_cond (void *call_data, void *section_data)
 
 static PARSER_TABLE logcon_parsetab[] = {
   { "End", parse_end },
-  { "ACL", parse_cond_acl },
-  { "URL", parse_cond_url_matcher },
-  { "Header", parse_cond_hdr_matcher },
-  { "HeadRequire", parse_cond_hdr_matcher },    /* compatibility keyword */
-  { "HeadDeny", parse_cond_head_deny_matcher }, /* compatibility keyword */
-  { "Host", parse_cond_host },
-  { "Match", parse_match },
-  { "AND", parse_and_cond, },
-  { "OR", parse_or_cond, },
-  { "NOT", parse_not_cond, },
+  MATCH_CONDITIONS (NULL, 0),
   { NULL }
 };
 
@@ -2463,21 +2487,239 @@ parse_cond (int op, SERVICE_COND *cond, void *section_data)
   subcond->bool.op = op;
   return parser_loop (logcon_parsetab, subcond, section_data, &range);
 }
+
+static int parse_else (void *call_data, void *section_data);
+static int parse_rewrite (void *call_data, void *section_data);
+static int parse_set_header (void *call_data, void *section_data);
+static int parse_delete_header (void *call_data, void *section_data);
+static int parse_set_url (void *call_data, void *section_data);
+static int parse_set_path (void *call_data, void *section_data);
+static int parse_set_query (void *call_data, void *section_data);
+static int parse_set_query_param (void *call_data, void *section_data);
+static int parse_set_fragment (void *call_data, void *section_data);
+static int parse_sub_rewrite (void *call_data, void *section_data);
 
+#define REWRITE_OPS(data, off)						\
+  { "SetHeader", parse_set_header, data, off },				\
+  { "DeleteHeader", parse_delete_header, data, off },			\
+  { "SetURL", parse_set_url, data, off },				\
+  { "SetPath", parse_set_path, data, off },				\
+  { "SetQuery", parse_set_query, data, off },				\
+  { "SetQueryParam", parse_set_query_param, data, off },		\
+  { "SetFragment", parse_set_fragment, data, off }
+
+static PARSER_TABLE rewrite_rule_parsetab[] = {
+  { "End", parse_end },
+  { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
+  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
+  MATCH_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
+  REWRITE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { NULL }
+};
+
+static int
+parse_end_else (void *call_data, void *section_data)
+{
+  struct token nl = { '\n' };
+  putback_tkn (NULL);
+  putback_tkn (&nl);
+  return PARSER_END;
+}
+
+static PARSER_TABLE else_rule_parsetab[] = {
+  { "End", parse_end_else },
+  { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
+  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
+  MATCH_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
+  REWRITE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { NULL }
+};
+
+static REWRITE_OP *
+rewrite_op_alloc (REWRITE_OP_HEAD *head, enum rewrite_type type)
+{
+  REWRITE_OP *op;
+
+  XZALLOC (op);
+  op->type = type;
+  SLIST_PUSH (head, op, next);
+
+  return op;
+}
+
+static int
+parse_rewrite_op (REWRITE_OP_HEAD *head, enum rewrite_type type)
+{
+  REWRITE_OP *op = rewrite_op_alloc (head, type);
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  op->v.str = xstrdup (tok->str);
+  return PARSER_OK;
+}
+
+static int
+parse_delete_header (void *call_data, void *section_data)
+{
+  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_HDR_DEL);
+  POUND_DEFAULTS *dfl = section_data;
+
+  XZALLOC (op->v.hdrdel);
+  return parse_regex (&op->v.hdrdel->pat, MATCH_RE,
+		      REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+		      NULL);
+}
+
+static int
+parse_set_header (void *call_data, void *section_data)
+{
+  return parse_rewrite_op (call_data, REWRITE_HDR_SET);
+}
+
+static int
+parse_set_url (void *call_data, void *section_data)
+{
+  return parse_rewrite_op (call_data, REWRITE_URL_SET);
+}
+
+static int
+parse_set_path (void *call_data, void *section_data)
+{
+  return parse_rewrite_op (call_data, REWRITE_PATH_SET);
+}
+
+static int
+parse_set_query (void *call_data, void *section_data)
+{
+  return parse_rewrite_op (call_data, REWRITE_QUERY_SET);
+}
+
+static int
+parse_set_query_param (void *call_data, void *section_data)
+{
+  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_QUERY_PARAM_SET);
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  op->v.qp.name = xstrdup (tok->str);
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  op->v.qp.value = xstrdup (tok->str);
+
+  return PARSER_OK;
+
+}
+
+static int
+parse_set_fragment (void *call_data, void *section_data)
+{
+  return parse_rewrite_op (call_data, REWRITE_FRAG_SET);
+}
+
+static REWRITE_RULE *
+rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
+{
+  REWRITE_RULE *rule;
+
+  XZALLOC (rule);
+  service_cond_init (&rule->cond, COND_BOOL);
+  SLIST_INIT (&rule->ophead);
+
+  if (head)
+    SLIST_PUSH (head, rule, next);
+
+  return rule;
+}
+
+static int
+parse_else (void *call_data, void *section_data)
+{
+  REWRITE_RULE *rule = rewrite_rule_alloc (NULL);
+  *(REWRITE_RULE**)call_data = rule;
+  return parser_loop (else_rule_parsetab, rule, section_data, NULL);
+}
+
+static int
+parse_sub_rewrite (void *call_data, void *section_data)
+{
+  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_REWRITE_RULE);
+  op->v.rule = rewrite_rule_alloc (NULL);
+  return parser_loop (rewrite_rule_parsetab, op->v.rule, section_data, NULL);
+}
+
+static int
+parse_rewrite (void *call_data, void *section_data)
+{
+  REWRITE_RULE *rule = rewrite_rule_alloc (call_data);
+  return parser_loop (rewrite_rule_parsetab, rule, section_data, NULL);
+}
+
+static REWRITE_RULE *
+rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
+{
+  if (!SLIST_EMPTY (head))
+    {
+      REWRITE_RULE *rw = SLIST_LAST (head);
+      if (rw->cond.type == COND_BOOL && SLIST_EMPTY (&rw->cond.bool.head))
+	return rw;
+    }
+
+  return rewrite_rule_alloc (head);
+}
+
+#define __cat2__(a,b) a ## b
+#define SETFN_NAME(part)			\
+  __cat2__(parse_,part)
+#define SETFN_SVC_NAME(part)			\
+  __cat2__(parse_svc_,part)
+#define SETFN_SVC_DECL(part)					     \
+  static int							     \
+  SETFN_SVC_NAME(part) (void *call_data, void *section_data)	     \
+  {								     \
+    REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);	     \
+    return SETFN_NAME(part) (&rule->ophead, section_data);	     \
+  }
+
+SETFN_SVC_DECL (set_url)
+SETFN_SVC_DECL (set_path)
+SETFN_SVC_DECL (set_query)
+SETFN_SVC_DECL (set_query_param)
+SETFN_SVC_DECL (set_fragment)
+SETFN_SVC_DECL (set_header)
+SETFN_SVC_DECL (delete_header)
+
+/*
+ * Support for backward-compatible HeaderRemove and HeadRemove directives.
+ */
+static int
+parse_header_remove (void *call_data, void *section_data)
+{
+  REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);
+  REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
+  XZALLOC (op->v.hdrdel);
+  return parse_regex (&op->v.hdrdel->pat, MATCH_RE,
+		      REG_EXTENDED | REG_ICASE | REG_NEWLINE,
+		      NULL);
+}
+
 static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
-  { "ACL", parse_cond_acl, NULL, offsetof (SERVICE, cond) },
-  { "URL", parse_cond_url_matcher, NULL, offsetof (SERVICE, cond) },
-  { "Header", parse_cond_hdr_matcher, NULL, offsetof (SERVICE, cond) },
-  /* compatibility keyword: */
-  { "HeadRequire", parse_cond_hdr_matcher, NULL, offsetof (SERVICE, cond) },
-  /* compatibility keyword: */
-  { "HeadDeny", parse_cond_head_deny_matcher, NULL, offsetof (SERVICE, cond) },
-  { "Host", parse_cond_host, NULL, offsetof (SERVICE, cond) },
-  { "Match", parse_match, NULL, offsetof (SERVICE, cond) },
-  { "AND", parse_and_cond, NULL, offsetof (SERVICE, cond) },
-  { "OR", parse_or_cond, NULL, offsetof (SERVICE, cond) },
-  { "NOT", parse_not_cond, NULL, offsetof (SERVICE, cond) },
+
+  MATCH_CONDITIONS (NULL, offsetof (SERVICE, cond)),
+
+  { "Rewrite", parse_rewrite, NULL, offsetof (SERVICE, rewrite) },
+  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (SERVICE, rewrite) },
+  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (SERVICE, rewrite) },
+  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (SERVICE, rewrite) },
+  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (SERVICE, rewrite) },
+  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (SERVICE, rewrite) },
+  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (SERVICE, rewrite) },
+  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (SERVICE, rewrite) },
+
   { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
   { "Redirect", parse_redirect_backend, NULL, offsetof (SERVICE, backends) },
@@ -2519,7 +2761,7 @@ parse_service (void *call_data, void *section_data)
       strncpy (svc->name, tok->str, sizeof (svc->name) - 1);
     }
   else
-    putback_tkn ();
+    putback_tkn (tok);
 
   if ((svc->sessions = session_table_new ()) == NULL)
     {
@@ -2779,31 +3021,6 @@ parse_rewritelocation (void *call_data, void *section_data)
 }
 
 static int
-append_header (void *call_data, void *section_data)
-{
-  HTTP_HEADER_LIST *hlist = call_data;
-  struct token *tok;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
-
-  switch (http_header_list_append (hlist, tok->str, H_REPLACE))
-    {
-    case 0:
-      break;
-
-    case -1:
-      xnomem ();
-
-    case 1:
-      conf_error ("%s", "invalid header");
-      return PARSER_FAIL;
-    }
-
-  return PARSER_OK;
-}
-
-static int
 parse_log_level (void *call_data, void *section_data)
 {
   return assign_int_range (call_data, 0, 5);
@@ -2882,14 +3099,26 @@ static PARSER_TABLE http_parsetab[] = {
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
   { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
-  { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
-  { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
+
+  { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
+  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
+  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (LISTENER, rewrite) },
+  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
+  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
+  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
+  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (LISTENER, rewrite) },
+
+  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
+
+  /* Backward compatibility */
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
-  { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
-  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { NULL }
@@ -2908,10 +3137,9 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->log_level = dfl->log_level;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
-  SLIST_INIT (&lst->head_off);
+  SLIST_INIT (&lst->rewrite);
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
-  DLIST_INIT (&lst->add_header);
   return lst;
 }
 
@@ -3402,14 +3630,27 @@ static PARSER_TABLE https_parsetab[] = {
   { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
   { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
   { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
-  { "HeaderRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
-  { "HeadRemove", assign_matcher, NULL, offsetof (LISTENER, head_off) },
+
+  { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
+  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
+  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (LISTENER, rewrite) },
+  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
+  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
+  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
+  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (LISTENER, rewrite) },
+
+  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
+
+  /* Backward compatibility */
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "HeaderAdd", append_header, NULL, offsetof (LISTENER, add_header) },
-  { "AddHeader", append_header, NULL, offsetof (LISTENER, add_header) },
-  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },

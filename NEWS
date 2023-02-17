@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-12
+Pound -- history of user-visible changes. 2023-02-17
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,122 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version (git)
+
+* Backreferences
+
+Up to eight most recent matches are saved.  They can be referenced
+as $N(M), where N is number of the parenthesized subexpression, and
+M is number of the match.  Matches are numbered in reverse chronological
+order with the most recent one being at index 0.  The (0) can be
+omitted ($1 is the same as $1(0)).
+
+For example, given the following statements:
+
+  Host -re "www\\.(.+)"
+  Header -re -icase "^Content-Type: *(.*)"
+  Path "^/static(/.*)?"
+
+"$1" refers to the subgroup of Path, "$1(1)" - to that of Header, and
+"$1(2)" - to that of Host.
+
+Curly braces may be used to delimit reference from the text that
+follows it.  This is useful if the reference is immediately followed
+by a decimal digit or opening parenthesis, as in: "${1}(text)".
+
+* Request matching directives
+
+In addition to "URL" and "Header", the following matching directives
+are provided
+
+  Path [options] "value"
+    Match path.
+
+  Query [options] "value"
+    Match query.
+
+  QueryParam "name" [options] "value"
+    Match query parameter.
+
+  Fragment [options] "value"
+    Match fragment.
+
+* Request modification directives
+
+Request modification directives apply changes to the incoming request
+before passing it on to the service or backend.  They can be used both
+in ListenHTTP (ListenHTTPS) and Service sections.  The following
+directives are provided:
+
+  DeleteHeader "header: pattern"
+      Remove matching headers from the incoming requests.
+
+  SetHeader "header: to add"
+      Add the defined header to the request passed.  If the header
+      already exists, change its value.
+
+  SetURL "value"
+      Sets the URL part of the request.
+
+  SetPath "value"
+      Sets the path part.
+
+  SetQuery "value"
+      Sets the query part.
+
+  SetQueryParam "name" "value"
+      Sets the query parameter "name" to "value".
+
+  SetFragment "value"
+      Sets the fragment part.
+
+  Rewrite ... [ Else ... ] End
+      Conditionally apply request modification depending on whether request
+      matches certain conditions, e.g.:
+
+		Rewrite
+			Path "\\.(jpg|gif)$"
+			SetPath "/images$0"
+		Else
+			Match AND
+				Host "example.org"
+				Path "\\.[^.]+$"
+			End
+			SetPath "/static$0"
+		Else
+			Path "\\.[^.]+$"
+			SetPath "/assets$0"
+		End
+
+* Request accessors
+
+These are special constructs that, when used in string values, are
+replaced with the corresponding parts of the incoming request.  The
+supported accessors are:
+
+ %[url]
+   The URL of the request.
+
+ %[path]
+   The path part of the request.
+
+ %[query]
+   The query part of the request.
+
+ %[param NAME]
+   The value of the query parameter NAME.
+
+ %[fragment]
+   The fragment part ofr the request
+
+ %[header NAME]
+   The value of the request header NAME.
+
+Request accessor can be used in all strings where the use of
+backreferences is allowed: i.e. arguments to Redirect, ACME,
+Error directives, and to all request modification directives described
+above.
 
 Version 4.5, 2023-02-12
 

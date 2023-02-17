@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2022-2023 Sergey Poznyakoff
+# Copyright (C) 2023 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,12 +13,15 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([HeadRemove])
-AT_KEYWORDS([headrem headremove])
+AT_SETUP([Visibility of changes])
+AT_KEYWORDS([rewrite chgvis accessor])
+
 PT_CHECK([ListenHTTP
-	HeadRemove "X-Foo-.*:.*"
-	HeadRemove "X-Bar: bar"
 	Service
+		Rewrite
+			SetURL "/other"
+			SetPath ["/echo%[path]"]
+		End
 		Backend
 			Address
 			Port
@@ -26,44 +29,11 @@ PT_CHECK([ListenHTTP
 	End
 End
 ],
-[GET /echo/
-X-Foo-One: one
-X-Foo-Two: twp
-X-Fooer: Quxer
-X-Bar: bar
+[GET /one
 end
 
 200
--x-orig-header-foo-one: one
--x-orig-header-foo-two: two
--x-orig-header-x-bar: bar
-x-orig-header-X-Fooer: Quxer
-end
-])
-
-PT_CHECK([ListenHTTP
-	HeadRemove "X-Foo-.*:.*"
-	HeadRemove "X-Bar: bar"
-	Service
-		Backend
-			Address
-			Port
-		End
-	End
-End
-],
-[GET /echo/
-X-Foo-One: one
-X-Foo-Two: twp
-X-Fooer: Quxer
-X-Bar: baz
-end
-
-200
--x-orig-header-foo-one: one
--x-orig-header-foo-two: two
-x-orig-header-x-bar: baz
-x-orig-header-X-Fooer: Quxer
+x-orig-uri: /echo/other
 end
 ])
 

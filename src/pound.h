@@ -293,6 +293,16 @@ enum
 
 int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
 
+struct query_param
+{
+  char *name;
+  char *value;
+  DLIST_ENTRY (query_param) link;
+};
+
+typedef DLIST_HEAD (,query_param) QUERY_HEAD;
+#define QUERY_EMPTY DLIST_EMPTY
+
 struct http_request
 {
   char *request;             /* Request line */
@@ -301,14 +311,20 @@ struct http_request
   int version;               /* HTTP minor version: 0 or 1 */
   char *url;                 /* URL part of the request */
   char *user;                /* Username extracted from Authorization header */
+  char *path;                /* URL Path */
+  char *query_raw;           /* URL query */
+  QUERY_HEAD query;
+  char *frag_raw;            /* URL fragment */
+  char *frag;
+  char *orig_request_line;   /* Original request line (for logging purposes) */
+  int split;
 };
 
 static inline void http_request_init (struct http_request *http)
 {
-  http->request = NULL;
-  http->url = NULL;
-  http->user = NULL;
+  memset (http, 0, sizeof (*http));
   DLIST_INIT (&http->headers);
+  DLIST_INIT (&http->query);
 }
 
 void http_request_free (struct http_request *);
@@ -376,7 +392,7 @@ struct be_redirect
 {
   char *url;		 /* for redirectors */
   int status;            /* Redirection status (301, 302, 303, 307, or 308 ) */
-  int append_uri;	 /* Append original URI to the new location. */
+  int has_uri;		 /* URL has path and/or query part. */
 };
 
 struct be_acme
@@ -474,10 +490,20 @@ enum service_cond_type
     COND_BOOL,  /* Boolean operation. */
     COND_ACL,   /* ACL match. */
     COND_URL,   /* URL match. */
+    COND_PATH,  /* Path match. */
+    COND_QUERY, /* Raw query match. */
+    COND_QUERY_PARAM, /* Query parameter match */
+    COND_FRAG,  /* Fragment match */
     COND_HDR,   /* Header match. */
     COND_HOST,  /* Special case od COND_HDR: matches the value of the
 		   Host: header */
   };
+
+struct query_param_match
+{
+  char *name;
+  regex_t re;
+};
 
 typedef struct _service_cond
 {
@@ -488,6 +514,7 @@ typedef struct _service_cond
     regex_t re;
     struct bool_service_cond bool;
     struct _service_cond *cond;
+    struct query_param_match qp;
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -510,11 +537,52 @@ service_cond_init (SERVICE_COND *cond, int type)
     }
 }
 
+enum rewrite_type
+  {
+    REWRITE_REWRITE_RULE,
+    REWRITE_HDR_DEL,
+    REWRITE_HDR_SET,
+    REWRITE_URL_SET,
+    REWRITE_PATH_SET,
+    REWRITE_QUERY_SET,
+    REWRITE_QUERY_PARAM_SET,
+    REWRITE_FRAG_SET
+  };
+
+typedef SLIST_HEAD(,rewrite_op) REWRITE_OP_HEAD;
+typedef SLIST_HEAD(,rewrite_rule) REWRITE_RULE_HEAD;
+
+typedef struct rewrite_op
+{
+  SLIST_ENTRY (rewrite_op) next; /* Next op in the list. */
+  enum rewrite_type type;        /* Rewrite operation type. */
+  union
+  {
+    struct rewrite_rule *rule;   /* type == REWRITE_REWRITE_RULE */
+    MATCHER *hdrdel;             /* type == REWRITE_HDR_DEL */
+    struct
+    {
+      char *name;
+      char *value;
+    } qp;                        /* type == REWRITE_QUERY_PARAM_SET */
+    char *str;                   /* type == REWRITE_*_SET */
+  } v;
+} REWRITE_OP;
+
+typedef struct rewrite_rule
+{
+  SERVICE_COND cond;               /* Optional condition. */
+  SLIST_ENTRY (rewrite_rule) next; /* Next rule in the list. */
+  struct rewrite_rule *iffalse;    /* Branch to go if cond yields false. */
+  REWRITE_OP_HEAD ophead;          /* Do this if cond yields true. */
+} REWRITE_RULE;
+
 /* service definition */
 typedef struct _service
 {
   char name[KEY_SIZE + 1];	/* symbolic name */
   SERVICE_COND cond;
+  REWRITE_RULE_HEAD rewrite;
   BACKEND_HEAD backends;
   BACKEND *emergency;
   int abs_pri;			/* abs total priority for all back-ends */
@@ -556,14 +624,13 @@ typedef struct _listener
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   int header_options;           /* additional header options */
-  HTTP_HEADER_LIST add_header;	/* extra headers */
+  REWRITE_RULE_HEAD rewrite;
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */
   regex_t url_pat;		/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req;	/* max. request size */
-  MATCHER_HEAD head_off;	/* headers to remove */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
@@ -585,19 +652,29 @@ struct submatch
   size_t matchn;
   size_t matchmax;
   regmatch_t *matchv;
-  char const *subject;
+  char *subject;
+};
+
+#define SMQ_SIZE 8
+
+struct submatch_queue
+{
+  int cur;
+  struct submatch sm[SMQ_SIZE+1];
 };
 
 #define SUBMATCH_INITIALIZER { 0, 0, NULL, NULL }
 
-void submatch_free (struct submatch *sm);
+static inline void
+submatch_init (struct submatch *sm)
+{
+  sm->matchn = 0;
+  sm->matchmax = 0;
+  sm->matchv = NULL;
+  sm->subject = NULL;
+}
 
-enum
-  {
-    SM_URL,
-    SM_HDR,
-    SM__MAX
-  };
+void submatch_queue_free (struct submatch_queue *smq);
 
 enum
   {
@@ -641,7 +718,7 @@ typedef struct _pound_http
   BIO *be;
   X509 *x509;
   SSL *ssl;
-  struct submatch sm[SM__MAX];
+  struct submatch_queue smq;
   RENEG_STATE reneg_state;
 
   int ws_state;  /* Websocket state */
@@ -709,7 +786,7 @@ char *str_be (char *buf, size_t size, BACKEND *be);
 
 /* Find the right service for a request */
 SERVICE *get_service (const LISTENER *, struct sockaddr *,
-		      const char *, HTTP_HEADER_LIST *, struct submatch *);
+		      struct http_request *, struct submatch_queue *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
@@ -913,3 +990,6 @@ int pound_to_http_status (int err);
 struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);
 int metrics_response (POUND_HTTP *phttp);
+
+int match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
+		struct http_request *req, struct submatch_queue *smq);

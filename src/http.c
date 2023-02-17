@@ -198,65 +198,427 @@ http_err_reply (POUND_HTTP *phttp, int err)
 		 phttp->lstn->http_err[err]);
   phttp->conn_closed = 1;
 }
-
-static char *
-expand_url (char const *url, char const *orig_url, struct submatch *sm, int append_uri)
+
+static int
+submatch_realloc (struct submatch *sm, regex_t const *re)
 {
-  struct stringbuf sb;
-  char *p;
-  char const *expr = url; /* For error reporting */
-
-  stringbuf_init_log (&sb);
-  while (*url)
+  size_t n = re->re_nsub + 1;
+  if (n > sm->matchmax)
     {
-      size_t len = strcspn (url, "$%");
-      stringbuf_add (&sb, url, len);
-      url += len;
-      if (*url == 0)
+      regmatch_t *p = realloc (sm->matchv, n * sizeof (p[0]));
+      if (!p)
+	return -1;
+      sm->matchmax = n;
+      sm->matchv = p;
+    }
+  sm->matchn = n;
+  return 0;
+}
+
+static void
+submatch_free (struct submatch *sm)
+{
+  free (sm->matchv);
+  free (sm->subject);
+  submatch_init (sm);
+}
+
+static void
+submatch_reset (struct submatch *sm)
+{
+  free (sm->subject);
+  sm->subject = NULL;
+  sm->matchn = 0;
+}
+
+static void
+submatch_queue_init (struct submatch_queue *smq)
+{
+  memset (smq, 0, sizeof (*smq));
+}
+
+void
+submatch_queue_free (struct submatch_queue *smq)
+{
+  int i;
+
+  for (i = 0; i < SMQ_SIZE; i++)
+    {
+      submatch_free (&smq->sm[i]);
+    }
+}
+
+static struct submatch *
+submatch_queue_get (struct submatch_queue *smq, int n)
+{
+  return smq->sm + (smq->cur + SMQ_SIZE - n) % SMQ_SIZE;
+}
+
+static struct submatch *
+submatch_queue_push (struct submatch_queue *smq)
+{
+  struct submatch *sm;
+  smq->cur = (smq->cur + 1) % SMQ_SIZE;
+  sm = submatch_queue_get (smq, 0);
+  submatch_reset (sm);
+  return sm;
+}
+
+static int
+submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
+{
+  int res;
+
+  submatch_free (sm);
+  if (submatch_realloc (sm, re))
+    {
+      lognomem ();
+      return 0;
+    }
+  res = regexec (re, subject, sm->matchn, sm->matchv, 0) == 0;
+  if (res)
+    {
+      if ((sm->subject = strdup (subject)) == NULL)
+	return 0;
+    }
+  return res;
+}
+
+/*
+ * Return codes for http_request_get_query_param,
+ * http_request_get_query_param_value, and request accessors.
+ */
+enum
+  {
+    RETRIEVE_OK,
+    RETRIEVE_NOT_FOUND,
+    RETRIEVE_ERROR = -1
+  };
+
+static int http_request_get_url (struct http_request *, char const **);
+static int http_request_get_path (struct http_request *, char const **);
+static int http_request_get_query (struct http_request *, char const **);
+static int http_request_get_query_param (struct http_request *,
+					 char const *, size_t,
+					 struct query_param **);
+static int http_request_get_fragment (struct http_request *, char const **);
+
+typedef int (*accessor_func) (struct http_request *, char const *, int, char const **);
+
+struct accessor
+{
+  char *name;
+  accessor_func func;
+  int arg;
+};
+
+static int
+accessor_url (struct http_request *req, char const *arg, int arglen,
+	      char const **ret_val)
+{
+  return http_request_get_url (req, ret_val);
+}
+
+static int
+accessor_path (struct http_request *req, char const *arg, int arglen,
+	       char const **ret_val)
+{
+  return http_request_get_path (req, ret_val);
+}
+
+static int
+accessor_query (struct http_request *req, char const *arg, int arglen,
+		char const **ret_val)
+{
+  return http_request_get_query (req, ret_val);
+}
+
+static int
+accessor_param (struct http_request *req, char const *arg, int arglen,
+		char const **ret_val)
+{
+  struct query_param *qp;
+  int rc;
+  if ((rc = http_request_get_query_param (req, arg, arglen, &qp)) == RETRIEVE_OK)
+    *ret_val = qp->value;
+  return rc;
+}
+
+static struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
+static char *http_header_get_value (struct http_header *hdr);
+
+static int
+accessor_header (struct http_request *req, char const *arg, int arglen,
+		 char const **ret_val)
+{
+  struct http_header *hdr;
+
+  if ((hdr = http_header_list_locate_name (&req->headers, arg, arglen)) == NULL)
+    return RETRIEVE_NOT_FOUND;
+
+  *ret_val = http_header_get_value (hdr);
+  return RETRIEVE_OK;
+}
+
+static int
+accessor_fragment (struct http_request *req, char const *arg, int arglen,
+		   char const **ret_val)
+{
+  return http_request_get_fragment (req, ret_val);
+}
+
+static struct accessor accessors[] = {
+  { "url",      accessor_url },
+  { "path",     accessor_path },
+  { "query",    accessor_query },
+  { "param",    accessor_param, 1 },
+  { "fragment", accessor_fragment },
+  { "frag",     accessor_fragment },
+  { "header",   accessor_header, 1 },
+  { NULL }
+};
+
+static accessor_func
+find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen)
+{
+  struct accessor *ap;
+  char const *arg = NULL;
+  size_t arglen = 0;
+  size_t i;
+
+  while (len && (*input == ' ' || *input == '\t'))
+    {
+      input++;
+      len--;
+    }
+  if (len == 0)
+    return NULL;
+
+  for (i = 0; i < len; i++)
+    if (input[i] == ' ' || input[i] == '\t')
+      break;
+
+  for (ap = accessors; ; ap++)
+    {
+      if (ap->name == NULL)
+	return NULL;
+      if (strlen (ap->name) == i && memcmp (ap->name, input, i) == 0)
 	break;
-      else if ((url[0] == '$' && (url[1] == '$' || url[1] == '%')) || url[1] == 0)
+    }
+
+  if (ap->arg)
+    {
+      if (!isspace (input[i]))
+	return NULL;
+
+      do
 	{
-	  stringbuf_add_char (&sb, url[0]);
-	  url += 2;
+	  i++;
+	  if (i == len)
+	    return NULL;
 	}
-      else if (isdigit (url[1]))
+      while (isspace (input[i]));
+
+      arg = input + i;
+      arglen = len - i;
+
+      do
 	{
-	  struct submatch *smu = &sm[url[0] == '$' ? SM_URL : SM_HDR];
-	  long n;
+	  if (arglen == 0)
+	    return NULL;
+	}
+      while (isspace (arg[arglen-1]));
+    }
+  else
+    {
+      while (i < len && isspace(input[i]))
+	i++;
+      if (i < len)
+	return NULL;
+      arg = NULL;
+      arglen = 0;
+    }
+
+  *ret_arg = (char*) arg;
+  *ret_arglen = arglen;
+
+  return ap->func;
+}
+
+static int
+expand_string_to_buffer (struct stringbuf *sb, char const *str,
+			 struct submatch_queue *smq, char *what,
+			 struct http_request *req)
+{
+  char *p;
+  char const *start = str; /* For error reporting */
+  int exp = 0; /* Number of expansions made */
+
+  while (*str)
+    {
+      int brace;
+      size_t len = strcspn (str, "$%");
+      stringbuf_add (sb, str, len);
+      str += len;
+      if (*str == 0)
+	break;
+      else if ((str[0] == '$' && (str[1] == '$' || str[1] == '%')) || str[1] == 0)
+	{
+	  stringbuf_add_char (sb, str[0]);
+	  str += 2;
+	}
+      else if (req && str[0] == '%' && str[1] == '[')
+	{
+	  char *q;
+	  size_t len;
+	  accessor_func acc;
+	  char *arg;
+	  size_t arglen;
+	  char const *val;
+
+	  q = strchr (str + 2, ']');
+	  if (q == NULL)
+	    {
+	      logmsg (LOG_WARNING, "%s \"%s\": unclosed %%[ at offset %d", what, start, (int)(str - start));
+	      stringbuf_add_char (sb, str[0]);
+	      str += 2;
+	      continue;
+	    }
+
+	  len = q - str;
+
+	  if ((acc = find_accessor (str + 2, len - 2, &arg, &arglen)) == NULL)
+	    {
+	      stringbuf_add (sb, str, len + 1);
+	    }
+	  else if (acc (req, arg, arglen, &val) == 0 && val)
+	    {
+	      stringbuf_add_string (sb, val);
+	      exp++;
+	    }
+
+	  str = q + 1;
+	}
+      else if ((brace = (str[1] == '{')) || isdigit (str[1]))
+	{
+	  long groupno;
 	  errno = 0;
-	  n = strtoul (url + 1, &p, 10);
+	  groupno = strtoul (str + 1 + brace, &p, 10);
 	  if (errno)
 	    {
-	      stringbuf_add_char (&sb, url[0]);
-	      url++;
+	      stringbuf_add_char (sb, str[0]);
+	      str++;
 	    }
 	  else
 	    {
-	      if (n <= sm->matchn)
+	      /*
+	       * For compatibility with versions 4.4 - 4.5, %N is taken to
+	       * mean $N(1).
+	       */
+	      int refno = str[0] == '$' ? 0 : 1;
+	      struct submatch *sm;
+
+	      if (*p == '(')
 		{
-		  stringbuf_add (&sb, smu->subject + smu->matchv[n].rm_so,
-				 smu->matchv[n].rm_eo - smu->matchv[n].rm_so);
+		  long n;
+		  errno = 0;
+		  n = strtoul (p + 1, &p, 10);
+		  if (errno || *p != ')')
+		    {
+		      stringbuf_add (sb, str, p - str);
+		      str = p;
+		      continue;
+		    }
+		  if (n < 0 || n >= SMQ_SIZE)
+		    {
+		      int len = p - str + 1;
+		      logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, len, len, str);
+		      stringbuf_add (sb, str, p - str);
+		      str = p;
+		      continue;
+		    }
+		  refno = n;
+		  p++;
+		}
+
+	      if (brace)
+		{
+		  if (*p != '}')
+		    {
+		      int n = str - start + 1;
+		      logmsg (LOG_WARNING, "%s \"%s\": missing closing brace in reference in position %d", what, start, n);
+		      stringbuf_add (sb, str, p - str);
+		      str = p;
+		      continue;
+		    }
+		  p++;
+		}
+
+	      sm = submatch_queue_get (smq, refno);
+
+	      if (sm->subject && groupno <= sm->matchn)
+		{
+		  stringbuf_add (sb, sm->subject + sm->matchv[groupno].rm_so,
+				 sm->matchv[groupno].rm_eo - sm->matchv[groupno].rm_so);
+		  exp++;
 		}
 	      else
 		{
-		  int n = p - url;
-		  stringbuf_add (&sb, url, n);
-		  logmsg (LOG_WARNING, "Redirect expression \"%s\" refers to non-existing group %*.*s", expr, n, n, url);
+		  int n = p - str;
+		  stringbuf_add (sb, str, n);
+		  logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, n, n, str);
 		}
-	      append_uri = 1;
-	      url = p;
+	      str = p;
 	    }
 	}
+      else
+	{
+	  int n = str - start + 1;
+	  logmsg (LOG_WARNING, "%s \"%s\" unescaped %% character in position %d", what, start, n);
+	  stringbuf_add_char (sb, *str);
+	  str++;
+	}
     }
+  return exp;
+}
+
+char *
+expand_string (char const *str, struct submatch_queue *smq, char *what,
+	       struct http_request *req)
+{
+  struct stringbuf sb;
+  char *p;
+
+  stringbuf_init_log (&sb);
+  expand_string_to_buffer (&sb, str, smq, what, req);
+  if ((p = stringbuf_finish (&sb)) == NULL)
+    stringbuf_free (&sb);
+  return p;
+}
+
+static char *
+expand_url (char const *url, struct http_request *req,
+	    struct submatch_queue *smq, int has_uri)
+{
+  struct stringbuf sb;
+  char *p;
+
+  stringbuf_init_log (&sb);
+
+  if (expand_string_to_buffer (&sb, url, smq, "Redirect expression", req))
+    has_uri = 1;
 
   /* For compatibility with previous versions */
-  if (!append_uri)
-    stringbuf_add_string (&sb, orig_url);
+  if (!has_uri)
+    stringbuf_add_string (&sb, req->url);
 
   if ((p = stringbuf_finish (&sb)) == NULL)
     stringbuf_free (&sb);
   return p;
 }
+
+static int rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
+			  struct http_request *request, struct sockaddr *addr);
 
 /*
  * Reply with a redirect
@@ -302,7 +664,11 @@ redirect_response (POUND_HTTP *phttp)
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  xurl = expand_url (redirect->url, phttp->request.url, phttp->sm, redirect->append_uri);
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  xurl = expand_url (redirect->url, &phttp->request, &phttp->smq, redirect->has_uri);
   if (!xurl)
     {
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -311,6 +677,10 @@ redirect_response (POUND_HTTP *phttp)
   /*
    * Make sure to return a safe version of the URL (otherwise CSRF
    * becomes a possibility)
+   *
+   * FIXME: 1. This should be optional.
+   *        2. Use urlencode or http_request_split/http_request_rebuild to
+   *           do that.
    */
   stringbuf_init_log (&sb_url);
   for (i = 0; xurl[i]; i++)
@@ -406,7 +776,11 @@ acme_response (POUND_HTTP *phttp)
   char *file_name;
   int rc = HTTP_STATUS_OK;
 
-  file_name = expand_url (phttp->backend->v.acme.dir, phttp->request.url, phttp->sm, 1);
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  file_name = expand_url (phttp->backend->v.acme.dir, &phttp->request, &phttp->smq, 1);
 
   if ((fd = open (file_name, O_RDONLY)) == -1)
     {
@@ -453,6 +827,10 @@ error_response (POUND_HTTP *phttp)
 {
   int err = phttp->backend->v.error.status;
   char *file_name = phttp->backend->v.error.file;
+
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   if (file_name)
     {
@@ -927,7 +1305,198 @@ is_readable (BIO *bio, int to_wait)
   p.events = POLLIN | POLLPRI;
   return (poll (&p, 1, to_wait * 1000) > 0);
 }
+
+struct method_def
+{
+  char const *name;
+  size_t length;
+  int meth;
+  int group;
+};
 
+static struct method_def methods[] = {
+#define S(s) s, sizeof(s)-1
+  { S("GET"),          METH_GET,           0 },
+  { S("POST"),         METH_POST,          0 },
+  { S("HEAD"),         METH_HEAD,          0 },
+  { S("PUT"),          METH_PUT,           1 },
+  { S("PATCH"),        METH_PATCH,         1 },
+  { S("DELETE"),       METH_DELETE,        1 },
+  { S("LOCK"),         METH_LOCK,          2 },
+  { S("UNLOCK"),       METH_UNLOCK,        2 },
+  { S("PROPFIND"),     METH_PROPFIND,      2 },
+  { S("PROPPATCH"),    METH_PROPPATCH,     2 },
+  { S("SEARCH"),       METH_SEARCH,        2 },
+  { S("MKCOL"),        METH_MKCOL,         2 },
+  { S("MOVE"),         METH_MOVE,          2 },
+  { S("COPY"),         METH_COPY,          2 },
+  { S("OPTIONS"),      METH_OPTIONS,       2 },
+  { S("TRACE"),        METH_TRACE,         2 },
+  { S("MKACTIVITY"),   METH_MKACTIVITY,    2 },
+  { S("CHECKOUT"),     METH_CHECKOUT,      2 },
+  { S("MERGE"),        METH_MERGE,         2 },
+  { S("REPORT"),       METH_REPORT,        2 },
+  { S("SUBSCRIBE"),    METH_SUBSCRIBE,     3 },
+  { S("UNSUBSCRIBE"),  METH_UNSUBSCRIBE,   3 },
+  { S("BPROPPATCH"),   METH_BPROPPATCH,    3 },
+  { S("POLL"),         METH_POLL,          3 },
+  { S("BMOVE"),        METH_BMOVE,         3 },
+  { S("BCOPY"),        METH_BCOPY,         3 },
+  { S("BDELETE"),      METH_BDELETE,       3 },
+  { S("BPROPFIND"),    METH_BPROPFIND,     3 },
+  { S("NOTIFY"),       METH_NOTIFY,        3 },
+  { S("CONNECT"),      METH_CONNECT,       3 },
+#undef S
+  { NULL }
+};
+
+static struct method_def *
+find_method (const char *str, int group)
+{
+  struct method_def *m;
+
+  for (m = methods; m->name; m++)
+    {
+      if (strncasecmp (m->name, str, m->length) == 0)
+	return m;
+    }
+  return NULL;
+}
+
+#define OTH  0  /* Other */
+#define UNR  1  /* Unreserved character */
+#define RSV  2  /* Reserved character */
+
+static int url_char_class[] = {
+  /*         0    1    2    3    4    5    6    7   */
+  /*  0 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
+  /*  1 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
+  /*  2 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
+  /*  3 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
+  /*  4 */  OTH, RSV, RSV, RSV, RSV, RSV, RSV, RSV,
+  /*  5 */  RSV, RSV, RSV, RSV, RSV, UNR, UNR, RSV,
+  /*  6 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /*  7 */  UNR, UNR, OTH, RSV, OTH, RSV, OTH, RSV,
+  /* 10 */  RSV, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 11 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 12 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 13 */  UNR, UNR, UNR, RSV, OTH, RSV, OTH, UNR,
+  /* 14 */  OTH, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 15 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 16 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
+  /* 17 */  UNR, UNR, UNR, OTH, OTH, OTH, UNR, OTH
+};
+
+static char xdig[] = "0123456789ABCDEFabcdef";
+
+/*
+ * Parse a URL, possibly decoding hexadecimal-encoded characters
+ */
+static int
+urldecode (char **res, char const *src, int len)
+{
+  struct stringbuf sb;
+  char *p;
+
+  stringbuf_init_log (&sb);
+  while (len)
+    {
+      size_t n;
+
+      if ((p = memchr (src, '%', len)) != NULL)
+	n = p - src;
+      else
+	n = len;
+
+      if (n > 0)
+	{
+	  stringbuf_add (&sb, src, n);
+	  src += n;
+	  len -= n;
+	}
+
+      if (*src)
+	{
+	  int a, b;
+
+	  if (len < 3)
+	    {
+	      stringbuf_add (&sb, src, len);
+	      break;
+	    }
+
+	  if ((p = strchr (xdig, src[1])) == NULL)
+	    {
+	      stringbuf_add (&sb, src, 2);
+	      src += 2;
+	      len -= 2;
+	      continue;
+	    }
+
+	  if ((a = p - xdig) > 15)
+	    a -= 6;
+
+	  if ((p = strchr (xdig, src[2])) == NULL)
+	    {
+	      stringbuf_add (&sb, src, 3);
+	      src += 3;
+	      len -= 3;
+	      continue;
+	    }
+
+	  if ((b = p - xdig) > 15)
+	    b -= 6;
+
+	  a = (a << 4) + b;
+	  if (a == 0)
+	    {
+	      stringbuf_free (&sb);
+	      return 1;
+	    }
+	  stringbuf_add_char (&sb, a);
+
+	  src += 3;
+	  len -= 3;
+	}
+    }
+
+  if ((p = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+  *res = p;
+  return 0;
+}
+
+static int
+urlencode (char **res, char const *src)
+{
+  struct stringbuf sb;
+  char *p;
+
+  stringbuf_init_log (&sb);
+  for (; *src; src++)
+    {
+      unsigned n = *(unsigned char*)src;
+      if (n < sizeof (url_char_class) && url_char_class[n] == UNR)
+	stringbuf_add_char (&sb, *src);
+      else
+	{
+	  stringbuf_add_char (&sb, '%');
+	  stringbuf_add_char (&sb, xdig[n >> 4]);
+	  stringbuf_add_char (&sb, xdig[n & 0xf]);
+	}
+    }
+
+  if ((p = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+  *res = p;
+  return 0;
+}
 
 static int
 qualify_header (struct http_header *hdr)
@@ -1077,10 +1646,11 @@ http_header_list_locate (HTTP_HEADER_LIST *head, int code)
 }
 
 static struct http_header *
-http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name)
+http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len)
 {
   struct http_header *hdr;
-  size_t len = strcspn (name, ":");
+  if (len == 0)
+    len = strcspn (name, ":");
   DLIST_FOREACH (hdr, head, link)
     {
       if (hdr->name_end - hdr->name_start == len &&
@@ -1103,7 +1673,7 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 {
   struct http_header *hdr;
 
-  if ((hdr = http_header_list_locate_name (head, text)) != NULL)
+  if ((hdr = http_header_list_locate_name (head, text, 0)) != NULL)
     {
       if (replace)
 	return http_header_change (hdr, text, 1);
@@ -1160,17 +1730,476 @@ http_header_list_filter (HTTP_HEADER_LIST *head, MATCHER *m)
 
   DLIST_FOREACH_SAFE (hdr, tmp, head, link)
     {
-      if (regexec (&m->pat, hdr->header, 0, NULL, 0))
+      if (regexec (&m->pat, hdr->header, 0, NULL, 0) == 0)
 	{
 	  http_header_list_remove (head, hdr);
 	}
     }
 }
 
-static char const *
-http_request_line (struct http_request *req)
+static void http_request_free_query (struct http_request *req);
+
+static int
+http_request_split (struct http_request *req)
 {
-  return (req && req->request) ? req->request : "";
+  if (req->split)
+    {
+      size_t url_len = strlen (req->url);
+      char *p;
+      size_t path_len = url_len;
+      int query_start = -1, query_len = 0;
+      int frag_start, frag_len = 0;
+
+      if ((p = strrchr (req->url, '#')) != NULL)
+	{
+	  frag_start = p - req->url;
+	  path_len -= frag_start + 1;
+	  frag_len = url_len - path_len;
+	}
+      else
+	{
+	  frag_start = strlen (req->url);
+	  frag_len = 0;
+	}
+
+      for (p = req->url + path_len; p > req->url; p--)
+	{
+	  if (*p == '?')
+	    {
+	      path_len = p - req->url;
+	      query_start = path_len + 1;
+	      query_len = frag_start - query_start;
+	      break;
+	    }
+	}
+
+      free (req->path);
+      if ((req->path = malloc (path_len + 1)) == NULL)
+	{
+	  lognomem ();
+	  return -1;
+	}
+      memcpy (req->path, req->url, path_len);
+      req->path[path_len] = 0;
+
+      free (req->query_raw);
+      http_request_free_query (req);
+      if (query_len > 0)
+	{
+	  if ((req->query_raw = malloc (query_len + 1)) == NULL)
+	    {
+	      lognomem ();
+	      return -1;
+	    }
+	  memcpy (req->query_raw, req->url + query_start, query_len);
+	  req->query_raw[query_len] = 0;
+	}
+      else
+	req->query_raw = NULL;
+
+      free (req->frag_raw);
+      if (frag_len)
+	{
+	  if ((req->frag_raw = malloc (frag_len + 1)) == NULL)
+	    {
+	      lognomem ();
+	      return -1;
+	    }
+	  memcpy (req->frag_raw, req->url + frag_start, frag_len);
+	  req->frag_raw[frag_len] = 0;
+	}
+      else
+	req->frag_raw = NULL;
+
+      req->split = 0;
+    }
+
+  return 0;
+}
+
+static int
+http_request_rebuild_line (struct http_request *req)
+{
+  struct stringbuf sb;
+  char *str;
+
+  stringbuf_init_log (&sb);
+  stringbuf_add_string (&sb, methods[req->method].name);
+  stringbuf_add_char (&sb, ' ');
+  stringbuf_add_string (&sb, req->url);
+  stringbuf_add_char (&sb, ' ');
+  stringbuf_add_string (&sb, "HTTP/1.");
+  stringbuf_add_char (&sb, req->version + '0');
+
+  if ((str = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+
+  if (req->orig_request_line)
+    free (req->request);
+  else
+    req->orig_request_line = req->request;
+  req->request = str;
+
+  return 0;
+}
+
+static int
+http_request_rebuild_url (struct http_request *req)
+{
+  struct stringbuf sb;
+  char *str;
+
+  stringbuf_init_log (&sb);
+  stringbuf_add_string (&sb, req->path);
+  if (req->query_raw)
+    {
+      stringbuf_add_char (&sb, '?');
+      stringbuf_add_string (&sb, req->query_raw);
+    }
+  if (req->frag_raw)
+    {
+      stringbuf_add_char (&sb, '#');
+      stringbuf_add_string (&sb, req->frag_raw);
+    }
+  if ((str = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+  free (req->url);
+  req->url = str;
+
+  return http_request_rebuild_line (req);
+}
+
+static int
+http_request_rebuild_query (struct http_request *req)
+{
+  struct stringbuf sb;
+  struct query_param *qp;
+  int more = 0;
+
+  stringbuf_init_log (&sb);
+  DLIST_FOREACH (qp, &req->query, link)
+    {
+      char *val;
+
+      if (urlencode (&val, qp->value))
+	{
+	  stringbuf_free (&sb);
+	  return -1;
+	}
+
+      if (more)
+	stringbuf_add_char (&sb, '&');
+      else
+	more = 1;
+      stringbuf_add_string (&sb, qp->name);
+      stringbuf_add_char (&sb, '=');
+      stringbuf_add_string (&sb, val);
+      free (val);
+    }
+  if ((req->query_raw = stringbuf_finish (&sb)) == NULL)
+    {
+      stringbuf_free (&sb);
+      return -1;
+    }
+
+  return http_request_rebuild_url (req);
+}
+
+static int
+http_request_get_request_line (struct http_request *req, char const **str)
+{
+  *str = req->request;
+  return 0;
+}
+
+static char const *
+http_request_orig_line (struct http_request *req)
+{
+  if (!req)
+    return "";
+  return req->orig_request_line ? req->orig_request_line :
+	  req->request ? req->request : "";
+}
+
+static int
+http_request_get_url (struct http_request *req, char const **retval)
+{
+  *retval = req->url;
+  return 0;
+}
+
+static int
+http_request_set_url (struct http_request *req, char const *url)
+{
+  char *p;
+
+  if ((p = strdup (url)) == NULL)
+    {
+      lognomem ();
+      return -1;
+    }
+  free (req->url);
+  req->url = p;
+  req->split = 1;
+  return http_request_rebuild_line (req);
+}
+
+static int
+http_request_get_path (struct http_request *req, char const **retval)
+{
+  if (http_request_split (req))
+      return -1;
+  *retval = req->path;
+  return 0;
+}
+
+static int
+http_request_set_path (struct http_request *req, char const *path)
+{
+  char *p;
+
+  if (http_request_split (req))
+      return -1;
+  if ((p = strdup (path)) == NULL)
+    {
+      lognomem ();
+      return -1;
+    }
+  free (req->path);
+  req->path = p;
+
+  return http_request_rebuild_url (req);
+}
+
+static int
+http_request_get_query (struct http_request *req, char const **retval)
+{
+  if (http_request_split (req))
+    return -1;
+  *retval = req->query_raw;
+  return 0;
+}
+
+static void
+query_param_free (struct query_param *qp)
+{
+  free (qp->name);
+  free (qp->value);
+  free (qp);
+}
+
+static void
+http_request_free_query (struct http_request *req)
+{
+  while (!DLIST_EMPTY (&req->query))
+    {
+      struct query_param *qp = DLIST_FIRST (&req->query);
+      DLIST_SHIFT (&req->query, link);
+      query_param_free (qp);
+    }
+}
+
+static int
+http_request_parse_query (struct http_request *req)
+{
+  char const *query;
+
+  if (http_request_get_query (req, &query))
+    return -1;
+  if (query)
+    {
+      while (*query)
+	{
+	  size_t pl = strcspn (query, "&");
+	  size_t nl;
+	  char *q;
+	  char *val;
+	  struct query_param *qp;
+
+	  q = memchr (query, '=', pl);
+	  if (q == NULL)
+	    {
+	      nl = pl;
+	      val = NULL;
+	    }
+	  else
+	    {
+	      nl = q - query;
+	      if (urldecode (&val, query + nl + 1, pl - nl - 1))
+		return -1;
+	    }
+
+	  if ((qp = malloc (sizeof (*qp))) == NULL)
+	    {
+	      lognomem ();
+	      return -1;
+	    }
+
+	  if ((qp->name = malloc (nl + 1)) == NULL)
+	    {
+	      lognomem ();
+	      free (qp);
+	      return -1;
+	    }
+	  memcpy (qp->name, query, nl);
+	  qp->name[nl] = 0;
+	  qp->value = val;
+
+	  DLIST_PUSH (&req->query, qp, link);
+
+	  query += pl;
+	  if (*query)
+	    query++;
+	}
+    }
+  return 0;
+}
+
+static int
+http_request_get_query_param (struct http_request *req,
+			      char const *name, size_t namelen,
+			      struct query_param **retval)
+{
+  struct query_param *qp;
+
+  if (http_request_split (req))
+    return RETRIEVE_ERROR;
+  if (QUERY_EMPTY (&req->query) && http_request_parse_query (req))
+    return RETRIEVE_ERROR;
+
+  DLIST_FOREACH (qp, &req->query, link)
+    {
+      if (strlen (qp->name) == namelen && memcmp (qp->name, name, namelen) == 0)
+	{
+	  *retval = qp;
+	  return RETRIEVE_OK;
+	}
+    }
+  return RETRIEVE_NOT_FOUND;
+}
+
+static int
+http_request_get_query_param_value (struct http_request *req, char const *name,
+				    char const **retval)
+{
+  struct query_param *qp;
+  int rc = http_request_get_query_param (req, name, strlen (name), &qp);
+  if (rc == RETRIEVE_OK)
+    *retval = qp->value;
+  return rc;
+}
+
+static int
+http_request_set_query (struct http_request *req, char const *rawquery)
+{
+  char *p;
+
+  if (http_request_split (req))
+      return -1;
+  if ((p = strdup (rawquery)) == NULL)
+    {
+      lognomem ();
+      return -1;
+    }
+  free (req->query_raw);
+  req->query_raw = p;
+  http_request_free_query (req);
+  return http_request_rebuild_url (req);
+}
+
+static int
+http_request_set_query_param (struct http_request *req, char const *name,
+			      char const *raw_value)
+{
+  struct query_param *qp;
+  int rc = http_request_get_query_param (req, name, strlen (name), &qp);
+  char *value;
+
+  switch (rc)
+    {
+    case RETRIEVE_ERROR:
+      return RETRIEVE_ERROR;
+
+    case RETRIEVE_NOT_FOUND:
+      /* not found */
+      if (raw_value == NULL)
+	return RETRIEVE_OK;
+      if ((value = strdup (raw_value)) == NULL)
+	{
+	  lognomem ();
+	  return RETRIEVE_ERROR;
+	}
+      if ((qp = malloc (sizeof (*qp))) == NULL)
+	{
+	  lognomem ();
+	  return RETRIEVE_ERROR;
+	}
+      if ((qp->name = strdup (name)) == NULL)
+	{
+	  lognomem ();
+	  free (qp);
+	  return RETRIEVE_ERROR;
+	}
+      qp->value = value;
+      DLIST_PUSH (&req->query, qp, link);
+      break;
+
+    case 0:
+      if (raw_value == 0)
+	{
+	  DLIST_REMOVE (&req->query, qp, link);
+	  query_param_free (qp);
+	}
+      else
+	{
+	  if (urlencode (&value, raw_value))
+	    return RETRIEVE_ERROR;
+	  free (qp->value);
+	  qp->value = value;
+	}
+      break;
+    }
+
+  return http_request_rebuild_query (req);
+}
+
+static int
+http_request_get_fragment (struct http_request *req, char const **retval)
+{
+  if (http_request_split (req))
+    return -1;
+  if (!req->frag && req->frag_raw &&
+      urldecode (&req->frag, req->frag_raw, strlen (req->frag_raw)))
+    return -1;
+  *retval = req->frag;
+  return 0;
+}
+
+static int
+http_request_set_fragment (struct http_request *req, char const *frag)
+{
+  char *val;
+  char const *s;
+
+  if (http_request_get_fragment (req, &s))
+    return -1;
+
+  if (urlencode (&val, frag))
+    return -1;
+
+  free (req->frag);
+  req->frag = NULL;
+
+  free (req->frag_raw);
+  req->frag_raw = val;
+
+  return http_request_rebuild_url (req);
 }
 
 static char const *
@@ -1198,9 +2227,15 @@ void
 http_request_free (struct http_request *req)
 {
   free (req->request);
+  http_header_list_free (&req->headers);
   free (req->url);
   free (req->user);
-  http_header_list_free (&req->headers);
+  free (req->path);
+  free (req->query_raw);
+  http_request_free_query (req);
+  free (req->frag_raw);
+  free (req->frag);
+  free (req->orig_request_line);
   http_request_init (req);
 }
 
@@ -1343,143 +2378,6 @@ get_user (char *hdrval, char **u_name)
   return -1;
 }
 
-struct method_def
-{
-  char const *name;
-  size_t length;
-  int meth;
-  int group;
-};
-
-static struct method_def methods[] = {
-#define S(s) s, sizeof(s)-1
-  { S("GET"),          METH_GET,           0 },
-  { S("POST"),         METH_POST,          0 },
-  { S("HEAD"),         METH_HEAD,          0 },
-  { S("PUT"),          METH_PUT,           1 },
-  { S("PATCH"),        METH_PATCH,         1 },
-  { S("DELETE"),       METH_DELETE,        1 },
-  { S("LOCK"),         METH_LOCK,          2 },
-  { S("UNLOCK"),       METH_UNLOCK,        2 },
-  { S("PROPFIND"),     METH_PROPFIND,      2 },
-  { S("PROPPATCH"),    METH_PROPPATCH,     2 },
-  { S("SEARCH"),       METH_SEARCH,        2 },
-  { S("MKCOL"),        METH_MKCOL,         2 },
-  { S("MOVE"),         METH_MOVE,          2 },
-  { S("COPY"),         METH_COPY,          2 },
-  { S("OPTIONS"),      METH_OPTIONS,       2 },
-  { S("TRACE"),        METH_TRACE,         2 },
-  { S("MKACTIVITY"),   METH_MKACTIVITY,    2 },
-  { S("CHECKOUT"),     METH_CHECKOUT,      2 },
-  { S("MERGE"),        METH_MERGE,         2 },
-  { S("REPORT"),       METH_REPORT,        2 },
-  { S("SUBSCRIBE"),    METH_SUBSCRIBE,     3 },
-  { S("UNSUBSCRIBE"),  METH_UNSUBSCRIBE,   3 },
-  { S("BPROPPATCH"),   METH_BPROPPATCH,    3 },
-  { S("POLL"),         METH_POLL,          3 },
-  { S("BMOVE"),        METH_BMOVE,         3 },
-  { S("BCOPY"),        METH_BCOPY,         3 },
-  { S("BDELETE"),      METH_BDELETE,       3 },
-  { S("BPROPFIND"),    METH_BPROPFIND,     3 },
-  { S("NOTIFY"),       METH_NOTIFY,        3 },
-  { S("CONNECT"),      METH_CONNECT,       3 },
-#undef S
-  { NULL }
-};
-
-static struct method_def *
-find_method (const char *str, int group)
-{
-  struct method_def *m;
-
-  for (m = methods; m->name; m++)
-    {
-      if (strncasecmp (m->name, str, m->length) == 0)
-	return m;
-    }
-  return NULL;
-}
-
-/*
- * Parse a URL, possibly decoding hexadecimal-encoded characters
- */
-static int
-decode_url (char **res, char const *src, int len)
-{
-  struct stringbuf sb;
-
-  stringbuf_init_log (&sb);
-  while (len)
-    {
-      char *p;
-      size_t n;
-
-      if ((p = memchr (src, '%', len)) != NULL)
-	n = p - src;
-      else
-	n = len;
-
-      if (n > 0)
-	{
-	  stringbuf_add (&sb, src, n);
-	  src += n;
-	  len -= n;
-	}
-
-      if (*src)
-	{
-	  static char xdig[] = "0123456789ABCDEFabcdef";
-	  int a, b;
-
-	  if (len < 3)
-	    {
-	      stringbuf_add (&sb, src, len);
-	      break;
-	    }
-
-	  if ((p = strchr (xdig, src[1])) == NULL)
-	    {
-	      stringbuf_add (&sb, src, 2);
-	      src += 2;
-	      len -= 2;
-	      continue;
-	    }
-
-	  if ((a = p - xdig) > 15)
-	    a -= 6;
-
-	  if ((p = strchr (xdig, src[2])) == NULL)
-	    {
-	      stringbuf_add (&sb, src, 3);
-	      src += 3;
-	      len -= 3;
-	      continue;
-	    }
-
-	  if ((b = p - xdig) > 15)
-	    b -= 6;
-
-	  a = (a << 4) + b;
-	  if (a == 0)
-	    {
-	      stringbuf_free (&sb);
-	      return 1;
-	    }
-	  stringbuf_add_char (&sb, a);
-
-	  src += 3;
-	  len -= 3;
-	}
-    }
-
-  if ((*res = stringbuf_finish (&sb)) == NULL)
-    {
-      stringbuf_free (&sb);
-      return -1;
-    }
-  return 0;
-}
-
 static int
 parse_http_request (struct http_request *req, int group)
 {
@@ -1517,12 +2415,157 @@ parse_http_request (struct http_request *req, int group)
     return -1;
 
   req->method = md->meth;
-  if (decode_url (&req->url, url, len))
-    return -1;
+  if ((req->url = malloc (len + 1)) == NULL)
+    {
+      lognomem ();
+      return -1;
+    }
+  memcpy (req->url, url, len);
+  req->url[len] = 0;
 
   req->version = http_ver - '0';
+  req->split = 1;
 
   return 0;
+}
+
+static int
+match_headers (HTTP_HEADER_LIST *headers, regex_t const *re, struct submatch *sm)
+{
+  struct http_header *hdr;
+
+  DLIST_FOREACH (hdr, headers, link)
+    {
+      if (hdr->header && submatch_exec (re, hdr->header, sm))
+	return 1;
+    }
+  return 0;
+}
+
+int
+match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
+	    struct http_request *req, struct submatch_queue *smq)
+{
+  int res = 1;
+  SERVICE_COND *subcond;
+  char const *str;
+
+  switch (cond->type)
+    {
+    case COND_ACL:
+      res = acl_match (cond->acl, srcaddr) == 0;
+      break;
+
+    case COND_URL:
+      if (http_request_get_url (req, &str) == -1)
+	res = -1;
+      else
+	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+      break;
+
+    case COND_PATH:
+      if (http_request_get_path (req, &str) == -1)
+	res = -1;
+      else
+	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+      break;
+
+    case COND_QUERY:
+      if (http_request_get_query (req, &str) == -1)
+	res = -1;
+      else
+	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+      break;
+
+    case COND_QUERY_PARAM:
+      switch (http_request_get_query_param_value (req, cond->qp.name, &str))
+	{
+	case RETRIEVE_ERROR:
+	  res = -1;
+	  break;
+
+	case RETRIEVE_NOT_FOUND:
+	  res = 0;
+	  break;
+
+	default:
+	  res = submatch_exec (&cond->qp.re, str, submatch_queue_push (smq));
+	}
+      break;
+
+    case COND_FRAG:
+      if (http_request_get_fragment (req, &str) == -1)
+	res = -1;
+      else
+	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+      break;
+
+    case COND_HDR:
+      res = match_headers (&req->headers, &cond->re, submatch_queue_push (smq));
+      break;
+
+    case COND_HOST:
+      res = match_headers (&req->headers, &cond->re, submatch_queue_push (smq));
+      if (res)
+	{
+	  /*
+	   * On match, adjust subgroup references and subject pointer
+	   * to refer to the Host: header value.
+	   */
+	  struct submatch *sm = submatch_queue_get (smq, 0);
+	  int n, i;
+	  char const *s = sm->subject;
+	  regmatch_t *mv = sm->matchv;
+	  int mc = sm->matchn;
+	  char *p;
+
+	  /* Skip initial whitespace and "host:" */
+	  s += strspn (s, " \t\n") + 5;
+	  /* Skip whitespace after header name. */
+	  s += strspn (s, " \t\n");
+	  /* Compute fix-up offset. */
+	  n = s - sm->subject;
+	  /* Adjust all subgroups. */
+	  /* rm_so of the 0th group is always 0, so adjust only rm_eo: */
+	  mv->rm_eo -= n;
+	  for (i = 1; i < mc; i++)
+	    {
+	      ++mv;
+	      mv->rm_so -= n;
+	      mv->rm_eo -= n;
+	    }
+	  /* Adjust subject. */
+	  if ((p = strdup (s)) != NULL)
+	    {
+	      free (sm->subject);
+	      sm->subject = p;
+	    }
+	  else
+	    {
+	      lognomem ();
+	    }
+	}
+      break;
+
+    case COND_BOOL:
+      if (cond->bool.op == BOOL_NOT)
+	{
+	  subcond = SLIST_FIRST (&cond->bool.head);
+	  res = ! match_cond (subcond, srcaddr, req, smq);
+	}
+      else
+	{
+	  SLIST_FOREACH (subcond, &cond->bool.head, next)
+	    {
+	      res = match_cond (subcond, srcaddr, req, smq);
+	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
+		break;
+	    }
+	}
+      break;
+    }
+
+  return res;
 }
 
 /*
@@ -1601,8 +2644,8 @@ http_log_1 (POUND_HTTP *phttp)
   char buf[MAX_ADDR_BUFSIZE];
   logmsg (LOG_INFO, "%s %s - %s",
 	  anon_addr2str (buf, sizeof (buf), &phttp->from_host),
-	  http_request_line (&phttp->request),
-	  http_request_line (&phttp->response));
+	  http_request_orig_line (&phttp->request),
+	  http_request_orig_line (&phttp->response));
 }
 
 static char *
@@ -1640,8 +2683,8 @@ http_log_2 (POUND_HTTP *phttp)
     logmsg (LOG_INFO,
 	    "%s %s - %s (%s/%s -> %s) %s sec",
 	    anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	    http_request_line (&phttp->request),
-	    http_request_line (&phttp->response),
+	    http_request_orig_line (&phttp->request),
+	    http_request_orig_line (&phttp->response),
 	    v_host, be_service_name (phttp->backend),
 	    str_be (baddr, sizeof (baddr), phttp->backend),
 	    log_duration (timebuf, sizeof (timebuf), &phttp->start_req));
@@ -1649,8 +2692,8 @@ http_log_2 (POUND_HTTP *phttp)
     logmsg (LOG_INFO,
 	    "%s %s - %s (%s -> %s) %s sec",
 	    anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	    http_request_line (&phttp->request),
-	    http_request_line (&phttp->response),
+	    http_request_orig_line (&phttp->request),
+	    http_request_orig_line (&phttp->response),
 	    be_service_name (phttp->backend),
 	    str_be (baddr, sizeof (baddr), phttp->backend),
 	    log_duration (timebuf, sizeof (timebuf), &phttp->start_req));
@@ -1679,7 +2722,7 @@ http_log_3 (POUND_HTTP *phttp)
 	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
 	  http_request_user_name (req),
 	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_line (req),
+	  http_request_orig_line (req),
 	  phttp->response_code,
 	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
 	  referer ? referer : "",
@@ -1707,7 +2750,7 @@ http_log_4 (POUND_HTTP *phttp)
 	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
 	  http_request_user_name (req),
 	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_line (req),
+	  http_request_orig_line (req),
 	  phttp->response_code,
 	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
 	  referer ? referer : "",
@@ -1739,7 +2782,7 @@ http_log_5 (POUND_HTTP *phttp)
 	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
 	  http_request_user_name (req),
 	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_line (req),
+	  http_request_orig_line (req),
 	  phttp->response_code,
 	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
 	  referer ? referer : "",
@@ -1768,8 +2811,11 @@ static int
 http_request_send (BIO *be, struct http_request *req)
 {
   struct http_header *hdr;
+  char const *s;
 
-  if (BIO_printf (be, "%s\r\n", req->request) <= 0)
+  if (http_request_get_request_line (req, &s))
+    return -1;
+  if (BIO_printf (be, "%s\r\n", s) <= 0)
     return -1;
   DLIST_FOREACH (hdr, &req->headers, link)
     {
@@ -1939,6 +2985,116 @@ add_ssl_headers (POUND_HTTP *phttp)
     BIO_free_all (bio);
   stringbuf_free (&sb);
 
+  return res;
+}
+
+static int rewrite_rule_check (REWRITE_RULE *rule,
+			       struct http_request *request,
+			       struct sockaddr *srcaddr,
+			       struct submatch_queue *smq);
+
+static int
+rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
+		  struct sockaddr *srcaddr,
+		  struct submatch_queue *smq)
+{
+  int res = 0;
+  REWRITE_OP *op;
+  char *s;
+
+  static struct
+  {
+    char *name;
+    int (*setter) (struct http_request *, char const *);
+  } rwtab[] = {
+    [REWRITE_URL_SET]    = { "url", http_request_set_url },
+    [REWRITE_PATH_SET]   = { "path", http_request_set_path },
+    [REWRITE_QUERY_SET]  = { "query", http_request_set_query },
+    [REWRITE_FRAG_SET]   = { "fragment", http_request_set_fragment }
+  };
+
+  SLIST_FOREACH (op, head, next)
+    {
+      switch (op->type)
+	{
+	case REWRITE_REWRITE_RULE:
+	  res = rewrite_rule_check (op->v.rule, request, srcaddr, smq);
+	  break;
+
+	case REWRITE_HDR_DEL:
+	  http_header_list_filter (&request->headers, op->v.hdrdel);
+	  break;
+
+	case REWRITE_HDR_SET:
+	  if ((s = expand_string (op->v.str, smq, "Header", request)) != NULL)
+	    {
+	      res = http_header_list_append (&request->headers, s, H_REPLACE);
+	      free (s);
+	    }
+	  else
+	    res = -1;
+	  break;
+
+	case REWRITE_QUERY_PARAM_SET:
+	  if ((s = expand_string (op->v.qp.value, smq, "query parameter", request)) != NULL)
+	    {
+	      res = http_request_set_query_param (request, op->v.qp.name, s);
+	      free (s);
+	    }
+	  else
+	    res = -1;
+	  break;
+
+	default:
+	  if ((s = expand_string (op->v.str, smq, rwtab[op->type].name, request)) != NULL)
+	    {
+	      res = rwtab[op->type].setter (request, s);
+	      free (s);
+	    }
+	  else
+	    res = -1;
+	  break;
+	}
+      if (res)
+	break;
+    }
+
+  return res;
+}
+
+static int
+rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
+		    struct sockaddr *srcaddr, struct submatch_queue *smq)
+{
+  int res = 0;
+
+  do
+    {
+      if (match_cond (&rule->cond, srcaddr, request, smq))
+	{
+	  res = rewrite_op_apply (&rule->ophead, request, srcaddr, smq);
+	  break;
+	}
+    }
+  while ((rule = rule->iffalse) != NULL);
+  return res;
+}
+
+static int
+rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
+	       struct http_request *request, struct sockaddr *addr)
+{
+  int res = 0;
+  REWRITE_RULE *rule;
+  struct submatch_queue smq;
+
+  submatch_queue_init (&smq);
+  SLIST_FOREACH (rule, rewrite_rules, next)
+    {
+      if ((res = rewrite_rule_check (rule, request, addr, &smq)) != 0)
+	break;
+    }
+  submatch_queue_free (&smq);
   return res;
 }
 
@@ -2558,23 +3714,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	lognomem ();
     }
 
-  /*
-   * Remove headers
-   */
-  if (!SLIST_EMPTY (&phttp->lstn->head_off))
-    {
-      MATCHER *m;
-
-      SLIST_FOREACH (m, &phttp->lstn->head_off, next)
-	http_header_list_filter (&phttp->request.headers, m);
-    }
-
-  /*
-   * Add headers if required
-   */
-  if (http_header_list_append_list (&phttp->request.headers,
-				    &phttp->lstn->add_header,
-				    H_REPLACE))
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr)
+      || rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*
@@ -3144,8 +4285,7 @@ do_http (POUND_HTTP *phttp)
        * any)
        */
       if ((phttp->svc = get_service (phttp->lstn, phttp->from_host.ai_addr,
-				     phttp->request.url,
-				     &phttp->request.headers, phttp->sm)) == NULL)
+				     &phttp->request, &phttp->smq)) == NULL)
 	{
 	  char const *v_host = http_request_host (&phttp->request);
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",
