@@ -2112,15 +2112,6 @@ parse_cond_query_param_matcher (void *call_data, void *section_data)
 }
 
 static int
-parse_cond_fragment_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_FRAG);
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  return parse_cond_matcher (cond, MATCH_RE, flags);
-}
-
-static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
@@ -2450,7 +2441,6 @@ static int parse_not_cond (void *call_data, void *section_data);
   { "Path", parse_cond_path_matcher, data, off },		\
   { "Query", parse_cond_query_matcher, data, off },		\
   { "QueryParam", parse_cond_query_param_matcher, data, off },	\
-  { "Fragment", parse_cond_fragment_matcher, data, off },	\
   { "Header", parse_cond_hdr_matcher, data, off },		\
   { "Host", parse_cond_host, data, off },			\
   { "Match", parse_match, data, off },				\
@@ -2496,7 +2486,6 @@ static int parse_set_url (void *call_data, void *section_data);
 static int parse_set_path (void *call_data, void *section_data);
 static int parse_set_query (void *call_data, void *section_data);
 static int parse_set_query_param (void *call_data, void *section_data);
-static int parse_set_fragment (void *call_data, void *section_data);
 static int parse_sub_rewrite (void *call_data, void *section_data);
 
 #define REWRITE_OPS(data, off)						\
@@ -2505,8 +2494,7 @@ static int parse_sub_rewrite (void *call_data, void *section_data);
   { "SetURL", parse_set_url, data, off },				\
   { "SetPath", parse_set_path, data, off },				\
   { "SetQuery", parse_set_query, data, off },				\
-  { "SetQueryParam", parse_set_query_param, data, off },		\
-  { "SetFragment", parse_set_fragment, data, off }
+  { "SetQueryParam", parse_set_query_param, data, off }
 
 static PARSER_TABLE rewrite_rule_parsetab[] = {
   { "End", parse_end },
@@ -2614,12 +2602,6 @@ parse_set_query_param (void *call_data, void *section_data)
 
 }
 
-static int
-parse_set_fragment (void *call_data, void *section_data)
-{
-  return parse_rewrite_op (call_data, REWRITE_FRAG_SET);
-}
-
 static REWRITE_RULE *
 rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
 {
@@ -2688,7 +2670,6 @@ SETFN_SVC_DECL (set_url)
 SETFN_SVC_DECL (set_path)
 SETFN_SVC_DECL (set_query)
 SETFN_SVC_DECL (set_query_param)
-SETFN_SVC_DECL (set_fragment)
 SETFN_SVC_DECL (set_header)
 SETFN_SVC_DECL (delete_header)
 
@@ -2718,7 +2699,6 @@ static PARSER_TABLE service_parsetab[] = {
   { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (SERVICE, rewrite) },
   { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (SERVICE, rewrite) },
   { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (SERVICE, rewrite) },
-  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (SERVICE, rewrite) },
 
   { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
@@ -3107,7 +3087,6 @@ static PARSER_TABLE http_parsetab[] = {
   { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
   { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
   { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
-  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (LISTENER, rewrite) },
 
   { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
 
@@ -3638,7 +3617,6 @@ static PARSER_TABLE https_parsetab[] = {
   { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
   { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
   { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
-  { "SetFragment", SETFN_SVC_NAME (set_fragment), NULL, offsetof (LISTENER, rewrite) },
 
   { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
 

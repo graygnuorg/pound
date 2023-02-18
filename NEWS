@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-17
+Pound -- history of user-visible changes. 2023-02-18
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -44,9 +44,6 @@ are provided
   QueryParam "name" [options] "value"
     Match query parameter.
 
-  Fragment [options] "value"
-    Match fragment.
-
 * Request modification directives
 
 Request modification directives apply changes to the incoming request
@@ -72,9 +69,6 @@ directives are provided:
 
   SetQueryParam "name" "value"
       Sets the query parameter "name" to "value".
-
-  SetFragment "value"
-      Sets the fragment part.
 
   Rewrite ... [ Else ... ] End
       Conditionally apply request modification depending on whether request
@@ -111,9 +105,6 @@ supported accessors are:
 
  %[param NAME]
    The value of the query parameter NAME.
-
- %[fragment]
-   The fragment part ofr the request
 
  %[header NAME]
    The value of the request header NAME.

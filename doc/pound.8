@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 17, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 18, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -754,9 +754,6 @@ Sets the query part.
 \fBSetQueryParam\fR "name" "value"
 Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
 .TP
-\fBSetFragment\fB "value"
-Sets the fragment part.
-.TP
 .BR Rewrite " ... [ " Else " ... ] " End
 Conditionally apply request modification depending on whether request
 matches certain conditions.
@@ -970,10 +967,6 @@ Match the query part of the incoming request.
 \fBQueryParam\fR "\fIname\fR" [\fIoptions\fR] "\fIpattern\fR"
 Match the value of the query parameter \fIname\fR.  The value is
 decoded prior to use.
-.TP
-\fBFragment\fR [\fIoptions\fR] "\fIpattern\fR"
-Match the fragment part of the incoming request.  The value is
-decoded prior to use.
 .PP
 The \fIoptions\fR argument in the above directives can be used to
 select the comparison method.  It consists of zero or more option
@@ -1087,9 +1080,6 @@ Sets the query part.
 \fBSetQueryParam\fR "name" "value"
 Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
 .TP
-\fBSetFragment\fB "value"
-Sets the fragment part.
-.TP
 .BR Rewrite " ... [ " Else " ... ] " End
 Conditionally apply request modification depending on whether request
 matches certain conditions.
@@ -1174,7 +1164,6 @@ where \fIname\fR is one of:
 .BR path ,
 .BR query ,
 .BR param ,
-.BR fragment ,
 and
 .BR header ,
 denoting the corresponding part of the request.  The
@@ -1534,12 +1523,6 @@ reassembling the URL,
 .B pound
 will encode special characters in \fIVALUE\fR.
 .TP
-\fBSetFragment\fR "\fIVALUE\fR"
-Sets the fragment part of the URL to \fIVALUE\fR.  The argument can
-contain whitespace and special characters,
-.B pound
-will encode them when reassembling the URL.
-.TP
 \fBSetHeader\fR "\fINAME\fB: \fIVALUE\fR"
 Sets the HTTP header.  If the header \fINAME\fR already exists, it
 will be overwritten.  Otherwise, new header will be added to the end
@@ -1601,10 +1584,6 @@ Returns the query part of the request.
 .TP
 .BI param " NAME"
 Returns the value of the query parameter \fINAME\fR.  The value is
-percent decoded.
-.TP
-.B fragment
-Returns the fragment part of the request.  The value is
 percent decoded.
 .TP
 .BI header " NAME"

@@ -88,7 +88,7 @@ X-I: i
 end
 
 200
-x-orig-uri: /echo/i/h/g/f/e/d/c/b/$1(8)
+x-orig-uri: /echo/i/h/g/f/e/d/c/b/%241%288%29
 end
 ])
 

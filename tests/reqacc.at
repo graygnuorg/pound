@@ -94,28 +94,6 @@ x-orig-header-X-Dir: (/var/lib)
 end
 ])
 
-## FIXME: It is impossible to pass fragment via HTTP::Tiny (bug in its
-## _split_url function)
-# PT_CHECK([ListenHTTP
-# 	Service
-# 		Rewrite
-# 			SetHeader ["X-Frag: (%[fragment])"]
-# 		End
-# 		Backend
-# 			Address
-# 			Port
-# 		End
-# 	End
-# End
-# ],
-# [GET /echo/foo?dir=%2Fvar%2Flib#test
-# end
-
-# 200
-# x-orig-header-X-Frag: (test)
-# end
-# ])
-
 PT_CHECK([ListenHTTP
 	Service
 		Rewrite

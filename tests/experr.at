@@ -29,9 +29,8 @@ End
 [GET /echo/foo
 end
 
-# FIXME: that's wrong: percent below should be encoded
 404
-x-orig-uri: /echo%@<:@url
+x-orig-uri: /echo%25%5Burl
 end
 ])
 
@@ -51,7 +50,7 @@ End
 end
 
 404
-x-orig-uri: /echo$0
+x-orig-uri: /echo%240
 end
 ])
 
@@ -71,7 +70,7 @@ End
 end
 
 404
-x-orig-uri: /echo${11bar
+x-orig-uri: /echo%24%7B11bar
 end
 ])
 
@@ -91,8 +90,7 @@ End
 end
 
 404
-# FIXME: See above
-x-orig-uri: /echo%{11bar
+x-orig-uri: /echo%25%7B11bar
 end
 ])
 
@@ -112,8 +110,7 @@ End
 end
 
 404
-# FIXME: See above
-x-orig-uri: /echo%bar
+x-orig-uri: /echo%25bar
 end
 ])
 
@@ -139,7 +136,7 @@ X-Bar: quux
 end
 
 200
-x-orig-uri: [/echo/$1(1]
+x-orig-uri: [/echo/%241%281]
 end
 ])
 
@@ -165,7 +162,7 @@ X-Bar: quux
 end
 
 200
-x-orig-uri: [/echo/${1(1}]
+x-orig-uri: [/echo/%24%7B1%281%7D]
 end
 ])
 

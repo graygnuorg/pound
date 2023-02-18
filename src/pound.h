@@ -311,11 +311,10 @@ struct http_request
   int version;               /* HTTP minor version: 0 or 1 */
   char *url;                 /* URL part of the request */
   char *user;                /* Username extracted from Authorization header */
+  char *path_raw;            /* URL Path (encoded) */
   char *path;                /* URL Path */
-  char *query_raw;           /* URL query */
+  char *query_raw;           /* URL query (encoded) */
   QUERY_HEAD query;
-  char *frag_raw;            /* URL fragment */
-  char *frag;
   char *orig_request_line;   /* Original request line (for logging purposes) */
   int split;
 };
@@ -493,7 +492,6 @@ enum service_cond_type
     COND_PATH,  /* Path match. */
     COND_QUERY, /* Raw query match. */
     COND_QUERY_PARAM, /* Query parameter match */
-    COND_FRAG,  /* Fragment match */
     COND_HDR,   /* Header match. */
     COND_HOST,  /* Special case od COND_HDR: matches the value of the
 		   Host: header */
@@ -545,8 +543,7 @@ enum rewrite_type
     REWRITE_URL_SET,
     REWRITE_PATH_SET,
     REWRITE_QUERY_SET,
-    REWRITE_QUERY_PARAM_SET,
-    REWRITE_FRAG_SET
+    REWRITE_QUERY_PARAM_SET
   };
 
 typedef SLIST_HEAD(,rewrite_op) REWRITE_OP_HEAD;

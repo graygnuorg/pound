@@ -99,26 +99,6 @@ end
 PT_CHECK([ListenHTTP
 	Service
 		Rewrite
-			SetFragment "use of /bin/true"
-		End
-		Backend
-			Address
-			Port
-		End
-	End
-End
-],
-[GET /echo/one
-end
-
-200
-x-orig-uri: /echo/one#use%20of%20%2Fbin%2Ftrue
-end
-])
-
-PT_CHECK([ListenHTTP
-	Service
-		Rewrite
 			SetHeader "X-Foo: bar baz"
 		End
 		Backend
@@ -232,7 +212,6 @@ PT_CHECK([ListenHTTP
 	Service
 		Rewrite
 			SetPath "/echo/other"
-			SetFragment "use of /bin/true"
 			SetQueryParam "foo" "b a r"
 			SetQueryParam "qux" "x/uq"
 			SetHeader "x-foo: bar baz"
@@ -250,7 +229,7 @@ X-Bar: qux
 end
 
 200
-x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq#use%20of%20%2Fbin%2Ftrue
+x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq
 x-orig-header-x-foo: bar baz
 -x-orig-header-X-Bar:
 end
@@ -259,7 +238,6 @@ end
 PT_CHECK([ListenHTTP
 	Service
 		SetPath ["/echo/other"]
-		SetFragment "use of /bin/true"
 		SetQueryParam "foo" "b a r"
 		SetQueryParam "qux" "x/uq"
 		SetHeader "x-foo: bar baz"
@@ -277,7 +255,7 @@ X-Bar: qux
 end
 
 200
-x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq#use%20of%20%2Fbin%2Ftrue
+x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq
 x-orig-header-x-foo: bar baz
 -x-orig-header-X-Bar:
 end

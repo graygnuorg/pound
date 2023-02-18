@@ -301,7 +301,6 @@ static int http_request_get_query (struct http_request *, char const **);
 static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
 					 struct query_param **);
-static int http_request_get_fragment (struct http_request *, char const **);
 
 typedef int (*accessor_func) (struct http_request *, char const *, int, char const **);
 
@@ -360,20 +359,11 @@ accessor_header (struct http_request *req, char const *arg, int arglen,
   return RETRIEVE_OK;
 }
 
-static int
-accessor_fragment (struct http_request *req, char const *arg, int arglen,
-		   char const **ret_val)
-{
-  return http_request_get_fragment (req, ret_val);
-}
-
 static struct accessor accessors[] = {
   { "url",      accessor_url },
   { "path",     accessor_path },
   { "query",    accessor_query },
   { "param",    accessor_param, 1 },
-  { "fragment", accessor_fragment },
-  { "frag",     accessor_fragment },
   { "header",   accessor_header, 1 },
   { NULL }
 };
@@ -518,7 +508,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	      int refno = str[0] == '$' ? 0 : 1;
 	      struct submatch *sm;
 
-	      if (*p == '(')
+	      if (str[0] == '$' && *p == '(')
 		{
 		  long n;
 		  errno = 0;
@@ -1471,26 +1461,32 @@ urldecode (char **res, char const *src, int len)
   return 0;
 }
 
+static void
+stringbuf_urlencode (struct stringbuf *sb, char const *src, int ispath)
+{
+  for (; *src; src++)
+    {
+      unsigned n = *(unsigned char*)src;
+      if (n < sizeof (url_char_class) &&
+	  (url_char_class[n] == UNR || (ispath && n == '/')))
+	stringbuf_add_char (sb, *src);
+      else
+	{
+	  stringbuf_add_char (sb, '%');
+	  stringbuf_add_char (sb, xdig[n >> 4]);
+	  stringbuf_add_char (sb, xdig[n & 0xf]);
+	}
+    }
+}
+
 static int
-urlencode (char **res, char const *src)
+urlencode (char **res, char const *src, int ispath)
 {
   struct stringbuf sb;
   char *p;
 
   stringbuf_init_log (&sb);
-  for (; *src; src++)
-    {
-      unsigned n = *(unsigned char*)src;
-      if (n < sizeof (url_char_class) && url_char_class[n] == UNR)
-	stringbuf_add_char (&sb, *src);
-      else
-	{
-	  stringbuf_add_char (&sb, '%');
-	  stringbuf_add_char (&sb, xdig[n >> 4]);
-	  stringbuf_add_char (&sb, xdig[n & 0xf]);
-	}
-    }
-
+  stringbuf_urlencode (&sb, src, ispath);
   if ((p = stringbuf_finish (&sb)) == NULL)
     {
       stringbuf_free (&sb);
@@ -1750,39 +1746,29 @@ http_request_split (struct http_request *req)
       char *p;
       size_t path_len = url_len;
       int query_start = -1, query_len = 0;
-      int frag_start, frag_len = 0;
 
-      if ((p = strrchr (req->url, '#')) != NULL)
-	{
-	  frag_start = p - req->url;
-	  path_len -= frag_start + 1;
-	  frag_len = url_len - path_len;
-	}
-      else
-	{
-	  frag_start = strlen (req->url);
-	  frag_len = 0;
-	}
-
-      for (p = req->url + path_len; p > req->url; p--)
+      for (p = req->url + url_len; p > req->url; p--)
 	{
 	  if (*p == '?')
 	    {
 	      path_len = p - req->url;
 	      query_start = path_len + 1;
-	      query_len = frag_start - query_start;
+	      query_len = url_len - query_start;
 	      break;
 	    }
 	}
 
-      free (req->path);
-      if ((req->path = malloc (path_len + 1)) == NULL)
+      free (req->path_raw);
+      if ((req->path_raw = malloc (path_len + 1)) == NULL)
 	{
 	  lognomem ();
 	  return -1;
 	}
-      memcpy (req->path, req->url, path_len);
-      req->path[path_len] = 0;
+      memcpy (req->path_raw, req->url, path_len);
+      req->path_raw[path_len] = 0;
+
+      free (req->path);
+      req->path = NULL;
 
       free (req->query_raw);
       http_request_free_query (req);
@@ -1798,20 +1784,6 @@ http_request_split (struct http_request *req)
 	}
       else
 	req->query_raw = NULL;
-
-      free (req->frag_raw);
-      if (frag_len)
-	{
-	  if ((req->frag_raw = malloc (frag_len + 1)) == NULL)
-	    {
-	      lognomem ();
-	      return -1;
-	    }
-	  memcpy (req->frag_raw, req->url + frag_start, frag_len);
-	  req->frag_raw[frag_len] = 0;
-	}
-      else
-	req->frag_raw = NULL;
 
       req->split = 0;
     }
@@ -1855,16 +1827,11 @@ http_request_rebuild_url (struct http_request *req)
   char *str;
 
   stringbuf_init_log (&sb);
-  stringbuf_add_string (&sb, req->path);
+  stringbuf_add_string (&sb, req->path_raw);
   if (req->query_raw)
     {
       stringbuf_add_char (&sb, '?');
       stringbuf_add_string (&sb, req->query_raw);
-    }
-  if (req->frag_raw)
-    {
-      stringbuf_add_char (&sb, '#');
-      stringbuf_add_string (&sb, req->frag_raw);
     }
   if ((str = stringbuf_finish (&sb)) == NULL)
     {
@@ -1889,7 +1856,7 @@ http_request_rebuild_query (struct http_request *req)
     {
       char *val;
 
-      if (urlencode (&val, qp->value))
+      if (urlencode (&val, qp->value, 0))
 	{
 	  stringbuf_free (&sb);
 	  return -1;
@@ -1957,6 +1924,9 @@ http_request_get_path (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
       return -1;
+  if (!req->path && req->path_raw &&
+      urldecode (&req->path, req->path_raw, strlen (req->path_raw)))
+    return -1;
   *retval = req->path;
   return 0;
 }
@@ -1964,17 +1934,23 @@ http_request_get_path (struct http_request *req, char const **retval)
 static int
 http_request_set_path (struct http_request *req, char const *path)
 {
-  char *p;
+  char *val;
+  char const *s;
 
   if (http_request_split (req))
       return -1;
-  if ((p = strdup (path)) == NULL)
-    {
-      lognomem ();
-      return -1;
-    }
+
+  if (http_request_get_path (req, &s))
+    return -1;
+
+  if (urlencode (&val, path, 1))
+    return -1;
+
   free (req->path);
-  req->path = p;
+  req->path = NULL;
+
+  free (req->path_raw);
+  req->path_raw = val;
 
   return http_request_rebuild_url (req);
 }
@@ -2160,7 +2136,7 @@ http_request_set_query_param (struct http_request *req, char const *name,
 	}
       else
 	{
-	  if (urlencode (&value, raw_value))
+	  if (urlencode (&value, raw_value, 0))
 	    return RETRIEVE_ERROR;
 	  free (qp->value);
 	  qp->value = value;
@@ -2169,39 +2145,6 @@ http_request_set_query_param (struct http_request *req, char const *name,
     }
 
   return http_request_rebuild_query (req);
-}
-
-static int
-http_request_get_fragment (struct http_request *req, char const **retval)
-{
-  if (http_request_split (req))
-    return -1;
-  if (!req->frag && req->frag_raw &&
-      urldecode (&req->frag, req->frag_raw, strlen (req->frag_raw)))
-    return -1;
-  *retval = req->frag;
-  return 0;
-}
-
-static int
-http_request_set_fragment (struct http_request *req, char const *frag)
-{
-  char *val;
-  char const *s;
-
-  if (http_request_get_fragment (req, &s))
-    return -1;
-
-  if (urlencode (&val, frag))
-    return -1;
-
-  free (req->frag);
-  req->frag = NULL;
-
-  free (req->frag_raw);
-  req->frag_raw = val;
-
-  return http_request_rebuild_url (req);
 }
 
 static char const *
@@ -2232,11 +2175,10 @@ http_request_free (struct http_request *req)
   http_header_list_free (&req->headers);
   free (req->url);
   free (req->user);
+  free (req->path_raw);
   free (req->path);
   free (req->query_raw);
   http_request_free_query (req);
-  free (req->frag_raw);
-  free (req->frag);
   free (req->orig_request_line);
   http_request_init (req);
 }
@@ -2493,13 +2435,6 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	default:
 	  res = submatch_exec (&cond->qp.re, str, submatch_queue_push (smq));
 	}
-      break;
-
-    case COND_FRAG:
-      if (http_request_get_fragment (req, &str) == -1)
-	res = -1;
-      else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
       break;
 
     case COND_HDR:
@@ -3012,7 +2947,6 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
     [REWRITE_URL_SET]    = { "url", http_request_set_url },
     [REWRITE_PATH_SET]   = { "path", http_request_set_path },
     [REWRITE_QUERY_SET]  = { "query", http_request_set_query },
-    [REWRITE_FRAG_SET]   = { "fragment", http_request_set_fragment }
   };
 
   SLIST_FOREACH (op, head, next)
