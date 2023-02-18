@@ -1022,7 +1022,11 @@ sub process_http_request {
 	if (my $ep = $endpoints{$dir}) {
 	    &{$ep}($http, $2);
 	} else {
-	    $http->reply(404, "Not found");
+	    $http->reply(404, "Not found",
+			 headers => {
+			     'x-orig-uri' => $http->uri,
+			     map { ('x-orig-header-' . $_) => $http->header->{$_} } keys %{$http->header}
+			 });
 	}
     } else {
 	$http->reply(500, "Malformed URI");

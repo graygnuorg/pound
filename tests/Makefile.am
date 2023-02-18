@@ -63,6 +63,7 @@ TESTSUITE_AT = \
  testsuite.at \
  acme.at\
  addheader.at\
+ backref.at\
  balancing.at\
  checkurl.at\
  chgvis.at\
@@ -70,11 +71,13 @@ TESTSUITE_AT = \
  echo.at\
  errfile.at\
  error.at\
+ experr.at\
  headdeny.at\
  headrem.at\
  headrequire.at\
  host.at\
  https.at\
+ lstset.at\
  maxrequest.at\
  not.at\
  optfwd.at\

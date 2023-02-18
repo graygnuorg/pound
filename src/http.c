@@ -480,7 +480,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  if (q == NULL)
 	    {
 	      logmsg (LOG_WARNING, "%s \"%s\": unclosed %%[ at offset %d", what, start, (int)(str - start));
-	      stringbuf_add_char (sb, str[0]);
+	      stringbuf_add (sb, str, 2);
 	      str += 2;
 	      continue;
 	    }
@@ -525,6 +525,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  n = strtoul (p + 1, &p, 10);
 		  if (errno || *p != ')')
 		    {
+		      int len = str - start + 1;
+		      logmsg (LOG_WARNING, "%s \"%s\": missing closing parenthesis in reference started in position %d ", what, start, len);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      continue;
@@ -546,7 +548,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  if (*p != '}')
 		    {
 		      int n = str - start + 1;
-		      logmsg (LOG_WARNING, "%s \"%s\": missing closing brace in reference in position %d", what, start, n);
+		      logmsg (LOG_WARNING, "%s \"%s\": missing closing brace in reference started in position %d", what, start, n);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      continue;
@@ -574,7 +576,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
       else
 	{
 	  int n = str - start + 1;
-	  logmsg (LOG_WARNING, "%s \"%s\" unescaped %% character in position %d", what, start, n);
+	  logmsg (LOG_WARNING, "%s \"%s\": unescaped %% character in position %d", what, start, n);
 	  stringbuf_add_char (sb, *str);
 	  str++;
 	}

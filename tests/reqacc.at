@@ -95,7 +95,7 @@ end
 ])
 
 ## FIXME: It is impossible to pass fragment via HTTP::Tiny (bug in its
-## _split_url function
+## _split_url function)
 # PT_CHECK([ListenHTTP
 # 	Service
 # 		Rewrite
