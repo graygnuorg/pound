@@ -16,7 +16,6 @@
 use strict;
 use warnings;
 use Socket qw(:DEFAULT :crlf);
-use IO::Select;
 use threads;
 use threads::shared;
 use Getopt::Long;
@@ -126,7 +125,7 @@ if ($config =~ m{(?<src>.+):(?<dst>.+)}) {
 }
 
 # Start HTTP listeners
-threads->create(sub { $backends->read_and_process } )->detach();
+$backends->read_and_process;
 
 # Start pound
 runner();
@@ -136,8 +135,6 @@ my $ps = PoundScript->new($script_file, $transcript_file);
 $ps->parse;
 
 # Terminate
-
-$_->join for threads->list();
 
 if ($statistics) {
     print "Total tests: ".$ps->tests. "\n";
@@ -939,16 +936,6 @@ sub find_socket {
     croak "Listener not found";
 }
 
-sub selector {
-    my $self = shift;
-    my $sel = IO::Select->new();
-    foreach my $lst (@{$self->{listeners}}) {
-	$lst->listen;
-	$sel->add($lst->socket_handle);
-    }
-    return $sel;
-}
-
 sub wait {
     my $self = shift;
     my @lst = @{$self->{listeners}};
@@ -970,13 +957,21 @@ sub wait {
 
 sub read_and_process {
     my $self = shift;
-    my $sel = $self->selector;
-    while (1) {
-	foreach my $conn ($sel->can_read) {
-	    my $fh;
-	    my $remote = accept($fh, $conn);
-	    threads->create(\&process_http_request, $fh, $self->find_socket($conn))->detach();
-	}
+
+    foreach my $lst (@{$self->{listeners}}) {
+	$lst->listen;
+    }
+
+    foreach my $lst (@{$self->{listeners}}) {
+	threads->create(sub {
+	    my $lst = shift;
+	    $lst->listen;
+	    while (1) {
+		my $fh;
+		accept($fh, $lst->socket_handle);
+		process_http_request($fh, $lst)
+	    }
+	}, $lst)->detach;
     }
 }
 
