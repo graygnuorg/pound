@@ -180,9 +180,14 @@ End
 Host: www.example.org
 end
 
-302
-location: http://%251%241/foo/bar
+500
 end
+])
+
+AT_CHECK([grep 'Redirect expression' pound.log],
+[0],
+[pound: Redirect expression "http://%1$1" refers to non-existing group %1
+pound: Redirect expression "http://%1$1" refers to non-existing group $1
 ])
 
 AT_CLEANUP

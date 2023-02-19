@@ -1066,14 +1066,15 @@ sub getline {
     my $http = shift;
     local $/ = $CRLF;
     my $fh = $http->{fh};
-    chomp(my $ret = <$fh>);
+    my $ret = <$fh>;
+    chomp($ret) if $ret;
     return $ret
 }
 
 sub ParseRequest {
     my $http = shift;
 
-    my $input = $http->getline();
+    my $input = $http->getline() or threads->exit();
     #    print "GOT $input\n";
     my @res = split " ", $input;
     if (@res != 3) {

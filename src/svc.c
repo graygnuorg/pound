@@ -510,7 +510,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
  * Find the right back-end for a request
  */
 BACKEND *
-get_backend (SERVICE * const svc, const struct addrinfo * from_host,
+get_backend (SERVICE *svc, const struct addrinfo *from_host,
 	     const char *request, HTTP_HEADER_LIST *headers)
 {
   BACKEND *res;

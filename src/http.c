@@ -435,14 +435,28 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
   return ap->func;
 }
 
+/*
+ * Expand backreferences and request accessors in STR, using the submatch
+ * queue SMQ and HTTP request REQ.  If the latter is NULL, request accessors
+ * are not handled.  Place the result in string buffer SB.  The string
+ * WHAT gives the identifier for use in diagnostic messages.
+ *
+ * On success, returns number of expansions made.  If invalid references or
+ * accessors are encountered, returns -1.  The failed references are copied
+ * to the output buffer verbatim and error message is logged for each of
+ * them.
+ *
+ * Eventual memory allocation failures are handled by SB.  The caller is
+ * supposed to check its error status.
+ */
 static int
 expand_string_to_buffer (struct stringbuf *sb, char const *str,
 			 struct submatch_queue *smq, char *what,
 			 struct http_request *req)
 {
   char *p;
-  char const *start = str; /* For error reporting */
-  int exp = 0; /* Number of expansions made */
+  char const *start = str; /* Save the string for error reporting. */
+  int result = 0; /* Number of expansions made. */
 
   while (*str)
     {
@@ -456,6 +470,11 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	{
 	  stringbuf_add_char (sb, str[0]);
 	  str += 2;
+	}
+      else if (str[0] == '%' && isxdigit (str[1]) && isxdigit (str[2]))
+	{
+	  stringbuf_add (sb, str, 3);
+	  str += 3;
 	}
       else if (req && str[0] == '%' && str[1] == '[')
 	{
@@ -472,6 +491,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	      logmsg (LOG_WARNING, "%s \"%s\": unclosed %%[ at offset %d", what, start, (int)(str - start));
 	      stringbuf_add (sb, str, 2);
 	      str += 2;
+	      result = -1;
 	      continue;
 	    }
 
@@ -484,7 +504,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  else if (acc (req, arg, arglen, &val) == 0 && val)
 	    {
 	      stringbuf_add_string (sb, val);
-	      exp++;
+	      if (result >= 0)
+		result++;
 	    }
 
 	  str = q + 1;
@@ -496,8 +517,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  groupno = strtoul (str + 1 + brace, &p, 10);
 	  if (errno)
 	    {
-	      stringbuf_add_char (sb, str[0]);
-	      str++;
+	      stringbuf_add (sb, str, 2);
+	      str += 2;
 	    }
 	  else
 	    {
@@ -519,6 +540,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		      logmsg (LOG_WARNING, "%s \"%s\": missing closing parenthesis in reference started in position %d ", what, start, len);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
+		      result = -1;
 		      continue;
 		    }
 		  if (n < 0 || n >= SMQ_SIZE)
@@ -527,6 +549,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		      logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, len, len, str);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
+		      result = -1;
 		      continue;
 		    }
 		  refno = n;
@@ -541,6 +564,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		      logmsg (LOG_WARNING, "%s \"%s\": missing closing brace in reference started in position %d", what, start, n);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
+		      result = -1;
 		      continue;
 		    }
 		  p++;
@@ -552,13 +576,15 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		{
 		  stringbuf_add (sb, sm->subject + sm->matchv[groupno].rm_so,
 				 sm->matchv[groupno].rm_eo - sm->matchv[groupno].rm_so);
-		  exp++;
+		  if (result >= 0)
+		    result++;
 		}
 	      else
 		{
 		  int n = p - str;
 		  stringbuf_add (sb, str, n);
 		  logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, n, n, str);
+		  result = -1;
 		}
 	      str = p;
 	    }
@@ -569,9 +595,10 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  logmsg (LOG_WARNING, "%s \"%s\": unescaped %% character in position %d", what, start, n);
 	  stringbuf_add_char (sb, *str);
 	  str++;
+	  result = -1;
 	}
     }
-  return exp;
+  return result;
 }
 
 char *
@@ -579,11 +606,11 @@ expand_string (char const *str, struct submatch_queue *smq, char *what,
 	       struct http_request *req)
 {
   struct stringbuf sb;
-  char *p;
+  char *p = NULL;
 
   stringbuf_init_log (&sb);
-  expand_string_to_buffer (&sb, str, smq, what, req);
-  if ((p = stringbuf_finish (&sb)) == NULL)
+  if (expand_string_to_buffer (&sb, str, smq, what, req) == -1
+      || (p = stringbuf_finish (&sb)) == NULL)
     stringbuf_free (&sb);
   return p;
 }
@@ -597,8 +624,18 @@ expand_url (char const *url, struct http_request *req,
 
   stringbuf_init_log (&sb);
 
-  if (expand_string_to_buffer (&sb, url, smq, "Redirect expression", req))
-    has_uri = 1;
+  switch (expand_string_to_buffer (&sb, url, smq, "Redirect expression", req))
+    {
+    case -1:
+      stringbuf_free (&sb);
+      return NULL;
+
+    case 0:
+      break;
+
+    default:
+      has_uri = 1;
+    }
 
   /* For compatibility with previous versions */
   if (!has_uri)
@@ -1354,147 +1391,6 @@ find_method (const char *str, int group)
     }
   return NULL;
 }
-
-#define OTH  0  /* Other */
-#define UNR  1  /* Unreserved character */
-#define RSV  2  /* Reserved character */
-
-static int url_char_class[] = {
-  /*         0    1    2    3    4    5    6    7   */
-  /*  0 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
-  /*  1 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
-  /*  2 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
-  /*  3 */  OTH, OTH, OTH, OTH, OTH, OTH, OTH, OTH,
-  /*  4 */  OTH, RSV, RSV, RSV, RSV, RSV, RSV, RSV,
-  /*  5 */  RSV, RSV, RSV, RSV, RSV, UNR, UNR, RSV,
-  /*  6 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /*  7 */  UNR, UNR, OTH, RSV, OTH, RSV, OTH, RSV,
-  /* 10 */  RSV, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 11 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 12 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 13 */  UNR, UNR, UNR, RSV, OTH, RSV, OTH, UNR,
-  /* 14 */  OTH, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 15 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 16 */  UNR, UNR, UNR, UNR, UNR, UNR, UNR, UNR,
-  /* 17 */  UNR, UNR, UNR, OTH, OTH, OTH, UNR, OTH
-};
-
-static char xdig[] = "0123456789ABCDEFabcdef";
-
-/*
- * Parse a URL, possibly decoding hexadecimal-encoded characters
- */
-static int
-urldecode (char **res, char const *src, int len)
-{
-  struct stringbuf sb;
-  char *p;
-
-  stringbuf_init_log (&sb);
-  while (len)
-    {
-      size_t n;
-
-      if ((p = memchr (src, '%', len)) != NULL)
-	n = p - src;
-      else
-	n = len;
-
-      if (n > 0)
-	{
-	  stringbuf_add (&sb, src, n);
-	  src += n;
-	  len -= n;
-	}
-
-      if (*src)
-	{
-	  int a, b;
-
-	  if (len < 3)
-	    {
-	      stringbuf_add (&sb, src, len);
-	      break;
-	    }
-
-	  if ((p = strchr (xdig, src[1])) == NULL)
-	    {
-	      stringbuf_add (&sb, src, 2);
-	      src += 2;
-	      len -= 2;
-	      continue;
-	    }
-
-	  if ((a = p - xdig) > 15)
-	    a -= 6;
-
-	  if ((p = strchr (xdig, src[2])) == NULL)
-	    {
-	      stringbuf_add (&sb, src, 3);
-	      src += 3;
-	      len -= 3;
-	      continue;
-	    }
-
-	  if ((b = p - xdig) > 15)
-	    b -= 6;
-
-	  a = (a << 4) + b;
-	  if (a == 0)
-	    {
-	      stringbuf_free (&sb);
-	      return 1;
-	    }
-	  stringbuf_add_char (&sb, a);
-
-	  src += 3;
-	  len -= 3;
-	}
-    }
-
-  if ((p = stringbuf_finish (&sb)) == NULL)
-    {
-      stringbuf_free (&sb);
-      return -1;
-    }
-  *res = p;
-  return 0;
-}
-
-static void
-stringbuf_urlencode (struct stringbuf *sb, char const *src, int ispath)
-{
-  for (; *src; src++)
-    {
-      unsigned n = *(unsigned char*)src;
-      if (n < sizeof (url_char_class) &&
-	  (url_char_class[n] == UNR || (ispath && n == '/')))
-	stringbuf_add_char (sb, *src);
-      else
-	{
-	  stringbuf_add_char (sb, '%');
-	  stringbuf_add_char (sb, xdig[n >> 4]);
-	  stringbuf_add_char (sb, xdig[n & 0xf]);
-	}
-    }
-}
-
-static int
-urlencode (char **res, char const *src, int ispath)
-{
-  struct stringbuf sb;
-  char *p;
-
-  stringbuf_init_log (&sb);
-  stringbuf_urlencode (&sb, src, ispath);
-  if ((p = stringbuf_finish (&sb)) == NULL)
-    {
-      stringbuf_free (&sb);
-      return -1;
-    }
-  *res = p;
-  return 0;
-}
 
 static int
 qualify_header (struct http_header *hdr)
@@ -1758,32 +1654,29 @@ http_request_split (struct http_request *req)
 	    }
 	}
 
-      free (req->path_raw);
-      if ((req->path_raw = malloc (path_len + 1)) == NULL)
+      free (req->path);
+      if ((req->path = malloc (path_len + 1)) == NULL)
 	{
 	  lognomem ();
 	  return -1;
 	}
-      memcpy (req->path_raw, req->url, path_len);
-      req->path_raw[path_len] = 0;
+      memcpy (req->path, req->url, path_len);
+      req->path[path_len] = 0;
 
-      free (req->path);
-      req->path = NULL;
-
-      free (req->query_raw);
+      free (req->query);
       http_request_free_query (req);
       if (query_len > 0)
 	{
-	  if ((req->query_raw = malloc (query_len + 1)) == NULL)
+	  if ((req->query = malloc (query_len + 1)) == NULL)
 	    {
 	      lognomem ();
 	      return -1;
 	    }
-	  memcpy (req->query_raw, req->url + query_start, query_len);
-	  req->query_raw[query_len] = 0;
+	  memcpy (req->query, req->url + query_start, query_len);
+	  req->query[query_len] = 0;
 	}
       else
-	req->query_raw = NULL;
+	req->query = NULL;
 
       req->split = 0;
     }
@@ -1827,11 +1720,11 @@ http_request_rebuild_url (struct http_request *req)
   char *str;
 
   stringbuf_init_log (&sb);
-  stringbuf_add_string (&sb, req->path_raw);
-  if (req->query_raw)
+  stringbuf_add_string (&sb, req->path);
+  if (req->query)
     {
       stringbuf_add_char (&sb, '?');
-      stringbuf_add_string (&sb, req->query_raw);
+      stringbuf_add_string (&sb, req->query);
     }
   if ((str = stringbuf_finish (&sb)) == NULL)
     {
@@ -1852,26 +1745,17 @@ http_request_rebuild_query (struct http_request *req)
   int more = 0;
 
   stringbuf_init_log (&sb);
-  DLIST_FOREACH (qp, &req->query, link)
+  DLIST_FOREACH (qp, &req->query_head, link)
     {
-      char *val;
-
-      if (urlencode (&val, qp->value, 0))
-	{
-	  stringbuf_free (&sb);
-	  return -1;
-	}
-
       if (more)
 	stringbuf_add_char (&sb, '&');
       else
 	more = 1;
       stringbuf_add_string (&sb, qp->name);
       stringbuf_add_char (&sb, '=');
-      stringbuf_add_string (&sb, val);
-      free (val);
+      stringbuf_add_string (&sb, qp->value);
     }
-  if ((req->query_raw = stringbuf_finish (&sb)) == NULL)
+  if ((req->query = stringbuf_finish (&sb)) == NULL)
     {
       stringbuf_free (&sb);
       return -1;
@@ -1924,9 +1808,6 @@ http_request_get_path (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
       return -1;
-  if (!req->path && req->path_raw &&
-      urldecode (&req->path, req->path_raw, strlen (req->path_raw)))
-    return -1;
   *retval = req->path;
   return 0;
 }
@@ -1942,15 +1823,13 @@ http_request_set_path (struct http_request *req, char const *path)
 
   if (http_request_get_path (req, &s))
     return -1;
-
-  if (urlencode (&val, path, 1))
-    return -1;
-
+  if ((val = strdup (path)) == NULL)
+    {
+      lognomem ();
+      return -1;
+    }
   free (req->path);
-  req->path = NULL;
-
-  free (req->path_raw);
-  req->path_raw = val;
+  req->path = val;
 
   return http_request_rebuild_url (req);
 }
@@ -1960,7 +1839,7 @@ http_request_get_query (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
     return -1;
-  *retval = req->query_raw;
+  *retval = req->query;
   return 0;
 }
 
@@ -1975,10 +1854,10 @@ query_param_free (struct query_param *qp)
 static void
 http_request_free_query (struct http_request *req)
 {
-  while (!DLIST_EMPTY (&req->query))
+  while (!DLIST_EMPTY (&req->query_head))
     {
-      struct query_param *qp = DLIST_FIRST (&req->query);
-      DLIST_SHIFT (&req->query, link);
+      struct query_param *qp = DLIST_FIRST (&req->query_head);
+      DLIST_SHIFT (&req->query_head, link);
       query_param_free (qp);
     }
 }
@@ -2009,8 +1888,13 @@ http_request_parse_query (struct http_request *req)
 	  else
 	    {
 	      nl = q - query;
-	      if (urldecode (&val, query + nl + 1, pl - nl - 1))
-		return -1;
+	      if ((val = malloc (pl - nl)) == NULL)
+		{
+		  lognomem ();
+		  return -1;
+		}
+	      memcpy (val, query + nl + 1, pl - nl - 1);
+	      val[pl - nl - 1] = 0;
 	    }
 
 	  if ((qp = malloc (sizeof (*qp))) == NULL)
@@ -2029,7 +1913,7 @@ http_request_parse_query (struct http_request *req)
 	  qp->name[nl] = 0;
 	  qp->value = val;
 
-	  DLIST_PUSH (&req->query, qp, link);
+	  DLIST_PUSH (&req->query_head, qp, link);
 
 	  query += pl;
 	  if (*query)
@@ -2048,10 +1932,10 @@ http_request_get_query_param (struct http_request *req,
 
   if (http_request_split (req))
     return RETRIEVE_ERROR;
-  if (QUERY_EMPTY (&req->query) && http_request_parse_query (req))
+  if (QUERY_EMPTY (&req->query_head) && http_request_parse_query (req))
     return RETRIEVE_ERROR;
 
-  DLIST_FOREACH (qp, &req->query, link)
+  DLIST_FOREACH (qp, &req->query_head, link)
     {
       if (strlen (qp->name) == namelen && memcmp (qp->name, name, namelen) == 0)
 	{
@@ -2085,8 +1969,8 @@ http_request_set_query (struct http_request *req, char const *rawquery)
       lognomem ();
       return -1;
     }
-  free (req->query_raw);
-  req->query_raw = p;
+  free (req->query);
+  req->query = p;
   http_request_free_query (req);
   return http_request_rebuild_url (req);
 }
@@ -2125,19 +2009,22 @@ http_request_set_query_param (struct http_request *req, char const *name,
 	  return RETRIEVE_ERROR;
 	}
       qp->value = value;
-      DLIST_PUSH (&req->query, qp, link);
+      DLIST_PUSH (&req->query_head, qp, link);
       break;
 
     case 0:
       if (raw_value == 0)
 	{
-	  DLIST_REMOVE (&req->query, qp, link);
+	  DLIST_REMOVE (&req->query_head, qp, link);
 	  query_param_free (qp);
 	}
       else
 	{
-	  if (urlencode (&value, raw_value, 0))
-	    return RETRIEVE_ERROR;
+	  if ((value = strdup (raw_value)) == NULL)
+	    {
+	      lognomem ();
+	      return -1;
+	    }
 	  free (qp->value);
 	  qp->value = value;
 	}
@@ -2175,9 +2062,8 @@ http_request_free (struct http_request *req)
   http_header_list_free (&req->headers);
   free (req->url);
   free (req->user);
-  free (req->path_raw);
   free (req->path);
-  free (req->query_raw);
+  free (req->query);
   http_request_free_query (req);
   free (req->orig_request_line);
   http_request_init (req);

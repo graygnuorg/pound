@@ -311,10 +311,9 @@ struct http_request
   int version;               /* HTTP minor version: 0 or 1 */
   char *url;                 /* URL part of the request */
   char *user;                /* Username extracted from Authorization header */
-  char *path_raw;            /* URL Path (encoded) */
   char *path;                /* URL Path */
-  char *query_raw;           /* URL query (encoded) */
-  QUERY_HEAD query;
+  char *query;               /* URL query */
+  QUERY_HEAD query_head;
   char *orig_request_line;   /* Original request line (for logging purposes) */
   int split;
 };
@@ -323,7 +322,7 @@ static inline void http_request_init (struct http_request *http)
 {
   memset (http, 0, sizeof (*http));
   DLIST_INIT (&http->headers);
-  DLIST_INIT (&http->query);
+  DLIST_INIT (&http->query_head);
 }
 
 void http_request_free (struct http_request *);

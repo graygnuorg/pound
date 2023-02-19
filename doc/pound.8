@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 18, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 19, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -965,8 +965,7 @@ Match the path part of the incoming request.
 Match the query part of the incoming request.
 .TP
 \fBQueryParam\fR "\fIname\fR" [\fIoptions\fR] "\fIpattern\fR"
-Match the value of the query parameter \fIname\fR.  The value is
-decoded prior to use.
+Match the value of the query parameter \fIname\fR.
 .PP
 The \fIoptions\fR argument in the above directives can be used to
 select the comparison method.  It consists of zero or more option
@@ -1518,10 +1517,8 @@ a valid query with the special characters properly encoded using
 percent encoding.
 .TP
 \fBSetQueryParam\fR "\fINAME\fR" "\fIVALUE\fR"
-Set the query parameter \fINAME\fR to the \fIVALUE\fR.  When
-reassembling the URL,
-.B pound
-will encode special characters in \fIVALUE\fR.
+Set the query parameter \fINAME\fR to the \fIVALUE\fR.  Value must be
+properly encoded if it contains reserved characters.
 .TP
 \fBSetHeader\fR "\fINAME\fB: \fIVALUE\fR"
 Sets the HTTP header.  If the header \fINAME\fR already exists, it
@@ -1583,8 +1580,7 @@ Returns the path part of the request.
 Returns the query part of the request.
 .TP
 .BI param " NAME"
-Returns the value of the query parameter \fINAME\fR.  The value is
-percent decoded.
+Returns the value of the query parameter \fINAME\fR.
 .TP
 .BI header " NAME"
 Returns the value of the HTTP header \fINAME\fR.

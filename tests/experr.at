@@ -29,8 +29,7 @@ End
 [GET /echo/foo
 end
 
-404
-x-orig-uri: /echo%25%5Burl
+500
 end
 ])
 
@@ -49,8 +48,7 @@ End
 [GET /foo
 end
 
-404
-x-orig-uri: /echo%240
+500
 end
 ])
 
@@ -69,8 +67,7 @@ End
 [GET /foo
 end
 
-404
-x-orig-uri: /echo%24%7B11bar
+500
 end
 ])
 
@@ -89,8 +86,7 @@ End
 [GET /foo
 end
 
-404
-x-orig-uri: /echo%25%7B11bar
+500
 end
 ])
 
@@ -98,7 +94,7 @@ AT_CHECK([fgrep -q 'pound: path "/echo%{11bar": missing closing brace in referen
 
 PT_CHECK([ListenHTTP
 	Service
-		SetPath "/echo%bar"
+		SetPath "/echo%qbar"
 		Backend
 			Address
 			Port
@@ -109,12 +105,11 @@ End
 [GET /foo
 end
 
-404
-x-orig-uri: /echo%25bar
+500
 end
 ])
 
-AT_CHECK([fgrep -q 'pound: path "/echo%bar": unescaped % character in position 6' pound.log])
+AT_CHECK([fgrep -q 'pound: path "/echo%qbar": unescaped % character in position 6' pound.log])
 
 PT_CHECK([ListenHTTP
 	Service
@@ -135,8 +130,7 @@ X-Foo: bar
 X-Bar: quux
 end
 
-200
-x-orig-uri: [/echo/%241%281]
+500
 end
 ])
 
@@ -161,8 +155,7 @@ X-Foo: bar
 X-Bar: quux
 end
 
-200
-x-orig-uri: [/echo/%24%7B1%281%7D]
+500
 end
 ])
 

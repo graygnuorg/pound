@@ -72,7 +72,7 @@ end
 PT_CHECK([ListenHTTP
 	Rewrite
 		SetQueryParam "foo" "10"
-		SetQueryParam "quux" "b ar"
+		SetQueryParam "quux" "b%20ar"
 	End
 	Service
 		Backend
@@ -195,8 +195,8 @@ end
 PT_CHECK([ListenHTTP
 	Rewrite
 		SetPath "/echo/other"
-		SetQueryParam "foo" "b a r"
-		SetQueryParam "qux" "x/uq"
+		SetQueryParam "foo" "bar"
+		SetQueryParam "qux" "x%2Fuq"
 		SetHeader "x-foo: bar baz"
 		DeleteHeader -beg -icase "x-bar:"
 	End
@@ -213,7 +213,7 @@ X-Bar: qux
 end
 
 200
-x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq
+x-orig-uri: /echo/other?foo=bar&qux=x%2Fuq
 x-orig-header-x-foo: bar baz
 -x-orig-header-X-Bar:
 end
@@ -221,8 +221,8 @@ end
 
 PT_CHECK([ListenHTTP
 	SetPath ["/echo/other"]
-	SetQueryParam "foo" "b a r"
-	SetQueryParam "qux" "x/uq"
+	SetQueryParam "foo" "bar"
+	SetQueryParam "qux" "x%2Fuq"
 	SetHeader "x-foo: bar baz"
 	DeleteHeader -beg -icase "x-bar:"
 
@@ -239,7 +239,7 @@ X-Bar: qux
 end
 
 200
-x-orig-uri: /echo/other?foo=b%20a%20r&qux=x%2Fuq
+x-orig-uri: /echo/other?foo=bar&qux=x%2Fuq
 x-orig-header-x-foo: bar baz
 -x-orig-header-X-Bar:
 end
