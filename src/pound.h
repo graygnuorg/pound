@@ -586,8 +586,7 @@ typedef struct _service
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
   unsigned sess_ttl;		/* session time-to-live */
-  regex_t sess_start;		/* pattern to identify the session data */
-  regex_t sess_pat;		/* pattern to match the session data */
+  char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
   SLIST_ENTRY (_service) next;
@@ -785,8 +784,7 @@ SERVICE *get_service (const LISTENER *, struct sockaddr *,
 		      struct http_request *, struct submatch_queue *);
 
 /* Find the right back-end for a request */
-BACKEND *get_backend (SERVICE * const, const struct addrinfo *,
-		      const char *, HTTP_HEADER_LIST *);
+BACKEND *get_backend (POUND_HTTP *phttp);
 
 /* Search for a host name, return the addrinfo for it */
 int get_host (char *const, struct addrinfo *, int);
@@ -802,7 +800,7 @@ int need_rewrite (const char *, const char *,
 /*
  * (for cookies only) possibly create session based on response headers
  */
-void upd_session (SERVICE * const, HTTP_HEADER_LIST *, BACKEND *);
+void upd_session (SERVICE *, HTTP_HEADER_LIST *, BACKEND *);
 
 #define BE_DISABLE  -1
 #define BE_KILL     1
@@ -989,3 +987,22 @@ int metrics_response (POUND_HTTP *phttp);
 
 int match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 		struct http_request *req, struct submatch_queue *smq);
+
+struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
+char *http_header_get_value (struct http_header *hdr);
+
+/*
+ * Return codes for http_request_get_query_param,
+ * http_request_get_query_param_value, and request accessors.
+ */
+enum
+  {
+    RETRIEVE_OK,
+    RETRIEVE_NOT_FOUND,
+    RETRIEVE_ERROR = -1
+  };
+
+int http_request_get_path (struct http_request *req, char const **retval);
+int http_request_get_query_param_value (struct http_request *req,
+					char const *name,
+					char const **retval);

@@ -284,19 +284,7 @@ submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
   return res;
 }
 
-/*
- * Return codes for http_request_get_query_param,
- * http_request_get_query_param_value, and request accessors.
- */
-enum
-  {
-    RETRIEVE_OK,
-    RETRIEVE_NOT_FOUND,
-    RETRIEVE_ERROR = -1
-  };
-
 static int http_request_get_url (struct http_request *, char const **);
-static int http_request_get_path (struct http_request *, char const **);
 static int http_request_get_query (struct http_request *, char const **);
 static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
@@ -342,9 +330,6 @@ accessor_param (struct http_request *req, char const *arg, int arglen,
     *ret_val = qp->value;
   return rc;
 }
-
-static struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
-static char *http_header_get_value (struct http_header *hdr);
 
 static int
 accessor_header (struct http_request *req, char const *arg, int arglen,
@@ -1511,7 +1496,7 @@ http_header_copy_value (struct http_header *hdr, char *buf, size_t len)
   return 0;
 }
 
-static char *
+char *
 http_header_get_value (struct http_header *hdr)
 {
   if (!hdr->value)
@@ -1539,7 +1524,7 @@ http_header_list_locate (HTTP_HEADER_LIST *head, int code)
   return NULL;
 }
 
-static struct http_header *
+struct http_header *
 http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len)
 {
   struct http_header *hdr;
@@ -1548,7 +1533,7 @@ http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t l
   DLIST_FOREACH (hdr, head, link)
     {
       if (hdr->name_end - hdr->name_start == len &&
-	  memcmp (hdr->header + hdr->name_start, name, len) == 0)
+	  strncasecmp (hdr->header + hdr->name_start, name, len) == 0)
 	return hdr;
     }
   return NULL;
@@ -1742,6 +1727,7 @@ http_request_rebuild_query (struct http_request *req)
 {
   struct stringbuf sb;
   struct query_param *qp;
+  char *p;
   int more = 0;
 
   stringbuf_init_log (&sb);
@@ -1752,14 +1738,19 @@ http_request_rebuild_query (struct http_request *req)
       else
 	more = 1;
       stringbuf_add_string (&sb, qp->name);
-      stringbuf_add_char (&sb, '=');
-      stringbuf_add_string (&sb, qp->value);
+      if (qp->value)
+	{
+	  stringbuf_add_char (&sb, '=');
+	  stringbuf_add_string (&sb, qp->value);
+	}
     }
-  if ((req->query = stringbuf_finish (&sb)) == NULL)
+  if ((p = stringbuf_finish (&sb)) == NULL)
     {
       stringbuf_free (&sb);
       return -1;
     }
+  free (req->query);
+  req->query = p;
 
   return http_request_rebuild_url (req);
 }
@@ -1803,7 +1794,7 @@ http_request_set_url (struct http_request *req, char const *url)
   return http_request_rebuild_line (req);
 }
 
-static int
+int
 http_request_get_path (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
@@ -1946,7 +1937,7 @@ http_request_get_query_param (struct http_request *req,
   return RETRIEVE_NOT_FOUND;
 }
 
-static int
+int
 http_request_get_query_param_value (struct http_request *req, char const *name,
 				    char const **retval)
 {
@@ -2319,7 +2310,10 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	  break;
 
 	default:
-	  res = submatch_exec (&cond->qp.re, str, submatch_queue_push (smq));
+	  if (str == NULL)
+	    res = 0;
+	  else
+	    res = submatch_exec (&cond->qp.re, str, submatch_queue_push (smq));
 	}
       break;
 
@@ -3162,8 +3156,8 @@ backend_response (POUND_HTTP *phttp)
 	}
 
       /*
-       * possibly record session information (only for
-       * cookies/header)
+       * possibly record session information (for header-based sessions
+       * only)
        */
       upd_session (phttp->svc, &phttp->response.headers, phttp->backend);
 
@@ -3695,9 +3689,7 @@ select_backend (POUND_HTTP *phttp)
   char const *v_host;
   char caddr[MAX_ADDR_BUFSIZE];
 
-  if ((backend = get_backend (phttp->svc, &phttp->from_host,
-			      phttp->request.url,
-			      &phttp->request.headers)) != NULL)
+  if ((backend = get_backend (phttp)) != NULL)
     {
       if (phttp->be != NULL)
 	{
@@ -3787,8 +3779,7 @@ select_backend (POUND_HTTP *phttp)
 	      return 0;
 	    }
 	}
-      while ((backend = get_backend (phttp->svc, &phttp->from_host,
-				     phttp->request.url, &phttp->request.headers)) != NULL);
+      while ((backend = get_backend (phttp)) != NULL);
     }
 
   /*

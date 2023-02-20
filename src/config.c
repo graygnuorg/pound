@@ -2272,7 +2272,7 @@ sess_type_to_str (int type)
 static int
 session_type_parser (void *call_data, void *section_data)
 {
-  struct service_session *sp = call_data;
+  SERVICE *svc = call_data;
   struct token *tok;
   int n;
 
@@ -2284,7 +2284,7 @@ session_type_parser (void *call_data, void *section_data)
       conf_error ("%s", "Unknown Session type");
       return PARSER_FAIL;
     }
-  sp->type = n;
+  svc->sess_type = n;
 
   return PARSER_OK;
 }
@@ -2292,108 +2292,47 @@ session_type_parser (void *call_data, void *section_data)
 static PARSER_TABLE session_parsetab[] = {
   { "End", parse_end },
   { "Type", session_type_parser },
-  { "TTL", assign_timeout, NULL, offsetof (struct service_session, ttl) },
-  { "ID", assign_string, NULL, offsetof (struct service_session, id) },
+  { "TTL", assign_timeout, NULL, offsetof (SERVICE, sess_ttl) },
+  { "ID", assign_string, NULL, offsetof (SERVICE, sess_id) },
   { NULL }
 };
-
-static int
-xregcomp (regex_t *rx, char const *expr, int flags)
-{
-  int rc;
-
-  rc = regcomp (rx, expr, flags);
-  if (rc)
-    {
-      conf_regcomp_error (rc, rx, expr);
-      return PARSER_FAIL;
-    }
-  return PARSER_OK;
-}
 
 static int
 parse_session (void *call_data, void *section_data)
 {
   SERVICE *svc = call_data;
-  struct service_session sess;
-  struct stringbuf sb;
   struct locus_range range;
 
-  memset (&sess, 0, sizeof (sess));
-  if (parser_loop (session_parsetab, &sess, section_data, &range))
+  if (parser_loop (session_parsetab, svc, section_data, &range))
     return PARSER_FAIL;
 
-  if (sess.type == SESS_NONE)
+  if (svc->sess_type == SESS_NONE)
     {
       conf_error_at_locus_range (&range, "Session type not defined");
       return PARSER_FAIL;
     }
 
-  if (sess.ttl == 0)
+  if (svc->sess_ttl == 0)
     {
       conf_error_at_locus_range (&range, "Session TTL not defined");
       return PARSER_FAIL;
     }
 
-  if ((sess.type == SESS_COOKIE || sess.type == SESS_URL
-       || sess.type == SESS_HEADER) && sess.id == NULL)
-    {
-      conf_error ("%s", "Session ID not defined");
-      return PARSER_FAIL;
-    }
-
-  xstringbuf_init (&sb);
-  switch (sess.type)
+  switch (svc->sess_type)
     {
     case SESS_COOKIE:
-      stringbuf_printf (&sb, "Cookie[^:]*:.*[ \t]%s=", sess.id);
-      if (xregcomp (&svc->sess_start, sb.base, REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-
-      if (xregcomp (&svc->sess_pat, "([^;]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      break;
-
     case SESS_URL:
-      stringbuf_printf (&sb, "[?&]%s=", sess.id);
-      if (xregcomp (&svc->sess_start, sb.base, REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      if (xregcomp (&svc->sess_pat, "([^&;#]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      break;
-
-    case SESS_PARM:
-      if (xregcomp (&svc->sess_start, ";", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      if (xregcomp (&svc->sess_pat, "([^?]*)", REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      break;
-
-    case SESS_BASIC:
-      if (xregcomp (&svc->sess_start, "Authorization:[ \t]*Basic[ \t]*",
-		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      if (xregcomp (&svc->sess_pat, "([^ \t]*)",
-		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      break;
-
     case SESS_HEADER:
-      stringbuf_printf (&sb, "%s:[ \t]*", sess.id);
-      if (xregcomp (&svc->sess_start, sb.base,
-		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
-      if (xregcomp (&svc->sess_pat, "([^ \t]*)",
-		    REG_ICASE | REG_NEWLINE | REG_EXTENDED) != PARSER_OK)
-	return PARSER_FAIL;
+      if (svc->sess_id == NULL)
+	{
+	  conf_error ("%s", "Session ID not defined");
+	  return PARSER_FAIL;
+	}
+      break;
+
+    default:
       break;
     }
-
-  svc->sess_ttl = sess.ttl;
-  svc->sess_type = sess.type;
-
-  free (sess.id);
-  stringbuf_free (&sb);
 
   return PARSER_OK;
 }

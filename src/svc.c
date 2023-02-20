@@ -402,58 +402,6 @@ get_service (const LISTENER *lstn, struct sockaddr *srcaddr,
 }
 
 /*
- * extract the session key for a given request
- */
-static int
-get_REQUEST (char *res, const SERVICE * svc, const char *request)
-{
-  int n, s;
-  regmatch_t matches[4];
-
-  if (regexec (&svc->sess_start, request, 4, matches, 0))
-    {
-      res[0] = '\0';
-      return 0;
-    }
-  s = matches[0].rm_eo;
-  if (regexec (&svc->sess_pat, request + s, 4, matches, 0))
-    {
-      res[0] = '\0';
-      return 0;
-    }
-  if ((n = matches[1].rm_eo - matches[1].rm_so) > KEY_SIZE)
-    n = KEY_SIZE;
-  strncpy (res, request + s + matches[1].rm_so, n);
-  res[n] = '\0';
-  return 1;
-}
-
-static int
-get_HEADERS (char *res, const SERVICE *svc, HTTP_HEADER_LIST *headers)
-{
-  int n, s;
-  regmatch_t matches[4];
-  struct http_header *hdr;
-
-  /* this will match SESS_COOKIE, SESS_HEADER and SESS_BASIC */
-  res[0] = '\0';
-  DLIST_FOREACH (hdr, headers, link)
-    {
-      if (regexec (&svc->sess_start, hdr->header, 4, matches, 0))
-	continue;
-      s = matches[0].rm_eo;
-      if (regexec (&svc->sess_pat, hdr->header + s, 4, matches, 0))
-	continue;
-      if ((n = matches[1].rm_eo - matches[1].rm_so) > KEY_SIZE)
-	n = KEY_SIZE;
-      strncpy (res, hdr->header + s + matches[1].rm_so, n);
-      res[n] = '\0';
-      //FIXME: Break?
-    }
-  return res[0] != '\0';
-}
-
-/*
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
@@ -507,18 +455,166 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
 }
 
 /*
+ * Find backend by session key.  If no session with the given key is found,
+ * create one and associate it with a randomly selected backend.
+ */
+BACKEND *
+find_backend_by_key (SERVICE *svc, char const *key, int no_be)
+{
+  BACKEND *res;
+  char keybuf[KEY_SIZE + 1];
+
+  if (key == NULL)
+    return NULL;
+
+  strncpy (keybuf, key, sizeof (keybuf) - 1);
+  keybuf[sizeof (keybuf) - 1] = 0;
+
+  if (svc->sess_ttl == 0)
+    res = no_be ? svc->emergency
+		: hash_backend (&svc->backends, svc->abs_pri, keybuf);
+  else if ((res = service_session_find (svc, keybuf)) == NULL)
+    {
+      if (no_be)
+	res = svc->emergency;
+      else
+	{
+	  /* no session yet - create one */
+	  res = rand_backend (&svc->backends, random () % svc->tot_pri);
+	  service_session_add (svc, keybuf, res);
+	}
+    }
+
+  return res;
+}
+
+/*
+ * Find session key using the header name and key extractor function.
+ *
+ * The function looks up the header HNAME in the header list HEADERS.
+ * If found, the key extractor function KEYFUN is invoked with the
+ * header value, ID, and RET_KEY as its arguments.  The function shall
+ * extract the key from the value and place it in the RET_KEY buffer,
+ * assuming it is KEY_SIZE+1 bytes long and truncating the value as
+ * necessary.  On success, KEYFUN shall return 0.
+ *
+ * If KEYFUN is NULL, the obtained header value (at most first KEY_SIZE
+ * octets of it) is copied to RET_KEY verbatim.
+ */
+int
+find_key_by_header (HTTP_HEADER_LIST *headers, char const *hname,
+		    int (*keyfun) (char const *, char const *, char *),
+		    char const *id,
+		    char *ret_key)
+{
+  struct http_header *hdr;
+  char const *val;
+
+  if ((hdr = http_header_list_locate_name (headers,
+					   hname,
+					   strlen (hname))) != NULL
+      && (val = http_header_get_value (hdr)) != NULL)
+    {
+      if (keyfun)
+	return keyfun (val, id, ret_key);
+      else
+	{
+	  strncpy (ret_key, val, KEY_SIZE);
+	  ret_key[KEY_SIZE] = 0;
+	  return 0;
+	}
+    }
+  return 1;
+}
+
+/*
+ * Look up for the backend in sessions using the header name, key
+ * extraction function and session ID.  See the two functions above
+ * for details.
+ */
+BACKEND *
+find_backend_by_header (SERVICE *svc, int no_be,
+			struct http_request *req, char const *hname,
+			int (*keyfun) (char const *, char const *, char *),
+			char const *id)
+{
+  char key[KEY_SIZE + 1];
+
+  if (find_key_by_header (&req->headers, hname, keyfun, id, key) == 0)
+    {
+      return find_backend_by_key (svc, key, no_be);
+    }
+
+  return NULL;
+}
+
+/*
+ * Key extractor function for Authorized header (basic authentication).
+ */
+static int
+key_authbasic (char const *hval, char const *sid, char *ret_key)
+{
+  if (strncasecmp (hval, "Basic", 5) == 0 && isspace (hval[5]))
+    {
+      for (hval += 6; *hval && isspace (*hval); hval++)
+	;
+      strncpy (ret_key, hval, KEY_SIZE);
+      ret_key[KEY_SIZE] = 0;
+      return 0;
+    }
+  return 1;
+}
+
+/*
+ * Key extractor function for Cookie header.  Extracts the value of
+ * the parameter SID.
+ */
+static int
+key_cookie (char const *hval, char const *sid, char *ret_key)
+{
+  size_t slen = strlen (sid);
+  while (*hval)
+    {
+      size_t n;
+
+      hval += strspn (hval, " \t");
+      if (*hval == 0)
+	break;
+
+      n = strcspn (hval, ";");
+
+      if (n > slen && hval[slen] == '=' && strncasecmp (hval, sid, slen) == 0)
+	{
+	  hval += slen + 1;
+	  n -= slen + 1;
+	  if (n > KEY_SIZE)
+	    n = KEY_SIZE;
+	  memcpy (ret_key, hval, n);
+	  ret_key[n] = 0;
+	  return 0;
+	}
+
+      hval += n;
+      if (hval[0] == 0)
+	break;
+      hval++;
+    }
+  return 1;
+}
+
+/*
  * Find the right back-end for a request
  */
 BACKEND *
-get_backend (SERVICE *svc, const struct addrinfo *from_host,
-	     const char *request, HTTP_HEADER_LIST *headers)
+get_backend (POUND_HTTP *phttp)
 {
-  BACKEND *res;
-  char key[KEY_SIZE + 1];
-  int ret_val, no_be;
+  SERVICE *svc = phttp->svc;
+  BACKEND *res = NULL;
+  char keybuf[KEY_SIZE + 1];
+  char const *key;
+  int no_be;
 
-  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "get_backend() lock: %s", strerror (ret_val));
+  pthread_mutex_lock (&svc->mut);
 
   no_be = (svc->tot_pri <= 0);
 
@@ -526,104 +622,93 @@ get_backend (SERVICE *svc, const struct addrinfo *from_host,
     {
     case SESS_NONE:
       /* choose one back-end randomly */
-      res = no_be ? svc->emergency : rand_backend (&svc->backends,
-						   random () % svc->tot_pri);
+      res = no_be ? svc->emergency
+		  : rand_backend (&svc->backends, random () % svc->tot_pri);
+      break;
+
+    case SESS_COOKIE:
+      res = find_backend_by_header (svc, no_be, &phttp->request,
+				    "Cookie", key_cookie, svc->sess_id);
       break;
 
     case SESS_IP:
-      addr2str (key, sizeof (key), from_host, 1);
-      if (svc->sess_ttl < 0)
-	res = no_be ? svc->emergency
-		     : hash_backend (&svc->backends, svc->abs_pri, key);
-      else if ((res = service_session_find (svc, key)) == NULL)
-	{
-	  if (no_be)
-	    res = svc->emergency;
-	  else
-	    {
-	      /* no session yet - create one */
-	      res = rand_backend (&svc->backends, random () % svc->tot_pri);
-	      service_session_add (svc, key, res);
-	    }
-	}
+      addr2str (keybuf, sizeof (keybuf), &phttp->from_host, 1);
+      res = find_backend_by_key (svc, keybuf, no_be);
       break;
 
     case SESS_URL:
+      if (http_request_get_query_param_value (&phttp->request, svc->sess_id, &key) == RETRIEVE_OK)
+	res = find_backend_by_key (svc, key, no_be);
+      break;
+
     case SESS_PARM:
-      if (get_REQUEST (key, svc, request))
+      if (http_request_get_path (&phttp->request, &key) == 0)
 	{
-	  if (svc->sess_ttl < 0)
-	    res = no_be ? svc->emergency
-			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((res = service_session_find (svc, key)) == NULL)
-	    {
-	      if (no_be)
-		res = svc->emergency;
-	      else
-		{
-		  /* no session yet - create one */
-		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  service_session_add (svc, key, res);
-		}
-	    }
-	}
-      else
-	{
-	  res = no_be ? svc->emergency
-		      : rand_backend (&svc->backends, random () % svc->tot_pri);
+	  char *p = strrchr (key, ';');
+	  if (p)
+	    res = find_backend_by_key (svc, p + 1, no_be);
 	}
       break;
-    default:
-      /* this works for SESS_BASIC, SESS_HEADER and SESS_COOKIE */
-      if (get_HEADERS (key, svc, headers))
-	{
-	  if (svc->sess_ttl < 0)
-	    res = no_be ? svc->emergency
-			: hash_backend (&svc->backends, svc->abs_pri, key);
-	  else if ((res = service_session_find (svc, key)) == NULL)
-	    {
-	      if (no_be)
-		res = svc->emergency;
-	      else
-		{
-		  /* no session yet - create one */
-		  res = rand_backend (&svc->backends, random () % svc->tot_pri);
-		  service_session_add (svc, key, res);
-		}
-	    }
-	}
-      else
-	{
-	  res = no_be ? svc->emergency
-		      : rand_backend (&svc->backends, random () % svc->tot_pri);
-	}
+
+    case SESS_HEADER:
+      res = find_backend_by_header (svc, no_be, &phttp->request,
+				    svc->sess_id, NULL, NULL);
       break;
+
+    case SESS_BASIC:
+      res = find_backend_by_header (svc, no_be, &phttp->request,
+				    "Authorization", key_authbasic, NULL);
     }
-  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "get_backend() unlock: %s", strerror (ret_val));
+
+  if (!res)
+    {
+      res = no_be ? svc->emergency
+		  : rand_backend (&svc->backends, random () % svc->tot_pri);
+    }
+
+  pthread_mutex_unlock (&svc->mut);
 
   return res;
 }
 
 /*
- * (for cookies/header only) possibly create session based on response headers
+ * Create session based on response headers.
  */
 void
-upd_session (SERVICE *const svc, HTTP_HEADER_LIST *headers, BACKEND *be)
+upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
 {
+  char *hname;
   char key[KEY_SIZE + 1];
-  int ret_val;
+  int (*keyfun) (char const *, char const *, char *);
 
-  if (svc->sess_type != SESS_HEADER && svc->sess_type != SESS_COOKIE)
-    return;
-  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "upd_session() lock: %s", strerror (ret_val));
-  if (get_HEADERS (key, svc, headers))
-    if (service_session_find (svc, key) == NULL)
-      service_session_add (svc, key, be);
-  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "upd_session() unlock: %s", strerror (ret_val));
-  return;
+  switch (svc->sess_type)
+    {
+    case SESS_HEADER:
+      hname = svc->sess_id;
+      keyfun = NULL;
+      break;
+
+    case SESS_COOKIE:
+      hname = "Cookie";
+      keyfun = key_cookie;
+      break;
+
+    case SESS_BASIC:
+      hname = "Authorization";
+      keyfun = key_authbasic;
+      break;
+
+    default:
+      return;
+    }
+
+  pthread_mutex_lock (&svc->mut);
+  if (find_key_by_header (headers, hname, keyfun, svc->sess_id, key) == 0)
+    {
+      if (service_session_find (svc, key) == NULL)
+	service_session_add (svc, key, be);
+    }
+  pthread_mutex_unlock (&svc->mut);
 }
 
 static void touch_be (void *data);
