@@ -3615,6 +3615,7 @@ static int
 open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 {
   char caddr[MAX_ADDR_BUFSIZE];
+  BIO *bb;
 
   /* Create new BIO */
   if ((phttp->be = BIO_new_socket (sock, 1)) == NULL)
@@ -3639,7 +3640,6 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
   if (backend_is_https (backend))
     {
       SSL *be_ssl;
-      BIO *bb;
 
       if ((be_ssl = SSL_new (backend->v.reg.ctx)) == NULL)
 	{
@@ -3665,19 +3665,19 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 		  ERR_error_string (ERR_get_error (), NULL));
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 	}
-
-      if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
-	{
-	  logmsg (LOG_WARNING, "(%"PRItid") e503 BIO_new(buffer) server failed",
-		  POUND_TID ());
-	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
-	}
-
-      BIO_set_buffer_size (bb, MAXBUF);
-      BIO_set_close (bb, BIO_CLOSE);
-      phttp->be = BIO_push (bb, phttp->be);
-
     }
+
+  if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") e503 BIO_new(buffer) server failed",
+	      POUND_TID ());
+      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+    }
+
+  BIO_set_buffer_size (bb, MAXBUF);
+  BIO_set_close (bb, BIO_CLOSE);
+  phttp->be = BIO_push (bb, phttp->be);
+
   return 0;
 }
 
