@@ -2682,6 +2682,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
       break;
 
     default:
+      stringbuf_free (&sb);
       return 0;
     }
 
@@ -2694,6 +2695,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
       return -1;
     }
 
+  stringbuf_free (&sb);
   return 0;
 }
 
