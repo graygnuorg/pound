@@ -2672,13 +2672,7 @@ parse_service (void *call_data, void *section_data)
     return PARSER_FAIL;
 
   if (tok->type == T_STRING)
-    {
-      if (strlen (tok->str) > sizeof (svc->name) - 1)
-	{
-	  conf_error ("%s", "service name too long: truncated");
-	}
-      strncpy (svc->name, tok->str, sizeof (svc->name) - 1);
-    }
+    svc->name = xstrdup (tok->str);
   else
     putback_tkn (tok);
 

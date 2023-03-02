@@ -2471,7 +2471,7 @@ be_service_name (BACKEND *be)
   switch (be->be_type)
     {
     case BE_BACKEND:
-      if (be->service->name[0])
+      if (be->service->name)
 	return be->service->name;
       break;
     case BE_REDIRECT:

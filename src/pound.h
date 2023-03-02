@@ -576,7 +576,7 @@ typedef struct rewrite_rule
 /* service definition */
 typedef struct _service
 {
-  char name[KEY_SIZE + 1];	/* symbolic name */
+  char *name;			/* symbolic name */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite;
   BACKEND_HEAD backends;
