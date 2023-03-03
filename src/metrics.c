@@ -421,6 +421,37 @@ json_object_get_type (struct json_value *obj, char const *attr, int type,
   return -1;
 }
 
+static int
+json_object_get_name (struct json_value *obj, struct json_value **retval)
+{
+  struct json_value *jv;
+
+  if (json_object_get (obj, "name", &jv))
+    {
+      if (errno == ENOENT)
+	logmsg (LOG_NOTICE, "attribute \"%s\" not found", "name");
+      else
+	logmsg (LOG_NOTICE, "attribute lookup error: %s", strerror (errno));
+      return -1;
+    }
+
+  switch (jv->type)
+    {
+    case json_string:
+    case json_null:
+      *retval = jv;
+      break;
+
+    default:
+      logmsg (LOG_NOTICE, "attribute \"%s\" type mismatch (expected %d or %d, got %d)",
+	      "name", json_string, json_null, jv->type);
+      errno = EINVAL;
+      return -1;
+    }
+
+  return 0;
+}
+
 /*
  * For each entry in the FAMILY array, apply its setfn function to the metric
  * of this family in the exposition.  EXP, PFX and VAL are passed to setfn.
@@ -536,6 +567,13 @@ gen_listener_info (EXPOSITION *exp, struct metric *metric,
 
   if ((samp = metric_add_sample (metric, pfx)) == NULL)
     return -1;
+
+  if (json_object_get_name (obj, &jv))
+    return -1;
+  if (metric_labels_add (&samp->labels, "name",
+			 jv->type == json_string ? jv->v.s : ""))
+    return -1;
+
   if (json_object_get_type (obj, "address", json_string, &jv))
     return -1;
   metric_labels_add (&samp->labels, "address", jv->v.s);
@@ -614,11 +652,12 @@ gen_service_info (EXPOSITION *exp, struct metric *metric,
   struct metric_sample *samp;
   struct json_value *jv;
 
-  if (json_object_get_type (obj, "name", json_string, &jv))
+  if (json_object_get_name (obj, &jv))
     return -1;
   if ((samp = metric_add_sample (metric, pfx)) == NULL)
     return -1;
-  if (metric_labels_add (&samp->labels, "name", jv->v.s))
+  if (metric_labels_add (&samp->labels, "name",
+			 jv->type == json_string ? jv->v.s : ""))
     return -1;
   samp->number = 1;
   return 0;

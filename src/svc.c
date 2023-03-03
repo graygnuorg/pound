@@ -1770,7 +1770,8 @@ service_serialize (SERVICE *svc)
       pthread_mutex_lock (&svc->mut);
 
       typename = sess_type_to_str (svc->sess_type);
-      if ((svc->name && json_object_set (obj, "name", json_new_string (svc->name)))
+      if (json_object_set (obj, "name",
+			   svc->name ? json_new_string (svc->name) : json_new_null ())
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
 	  || json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri))
@@ -1799,8 +1800,8 @@ listener_serialize (LISTENER *lstn)
     {
       int err = 0;
 
-      if (lstn->name)
-	err = json_object_set (obj, "name", json_new_string (lstn->name));
+      err |= json_object_set (obj, "name",
+			      lstn->name ? json_new_string (lstn->name) : json_new_null ());
       err |= json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
 
       is_https = !SLIST_EMPTY (&lstn->ctx_head);
