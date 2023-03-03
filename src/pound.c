@@ -274,7 +274,7 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 
   pthread_mutex_lock (&arg_mut);
   SLIST_PUSH (&thr_head, res, next);
-  if (worker_count == active_threads)
+  if (worker_count < worker_max_count && worker_count == active_threads)
     {
       worker_start ();
     }
