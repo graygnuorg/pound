@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-02-20
+Pound -- history of user-visible changes. 2023-03-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -113,6 +113,33 @@ Request accessor can be used in all strings where the use of
 backreferences is allowed: i.e. arguments to Redirect, ACME,
 Error directives, and to all request modification directives described
 above.
+
+* Listener labels
+
+Listeners can be assigned symbolic labels.  The syntax is:
+
+  ListenHTTP "name"
+or
+  ListenHTTPS "name"
+
+The "name" must be unique among all listeners defined in the
+configuration.
+
+This symbolic name can be used to identify listener in poundctl
+requests (see below).
+
+* Service labels
+
+Service labels must be unique among all services within the
+listener (or in the configuration file, for global ones).
+
+* Use of listener and service labels in poundctl
+
+Listeners and services can be identified both by their numbers and
+labels.  For example:
+
+  poundctl list /main/static/1
+
 
 Version 4.5, 2023-02-12
 

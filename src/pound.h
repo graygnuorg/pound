@@ -613,6 +613,7 @@ typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 /* Listener definition */
 typedef struct _listener
 {
+  char *name;			/* symbolic name */
   struct addrinfo addr;		/* IPv4/6 address */
   int sock;			/* listening socket */
   POUND_CTX_HEAD ctx_head;	/* CTX for SSL connections */

@@ -45,7 +45,7 @@ typedef unsigned TOKENMASK;
 #define T_MASK_ISSET(m,t) ((m) & T_BIT(t))
 #define T_ANY 0 /* any token, inlcuding newline */
 /* Unquoted character sequence */
-#define T_UNQ (T_BIT (T_IDENT) | T_BIT (T_NUMBER) | T_BIT(T_LITERAL))
+#define T_UNQ (T_BIT (T_IDENT) | T_BIT (T_NUMBER) | T_BIT (T_LITERAL))
 
 /* Locations in the source file */
 struct locus_point
@@ -2651,6 +2651,18 @@ static PARSER_TABLE service_parsetab[] = {
 };
 
 static int
+find_service_ident (SERVICE_HEAD *svc_head, char const *name)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, svc_head, next)
+    {
+      if (svc->name && strcmp (svc->name, name) == 0)
+	return 1;
+    }
+  return 0;
+}
+
+static int
 parse_service (void *call_data, void *section_data)
 {
   SERVICE_HEAD *head = call_data;
@@ -2672,7 +2684,14 @@ parse_service (void *call_data, void *section_data)
     return PARSER_FAIL;
 
   if (tok->type == T_STRING)
-    svc->name = xstrdup (tok->str);
+    {
+      if (find_service_ident (head, tok->str))
+	{
+	  conf_error ("%s", "service name is not unique");
+	  return PARSER_FAIL;
+	}
+      svc->name = xstrdup (tok->str);
+    }
   else
     putback_tkn (tok);
 
@@ -3056,15 +3075,42 @@ listener_alloc (POUND_DEFAULTS *dfl)
 }
 
 static int
+find_listener_ident (LISTENER_HEAD *list_head, char const *name)
+{
+  LISTENER *lstn;
+  SLIST_FOREACH (lstn, list_head, next)
+    {
+      if (lstn->name && strcmp (lstn->name, name) == 0)
+	return 1;
+    }
+  return 0;
+}
+
+static int
 parse_listen_http (void *call_data, void *section_data)
 {
   LISTENER *lst;
   LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
   struct locus_range range;
+  struct token *tok;
 
   if ((lst = listener_alloc (dfl)) == NULL)
     return PARSER_FAIL;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  else if (tok->type == T_STRING)
+    {
+      if (find_listener_ident (list_head, tok->str))
+	{
+	  conf_error ("%s", "listener name is not unique");
+	  return PARSER_FAIL;
+	}
+      lst->name = xstrdup (tok->str);
+    }
+  else
+    putback_tkn (tok);
 
   if (parser_loop (http_parsetab, lst, section_data, &range))
     return PARSER_FAIL;
@@ -3585,9 +3631,24 @@ parse_listen_https (void *call_data, void *section_data)
   struct locus_range range;
   POUND_CTX *pc;
   struct stringbuf sb;
+  struct token *tok;
 
   if ((lst = listener_alloc (dfl)) == NULL)
     return PARSER_FAIL;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  else if (tok->type == T_STRING)
+    {
+      if (find_listener_ident (list_head, tok->str))
+	{
+	  conf_error ("%s", "listener name is not unique");
+	  return PARSER_FAIL;
+	}
+      lst->name = xstrdup (tok->str);
+    }
+  else
+    putback_tkn (tok);
 
   lst->ssl_op_enable = SSL_OP_ALL;
 #ifdef  SSL_OP_NO_COMPRESSION

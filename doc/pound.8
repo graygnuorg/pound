@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 19, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 3, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -144,6 +144,13 @@ Normally, the connection between
 and
 .I backends
 is via plain HTTP.  It is, however, possible to use HTTPS as well.
+.PP
+A working
+.B pound
+configuration may define multiple listeners and services.  They can be
+identified either by 0-based ordinal number within the configuration
+(or, for services, within the listener) or by their symbolic name.
+Backends are identified by their ordinal number within service.
 .SH WORKER MODEL
 Each incoming request is processed by a specific \fIworker\fR, i.e. a
 thread in the running program.  The number of running workers is
@@ -549,12 +556,18 @@ the PID file will remain on disk after termination of the program.
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
 .B pound
-will listen on for HTTP requests. All configuration directives enclosed
-between
+will listen on for HTTP requests.  The listener declaration begins with
+the keyword
+.B ListenHTTP
+on a separate line.  The keyword may be followed by a quoted string
+supplying listener name.  This name is a unique label that identifies
+the listener.
+.PP
+All configuration directives enclosed between
 .B ListenHTTP
 and
 .B End
-are specific to a single HTTP listener. At the very least you must specify
+are specific to a single HTTP listener.  At the very least you must specify
 and address and a port for each listener. The following directives are
 available:
 .TP
@@ -673,10 +686,12 @@ value.
 .TP
 \fBService\fR [ "name" ]
 This defines a private service (see below for service definition
-syntax). This service will be used only by this listener. The service
-may be optionally named, with the name showing in the
+syntax). This service will be used only by this listener. Optional
+\fIname\fR supplies the label, that can be used in
 .BR poundctl (8)
-listings.
+requests to identify the service.  This label must be unique among all
+services within the enclosing listener, or, for global services,
+within the configuration.
 .TP
 \fBACME\fR "directory"
 Serve ACME challenge requests from the given
@@ -777,8 +792,14 @@ Same as \fBDeleteHeader\fR.
 .SH "HTTPS Listener"
 An HTTPS listener defines an address and port that
 .B pound
-will listen on for HTTPS requests. All configuration directives enclosed
-between
+will listen on for HTTPS requests.  The listener declaration begins with
+the keyword
+.B ListenHTTPS
+on a separate line.  The keyword may be followed by a quoted string
+supplying listener name.  This name is a unique label that identifies
+the listener.
+.PP
+All configuration directives enclosed between
 .B ListenHTTPS
 and
 .B End
@@ -1124,7 +1145,7 @@ statement.  Numbering of subexpressions starts at 1 (\fB$0\fR refers
 to the entire matching string).  Numbering of matches starts
 at 0.
 .IP
-For example, given the following statements 
+For example, given the following statements
 .IP
 .EX
 Host -re "www\\.(.+)"

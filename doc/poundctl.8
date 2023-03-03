@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "January 13, 2023" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "March 3, 2023" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -62,8 +62,22 @@ All commands take the \fB/\fIL\fB/\fIS\fB/\fIB\fR argument, which
 specifies the
 .B pound
 object to apply the command to.  Here, \fIL\fR, \fIS\fR, and \fIB\fR
-stand for the numbers of \fIlistener\fR, \fIservice\fR and
-\fIbackend\fR, correspondingly.  Depending on the command, either
+stand for the identifiers of \fIlistener\fR, \fIservice\fR and
+\fIbackend\fR, correspondingly.  For listeners and services, both
+numeric identifiers or symbolic names are allowed.  Numeric
+identifiers refer to the ordinal number of the listener in the
+configuration file, or service within the enclosing listener
+(or in the configuration file, if \fIL\fR is \fB\-\fR, see below).
+Symbolic names refer to the names assigned with the corresponding
+.BR ListenHTTP ,
+.BR ListenHTTPS ,
+or
+.B Service
+statement in the configuration file.  The identifier \fIB\fR is
+always numeric and refers to the ordinal number of the backend in
+the service.
+.PP
+Depending on the command, either
 \fIB\fR or both /\fIS\fR/\fIB\fR/ may be omitted.  For example,
 the following command will disable backend 2 in service 1 of listener 0:
 .PP

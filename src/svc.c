@@ -1503,57 +1503,6 @@ get_param (char const *url, char const *param, size_t *ret_len)
   return p;
 }
 
-/*
- * return listener by its number
- */
-static LISTENER *
-get_nth_listener (int n)
-{
-  LISTENER *lstn;
-
-  SLIST_FOREACH (lstn, &listeners, next)
-    {
-      if (n == 0)
-	break;
-      n--;
-    }
-  return lstn;
-}
-
-/*
- * return service by its number
- */
-static SERVICE *
-get_nth_service (LISTENER *lstn, int n)
-{
-  SERVICE *svc;
-  SERVICE_HEAD *head = lstn ? &lstn->services : &services;
-  SLIST_FOREACH (svc, head, next)
-    {
-      if (n == 0)
-	break;
-      n--;
-    }
-  return svc;
-}
-
-/*
- * select a back-end by number
- */
-static BACKEND *
-get_nth_backend (SERVICE *svc, int n)
-{
-  BACKEND *be;
-
-  SLIST_FOREACH (be, &svc->backends, next)
-    {
-      if (n == 0)
-	break;
-      n--;
-    }
-  return be;
-}
-
 static int
 session_backend_index (SESSION *sess)
 {
@@ -1821,7 +1770,7 @@ service_serialize (SERVICE *svc)
       pthread_mutex_lock (&svc->mut);
 
       typename = sess_type_to_str (svc->sess_type);
-      if (json_object_set (obj, "name", json_new_string (svc->name ? svc->name : ""))
+      if ((svc->name && json_object_set (obj, "name", json_new_string (svc->name)))
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
 	  || json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri))
@@ -1850,7 +1799,9 @@ listener_serialize (LISTENER *lstn)
     {
       int err = 0;
 
-      err = json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
+      if (lstn->name)
+	err = json_object_set (obj, "name", json_new_string (lstn->name));
+      err |= json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
 
       is_https = !SLIST_EMPTY (&lstn->ctx_head);
       err |= json_object_set (obj, "protocol",
@@ -2050,26 +2001,139 @@ control_list_all (BIO *c, char const *url)
   return rc;
 }
 
-static int
-ctl_getnum (char const **url)
+/*
+ * Type of object identifier.
+ */
+enum
+  {
+    IDTYPE_ERR = -1,
+    IDTYPE_NUM,         /* Numeric identifier (index). */
+    IDTYPE_STR          /* String identifier (name). */
+  };
+
+/*
+ * Object identifier.
+ */
+typedef struct
 {
+  int type;              /* Identifier type. */
+  union
+  {
+    int n;               /* Index value (IDTYPE_NUM). */
+    struct               /* String value (IDTYPE_STR). */
+    {
+      int len;           /* Name length. */
+      char const *name;  /* Pointer to the name. */
+    } s;
+  };
+} IDENT;
+
+/*
+ * Get single identifier from the URL (must point to a /, on entry).
+ * On success, advance URL to the point past the end of the identifier
+ * (normally next / or end of URL).
+ * On error, return ident with its type set to IDTYPE_ERR.
+ */
+static IDENT
+ctl_getident (char const **url)
+{
+  IDENT retval = { IDTYPE_ERR };
   long n;
   char *end;
 
   if (**url == '/')
-    ++*url;
-  else
-    return -1;
-  errno = 0;
-  n = strtol (*url, &end, 10);
-  if (errno || n > INT_MAX)
-    return -1;
-  if (*end != 0 && *end != '/' && *end != '?')
-    return -1;
-  *url = end;
-  return n;
+    {
+      ++*url;
+      errno = 0;
+      n = strtol (*url, &end, 10);
+      if (*end != 0 && *end != '/' && *end != '?')
+	{
+	  end = (char*) *url + strcspn (*url, "/?");
+	  retval.s.name = *url;
+	  retval.s.len = end - *url;
+	  retval.type = IDTYPE_STR;
+	  *url = end;
+	}
+      else if (errno == 0 && n <= INT_MAX)
+	{
+	  retval.type = IDTYPE_NUM;
+	  retval.n = n;
+	  *url = end;
+	}
+    }
+  return retval;
 }
 
+/*
+ * Locate listener identified by ID.
+ */
+static LISTENER *
+locate_listener (IDENT id)
+{
+  LISTENER *lstn = NULL;
+
+  if (id.type != IDTYPE_ERR)
+    {
+      long n = 0;
+      SLIST_FOREACH (lstn, &listeners, next)
+	{
+	  if ((id.type == IDTYPE_NUM && n == id.n) ||
+	      (lstn->name && strlen (lstn->name) == id.s.len &&
+	       memcmp (lstn->name, id.s.name, id.s.len) == 0))
+	    break;
+	  n++;
+	}
+    }
+  return lstn;
+}
+
+/*
+ * Locate service identified by ID.  If LSTN is null, look it up in the
+ * global service list.
+ */
+static SERVICE *
+locate_service (LISTENER *lstn, IDENT id)
+{
+  SERVICE *svc = 0;
+
+  if (id.type != IDTYPE_ERR)
+    {
+      int n = 0;
+      SERVICE_HEAD *head = lstn ? &lstn->services : &services;
+
+      SLIST_FOREACH (svc, head, next)
+	{
+	  if ((id.type == IDTYPE_NUM && n == id.n) ||
+	      (svc->name && strlen (svc->name) == id.s.len &&
+	       memcmp (svc->name, id.s.name, id.s.len) == 0))
+	    break;
+	  n++;
+	}
+    }
+  return svc;
+}
+
+/*
+ * Locate backend identified by ID.  Only IDTYPE_NUM is supported.
+ */
+static BACKEND *
+locate_backend (SERVICE *svc, IDENT id)
+{
+  BACKEND *be = NULL;
+
+  if (id.type == IDTYPE_NUM)
+    {
+      long n = 0;
+      SLIST_FOREACH (be, &svc->backends, next)
+	{
+	  if (n == id.n)
+	    break;
+	  n++;
+	}
+    }
+  return be;
+}
+
 enum object_type
   {
     OBJ_LISTENER,
@@ -2093,12 +2157,9 @@ typedef int (*OBJHANDLER) (BIO *, OBJECT *, char const *, void *);
 static int
 ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
 {
-  int n;
   OBJECT obj = { .type = OBJ_BACKEND };
 
-  if ((n = ctl_getnum (&url)) < 0)
-    return HTTP_STATUS_NOT_FOUND;
-  if ((obj.be = get_nth_backend (svc, n)) == NULL)
+  if ((obj.be = locate_backend (svc, ctl_getident (&url))) == NULL)
     return HTTP_STATUS_NOT_FOUND;
   return func (c, &obj, url, data);
 }
@@ -2106,13 +2167,9 @@ ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
 static int
 ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url, LISTENER *lstn)
 {
-  int n;
   OBJECT obj = { .type = OBJ_SERVICE };
 
-  if ((n = ctl_getnum (&url)) < 0)
-    return HTTP_STATUS_NOT_FOUND;
-
-  if ((obj.svc = get_nth_service (lstn, n)) == NULL)
+  if ((obj.svc = locate_service (lstn, ctl_getident (&url))) == NULL)
     return HTTP_STATUS_NOT_FOUND;
 
   if (*url && *url != '?')
@@ -2123,7 +2180,6 @@ ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url, LISTENER *lst
 static int
 ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
 {
-  int n;
   OBJECT obj = { .type = OBJ_LISTENER };
   size_t len = strcspn (url, "?");
 
@@ -2137,14 +2193,8 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
       obj.lstn = NULL;
       url += 2;
     }
-  else
-    {
-      if ((n = ctl_getnum (&url)) < 0)
-	return HTTP_STATUS_NOT_FOUND;
-
-      if ((obj.lstn = get_nth_listener (n)) == NULL)
-	return HTTP_STATUS_NOT_FOUND;
-    }
+  else if ((obj.lstn = locate_listener (ctl_getident (&url))) == NULL)
+    return HTTP_STATUS_NOT_FOUND;
 
   if (*url && *url != '?')
     return ctl_service (func, data, c, url, obj.lstn);
