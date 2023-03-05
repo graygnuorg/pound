@@ -402,13 +402,43 @@ get_service (const LISTENER *lstn, struct sockaddr *srcaddr,
 }
 
 /*
+ * Calculate a uniformly distributed random number less than max.
+ * avoiding "modulo bias".
+ *
+ * The code is based on arc4random_uniform from OpenBSD, see
+ * http://cvsweb.openbsd.org/cgi-bin/cvsweb/~checkout~/src/lib/libc/crypt/arc4r\
+andom_uniform.c
+ *
+ * Uniformity is achieved by generating new random numbers until the one
+ * returned is outside the range [0, 2**32 % max).  This
+ * guarantees the selected random number will be inside
+ * [2**32 % max, 2**32) which maps back to [0, max)
+ * after reduction modulo max.
+ */
+static long
+random_in_range (unsigned long max)
+{
+  long r;
+  unsigned long min;
+
+  if (max < 2)
+    return 0;
+  min = - max % max;
+  do
+    r = random ();
+  while (r < min);
+  return r % max;
+}
+
+/*
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (BACKEND_HEAD *head, int pri)
+rand_backend (SERVICE *svc)
 {
   BACKEND *be;
-  SLIST_FOREACH (be, head, next)
+  int pri = random_in_range (svc->tot_pri);
+  SLIST_FOREACH (be, &svc->backends, next)
     {
       if (!backend_is_alive (be) || be->disabled)
 	continue;
@@ -480,7 +510,7 @@ find_backend_by_key (SERVICE *svc, char const *key, int no_be)
       else
 	{
 	  /* no session yet - create one */
-	  res = rand_backend (&svc->backends, random () % svc->tot_pri);
+	  res = rand_backend (svc);
 	  service_session_add (svc, keybuf, res);
 	}
     }
@@ -622,8 +652,7 @@ get_backend (POUND_HTTP *phttp)
     {
     case SESS_NONE:
       /* choose one back-end randomly */
-      res = no_be ? svc->emergency
-		  : rand_backend (&svc->backends, random () % svc->tot_pri);
+      res = no_be ? svc->emergency : rand_backend (svc);
       break;
 
     case SESS_COOKIE:
@@ -662,8 +691,7 @@ get_backend (POUND_HTTP *phttp)
 
   if (!res)
     {
-      res = no_be ? svc->emergency
-		  : rand_backend (&svc->backends, random () % svc->tot_pri);
+      res = no_be ? svc->emergency : rand_backend (svc);
     }
 
   pthread_mutex_unlock (&svc->mut);

@@ -1593,7 +1593,9 @@ backend_parse_https (void *call_data, void *section_data)
 
   xstringbuf_init (&sb);
   stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
-  SSL_CTX_set_session_id_context (be->v.reg.ctx, (unsigned char *) sb.base, sb.len);
+  SSL_CTX_set_session_id_context (be->v.reg.ctx,
+				  (unsigned char *) stringbuf_value (&sb),
+				  stringbuf_len (&sb));
   stringbuf_free (&sb);
 
   POUND_SSL_CTX_init (be->v.reg.ctx);
