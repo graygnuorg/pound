@@ -840,6 +840,7 @@ typedef struct
   unsigned be_connto;
   unsigned ignore_case;
   int header_options;
+  BALANCER balancer;
 } POUND_DEFAULTS;
 
 static int
@@ -2628,6 +2629,26 @@ parse_header_remove (void *call_data, void *section_data)
 		      NULL);
 }
 
+static int
+parse_balancer (void *call_data, void *section_data)
+{
+  BALANCER *t = call_data;
+  struct token *tok;
+
+  if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
+    return PARSER_FAIL;
+  if (strcasecmp (tok->str, "random") == 0)
+    *t = BALANCER_RANDOM;
+  else if (strcasecmp (tok->str, "iwrr") == 0)
+    *t = BALANCER_IWRR;
+  else
+    {
+      conf_error ("unsupported balancing strategy: %s", tok->str);
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
 static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
 
@@ -2649,6 +2670,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
   { "Metrics", parse_metrics, NULL, offsetof (SERVICE, backends) },
   { "Session", parse_session },
+  { "Balancer", parse_balancer, NULL, offsetof (SERVICE, balancer) },
   { NULL }
 };
 
@@ -2668,7 +2690,7 @@ static int
 parse_service (void *call_data, void *section_data)
 {
   SERVICE_HEAD *head = call_data;
-  POUND_DEFAULTS dfl = *(POUND_DEFAULTS*) section_data;
+  POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) section_data;
   struct token *tok;
   SERVICE *svc;
   struct locus_range range;
@@ -2679,6 +2701,7 @@ parse_service (void *call_data, void *section_data)
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
+  svc->balancer = dfl->balancer;
 
   tok = gettkn_any ();
 
@@ -2703,7 +2726,7 @@ parse_service (void *call_data, void *section_data)
       return -1;
     }
 
-  if (parser_loop (service_parsetab, svc, &dfl, &range))
+  if (parser_loop (service_parsetab, svc, dfl, &range))
     return PARSER_FAIL;
   else
     {
@@ -2719,10 +2742,16 @@ parse_service (void *call_data, void *section_data)
 	    {
 	      be->service = svc;
 	      if (!be->disabled)
-		svc->tot_pri += be->priority;
+		{
+		  svc->tot_pri += be->priority;
+		  if (svc->max_pri < be->priority)
+		    svc->max_pri = be->priority;
+		}
 	      svc->abs_pri += be->priority;
 	    }
 	}
+
+      service_lb_init (svc);
 
       SLIST_PUSH (head, svc, next);
     }
@@ -2777,6 +2806,7 @@ parse_acme (void *call_data, void *section_data)
 
   svc->tot_pri = 1;
   svc->abs_pri = 1;
+  svc->max_pri = 1;
 
   /* Create ACME backend */
   XZALLOC (be);
@@ -3767,6 +3797,7 @@ parse_control_global (void *call_data, void *section_data)
   pthread_mutex_init (&svc->mut, NULL);
   svc->tot_pri = 1;
   svc->abs_pri = 1;
+  svc->max_pri = 1;
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
 
@@ -3801,6 +3832,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "WSTimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, ws_to) },
   { "ConnTO", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_connto) },
   { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case) },
+  { "Balancer", parse_balancer, NULL, offsetof (POUND_DEFAULTS, balancer) },
   { "HeaderOption", parse_header_options, NULL, offsetof (POUND_DEFAULTS, header_options) },
   { "ECDHCurve", parse_ECDHCurve },
   { "SSLEngine", parse_SSLEngine },
@@ -3828,7 +3860,8 @@ parse_config_file (char const *file)
     .ws_to = 600,
     .be_connto = 15,
     .ignore_case = 0,
-    .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS
+    .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
+    .balancer = BALANCER_RANDOM
   };
 
   if (push_input (file) == 0)

@@ -340,16 +340,16 @@ sub send {
 	    $self->send_and_expect($lst, $host, $s) or goto end;
 	}
 
-	if (my $i = $self->{stats}{index}{value}) {
+	if (defined(my $i = $self->{stats}{index}{value})) {
 	    $s = $s->elemstat($i);
 	}
 
 	# Assume success
 	my $ok = 1;
 
-	# Iterate over criterions applying them to the received statistics
+	# Iterate over criteria applying them to the received statistics
 	# and correcting $ok accordingly.
-	foreach my $k (qw(min max avg stddev)) {
+	foreach my $k (qw(sum min max avg stddev)) {
 	    if (exists($self->{stats}{$k})) {
 		unless ($self->check_expect($s->${ \$k }, $self->{stats}{$k})) {
 		    $ok = 0;
@@ -484,7 +484,14 @@ sub parse_req {
 			    $self->{stats}{$k}{min} = $v - $+{dev} * $v / 100;
 			    $self->{stats}{$k}{max} = $v + $+{dev} * $v / 100;
 			} else {
-			    $self->{stats}{$k}{min} = $self->{stats}{$k}{max} = $v;
+			    my $d;
+			    if ($v =~ /\.(\d+)/) {
+				$d = (1/(10**length($1)))/2;
+			    } else {
+				$d = 0;
+			    }
+			    $self->{stats}{$k}{min} = $v - $d;
+			    $self->{stats}{$k}{max} = $v + $d;
 			}
 		    } else {
 			$self->{stats}{$k}{min} = $+{min};
@@ -755,21 +762,10 @@ sub ratio {
     return map { $_ / $self->avg } $self->samples
 }
 
-sub elemratio {
-    my ($self, $n) = @_;
-    my $v = $self->sample($n);
-    return map { $v / $_ } $self->samples;
-}
-
 sub elemstat {
     my ($self, $n) = @_;
     my $s = Stats->new();
-    my $i = 0;
-    my $j = 0;
-    foreach my $v ($self->elemratio($n)) {
-	next if ($i++ == $n);
-	$s->incr($j++, $v);
-    }
+    $s->incr(0, $self->sample($n) / $self->sum);
     return $s;
 }
 
@@ -794,6 +790,7 @@ sub _compute {
 	    }
 	}
 
+	$self->{sum} = $sum;
 	$self->{min} = $min;
 	$self->{max} = $max;
 	$self->{avg} = $sum / $nsamples;
@@ -804,6 +801,7 @@ sub _compute {
     return $self->{$what}
 }
 
+sub sum { shift->_compute('sum') }
 sub min { shift->_compute('min') }
 sub max { shift->_compute('max') }
 sub avg { shift->_compute('avg') }

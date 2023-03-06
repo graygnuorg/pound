@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-03
+Pound -- history of user-visible changes. 2023-03-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -8,6 +8,28 @@ on 2022-09-19.  See the README.md file for details.
 Please send pound bug reports to <gray@gnu.org>
 
 Version 4.5.90, (git)
+
+* Load-balancing strategies
+
+A load balancing strategy defines algorithm used to distribute
+incoming requests between multiple regular backends.  This version
+of pound implements two such strategies:
+
+** Weighted Random Balancing
+
+This is the default strategy and the one implemented by prior versions
+of pound.  Each backend is assigned a numeric priority between 0 and 9
+(inclusive).  The backend to use for each request is determined at
+random taking into account backend priorities, so that backends with
+numerically greater priorities have proportionally greater chances of
+being selected than the ones with lesser priorities.
+
+** Interleaved Weighted Round Robin Balancing
+
+Requests are assigned to each backend in turn.  Backend priorities, or
+weigths, are used to control the share of requests handled by each
+backend.  The greater the weight, the more requests will be sent to
+this backend.
 
 * Backreferences
 

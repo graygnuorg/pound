@@ -448,6 +448,70 @@ rand_backend (SERVICE *svc)
   return be;
 }
 
+static BACKEND *
+iwrr_select (SERVICE *svc)
+{
+  BACKEND *be = NULL;
+
+  do
+    {
+      if (!svc->iwrr_cur->disabled && backend_is_alive (svc->iwrr_cur))
+	{
+	  if (svc->iwrr_round <= svc->iwrr_cur->priority)
+	    be = svc->iwrr_cur;
+	}
+      if ((svc->iwrr_cur = SLIST_NEXT (svc->iwrr_cur, next)) == NULL)
+	{
+	  svc->iwrr_cur = SLIST_FIRST (&svc->backends);
+	  svc->iwrr_round = (svc->iwrr_round + 1) % (svc->max_pri + 1);
+	}
+    }
+  while (be == NULL);
+  return be;
+}
+
+static BACKEND *
+service_lb_select_backend (SERVICE *svc)
+{
+  BACKEND *be;
+
+  if (svc->max_pri == 0)
+    return NULL;
+  if (SLIST_NEXT (SLIST_FIRST (&svc->backends), next) == NULL)
+    {
+      be = SLIST_FIRST (&svc->backends);
+      if (!be->disabled && backend_is_alive (be))
+	return be;
+      return NULL;
+    }
+
+  switch (svc->balancer)
+    {
+    case BALANCER_RANDOM:
+      be = rand_backend (svc);
+      break;
+
+    case BALANCER_IWRR:
+      be = iwrr_select (svc);
+    }
+  return be;
+}
+
+void
+service_lb_init (SERVICE *svc)
+{
+  switch (svc->balancer)
+    {
+    case BALANCER_RANDOM:
+      break;
+
+    case BALANCER_IWRR:
+      svc->iwrr_round = 0;
+      svc->iwrr_cur = SLIST_FIRST (&svc->backends);
+      break;
+    }
+}
+
 /*
  * return a back-end based on a fixed hash value
  * this is used for session_ttl < 0
@@ -510,7 +574,7 @@ find_backend_by_key (SERVICE *svc, char const *key, int no_be)
       else
 	{
 	  /* no session yet - create one */
-	  res = rand_backend (svc);
+	  res = service_lb_select_backend (svc);
 	  service_session_add (svc, keybuf, res);
 	}
     }
@@ -652,7 +716,7 @@ get_backend (POUND_HTTP *phttp)
     {
     case SESS_NONE:
       /* choose one back-end randomly */
-      res = no_be ? svc->emergency : rand_backend (svc);
+      res = no_be ? svc->emergency : service_lb_select_backend (svc);
       break;
 
     case SESS_COOKIE:
@@ -691,7 +755,7 @@ get_backend (POUND_HTTP *phttp)
 
   if (!res)
     {
-      res = no_be ? svc->emergency : rand_backend (svc);
+      res = no_be ? svc->emergency : service_lb_select_backend (svc);
     }
 
   pthread_mutex_unlock (&svc->mut);
@@ -761,6 +825,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
   svc->tot_pri = 0;
+  svc->max_pri = 0;
   SLIST_FOREACH (b, &svc->backends, next)
     {
       if (b == be)
@@ -798,7 +863,11 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 	    }
 	}
       if (backend_is_alive (b) && !b->disabled)
-	svc->tot_pri += b->priority;
+	{
+	  svc->tot_pri += b->priority;
+	  if (svc->max_pri < be->priority)
+	    svc->max_pri = be->priority;
+	}
     }
   if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() unlock: %s", strerror (ret_val));
@@ -1189,6 +1258,8 @@ touch_be (void *data)
 	    {
 	      pthread_mutex_lock (&be->service->mut);
 	      be->service->tot_pri += be->priority;
+	      if (be->service->max_pri < be->priority)
+		be->service->max_pri = be->priority;
 	      pthread_mutex_unlock (&be->service->mut);
 	    }
 	}
@@ -1803,6 +1874,7 @@ service_serialize (SERVICE *svc)
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
 	  || json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri))
+	  || json_object_set (obj, "max_pri", json_new_integer (svc->max_pri))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
 	  || json_object_set (obj, "backends", backends_serialize (&svc->backends))

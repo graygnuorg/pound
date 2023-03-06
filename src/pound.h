@@ -573,6 +573,12 @@ typedef struct rewrite_rule
   REWRITE_OP_HEAD ophead;          /* Do this if cond yields true. */
 } REWRITE_RULE;
 
+typedef enum
+  {
+    BALANCER_RANDOM,
+    BALANCER_IWRR,
+  } BALANCER;
+
 /* service definition */
 typedef struct _service
 {
@@ -583,6 +589,11 @@ typedef struct _service
   BACKEND *emergency;
   int abs_pri;			/* abs total priority for all back-ends */
   int tot_pri;			/* total priority for current back-ends */
+  int max_pri;                  /* maximum priority */
+  BALANCER balancer;
+  /* For IWRR balancer */
+  int iwrr_round;
+  BACKEND *iwrr_cur;
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
   unsigned sess_ttl;		/* session time-to-live */
@@ -1007,3 +1018,5 @@ int http_request_get_path (struct http_request *req, char const **retval);
 int http_request_get_query_param_value (struct http_request *req,
 					char const *name,
 					char const **retval);
+
+void service_lb_init (SERVICE *svc);

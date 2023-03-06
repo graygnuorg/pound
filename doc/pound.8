@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 3, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 6, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -102,19 +102,41 @@ web server. The
 .I backend
 defines how the server should be contacted.
 .IP
-Three types of
-.I backends
-may be defined: a "regular"
-.I backend
-which receives requests and returns responses, a "redirect"
-.IR backend ,
-in which case
-.B pound
-will respond with a redirect response, without accessing any
-.I backend
-at all, or an "emergency"
-.IR backend ,
-which will be used only if all other backends are "dead".
+Several types of backends are defined:
+.RS
+.TP
+.I Regular backend
+Regular backends are the most often used type of backends and the
+.I raison d'etre
+of
+.BR pound .
+A regular backend passes received requests to a backend server, waits
+for it to respond and sends the response back to the requesting
+client.
+.TP
+.I Redirect backend
+A redirect backend responds to each request with a redirect response.
+See
+.BR Redirect ,
+below.
+.TP
+.I ACME backend
+A special backend designed to handle ACME challenges.  Backends of
+this type are used to handle HTTP-01 authorization when re-issuing
+.I LetsEncrypt
+certificates.
+.IP
+See the
+.B ACME
+section below.
+.TP
+.I Error backend
+An error backend creates and returns an HTTP status response.
+.TP
+.I Emergency backend
+A special case of regular backend which will be used only if all other
+backends are "dead".
+.RE
 .IP
 Multiple
 .I backends
@@ -122,8 +144,11 @@ may be defined within a
 .IR service ,
 in which case
 .B pound
-will load-balance between the available
+will balance the load between the available
 .IR backends .
+.IP
+Two types of load-balancing strategies are implemented: random
+balancing (default), and interleaved weighted round-robin balancing.
 .IP
 If a
 .I backend
@@ -151,6 +176,55 @@ configuration may define multiple listeners and services.  They can be
 identified either by 0-based ordinal number within the configuration
 (or, for services, within the listener) or by their symbolic name.
 Backends are identified by their ordinal number within service.
+.SH REQUEST BALANCING
+A load balancing strategy defines algorithm used to distribute
+incoming requests between multiple regular backends.  Two such
+strategies are implemented:
+.TP
+.B Weighted Random Balancing
+This is the default strategy.  Each backend is assigned a numeric
+.I priority
+between 0 and 9 (inclusive).  The backend to use for each request is
+determined at random taking into account backend priorities, so that
+backends with numerically greater priorities have proportionally greater
+chances of being selected than the ones with lesser priorities.  The
+share of requests a backend handles can be estimated as:
+.IP
+.RS
+.EX
+.BR "Pi / S(P)" ,
+.EE
+.RE
+.IP
+where
+.B Pi
+is priority of the backend with index
+.BR i ,
+and
+.B S(P)
+is sum of all priorities.
+.TP
+.B Interleaved Weighted Round Robin Balancing
+Requests are assigned to each backend in turn.  Backend priorities, or
+.I weigths
+are used to control the share of requests handled by each backend.
+The greater the weight, the more requests will be sent to this backend.
+In general, the share of requests assigned to a backend is calculated
+by the following relation:
+.IP
+.RS
+.EX
+.BR "(Pi + 1) / (N + S(P))" ,
+.EE
+.RE
+.IP
+where
+.B N
+is the number of backends,
+.B Pi
+and
+.B S(P)
+as discussed above.
 .SH WORKER MODEL
 Each incoming request is processed by a specific \fIworker\fR, i.e. a
 thread in the running program.  The number of running workers is
@@ -338,6 +412,18 @@ This setting can be overridden on a per-listener basis.  See the
 description of \fBHeaderOption\fR directive in \fBHTTP Listener\fR
 section, and section \fBBUILT-IN HEADERS\fR, for a detailed
 discussion of various header modification directives and their effect.
+.TP
+\fBBalancer\fR \fBrandom\fR | \fBiwrr\fR
+Defines the load-balancing strategy to use.  Possible arguments are:
+\fBrandom\fR, to use weighted random balancing algorithm. an
+\fBiwrr\fR, meaning interleaved weighted round robin balancing.
+See
+.BR "REQUEST BALANCING" ,
+above, for a detailed discussion of these balancing strategies.
+.IP
+The \fBBalancer\fR statement in global scope applies to all
+\fBService\fR directives that don't contain \fBBalancer\fR
+definitions of their own.
 .TP
 \fBDaemon\fR \fIbool\fR
 Have
@@ -1104,6 +1190,16 @@ Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
 Conditionally apply request modification depending on whether request
 matches certain conditions.
 .SS Backend definitions
+.TP
+\fBBalancer\fR \fBrandom\fR | \fBiwrr\fR
+Defines the load-balancing strategy to use.  Possible arguments are:
+\fBrandom\fR, to use weighted random balancing algorithm. an
+\fBiwrr\fR, meaning interleaved weighted round robin balancing.
+See
+.BR "REQUEST BALANCING" ,
+above, for a detailed discussion of these balancing strategies.
+.IP
+This directive overrides the \fBBalancer\fR directive in global scope.
 .TP
 \fBBackend\fR
 Directives enclosed between a

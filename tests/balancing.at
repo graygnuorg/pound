@@ -18,6 +18,7 @@ AT_KEYWORDS([balancing])
 PT_CHECK(
 [ListenHTTP
 	Service
+		Balance iwrr
 		Backend
 			Address
 			Port
@@ -61,7 +62,7 @@ PT_CHECK(
 	End
 End
 ],
-[stats samples=1000 avg=100 stddev=[[0,14]]
+[stats samples=1000 avg=100 stddev=0
 
 GET /echo/foo
 end
@@ -70,4 +71,3 @@ end
 end
 ])
 AT_CLEANUP
-
