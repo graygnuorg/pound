@@ -174,7 +174,7 @@
 	  if (((elt)->field.dl_next = (anchor)->field.dl_next) == NULL)	\
 	    (head)->dl_last = (elt);					\
 	  else								\
-	    (elt)->field.dl_next->link.dl_prev = (elt);			\
+	    (elt)->field.dl_next->field.dl_prev = (elt);		\
 	  (anchor)->field.dl_next = (elt);				\
 	  (elt)->field.dl_prev = (anchor);				\
 	}								\
@@ -191,7 +191,7 @@
 	  if (((elt)->field.dl_prev = (anchor)->field.dl_prev) == NULL)	\
 	    (head)->dl_first = (elt);					\
 	  else								\
-	    (elt)->field.dl_prev->link.dl_next = (elt);			\
+	    (elt)->field.dl_prev->field.dl_next = (elt);		\
 	  (anchor)->field.dl_prev = (elt);				\
 	  (elt)->field.dl_next = (anchor);				\
 	}								\
