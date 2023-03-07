@@ -28,11 +28,10 @@ from his fork.
 
 1. a *reverse-proxy*: it passes requests from client browsers to one or
    more backend servers.
-2. a *load balancer*: it distributes the requests from client
-   browsers among several backend servers, while keeping session
-   information.
+2. a *load balancer*: it distributes requests from client browsers among
+   several backend servers, while keeping session information.
 3. an *SSL wrapper*: it decrypts HTTPS requests from client browsers and
-   passes them as plain HTTP to the back-end servers.
+   passes them as plain HTTP to the backend servers.
 4. an *HTTP/HTTPS sanitizer*: it verifies requests for correctness and
    accepts only well-formed ones.
 5. a *fail-over server*: should a backend server fail, *pound* will take
@@ -96,7 +95,7 @@ This will prepare the necessary infrastructure files (`Makefile.in`'s
 etc.)
 
 If you are building __pound__ from a tarball, the above step is not
-needed, since all the necessary files are included in the tarball.
+needed, since all the necessary files are already included in it.
 
 To prepare __pound__ for compilation, run `./configure`.  Its command
 line options will decide where on the filesystem the binary will be
@@ -123,7 +122,7 @@ configuration options:
 
 Enable or disable the use of the `pcreposix` library.  This is a
 library that makes it possible to use both POSIX extended and
-Perl-compatible regular expressions in the __pound__ configuration
+Perl-compatible regular expressions in __pound__ configuration
 file.
 
 By default, its presence is determined automatically.
@@ -181,16 +180,17 @@ it involves generating DH parameters.
 
 Testing a reverse proxy in general, and __pound__ in particular, is not
 a trivial task.  Testsuite in __pound__ was implemented quite recently
-and is still somewhat experimental.  Notwithstanding this, it has
+and is still somewhat experimental.  Notwithstanding that, it has
 already helped to discover several important bugs that lurked in the
 code.
 
 To test __pound__ you will need [Perl](https://www.perl.org) version
-5.26.3 or later and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass)
-module.  To install the latter on a debian-based system, run
+5.26.3 or later, and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass)
+module.  To install the latter on a reasonably recent debian-based system,
+run
 
 ```sh
- apt install libio-fdpass-perl
+ apt-get install libio-fdpass-perl
 ```
 
 On other systems you may need to install it directly from *cpan* by
@@ -211,7 +211,7 @@ something like that:
 
 ```
 ## -------------------------- ##
-## pound 4.0 test suite.      ##
+## pound 4.5 test suite.      ##
 ## -------------------------- ##
   1: Configuration file syntax                       ok
   2: Basic request processing                        ok
@@ -233,12 +233,12 @@ All 11 tests were successful.
 ```
 
 If a test results in something other than `ok`, it leaves the detailed
-diagnostics in files in the `tests/*N*/testsuite.dir` directory, where
-*N* is the ordinal number of the test.  Pack them all into a single
+diagnostics in files in the `tests/NN/testsuite.dir` directory, where
+*NN* is the ordinal number of the test.  Pack them all into a single
 tarball and send it over to <gray@gnu.org> for investigation.  See
-also the [Bug Reporting](#user-content-bug-reporting) section below.
+also the section [Bug Reporting](#user-content-bug-reporting) below.
 
-## Installing
+## Installation
 
 If both building and testing succeeded, it's time to install __pound__.
 To do so, run the following command as root:
@@ -251,8 +251,8 @@ To do so, run the following command as root:
 
 __Pound__ looks for its configuration file in a location defined at
 [compile time](#user-content-compilation), normally `/etc/pound.cfg`,
-or `/usr/local/etc/pound.cfg`.  It's syntax is discussed in detail
-in the [manual](https://www.gnu.org.ua/software/pound/pound.html).
+or `/usr/local/etc/pound.cfg`.  The configuration file syntax is discussed
+in detail in the [manual](https://www.gnu.org.ua/software/pound/pound.html).
 Here we will describe some example configurations.
 
 Any __pound__ configuration must contain at least two parts:
@@ -270,7 +270,7 @@ such as source IP address, URL, request header or the like.
 ### Simplest configuration
 
 The following configuration instructs __pound__ to listen for incoming
-HTTP requests on 192.0.2.1:80 and to pass it to single backend on
+HTTP requests on 192.0.2.1:80 and pass them to single backend on
 10.10.0.1:8080.
 
 
@@ -340,16 +340,20 @@ End
 ### Virtual Hosts
 
 To implement virtual hosts, one needs to instruct __pound__ to
-route requests to different services depending on the value of
-their `Host:` headers.  In previous versions of __pound__ it
-was achieved using the `HeadRequire` directive.  Since version
-4.1 __pound__ provides the `Host` directive for this purpose.
+route requests to different services depending on the values of
+their `Host:` headers.  To do so, use the `Host` statement in the
+`Service` section.
+
+The argument to `Host` specifies the host name.  When an incoming request
+arrives, it is compared with this value.  The `Service` section will be
+used only if the value of the `Host:` header from the request matched the
+argument to the `Host` statement.  By default, exact case-insensitive
+comparison is used.
 
 Let's assume that you have internal server 192.168.0.10 that is supposed to
 serve the needs of virtual host *www.server0.com* and 192.168.0.11
 that serves *www.server1.com*.  You want __pound__ to listen on address
-192.0.2.1 and separate the requests to each host.  The configuration file
-would look like this:
+192.0.2.1.  The configuration file would look like this:
 
 ```
 ListenHTTP
@@ -396,6 +400,11 @@ two `Host` statements:
 		End
 	End
 ```
+
+When this service is considered, the value of the `Host:` header from the
+incoming request is matched against each host listed in the `Match OR`
+statement.  If any value compares equal, the match succeeds and the service
+is selected for processing the request.
 
 By default, the `Host` directive uses exact case-insensitive string match.
 This can be altered by supplying one or more options to it.  In the example
@@ -561,7 +570,7 @@ achieves the same result without changing the contents in any way.
 ### Logging
 
 If __pound__ operates in daemon mode (the default), all diagnostics
-goes to syslog, facility `daemon`.  __Pound__ switches to syslog right
+goes to the syslog facility `daemon`.  __Pound__ switches to syslog right
 before it disconnects from the controlling terminal.  Until then, it
 sends its messages to the standard error.
 
@@ -656,6 +665,29 @@ directives are applied is:
 1. Headers controlled by the `HeaderOption` directive are added.
 2. Headers requested by `HeaderRemove` directives are removed.
 3. Headers from `HeaderAdd` directives are added.
+
+## ACME
+
+__Pound__ offers built-in support for ACME (a.k.a. _LetsEncrypt_) [HTTP-01](https://letsencrypt.org/docs/challenge-types/#http-01-challenge) challenge type.
+Thus, it can be used with any certificate controller to obtain SSL certificates
+on the fly.
+
+Assuming your certificate controller is configured to store challenges in
+directory `/var/lib/pound/acme`, all you need to do is add the `ACME`
+statement to the `ListenHTTP` block, for example:
+
+```
+ListenHTTP
+	ACME "/var/lib/pound/acme"
+	.
+	.
+	.
+End
+```
+
+Now, each request whose URL ends in `/.well-known/acme-challenge/NAME`
+will be served by directly by __pound__: it will send the content of
+the file `/var/lib/pound/acme/NAME` as a reply.
 
 ## Using `RootJail`
 
