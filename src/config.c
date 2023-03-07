@@ -2738,8 +2738,18 @@ parse_service (void *call_data, void *section_data)
 	}
       else
 	{
+	  int be_class = 0;
+#         define BE_MASK(n) (1<<(n))
+#         define  BX_(x)  ((x) - (((x)>>1)&0x77777777)			\
+			   - (((x)>>2)&0x33333333)			\
+			   - (((x)>>3)&0x11111111))
+#         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
+	  int n = 0;
+
 	  SLIST_FOREACH (be, &svc->backends, next)
 	    {
+	      n++;
+	      be_class |= BE_MASK (be->be_type);
 	      be->service = svc;
 	      if (!be->disabled)
 		{
@@ -2748,6 +2758,30 @@ parse_service (void *call_data, void *section_data)
 		    svc->max_pri = be->priority;
 		}
 	      svc->abs_pri += be->priority;
+	    }
+
+	  if (n > 1)
+	    {
+	      if (be_class & ~(BE_MASK (BE_BACKEND) | BE_MASK (BE_REDIRECT)))
+		{
+		  conf_error_at_locus_range (&range,
+			  "%s",
+			  BITCOUNT (be_class) == 1
+			    ? "multiple backends of this type are not allowed"
+			    : "service mixes backends of different types");
+		  return PARSER_FAIL;
+		}
+
+	       if (be_class & BE_MASK (BE_REDIRECT))
+		{
+		  conf_error_at_locus_range (&range,
+			  "warning: %s",
+			  (be_class & BE_MASK (BE_BACKEND))
+			     ? "service mixes regular and redirect backends"
+			     : "service uses multiple redirect backends");
+		  conf_error_at_locus_range (&range,
+			  "see section \"DEPRECATED FEATURES\" in pound(8)");
+		}
 	    }
 	}
 

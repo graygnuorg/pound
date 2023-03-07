@@ -69,6 +69,7 @@ AT_BANNER([Special backends])
 m4_include([redirect.at])
 m4_include([acme.at])
 m4_include([error.at])
+m4_include([bemix.at])
 
 AT_BANNER([HeaderOption])
 m4_include([optfwd.at])

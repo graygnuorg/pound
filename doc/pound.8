@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 6, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 7, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1215,9 +1215,11 @@ will attempt to load-balance between them.
 \fBRedirect\fR [\fIcode\fR] "url"
 This is a special type of backend. Instead of sending the request to a backend
 .B pound
-replies immediately with a redirection to the given URL. You may
-define multiple redirectors in a service, as well as mixing them with
-regular backends.
+replies immediately with a redirection to the given URL.
+.IP
+It is allowed to define multiple redirectors in a service, as well as
+mixing them with regular backends, but there is little if any
+justification for such usage, so it is deprecated.
 .IP
 Optional \fIcode\fR can be one of:
 .BR 301 ,
@@ -1887,6 +1889,7 @@ absolutely fool-proof - as the recent Apache problem with chunked
 transfers demonstrated. However, given the current standards, this is
 the best that can be done - HTTP is an inherently weak protocol.
 .SH DEPRECATED FEATURES
+.SS Configuration statements
 The following configuration statements are retained for backward
 compatibility with earlier
 .B pound
@@ -1919,7 +1922,7 @@ Use the \fB\-icase\fR option to the \fBURL\fR directive
 instead.  See the discussion of \fIoptions\fR in the
 .B Service Matching Directives
 section.
-.PP
+.SS Redirect request hack
 The use of the \fIredirect request\fR hack in the \fBRedirect\fR
 statement is deprecated as well.
 Instead of relying on the trailing slash to append the original URL
@@ -1936,6 +1939,13 @@ use:
   URL ".*"
   Redirect "http://example.org$0"
 .EE
+.SS Multiple redirect backends
+Use of multiple \fBRedirect\fR backends in a single service is
+deprecated, as well as using  \fBRedirect\fR backends together with
+regular ones.  If you know of any valid usage for such configuration,
+please drop a note to the authors (see
+.BR "REPORTING BUGS" ,
+below).
 .SH ADDITIONAL NOTES
 .B Pound
 uses the system log for messages (default facility \fBLOG_DAEMON\fR).

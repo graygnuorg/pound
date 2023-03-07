@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-06
+Pound -- history of user-visible changes. 2023-03-07
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -30,6 +30,13 @@ Requests are assigned to each backend in turn.  Backend priorities, or
 weigths, are used to control the share of requests handled by each
 backend.  The greater the weight, the more requests will be sent to
 this backend.
+
+* New statement: Balancer
+
+The Balancer statement can appear in global and in Service scope.  It
+defines the load balancer to use.  Possible arguments are: random, to
+use weighted random balancing (default), and iwrr to use interleaved
+weighted round robin balancing.
 
 * Backreferences
 
@@ -161,6 +168,11 @@ Listeners and services can be identified both by their numbers and
 labels.  For example:
 
   poundctl list /main/static/1
+
+* Use of multiple redirects in single service
+
+Use of multiple redirect backends in single service, as well as mixing
+them with regular backends is deprecated and causes a warning message.
 
 
 Version 4.5, 2023-02-12
