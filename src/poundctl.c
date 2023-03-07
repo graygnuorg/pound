@@ -130,7 +130,7 @@ get_socket_name (void)
   if (name)
     socket_name = xstrdup (name);
 
-  return name;
+  return socket_name;
 }
 
 BIO *
