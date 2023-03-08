@@ -822,14 +822,18 @@ detach (void)
   if (pid == -1)
     abend ("setsid: %s", strerror (ec));
 
-  chdir ("/");
+  if (chdir ("/"))
+    abend ("can't change to /: %s", strerror (errno));
 
   close (0);
   close (1);
   close (2);
-  open ("/dev/null", O_RDONLY);
-  open ("/dev/null", O_WRONLY);
-  dup (1);
+  if (open ("/dev/null", O_RDONLY) == -1)
+    abend ("can't open /dev/null: %s", strerror (errno));
+  if (open ("/dev/null", O_WRONLY) == -1)
+    abend ("can't open /dev/null: %s", strerror (errno));
+  if (dup (1) == -1)
+    abend ("dup failed: %s", strerror (errno));
 }
 
 int
