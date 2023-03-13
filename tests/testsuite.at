@@ -20,7 +20,7 @@ m4_define([PT_CONF],
 [cat > pound.cfg <<_CONF
 $1
 _CONF
-AT_CHECK([pound -c -Wno-dns -f pound.cfg],m4_shift($@))])
+AT_CHECK([pound -c -Wno-dns -Wno-include-dir -f pound.cfg],m4_shift($@))])
 
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
 
@@ -64,6 +64,12 @@ m4_include([host.at])
 m4_include([url.at])
 m4_include([or.at])
 m4_include([not.at])
+m4_include([fromfile.at])
+
+AT_BANNER([Includes])
+m4_include([include.at])
+m4_include([incldir.at])
+m4_include([inclnest.at])
 
 AT_BANNER([Special backends])
 m4_include([redirect.at])

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-07
+Pound -- history of user-visible changes. 2023-03-13
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,36 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.6.90 (git)
+
+* Default include directory
+
+Any file name arguments to configuration directives that are relative
+pathnames are looked up in the include directory.  The initial value
+for the include directory is set to the system configuration
+directory, as configured at compile time.   It can be changed:
+
+1. on the command line, using the -Winclude-dir=DIR or -Wno-include-dir
+   options.  The latter form resets it to the current working
+   directory.
+
+2. in the global scope of the configuration file, using the IncludeDir
+   configuration statement.
+
+* Reading patterns from file
+
+All request matching directives (Header, Host, URL, etc.) take an
+additional option "-file".  When this option is specified, the
+argument to the directive is treated as the name of a file to read
+patterns from.  If the filename is relative, it is looked up in the
+include directory (see above).  Patterns are read from the file line
+by line, empty lines and comments are ignored.  For example:
+
+   Service
+      Host -file "pound/webhosts"
+      ...
+   End
 
 Version 4.6, 2023-03-07
 

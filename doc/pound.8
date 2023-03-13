@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 7, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 13, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -308,7 +308,7 @@ terms, and configuration flags.
 .TP
 \fB\-W [\fBno\-]\fIFEATURE\fR
 Enable or disable (if prefixed with \fBno\-\fR) additional \fBpound\fR
-features.  As of this version, only one \fIFEATURE\fR is implemented:
+features.  As of this version, the following \fIFEATURE\fRs are implemented:
 .RS
 .TP
 .RB [ no\- ] dns
@@ -316,6 +316,19 @@ Resolve host names found in configuration file.  This is the default.
 You can disable it if your configuration file refers to backends only
 by their IP addresses, in order to suppress potentially lengthy
 network host address lookups.
+.TP
+.B no\-include\-dir
+Don't set the include directory to the system configuration
+directory.  This means that each relative filename used in arguments
+to the directives in the configuration file will be looked up in the
+current working directory.  This feature is useful mainly in
+testsuite.
+.TP
+\fBinclude\-dir=\fIDIR\fR
+Override the default include directory setting.  Set it to \fIDIR\fR.
+See the discussion of the \fBIncludeDir\fR directive in section
+.BR "GLOBAL DIRECTIVES" ,
+below.
 .RE
 .PP
 In general, any number of backend servers may be specified. Use the
@@ -585,8 +598,21 @@ the
 .BR poundctl (8)
 program.
 .TP
-\fBInclude\fR "/path/to/file"
-Include the file as though it were part of the configuration file.
+\fBIncludeDir\fR "\fIdir\fR"
+Sets the \fIinclude directory\fR.  This is the directory
+where \fIpound\fR looks for relative file names that appear in other
+configuratin directives (e.g. \fIInclude\fR).  The default value is
+the system configuration directory as set at compile time (you can
+check its value in the output of \fBpound -V\fR).  This initial value
+can be changed in the command line using the
+\fB\-W include\-dir=\fIname\fR option or reset to the current working
+directory using the \fB\-W no\-include\-dir\fR option (see the
+discussion of \fB\-W\fR below).
+.TP
+\fBInclude\fR "\fIfile\fR"
+Include the file as though it were part of the configuration file.  If
+\fIfile\fR is a relative file name, it will be looked in the \fIinclude
+directory\fR (see above).
 .TP
 \fBAnonymise\fR
 (alternative spelling \fBAnonymize\fR also accepted) Replace the last
@@ -1095,6 +1121,14 @@ Case-sensitive comparison.
 .TP
 .B \-icase
 Case-insensitive comparison.
+.TP
+.B \-file
+Treat \fIpattern\fR as the name of a file to read patterns from.  If
+the name is relative, it will be looked up in the \fIinclude
+directory\fR (see the discussion of the \fBIncludeDir\fR directory
+above).  Patterns are read from the file line by line.  Leading and
+trailing whitespace is removed.  Empty
+lines and comments (lines starting with \fB#\fR) are ignored.
 .PP
 For example, the following will match any request whose \fBHost\fR
 header begins with "www." (case-insensitive):

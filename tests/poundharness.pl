@@ -21,11 +21,14 @@ use threads::shared;
 use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
+use Cwd qw(abs_path);
 
 my $config = 'pound.cfi:pound.cfg';
+my @preproc_files;
 my $log_level = 2;
 my $log_file = 'pound.log';
 my $pid_file = 'pound.pid';
+my $include_dir;
 my $transcript_file;
 my $verbose;
 my $dry_run;
@@ -105,23 +108,37 @@ sub usage_error {
 }
 
 GetOptions('config|f=s' => \$config,
+	   'preproc=s@' => \@preproc_files,
 	   'verbose|v+' => \$verbose,
 	   'log-level|l=n' => \$log_level,
 	   'transcript|x=s' => \$transcript_file,
 	   'statistics|s' => \$statistics,
-	   'startup-timeout|t=n' => \$startup_timeout)
+	   'startup-timeout|t=n' => \$startup_timeout,
+	   'include-dir=s' => \$include_dir)
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
 usage_error "too many arguments\n" if @ARGV;
 
+foreach my $file (@preproc_files) {
+    if ($file =~ m{(?<src>.+):(?<dst>.+)}) {
+	preproc($+{src}, $+{dst});
+    } else {
+	preproc($file, "$file.cfg");
+    }
+}
+
 if ($config =~ m{(?<src>.+):(?<dst>.+)}) {
-    preproc($+{src}, $+{dst});
+    preproc($+{src}, $+{dst}, 1);
     $config = $+{dst};
 } else {
     my $ofile = 'pound.cfg';
-    preproc($config, $ofile);
+    preproc($config, $ofile, 1);
     $config = $ofile;
+}
+
+if ($include_dir) {
+    $config = abs_path($config)
 }
 
 # Start HTTP listeners
@@ -148,7 +165,7 @@ exit ($ps->failures ? EX_FAILURE : EX_SUCCESS);
 ## -----------------------------
 
 sub preproc {
-    my ($infile, $outfile) = @_;
+    my ($infile, $outfile, $init) = @_;
     if ($verbose) {
 	print "Preprocessing $infile into $outfile\n";
     }
@@ -166,13 +183,15 @@ sub preproc {
     };
     my @state;
     unshift @state, ST_INIT;
-    print $out <<EOT;
+    if ($init) {
+	print $out <<EOT;
 # Initial settings by $0
 Daemon 0
 LogFacility -
 LogLevel $log_level
 EOT
 ;
+    }
     my $be;
     while (<$in>) {
 	chomp;
@@ -243,7 +262,8 @@ sub runner {
     }
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
-    exec 'pound', '-p', $pid_file, '-f', $config, '-W', 'no-dns';
+    exec 'pound', '-p', $pid_file, '-f', $config, '-v', '-W', 'no-dns', '-W',
+	  $include_dir ? "include-dir=$include_dir" : 'no-include-dir';
 }
 
 package PoundScript;

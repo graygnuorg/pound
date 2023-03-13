@@ -376,6 +376,40 @@ name_list_free (void)
     }
 }
 
+int include_fd = AT_FDCWD;
+
+static void
+close_include_dir (void)
+{
+  if (include_fd != AT_FDCWD)
+    close (include_fd);
+}
+
+static int
+open_include_dir (char const *dir)
+{
+  int fd;
+
+  if (dir == NULL)
+    fd = AT_FDCWD;
+  else if ((fd = open (dir, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
+    return -1;
+
+  close_include_dir ();
+  include_fd = fd;
+  return fd;
+}
+
+static FILE *
+fopen_include (const char *filename)
+{
+  int fd;
+
+  if ((fd = openat (include_fd, filename, O_RDONLY)) == -1)
+    return NULL;
+  return fdopen (fd, "r");
+}
+
 /*
  * Input scanner.
  */
@@ -400,7 +434,7 @@ input_open (char const *filename, struct stat *st)
 
   input = xmalloc (sizeof (*input));
   memset (input, 0, sizeof (*input));
-  if ((input->file = fopen (filename, "r")) == 0)
+  if ((input->file = fopen_include (filename)) == 0)
     {
       logmsg (LOG_ERR, "can't open %s: %s", filename, strerror (errno));
       free (input);
@@ -623,7 +657,7 @@ push_input (const char *filename)
   struct stat st;
   struct input *input;
 
-  if (stat (filename, &st))
+  if (fstatat (include_fd, filename, &st, 0))
     {
       conf_error ("can't stat %s: %s", filename, strerror (errno));
       return -1;
@@ -842,6 +876,20 @@ typedef struct
   int header_options;
   BALANCER balancer;
 } POUND_DEFAULTS;
+
+static int
+parse_includedir (void *call_data, void *section_data)
+{
+  struct token *tok = gettkn_expect (T_STRING);
+  if (!tok)
+    return PARSER_FAIL;
+  if (open_include_dir (tok->str) == -1)
+    {
+      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
 
 static int
 parse_include (void *call_data, void *section_data)
@@ -1906,7 +1954,7 @@ service_cond_append (SERVICE_COND *cond, int type)
 }
 
 static void
-stringbuf_escape_regex (struct stringbuf *sb, char *p)
+stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 {
   while (*p)
     {
@@ -1933,14 +1981,15 @@ enum match_mode
   };
 
 static int
-parse_match_mode (int *mode, int *re_flags)
+parse_match_mode (int *mode, int *re_flags, int *from_file)
 {
   struct token *tok;
 
   enum
   {
     MATCH_ICASE = MATCH__MAX,
-    MATCH_CASE
+    MATCH_CASE,
+    MATCH_FILE
   };
 
   static struct kwtab optab[] = {
@@ -1950,8 +1999,12 @@ parse_match_mode (int *mode, int *re_flags)
     { "-end",   MATCH_END },
     { "-icase", MATCH_ICASE },
     { "-case",  MATCH_CASE },
+    { "-file",  MATCH_FILE },
     { NULL }
   };
+
+  if (from_file)
+    *from_file = 0;
 
   for (;;)
     {
@@ -1979,6 +2032,16 @@ parse_match_mode (int *mode, int *re_flags)
 	  *re_flags |= REG_ICASE;
 	  break;
 
+	case MATCH_FILE:
+	  if (from_file)
+	    *from_file = 1;
+	  else
+	    {
+	      conf_error ("unexpected token: %s", tok->str);
+	      return PARSER_FAIL;
+	    }
+	  break;
+
 	default:
 	  *mode = n;
 	}
@@ -1987,57 +2050,62 @@ parse_match_mode (int *mode, int *re_flags)
   return PARSER_OK;
 }
 
+static char *
+build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
+{
+  switch (mode)
+    {
+    case MATCH_EXACT:
+      if (pfx)
+	stringbuf_add_string (sb, pfx);
+      stringbuf_escape_regex (sb, expr);
+      break;
+
+    case MATCH_RE:
+      if (pfx)
+	stringbuf_add_string (sb, pfx);
+      stringbuf_add_string (sb, expr);
+      break;
+
+    case MATCH_BEG:
+      stringbuf_add_char (sb, '^');
+      if (pfx)
+	stringbuf_add_string (sb, pfx);
+      stringbuf_escape_regex (sb, expr);
+      stringbuf_add_string (sb, ".*");
+      break;
+
+    case MATCH_END:
+      stringbuf_add_string (sb, ".*");
+      if (pfx)
+	stringbuf_add_string (sb, pfx);
+      stringbuf_escape_regex (sb, expr);
+      stringbuf_add_char (sb, '$');
+      break;
+
+    default:
+      abort ();
+    }
+  return stringbuf_finish (sb);
+}
+
 static int
-parse_regex (regex_t *regex, int mode, int flags, char *pfx)
+parse_regex_compat (regex_t *regex, int flags)
 {
   struct token *tok;
+  int mode = MATCH_RE;
   char *p;
   int rc;
   struct stringbuf sb;
 
-  if (parse_match_mode (&mode, &flags))
+  if (parse_match_mode (&mode, &flags, NULL))
     return PARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
   xstringbuf_init (&sb);
-  switch (mode)
-    {
-    case MATCH_EXACT:
-      if (pfx)
-	stringbuf_add_string (&sb, pfx);
-      stringbuf_escape_regex (&sb, tok->str);
-      break;
-
-    case MATCH_RE:
-      if (pfx)
-	stringbuf_add_string (&sb, pfx);
-      stringbuf_add_string (&sb, tok->str);
-      break;
-
-    case MATCH_BEG:
-      stringbuf_add_char (&sb, '^');
-      if (pfx)
-	stringbuf_add_string (&sb, pfx);
-      stringbuf_escape_regex (&sb, tok->str);
-      stringbuf_add_string (&sb, ".*");
-      break;
-
-    case MATCH_END:
-      stringbuf_add_string (&sb, ".*");
-      if (pfx)
-	stringbuf_add_string (&sb, pfx);
-      stringbuf_escape_regex (&sb, tok->str);
-      stringbuf_add_char (&sb, '$');
-      break;
-
-    default:
-      abort ();
-    }
-
-  p = stringbuf_finish (&sb);
-
+  p = build_regex (&sb, mode, tok->str, NULL);
   rc = regcomp (regex, p, flags);
   stringbuf_free (&sb);
   if (rc)
@@ -2050,9 +2118,91 @@ parse_regex (regex_t *regex, int mode, int flags, char *pfx)
 }
 
 static int
-parse_cond_matcher (SERVICE_COND *cond, int mode, int flags)
+parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
+		    int mode, int flags, char *param_name)
 {
-  return parse_regex (&cond->re, mode, flags, NULL);
+  struct token *tok;
+  int rc;
+  struct stringbuf sb;
+  SERVICE_COND *cond;
+  static char const host_pfx[] = "Host:[[:space:]]*";
+  int from_file;
+  char *expr;
+
+  if (parse_match_mode (&mode, &flags, &from_file))
+    return PARSER_FAIL;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  xstringbuf_init (&sb);
+  if (from_file)
+    {
+      FILE *fp;
+      char *p;
+      char buf[MAXBUF];
+
+      if ((fp = fopen_include (tok->str)) == NULL)
+	{
+	  conf_error ("can't open file %s: %s", tok->str, strerror (errno));
+	  return PARSER_FAIL;
+	}
+
+      cond = service_cond_append (top_cond, COND_BOOL);
+      cond->bool.op = BOOL_OR;
+
+      while ((p = fgets (buf, sizeof buf, fp)) != NULL)
+	{
+	  int rc;
+	  size_t len;
+	  SERVICE_COND *hc;
+
+	  p += strspn (p, " \t");
+	  for (len = strlen (p);
+	       len > 0 && (p[len-1] == ' ' || p[len-1] == '\t'|| p[len-1] == '\n'); len--)
+	    ;
+	  if (len == 0 || *p == '#')
+	    continue;
+	  p[len] = 0;
+
+	  stringbuf_reset (&sb);
+	  expr = build_regex (&sb, mode, p, type == COND_HOST ? host_pfx : NULL);
+	  hc = service_cond_append (cond, type);
+	  rc = regcomp (&hc->re, expr, flags);
+	  if (rc)
+	    {
+	      conf_regcomp_error (rc, &hc->re, NULL);
+	      return PARSER_FAIL;
+	    }
+	  if (type == COND_QUERY_PARAM)
+	    {
+	      regex_t re = hc->re;
+	      hc->qp.re = re;
+	      hc->qp.name = xstrdup (param_name);
+	    }
+	}
+      fclose (fp);
+    }
+  else
+    {
+      cond = service_cond_append (top_cond, type);
+      expr = build_regex (&sb, mode, tok->str, type == COND_HOST ? host_pfx : NULL);
+      rc = regcomp (&cond->re, expr, flags);
+      if (rc)
+	{
+	  conf_regcomp_error (rc, &cond->re, NULL);
+	  return PARSER_FAIL;
+	}
+      if (type == COND_QUERY_PARAM)
+	{
+	  regex_t re = cond->re;
+	  cond->qp.re = re;
+	  cond->qp.name = xstrdup (param_name);
+	}
+    }
+  stringbuf_free (&sb);
+
+  return PARSER_OK;
 }
 
 static int
@@ -2066,60 +2216,50 @@ static int
 parse_cond_url_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_URL);
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  return parse_cond_matcher (cond, MATCH_RE, flags);
+  return parse_cond_matcher (call_data, COND_URL, MATCH_RE,
+			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     NULL);
 }
 
 static int
 parse_cond_path_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_PATH);
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  return parse_cond_matcher (cond, MATCH_RE, flags);
+  return parse_cond_matcher (call_data, COND_PATH, MATCH_RE,
+			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     NULL);
 }
 
 static int
 parse_cond_query_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_QUERY);
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
-  return parse_cond_matcher (cond, MATCH_RE, flags);
+  return parse_cond_matcher (call_data, COND_QUERY, MATCH_RE,
+			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     NULL);
 }
 
 static int
 parse_cond_query_param_matcher (void *call_data, void *section_data)
 {
+  SERVICE_COND *top_cond = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_QUERY_PARAM);
   int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
   struct token *tok;
-  char *name;
-  int rc;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  name = xstrdup (tok->str);
-
-  if ((rc = parse_cond_matcher (cond, MATCH_RE, flags)) == PARSER_OK)
-    {
-      regex_t re = cond->re;
-      cond->qp.re = re;
-      cond->qp.name = name;
-    }
-
-  return rc;
+  return parse_cond_matcher (top_cond, COND_QUERY_PARAM, MATCH_RE, flags,
+			     tok->str);
 }
 
 static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HDR);
-  return parse_cond_matcher (cond, MATCH_RE,
-			     REG_NEWLINE | REG_EXTENDED | REG_ICASE);
+  return parse_cond_matcher (call_data, COND_HDR, MATCH_RE,
+			     REG_NEWLINE | REG_EXTENDED | REG_ICASE,
+			     NULL);
 }
 
 static int
@@ -2127,16 +2267,16 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
   cond->bool.op = BOOL_NOT;
-  return parse_cond_matcher (service_cond_append (cond, COND_HDR),
-			     MATCH_RE, REG_NEWLINE | REG_EXTENDED | REG_ICASE);
+  return parse_cond_matcher (cond, COND_HDR, MATCH_RE,
+			     REG_NEWLINE | REG_EXTENDED | REG_ICASE,
+			     NULL);
 }
 
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_HOST);
-  return parse_regex (&cond->re, MATCH_EXACT, REG_EXTENDED | REG_ICASE,
-		      "Host:[[:space:]]*");
+  return parse_cond_matcher (call_data, COND_HOST, MATCH_RE,
+			     REG_EXTENDED | REG_ICASE, NULL);
 }
 
 static int
@@ -2497,9 +2637,8 @@ parse_delete_header (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = section_data;
 
   XZALLOC (op->v.hdrdel);
-  return parse_regex (&op->v.hdrdel->pat, MATCH_RE,
-		      REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
-		      NULL);
+  return parse_regex_compat (&op->v.hdrdel->pat,
+			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0));
 }
 
 static int
@@ -2624,9 +2763,8 @@ parse_header_remove (void *call_data, void *section_data)
   REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);
   REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
   XZALLOC (op->v.hdrdel);
-  return parse_regex (&op->v.hdrdel->pat, MATCH_RE,
-		      REG_EXTENDED | REG_ICASE | REG_NEWLINE,
-		      NULL);
+  return parse_regex_compat (&op->v.hdrdel->pat,
+			     REG_EXTENDED | REG_ICASE | REG_NEWLINE);
 }
 
 static int
@@ -3848,6 +3986,7 @@ parse_control_global (void *call_data, void *section_data)
 
 static PARSER_TABLE top_level_parsetab[] = {
   { "Include", parse_include },
+  { "IncludeDir", parse_includedir },
   { "User", assign_string, &user },
   { "Group", assign_string, &group },
   { "RootJail", assign_string, &root_jail },
@@ -3928,11 +4067,29 @@ struct pound_feature
   void (*setfn) (int, char const *);
 };
 
+static void
+set_include_dir (int enabled, char const *val)
+{
+  if (enabled)
+    {
+      if (open_include_dir (val) == -1)
+	abend ("can't open include directory %s: %s", val, strerror (errno));
+    }
+  else
+    open_include_dir (NULL);
+}
+
 static struct pound_feature feature[] = {
   [FEATURE_DNS] = {
     .name = "dns",
     .descr = "resolve host names found in configuration file (default)",
     .enabled = F_ON
+  },
+  [FEATURE_INCLUDE_DIR] = {
+    .name = "include-dir",
+    .descr = "include file directory",
+    .enabled = F_ON,
+    .setfn = set_include_dir
   },
   { NULL }
 };
@@ -3986,6 +4143,7 @@ feature_set (char const *name)
 
 struct string_value pound_settings[] = {
   { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
+  { "Include directory",   STRING_CONSTANT, { .s_const = SYSCONFDIR } },
   { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
   { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
 #if ! SET_DH_AUTO
@@ -4036,6 +4194,7 @@ config_parse (int argc, char **argv)
 
   set_progname (argv[0]);
 
+  open_include_dir (SYSCONFDIR);
   while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
     switch (c)
       {
@@ -4091,6 +4250,7 @@ config_parse (int argc, char **argv)
 
   if (parse_config_file (conf_name))
     exit (1);
+  close_include_dir ();
   name_list_free ();
 
   if (check_only)

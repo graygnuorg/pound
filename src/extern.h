@@ -39,7 +39,8 @@ extern SERVICE_HEAD services;	/* global services (if any) */
 
 enum
   {
-    FEATURE_DNS
+    FEATURE_DNS,
+    FEATURE_INCLUDE_DIR
   };
 
 int feature_is_set (int f);

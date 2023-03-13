@@ -73,11 +73,15 @@ TESTSUITE_AT = \
  errfile.at\
  error.at\
  experr.at\
+ fromfile.at\
  headdeny.at\
  headrem.at\
  headrequire.at\
  host.at\
  https.at\
+ include.at\
+ incldir.at\
+ inclnest.at\
  lstset.at\
  maxrequest.at\
  not.at\
