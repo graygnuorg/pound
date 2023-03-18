@@ -376,7 +376,7 @@ name_list_free (void)
     }
 }
 
-int include_fd = AT_FDCWD;
+static int include_fd = AT_FDCWD;
 
 static void
 close_include_dir (void)
@@ -4072,6 +4072,8 @@ set_include_dir (int enabled, char const *val)
 {
   if (enabled)
     {
+      if (val && (*val == 0 || strcmp (val, ".") == 0))
+	val = NULL;
       if (open_include_dir (val) == -1)
 	abend ("can't open include directory %s: %s", val, strerror (errno));
     }
@@ -4088,7 +4090,7 @@ static struct pound_feature feature[] = {
   [FEATURE_INCLUDE_DIR] = {
     .name = "include-dir",
     .descr = "include file directory",
-    .enabled = F_ON,
+    .enabled = F_DFL,
     .setfn = set_include_dir
   },
   { NULL }
@@ -4098,6 +4100,12 @@ int
 feature_is_set (int f)
 {
   return feature[f].enabled;
+}
+
+int
+feature_is_dfl (int f)
+{
+  return feature[f].enabled == F_DFL;
 }
 
 static int
@@ -4194,7 +4202,6 @@ config_parse (int argc, char **argv)
 
   set_progname (argv[0]);
 
-  open_include_dir (SYSCONFDIR);
   while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
     switch (c)
       {
@@ -4212,6 +4219,8 @@ config_parse (int argc, char **argv)
 
       case 'f':
 	conf_name = optarg;
+	if (feature_is_dfl (FEATURE_INCLUDE_DIR))
+	  feature_set ("include-dir");
 	break;
 
       case 'h':
@@ -4248,6 +4257,8 @@ config_parse (int argc, char **argv)
       exit (1);
     }
 
+  if (feature_is_dfl (FEATURE_INCLUDE_DIR))
+    open_include_dir (SYSCONFDIR);
   if (parse_config_file (conf_name))
     exit (1);
   close_include_dir ();
