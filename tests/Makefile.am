@@ -82,6 +82,7 @@ TESTSUITE_AT = \
  include.at\
  incldir.at\
  inclnest.at\
+ inclscope.at\
  lstset.at\
  maxrequest.at\
  not.at\

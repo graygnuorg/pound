@@ -812,6 +812,13 @@ parser_find (PARSER_TABLE *tab, char const *name)
   return NULL;
 }
 
+static int parse_include (void *call_data, void *section_data);
+
+static PARSER_TABLE global_parsetab[] = {
+  { "Include", parse_include },
+  { NULL }
+};
+
 static int
 parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
 		 int single_statement, struct locus_range *retrange)
@@ -847,6 +854,10 @@ parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
       if (tok->type == T_IDENT)
 	{
 	  PARSER_TABLE *ent = parser_find (ptab, tok->str);
+
+	  if (!single_statement && ent == NULL)
+	    ent = parser_find (global_parsetab, tok->str);
+
 	  if (ent)
 	    {
 	      void *data = ent->data ? ent->data : call_data;
@@ -1518,8 +1529,20 @@ parse_acl (ACL *acl)
 	return PARSER_FAIL;
       if (tok->type == '\n')
 	continue;
-      if (tok->type == T_IDENT && strcasecmp (tok->str, "end") == 0)
-	break;
+      if (tok->type == T_IDENT)
+	{
+	  if (strcasecmp (tok->str, "end") == 0)
+	    break;
+	  if (strcasecmp (tok->str, "include") == 0)
+	    {
+	      if ((rc = parse_include (NULL, NULL)) == PARSER_FAIL)
+		return rc;
+	      continue;
+	    }
+	  conf_error ("expected CIDR, \"Include\", or \"End\", but found %s",
+		      token_type_str (tok->type));
+	  return PARSER_FAIL;
+	}
       putback_tkn (tok);
       if ((rc = parse_cidr (acl)) != PARSER_OK)
 	return rc;
@@ -1806,62 +1829,18 @@ disable_proto (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE backend_parsetab[] = {
-  {
-    .name = "End",
-    .parser = parse_end
-  },
-  {
-    .name = "Address",
-    .parser = assign_address,
-    .off = offsetof (BACKEND, v.reg.addr)
-  },
-  {
-    .name = "Port",
-    .parser = assign_port,
-    .off = offsetof (BACKEND, v.reg.addr)
-  },
-  {
-    .name = "Priority",
-    .parser = backend_assign_priority,
-    .off = offsetof (BACKEND, priority)
-  },
-  {
-    .name = "TimeOut",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.to)
-  },
-  {
-    .name = "WSTimeOut",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.ws_to)
-  },
-  {
-    .name = "ConnTO",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.conn_to)
-  },
-  {
-    .name = "HTTPS",
-    .parser = backend_parse_https
-  },
-  {
-    .name = "Cert",
-    .parser = backend_parse_cert
-  },
-  {
-    .name = "Ciphers",
-    .parser = backend_assign_ciphers
-  },
-  {
-    .name = "Disable",
-    .parser = disable_proto,
-    .off = offsetof (BACKEND, v.reg.ctx)
-  },
-  {
-    .name = "Disabled",
-    .parser = assign_bool,
-    .off = offsetof (BACKEND, disabled)
-  },
+  { "End",       parse_end },
+  { "Address",   assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
+  { "Port",      assign_port,    NULL, offsetof (BACKEND, v.reg.addr) },
+  { "Priority",  backend_assign_priority, NULL, offsetof (BACKEND, priority) },
+  { "TimeOut",   assign_timeout, NULL, offsetof (BACKEND, v.reg.to) },
+  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.ws_to) },
+  { "ConnTO",    assign_timeout, NULL, offsetof (BACKEND, v.reg.conn_to) },
+  { "HTTPS",     backend_parse_https },
+  { "Cert",      backend_parse_cert },
+  { "Ciphers",   backend_assign_ciphers },
+  { "Disable",   disable_proto,  NULL, offsetof (BACKEND, v.reg.ctx) },
+  { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
   { NULL }
 };
 
@@ -4019,7 +3998,6 @@ parse_control_global (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE top_level_parsetab[] = {
-  { "Include", parse_include },
   { "IncludeDir", parse_includedir },
   { "User", assign_string, &user },
   { "Group", assign_string, &group },

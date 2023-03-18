@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 13, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 18, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -379,8 +379,9 @@ An IPv4 or IPv6 address in numeric form, or a hostname.
 .PP
 Unless specified otherwise, directives may appear in any order.
 .SH "GLOBAL DIRECTIVES"
-Global directives may appear anywhere within the configuration file,
-although it is customary for them to be at the start.
+Global directives may appear anywhere at the top level within the
+configuration file, although it is customary for them to be at the
+start.
 .TP
 \fBUser\fR "user_name"
 Specify the user
@@ -613,6 +614,9 @@ discussion of \fB\-W\fR below).
 Include the file as though it were part of the configuration file.  If
 \fIfile\fR is a relative file name, it will be looked in the \fIinclude
 directory\fR (see above).
+.IP
+This is the only directive that is allowed both at topmost level and
+in any subsections of the configuration file.
 .TP
 \fBAnonymise\fR
 (alternative spelling \fBAnonymize\fR also accepted) Replace the last
@@ -621,10 +625,11 @@ Default: log the client address in full.
 .TP
 \fBACL\fR "name"
 Define a \fInamed access control list\fR (\fIACL\fR).  An ACL is a
-list of network addresses in CIDR notation, terminated with an
+list of network addresses in CIDR notation, one address per line,
+terminated with an
 .B End
 directive on a line by itself.  E.g.:
-.sp
+.IP
 .RS
 .EX
 ACL "secure"
@@ -632,7 +637,13 @@ ACL "secure"
    "203.0.113.0/24"
 End
 .EE
-.sp
+.RE
+.IP
+The
+.B Include
+directive is allowed within
+.BR ACL .
+.IP
 Named ACLs can be used in \fBService\fR definitions to make services
 available from certain IP addresses only.
 .RE

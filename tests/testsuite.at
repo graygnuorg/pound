@@ -70,6 +70,7 @@ AT_BANNER([Includes])
 m4_include([include.at])
 m4_include([incldir.at])
 m4_include([inclnest.at])
+m4_include([inclscope.at])
 
 AT_BANNER([Special backends])
 m4_include([redirect.at])

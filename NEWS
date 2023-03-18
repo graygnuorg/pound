@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-13
+Pound -- history of user-visible changes. 2023-03-18
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -22,6 +22,12 @@ directory, as configured at compile time.   It can be changed:
 
 2. in the global scope of the configuration file, using the IncludeDir
    configuration statement.
+
+* The "Include" directive
+
+The "Include" directive can appear not only at the topmost level, but
+also in any sections (ListenHTTP, Service, ACL, etc.). In short -
+anyplace where a statement is allowed.
 
 * Reading patterns from file
 
