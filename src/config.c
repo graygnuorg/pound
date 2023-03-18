@@ -355,6 +355,31 @@ struct name_list
 static struct name_list *name_list;
 
 static char const *
+pathname_alloc (char const *dir, char const *name)
+{
+  struct name_list *np;
+  size_t dirlen = 0;
+
+  /* Ignore the directory if the filename is absolute. */
+  if (name[0] == '/')
+    dir = NULL;
+
+  if (dir)
+    dirlen = strlen (dir) + 1;
+
+  np = xmalloc (sizeof (*np) + dirlen + strlen (name));
+  if (dir)
+    {
+      strcpy (np->name, dir);
+      np->name[dirlen-1] = '/';
+    }
+  strcpy (np->name + dirlen, name);
+  np->next = name_list;
+  name_list = np;
+  return np->name;
+}
+
+static char const *
 name_alloc (char const *name)
 {
   struct name_list *np;
@@ -377,12 +402,16 @@ name_list_free (void)
 }
 
 static int include_fd = AT_FDCWD;
+static char const *include_dir = NULL;
 
 static void
 close_include_dir (void)
 {
   if (include_fd != AT_FDCWD)
-    close (include_fd);
+    {
+      close (include_fd);
+      include_dir = NULL;
+    }
 }
 
 static int
@@ -396,6 +425,7 @@ open_include_dir (char const *dir)
     return -1;
 
   close_include_dir ();
+  include_dir = dir ? name_alloc (dir) : NULL;
   include_fd = fd;
   return fd;
 }
@@ -442,7 +472,7 @@ input_open (char const *filename, struct stat *st)
     }
   input->ino = st->st_ino;
   input->devno = st->st_dev;
-  input->locus.filename = name_alloc (filename);
+  input->locus.filename = pathname_alloc (include_dir, filename);
   input->locus.line = 1;
   input->locus.col = 0;
   return input;
@@ -659,7 +689,11 @@ push_input (const char *filename)
 
   if (fstatat (include_fd, filename, &st, 0))
     {
-      conf_error ("can't stat %s: %s", filename, strerror (errno));
+      if (include_dir)
+	conf_error ("can't stat %s/%s: %s", include_dir, filename,
+		    strerror (errno));
+      else
+	conf_error ("can't stat %s: %s", filename, strerror (errno));
       return -1;
     }
 
