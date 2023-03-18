@@ -402,7 +402,7 @@ name_list_free (void)
 }
 
 static int include_fd = AT_FDCWD;
-static char const *include_dir = NULL;
+static char const *include_dir = SYSCONFDIR;
 
 static void
 close_include_dir (void)
@@ -4073,7 +4073,9 @@ parse_config_file (char const *file)
 
   if (push_input (file) == 0)
     {
+      open_include_dir (include_dir);
       res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
+      close_include_dir ();
       if (res == 0)
 	{
 	  if (cur_input)
@@ -4108,11 +4110,10 @@ set_include_dir (int enabled, char const *val)
     {
       if (val && (*val == 0 || strcmp (val, ".") == 0))
 	val = NULL;
-      if (open_include_dir (val) == -1)
-	abend ("can't open include directory %s: %s", val, strerror (errno));
+      include_dir = val;
     }
   else
-    open_include_dir (NULL);
+    include_dir = NULL;
 }
 
 static struct pound_feature feature[] = {
@@ -4134,12 +4135,6 @@ int
 feature_is_set (int f)
 {
   return feature[f].enabled;
-}
-
-int
-feature_is_dfl (int f)
-{
-  return feature[f].enabled == F_DFL;
 }
 
 static int
@@ -4253,8 +4248,6 @@ config_parse (int argc, char **argv)
 
       case 'f':
 	conf_name = optarg;
-	if (feature_is_dfl (FEATURE_INCLUDE_DIR))
-	  feature_set ("include-dir");
 	break;
 
       case 'h':
@@ -4291,11 +4284,8 @@ config_parse (int argc, char **argv)
       exit (1);
     }
 
-  if (feature_is_dfl (FEATURE_INCLUDE_DIR))
-    open_include_dir (SYSCONFDIR);
   if (parse_config_file (conf_name))
     exit (1);
-  close_include_dir ();
   name_list_free ();
 
   if (check_only)
