@@ -395,7 +395,7 @@ struct be_redirect
 
 struct be_acme
 {
-  char *dir;             /* Name of the directory for ACME challenges. */
+  int wd;                /* Working directory descriptor. */
 };
 
 struct be_error

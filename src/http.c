@@ -794,9 +794,9 @@ acme_response (POUND_HTTP *phttp)
       rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  file_name = expand_url (phttp->backend->v.acme.dir, &phttp->request, &phttp->smq, 1);
+  file_name = expand_url ("$1", &phttp->request, &phttp->smq, 1);
 
-  if ((fd = open (file_name, O_RDONLY)) == -1)
+  if ((fd = openat (phttp->backend->v.acme.wd, file_name, O_RDONLY)) == -1)
     {
       if (errno == ENOENT)
 	{

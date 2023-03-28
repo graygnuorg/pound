@@ -2952,11 +2952,9 @@ parse_acme (void *call_data, void *section_data)
   SERVICE_COND *cond;
   struct token *tok;
   struct stat st;
-  size_t len;
   int rc;
   static char re_acme[] = "^/\\.well-known/acme-challenge/(.+)";
-  static char suf_acme[] = "/$1";
-  static size_t suf_acme_size = sizeof (suf_acme) - 1;
+  int fd;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -2969,6 +2967,11 @@ parse_acme (void *call_data, void *section_data)
   if (!S_ISDIR (st.st_mode))
     {
       conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+  if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
+    {
+      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
       return PARSER_FAIL;
     }
 
@@ -2999,13 +3002,7 @@ parse_acme (void *call_data, void *section_data)
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
 
-  len = strlen (tok->str);
-  if (tok->str[len-1] == '/')
-    len--;
-
-  be->v.acme.dir = xmalloc (len + suf_acme_size + 1);
-  memcpy (be->v.acme.dir, tok->str, len);
-  strcpy (be->v.acme.dir + len, suf_acme);
+  be->v.acme.wd = fd;
 
   /* Register backend in service */
   SLIST_PUSH (&svc->backends, be, next);

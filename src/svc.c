@@ -336,7 +336,7 @@ str_be (char *buf, size_t size, BACKEND *be)
       break;
 
     case BE_ACME:
-      snprintf (buf, size, "acme:%s", be->v.acme.dir);
+      snprintf (buf, size, "acme");
       break;
 
     case BE_CONTROL:
@@ -1806,9 +1806,6 @@ backend_serialize (BACKEND *be)
 		break;
 
 	      case BE_ACME:
-		err = json_object_set (obj, "path", json_new_string (be->v.acme.dir));
-		break;
-
 	      case BE_CONTROL:
 	      case BE_METRICS:
 		/* FIXME */
