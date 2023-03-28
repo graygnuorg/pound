@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 18, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 28, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -383,26 +383,20 @@ Global directives may appear anywhere at the top level within the
 configuration file, although it is customary for them to be at the
 start.
 .TP
-\fBUser\fR "user_name"
+\fBUser\fR "\fIuser_name\fR"
 Specify the user
 .B pound
 will run as (must be defined in the system user database).
 .TP
-\fBGroup\fR "group_name"
+\fBGroup\fR "\fIgroup_name\fR"
 Specify the group
 .B pound
 will run as (must be defined in the system group database).
 .TP
-\fBRootJail\fR "directory_path_and_name"
+\fBRootJail\fR "\fIdirectory\fR"
 Specify the directory that
 .B pound
-will chroot to at runtime. Please note that OpenSSL requires access to
-/dev/urandom, so make sure you create a device by that name,
-accessible from the root jail directory.
-.B pound
-may also require access to
-.I /dev/syslog
-or similar.
+will chroot to at runtime.
 .TP
 \fBHeaderOption\fR \fIopt\fR...
 Sets default options for header addition.  \fIopt\fR is one of:
@@ -584,14 +578,14 @@ immediately. You can bypass this behaviour by stopping
 with a TERM or QUIT signal, in which case the program exits without any
 delay.
 .TP
-\fBSSLEngine\fR "name"
+\fBSSLEngine\fR "\fIname\fR"
 Use an OpenSSL hardware acceleration card called \fIname\fR. Available
 only if OpenSSL-engine is installed on your system.
 .TP
-\fBECDHcurve\fR "name"
+\fBECDHcurve\fR "\fIname\fR"
 Use the named curve for elliptical curve encryption (default: prime256v1).
 .TP
-\fBControl\fR "/path/to/socket"
+\fBControl\fR "\fIpathname\fR"
 Set the control socket path. If not defined,
 .B pound
 does not listen for any commands. The commands may be issued by using
@@ -623,7 +617,7 @@ in any subsections of the configuration file.
 byte of the client address with 0 for logging purposes.
 Default: log the client address in full.
 .TP
-\fBACL\fR "name"
+\fBACL\fR "\fIname\fR"
 Define a \fInamed access control list\fR (\fIACL\fR).  An ACL is a
 list of network addresses in CIDR notation, one address per line,
 terminated with an
@@ -648,7 +642,7 @@ Named ACLs can be used in \fBService\fR definitions to make services
 available from certain IP addresses only.
 .RE
 .TP
-\fBPIDFile\fR "filename"
+\fBPIDFile\fR "\fIfilename\fR"
 Sets the name of the file where to store program PID.  It can be
 overridden by the
 .B \-p
@@ -713,7 +707,7 @@ will listen on.  This parameter must be present if the
 .B Address
 parameter contains an IPv4 or IPv6 address.
 .TP
-\fBSocketFrom\fR "/path/to/socket"
+\fBSocketFrom\fR "\fIpathname\fR"
 Read the socket to listen on from the UNIX socket given as argument.
 If this parameter is supplied, neither
 .B Address
@@ -745,7 +739,7 @@ Override the global
 .I Client
 time-out value.
 .TP
-\fBCheckURL\fR "pattern to match"
+\fBCheckURL\fR "\fIpattern\fR"
 Define a pattern that must be matched by each request sent to this
 listener. A request that does not match is considered to be illegal.
 By default
@@ -756,29 +750,29 @@ only to the request path -
 .B pound
 will still check that the request is syntactically correct.
 .TP
-\fBErr404\fR "filename"
+\fBErr404\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 404 occurs.
-Default: "Not Found.".
+Default text: "Not Found.".
 .TP
-\fBErr413\fR "filename"
+\fBErr413\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 413 occurs.
-Default: "Request too large.".
+Default text: "Request too large.".
 .TP
-\fBErr414\fR "filename"
+\fBErr414\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 414 occurs.
-Default: "Request URI is too long.".
+Default text: "Request URI is too long.".
 .TP
-\fBErr500\fR "filename"
+\fBErr500\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 500 occurs.
-Default: "An internal server error occurred. Please try again later.".
+Default text: "An internal server error occurred. Please try again later.".
 .TP
-\fBErr501\fR "filename"
+\fBErr501\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 501 occurs.
-Default: "This method may not be used.".
+Default text: "This method may not be used.".
 .TP
-\fBErr503\fR "filename"
+\fBErr503\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 503 occurs.
-Default: "The service is not available. Please try again later.".
+Default text: "The service is not available. Please try again later.".
 .TP
 \fBMaxRequest\fR \fIn\fR
 Request maximal size. All requests will be limited to these many
@@ -802,12 +796,12 @@ to change the "Destination:" header in requests. The header is changed
 to point to the backend itself with the correct protocol. Default:
 \fIfalse\fR.
 .TP
-\fBLogLevel\fR value
+\fBLogLevel\fR \fIvalue\fR
 Override the global
 .B LogLevel
 value.
 .TP
-\fBService\fR [ "name" ]
+\fBService\fR [ "\fIname\fR" ]
 This defines a private service (see below for service definition
 syntax). This service will be used only by this listener. Optional
 \fIname\fR supplies the label, that can be used in
@@ -816,7 +810,7 @@ requests to identify the service.  This label must be unique among all
 services within the enclosing listener, or, for global services,
 within the configuration.
 .TP
-\fBACME\fR "directory"
+\fBACME\fR "\fIdirectory\fR"
 Serve ACME challenge requests from the given
 .IR directory .
 See the section
@@ -870,26 +864,26 @@ in the section
 .BR "REQUEST MODIFICATION" ,
 below.
 .TP
-\fBDeleteHeader\fR "header: pattern"
+\fBDeleteHeader\fR "\fIheader\fB: \fIpattern\fR"
 Remove certain headers from the incoming requests. All occurrences of
 the matching specified header will be removed. See the section
 for a detailed discussion of various header modification directives.
 .TP
-\fBSetHeader\fR "header: to add"
+\fBSetHeader\fR "\fIheader\fB: \fIvalue\fR"
 Add the defined header to the request passed to the backend
 server. The header is added verbatim. Use multiple \fBHeaderAdd\fR
 directives if you need to add more than one header.
 .TP
-\fBSetURL\fR "value"
+\fBSetURL\fR "\fIvalue\fR"
 Sets the URL part of the request.
 .TP
-\fBSetPath\fR "value"
+\fBSetPath\fR "\fIvalue\fR"
 Sets the path part.
 .TP
-\fBSetQuery\fR "value"
+\fBSetQuery\fR "\fIvalue\fR"
 Sets the query part.
 .TP
-\fBSetQueryParam\fR "name" "value"
+\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
 Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
 .TP
 .BR Rewrite " ... [ " Else " ... ] " End
@@ -901,16 +895,16 @@ versions of
 .BR pound .
 They will be removed in future releases.
 .TP
-\fBHeaderAdd\fR "header: to add"
+\fBHeaderAdd\fR "\fIheader\fB: \fIvalue\fR"
 Same as \fBSetHeader\fR.
 .TP
-\fBAddHeader\fR "header: to add"
+\fBAddHeader\fR "\fIheader\fB: \fIvalue\fR"
 Same as \fBSetHeader\fR.
 .TP
-\fBHeaderRemove\fR "pattern"
+\fBHeaderRemove\fR "\fIpattern\fR"
 Same as \fBDeleteHeader\fR.
 .TP
-\fBHeadRemove\fR "pattern"
+\fBHeadRemove\fR "\fIpattern\fR"
 Same as \fBDeleteHeader\fR.
 .SH "HTTPS Listener"
 An HTTPS listener defines an address and port that
@@ -931,7 +925,7 @@ an address, a port and a server certificate for each listener. All directives
 defined for HTTP listeners are applicable to HTTPS listeners as well. The
 following additional directives are also available:
 .TP
-\fBCert\fR "certificate file"
+\fBCert\fR "\fIfilename\fR"
 Specify the server certificate. The
 .I certificate file
 is the file containing the certificate, possibly a certificate chain
@@ -971,7 +965,7 @@ disabling a single protocol. For example,
 .B Disable TLSv1
 would disable SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1 and TLSv1_2.
 .TP
-\fBCiphers\fR "acceptable:cipher:list"
+\fBCiphers\fR "\fIcipher_list\fR"
 This is the list of ciphers that will be accepted by the SSL
 connection; it is a string in the same format as in OpenSSL
 .BR ciphers (1)
@@ -994,13 +988,14 @@ supported.  If the value is 2, insecure renegotiation is supported,
 with unpatched clients. \fBThis can lead to a DoS and a Man in the
 Middle attack!\fR The default value is 0.
 .TP
-\fBCAlist\fR "CAcert_file"
-Set the list of "trusted" CA's for this server. The CAcert_file is a
-file containing a sequence of CA certificates (PEM format). The names
-of the defined CA certificates will be sent to the client on connection.
+\fBCAlist\fR "\fIfilename\fR"
+Set the list of "trusted" CA's for this server. The \fIfilename\fR is
+the name of a file containing a sequence of CA certificates (PEM
+format). The names of the defined CA certificates will be sent to the
+client on connection.
 .TP
-\fBVerifyList\fR "Verify_file"
-Set the CA (Certificate Authority). The Verify_file is a file that
+\fBVerifyList\fR "\fIfilename\fR"
+Set the CA (Certificate Authority). The \fIfilename\fR is a file that
 contains the CA root certificates (in PEM format).
 .IP
 .IR "Please note":
@@ -1009,8 +1004,8 @@ CAlist tells the client (browser) which client certificates it should
 send. The VerifyList defines which CAs are actually used for the
 verification of the returned certificate.
 .TP
-\fBCRLlist\fR "CRL_file"
-Set the CRL (Certificate Revocation List) file. The CRL_file is a file
+\fBCRLlist\fR "\fIfilename\fR"
+Set the CRL (Certificate Revocation List) file. The \fIfilename\fR is a file
 that contains the CRLs (in PEM format).
 .TP
 \fBNoHTTPS11\fR 0|1|2
@@ -1051,7 +1046,7 @@ directives are joined by a boolean \fBAND\fR.
 .PP
 A service with no matching directives always matches.
 .TP
-\fBACL\fR "name"
+\fBACL\fR "\fIname\fR"
 Match the source IP address against the named ACL.  The ACL must have
 been defined earlier (see the
 .B ACL
@@ -1153,13 +1148,13 @@ older versions of
 .BR pound .
 They will be removed in future versions.
 .TP
-\fBHeadRequire\fR "pattern"
+\fBHeadRequire\fR "\fIpattern\fR"
 Same as \fBHeader\fR.
 .TP
-\fBHeadDeny\fR "pattern"
+\fBHeadDeny\fR "\fIpattern\fR"
 A shortcut for
 .IP
-\fBNot header\fR "pattern"
+\fBNot header\fR "\fIpattern\fR"
 .IP
 In other words: the request may
 .B not
@@ -1212,23 +1207,23 @@ in the section
 .BR "REQUEST MODIFICATION" ,
 below.
 .TP
-\fBDeleteHeader\fR "header: pattern"
+\fBDeleteHeader\fR "\fIheader\fB: \fIpattern\fR"
 Remove matching headers from the incoming requests.
 .TP
-\fBSetHeader\fR "header: to add"
+\fBSetHeader\fR "\fIheader\fB: \fIvalue\fR"
 Add the defined header to the request passed to the backend
 server.
 .TP
-\fBSetURL\fR "value"
+\fBSetURL\fR "\fIvalue\fR"
 Sets the URL part of the request.
 .TP
-\fBSetPath\fR "value"
+\fBSetPath\fR "\fIvalue\fR"
 Sets the path part.
 .TP
-\fBSetQuery\fR "value"
+\fBSetQuery\fR "\fIvalue\fR"
 Sets the query part.
 .TP
-\fBSetQueryParam\fR "name" "value"
+\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
 Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
 .TP
 .BR Rewrite " ... [ " Else " ... ] " End
@@ -1257,7 +1252,7 @@ may define multiple backends per service, in which case
 .B pound
 will attempt to load-balance between them.
 .TP
-\fBRedirect\fR [\fIcode\fR] "url"
+\fBRedirect\fR [\fIcode\fR] "\fIurl\fR"
 This is a special type of backend. Instead of sending the request to a backend
 .B pound
 replies immediately with a redirection to the given URL.
@@ -1450,11 +1445,7 @@ This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see
 .BR https://letsencrypt.org/docs/challenge-types/#http-01-challenge ).
 It takes a single argument specifying a directory where ACME
-challenges are stored.  The argument is subject to \fIbackreference
-expansions\fR as discussed in the description of the \fBRedirect\fR
-statement, in section
-.B Service
-above.
+challenges are stored.
 .PP
 It is supposed that another program is started
 periodically, which checks for certificates approaching their
@@ -1491,11 +1482,11 @@ parameter for non Unix-domain backends.
 \fBHTTPS\fR
 The backend is using HTTPS.
 .TP
-\fBCert\fR "certificate file"
+\fBCert\fR "\fIfilename\fR"
 Specify the certificate that
 .B pound
 will use as a client. The
-.I certificate file
+.I filename
 is the file containing the certificate, possibly a certificate chain
 and the signature.
 This directive may appear only after the
@@ -1512,7 +1503,7 @@ This directive may appear only after the
 .B HTTPS
 directive.
 .TP
-\fBCiphers\fR "acceptable:cipher:list"
+\fBCiphers\fR "\fIcipherlist\fR"
 This is the list of ciphers that will be accepted by the SSL
 connection; it is a string in the same format as in OpenSSL
 .BR ciphers (1)
@@ -1613,7 +1604,7 @@ This is a
 .B mandatory
 parameter.
 .TP
-\fBID\fR "name"
+\fBID\fR "\fIname\fR"
 The session identifier. This directive is permitted only for sessions of type
 URL (the name of the request parameter we need to track), COOKIE (the name of
 the cookie) and HEADER (the header name).
@@ -1669,29 +1660,29 @@ sections.
 .PP
 Basic request modification directives are:
 .TP
-\fBSetURL\fR "\fIVALUE\fR"
-Set the URL of the incoming request to \fIVALUE\fR.
+\fBSetURL\fR "\fIvalue\fR"
+Set the URL of the incoming request to \fIvalue\fR.
 .TP
-\fBSetPath\fR "\fIVALUE\fR"
+\fBSetPath\fR "\fIvalue\fR"
 Set the path part of the URL to the given string.
 .TP
-\fBSetQuery\fR "\fIVALUE\fR"
-Set the query part of the URL to the given string.  \fIVALUE\fR must be
+\fBSetQuery\fR "\fIvalue\fR"
+Set the query part of the URL to the given string.  \fIvalue\fR must be
 a valid query with the special characters properly encoded using
 percent encoding.
 .TP
-\fBSetQueryParam\fR "\fINAME\fR" "\fIVALUE\fR"
-Set the query parameter \fINAME\fR to the \fIVALUE\fR.  Value must be
+\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
+Set the query parameter \fIname\fR to the \fIvalue\fR.  Value must be
 properly encoded if it contains reserved characters.
 .TP
-\fBSetHeader\fR "\fINAME\fB: \fIVALUE\fR"
-Sets the HTTP header.  If the header \fINAME\fR already exists, it
+\fBSetHeader\fR "\fIname\fB: \fIvalue\fR"
+Sets the HTTP header.  If the header \fIname\fR already exists, it
 will be overwritten.  Otherwise, new header will be added to the end
 of the header list.
 .TP
-\fBDeleteHeader\fR [\fIoptions\fR] "\fIPATTERN\fR"
-Remove from the request all headers matchibg \fIPATTERN\fR.  By
-default, \fIPATTERN\fR is treated as extended POSIX regular
+\fBDeleteHeader\fR [\fIoptions\fR] "\fIpattern\fR"
+Remove from the request all headers matchibg \fIpattern\fR.  By
+default, \fIpattern\fR is treated as extended POSIX regular
 expression.  One or more \fIoptions\fR can be supplied to modify
 the default behavior.  The \fIoptions\fR argument in the above
 directives can be used to select the comparison method.  It consists
@@ -1717,7 +1708,7 @@ Case-sensitive comparison.
 Case-insensitive comparison.
 .RE
 .PP
-The \fIVALUE\fR argument in the above directives is subject to
+The \fIvalue\fR argument in the above directives is subject to
 .IR "request evaluation", during which ny occurrence of
 .I request accessors
 found in it is replaced them with the values they produce.
