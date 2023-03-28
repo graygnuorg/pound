@@ -22,7 +22,7 @@ AM_CPPFLAGS = @SSL_CPPFLAGS@ \
  -DLOCALSTATEDIR=\"$(localstatedir)\"\
  -DPKGDATADIR=\"$(pkgdatadir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD = ./libpound.a @PTHREAD_LIBS@
+LDADD = libpound.a @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
