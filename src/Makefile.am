@@ -52,8 +52,9 @@ noinst_HEADERS=pound.h extern.h list.h
 
 if SET_DH_AUTO
 DHSRC =
+nodist_pound_SOURCES =
 else
-noinst_HEADERS += dh.h
+nodist_pound_SOURCES = dh.h
 DHSRC = dh512.h dh@DH_LEN@.h
 
 dh512.h:
