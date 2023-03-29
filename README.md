@@ -120,51 +120,69 @@ configuration options:
 
 * `--enable-pcreposix` or `--disable-pcreposix`
 
-Enable or disable the use of the `pcreposix` library.  This is a
-library that makes it possible to use both POSIX extended and
-Perl-compatible regular expressions in __pound__ configuration
-file.
+  Enable or disable the use of the `pcreposix` library.  This is a
+  library that makes it possible to use both POSIX extended and
+  Perl-compatible regular expressions in __pound__ configuration
+  file.
 
-By default, its presence is determined automatically.
+  By default, its presence is determined automatically.
+
+* `--enable-pthread-cancel-probe` or `--disable-pthread-cancel-probe`
+
+  __Pound__ calls the `pthread_cancel` function as part of its shutdown
+  sequence.  In GNU libc, this function tries to load shared library
+  `libgcc_s.so.1`.  It will fail to do so, if the program is running in
+  chroot (the `RootJail` statement is given), unless the library has
+  previously been copied to the chroot directory.  To avoid this, __pound__
+  will do a temptative call to `pthread_cancel` early, before chrooting,
+  so that the necessary library will be loaded and remain available after
+  `chroot`.  To determine whether to do this _pthread_cancel probe_ hack,
+  `configure` checks if the library `libgcc_s.so.1` is available.  If so,
+  the early probe is enabled.
+
+  These two options allow you to forcefully enable or disable this probe.
+  For instance, you may wish to enable it, if another _libc_ implementation
+  exhibits a similar behavior, or if `configure` fails to determine the
+  `libgcc_s.so.1` presence properly.
 
 * `--with-maxbuf=`*n*
 
-Sets the value of `MAXBUF` parameter - the size of a generic buffer
-used internally by __pound__ for various needs.  The default is 4096.
-You will probably not want to change it.
+  Sets the value of `MAXBUF` parameter - the size of a generic buffer
+  used internally by __pound__ for various needs.  The default is 4096.
+  You will probably not want to change it.
 
 * `--with-owner=`*user*
 
-Name of the system user who will own the __pound__ executable file.  When
-not supplied, the first name from the following list that exists in
-the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-`sys`, `root`.
+  Name of the system user who will own the __pound__ executable file.  When
+  not supplied, the first name from the following list that exists in
+  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
+  `sys`, `root`.
 
 * `--with-group=`*group*
 
-Name of the system group who will own the __pound__ executable.  When
-not supplied, the first name from the following list that exists in
-the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-`sys`, `root`.
+  Name of the system group who will own the __pound__ executable.  When
+  not supplied, the first name from the following list that exists in
+  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
+  `sys`, `root`.
 
 * `--with-dh=`*n*
 
-Default DH parameter length.  Allowed values for *n* are 2048 (the
-default) and 1024.
+  Default DH parameter length.  Allowed values for *n* are 2048 (the
+  default) and 1024.
 
-This option has no effect when compiling with OpenSSL 1.1 or later.
+  This option has no effect when compiling with OpenSSL 1.1 or later.
 
 * `--with-ssl=`*directory*
 
-Directory under which OpenSSL is installed.  You will seldom need this
-option.  Most of the time `configure` is able to detect that location
-automatically.
+  Directory under which OpenSSL is installed.  You will seldom need this
+  option.  Most of the time `configure` is able to detect that location
+  automatically.
 
 * `--with-t_rsa=`*n*
 
-Sets default time interval for regeneration of RSA ephemeral keys.
+  Sets default time interval for regeneration of RSA ephemeral keys.
 
-This option has no effect when compiling with OpenSSL 1.1 or later.
+  This option has no effect when compiling with OpenSSL 1.1 or later.
 
 When configuration is finished, run
 
@@ -707,19 +725,32 @@ before shutting down.
 __Pound__ tries to open all files and devices it needs before
 chrooting.  There might be cases, however, when it is not enough
 and you would need to copy certain system files to the chroot
-directory.  In particular, if you get the following message when
-stopping __pound__:
+directory.
+
+### Note for users of __pound__ versions prior to 4.7
+
+If __pound__ displays the following message and aborts when being stopped:
 
 ```
 libgcc_s.so.1 must be installed for pthread_cancel to work
 ```
 
-then you need to copy that library to the RootJail directory, e.g.:
+then you need to copy that library to the `RootJail` directory, e.g.:
 
 ```sh
 mkdir /var/pound/lib64
 cp /usr/lib64/libgcc_s.so.1 /var/pound/lib64
 ```
+
+or make sure it is loaded at program startup by defining the
+`LD_PRELOAD` variable:
+
+```sh
+export LD_PRELOAD=/usr/lib64/libgcc_s.so
+```
+
+This problem was fixed in version 4.7 (see the description of the
+`--enable-pthread-cancel-probe` configure option above).
 
 ## Bug-reporting
 

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-18
+Pound -- history of user-visible changes. 2023-03-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -42,6 +42,23 @@ by line, empty lines and comments are ignored.  For example:
       Host -file "pound/webhosts"
       ...
    End
+
+* Early pthread_cancel probe
+
+In GNU libc, a call to pthread_cancel involves loading the libgcc_s.so.1
+shared library.  If pound is running in a chroot, this fails with the
+following diagnostics
+
+   libgcc_s.so.1 must be installed for pthread_cancel to work
+
+after which the program aborts.  That means that normal pound shutdown
+sequence is not performed properly.  To avoid this, pound will create
+and cancel a dummy thread right before doing chroot.  This ensures
+that libgcc_s.so.1 is loaded and will remain so after chroot.
+
+This early probe is enabled if pound is linked with GNU libc.  The
+--enable-pthread-cancel-probe configure option is available to
+forcefully enable or disable it, if the need be.
 
 Version 4.6, 2023-03-07
 

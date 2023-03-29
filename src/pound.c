@@ -836,6 +836,44 @@ detach (void)
     abend ("dup failed: %s", strerror (errno));
 }
 
+#if EARLY_PTHREAD_CANCEL_PROBE
+/*
+ * In GNU libc, a call to pthread_cancel involves loading the libgcc_s.so.1
+ * shared library.  If pound is running in a chroot, this fails with the
+ * diagnostics
+ *
+ *    libgcc_s.so.1 must be installed for pthread_cancel to work
+ *
+ * after which the program aborts.  That means that normal pound shutdown
+ * sequence is not performed properly.  To avoid this, the following kludge
+ * is implemented: a dummy thread is created and immediately cancelled before
+ * doing chroot.  This should load libgcc_s.so.1 early, so that it remains
+ * loaded after chroot.
+ *
+ * In case other libc flavours exhibit similar behaviour, this hack can
+ * be enabled at compile time by giving the --enable-pthread-cancel-probe
+ * option to configure.
+ */
+static void *
+thr_cancel (void *dummy)
+{
+  pause ();
+  return NULL;
+}
+
+static void
+probe_pthread_cancel (void)
+{
+  pthread_t t;
+  void *p;
+  pthread_create (&t, NULL, thr_cancel, NULL);
+  pthread_cancel (t);
+  pthread_join (t, &p);
+}
+#else
+# define probe_pthread_cancel()
+#endif
+
 int
 main (const int argc, char **argv)
 {
@@ -963,6 +1001,12 @@ main (const int argc, char **argv)
 
       /* Make sure openssl opens /dev/urandom before the chroot. */
       RAND_bytes (&random, 1);
+
+      /*
+       * Give libc a chance to load any libraries necessary for pthread_cancel
+       * to work.  See the comment above.
+       */
+      probe_pthread_cancel ();
 
       if (chroot (root_jail))
 	abend ("chroot: %s", strerror (errno));

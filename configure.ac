@@ -125,6 +125,25 @@ AC_CHECK_LIB([nsl], [gethostbyaddr])
 AC_CHECK_LIB([socket], [socket])
 AC_CHECK_LIB([resolv], [hstrerror])
 
+AC_ARG_ENABLE([pthread-cancel-probe],
+ [AS_HELP_STRING([--enable-pthread-cancel-probe],
+		 [enable early probe of the pthread_cancel function])],
+  [case ${enableval} in
+   yes) early_pthread_cancel_probe=1;;
+   no)  early_pthread_cancel_probe=0;;
+   *)   unset early_pthread_cancel_probe
+   esac],
+  [unset early_pthread_cancel_probe])
+
+if test -z "$early_pthread_cancel_probe"; then
+  AC_CHECK_LIB([gcc_s],[main],
+	       [early_pthread_cancel_probe=1],
+	       [early_pthread_cancel_probe=0])
+fi
+
+AC_DEFINE_UNQUOTED([EARLY_PTHREAD_CANCEL_PROBE],[$early_pthread_cancel_probe],
+ [Define to try pthread_cancel before chroot, to force loading necessary libraries])
+
 AC_CHECK_LIB([crypto],[BIO_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lcrypto) - aborted],[1])])
 AC_CHECK_LIB([ssl],[SSL_CTX_new],[],
@@ -205,7 +224,7 @@ Owner user .................................... $owner_user
 Owner group ................................... $owner_group
 PCRE POSIX library ............................ $status_pcreposix
 Memory allocator .............................. $memory_allocator
-
+Early pthread_cancel probe .................... $status_pthread_cancel_probe
 *******************************************************************
 
 EOF
@@ -215,6 +234,11 @@ owner_user=$I_OWNER
 owner_group=$I_GRP
 status_pcreposix=$status_pcreposix
 memory_allocator=$memory_allocator
+if test "$early_pthread_cancel_probe" = 1; then
+  status_pthread_cancel_probe=yes
+else
+  status_pthread_cancel_probe=no
+fi
 ])
 
 AC_CONFIG_TESTDIR(tests)
