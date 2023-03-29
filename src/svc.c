@@ -344,8 +344,8 @@ str_be (char *buf, size_t size, BACKEND *be)
       break;
 
     case BE_ERROR:
-      if (be->v.error.file)
-	snprintf (buf, size, "error:%s %d", be->v.error.file,
+      if (be->v.error.text)
+	snprintf (buf, size, "error:%d:text",
 		  pound_to_http_status (be->v.error.status));
       else
 	snprintf (buf, size, "error:%d",
@@ -1814,8 +1814,8 @@ backend_serialize (BACKEND *be)
 	      case BE_ERROR:
 		err = json_object_set (obj, "status",
 				       json_new_integer (pound_to_http_status (be->v.error.status)))
-		  || json_object_set (obj, "file",
-				      be->v.error.file ? json_new_string (be->v.error.file) : json_new_null ());
+		  || json_object_set (obj, "text",
+				      be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
 		break;
 	      }
 	  if (enable_backend_stats)

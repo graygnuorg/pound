@@ -59,6 +59,12 @@ that libgcc_s.so.1 is loaded and will remain so after chroot.
 This early probe is enabled if pound is linked with GNU libc.  The
 --enable-pthread-cancel-probe configure option is available to
 forcefully enable or disable it, if the need be.
+
+* PID file is properly removed when in RootJail mode.
+
+This doesn not cover the case where the privileges of the user the
+program runs at (as set by the "User" and "Group" configuration
+statements) forbid to remove the file.
 
 Version 4.6, 2023-03-07
 

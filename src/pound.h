@@ -401,7 +401,7 @@ struct be_acme
 struct be_error
 {
   int status;            /* Pound HTTP status index */
-  char *file;            /* File with error content page */
+  char *text;            /* Error content page */
 };
 
 /* back-end definition */
@@ -938,7 +938,7 @@ void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
 char const *sess_type_to_str (int type);
 int control_response (POUND_HTTP *arg);
 void pound_atexit (void (*func) (void *), void *arg);
-void unlink_file (void *arg);
+int unlink_at_exit (char const *file_name);
 
 extern char const *progname;
 

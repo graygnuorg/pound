@@ -2361,8 +2361,9 @@ parse_error_backend (void *call_data, void *section_data)
   BACKEND_HEAD *head = call_data;
   struct token *tok;
   int n, status;
-  char *file = NULL;
+  char *text = NULL;
   BACKEND *be;
+  int rc;
 
   if ((tok = gettkn_expect (T_NUMBER)) == NULL)
     return PARSER_FAIL;
@@ -2379,9 +2380,13 @@ parse_error_backend (void *call_data, void *section_data)
 
   if (tok->type == T_STRING)
     {
-      file = tok->str;
+      putback_tkn (tok);
+      if ((rc = assign_string_from_file (&text, section_data)) == PARSER_FAIL)
+	return rc;
     }
-  else if (tok->type != '\n')
+  else if (tok->type == '\n')
+    rc = PARSER_OK_NONL;
+  else
     {
       conf_error ("%s", "string or newline expected");
       return PARSER_FAIL;
@@ -2393,11 +2398,11 @@ parse_error_backend (void *call_data, void *section_data)
   pthread_mutex_init (&be->mut, NULL);
 
   be->v.error.status = status;
-  be->v.error.file = file ? xstrdup (file) : NULL;
+  be->v.error.text = text;
 
   SLIST_PUSH (head, be, next);
 
-  return tok->type == '\n' ? PARSER_OK_NONL : PARSER_OK;
+  return rc;
 }
 
 struct service_session
@@ -3960,7 +3965,7 @@ parse_control_global (void *call_data, void *section_data)
   sun = xmalloc (len);
   sun->sun_family = AF_UNIX;
   strcpy (sun->sun_path, tok->str);
-  pound_atexit (unlink_file, sun->sun_path);
+  unlink_at_exit (sun->sun_path);
 
   lst->addr.ai_socktype = SOCK_STREAM;
   lst->addr.ai_family = AF_UNIX;

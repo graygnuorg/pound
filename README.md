@@ -717,17 +717,15 @@ straightforward:
 RootJail "/var/pound"
 ```
 
-Several points to note:
-
-When using `RootJail`, __pound__ does not remove its PID file
-before shutting down.
-
 __Pound__ tries to open all files and devices it needs before
 chrooting.  There might be cases, however, when it is not enough
 and you would need to copy certain system files to the chroot
 directory.
 
-### Note for users of __pound__ versions prior to 4.7
+### Notes for users of __pound__ versions prior to 4.7
+
+When using `RootJail`, __pound__ does not remove its PID file
+before shutting down.
 
 If __pound__ displays the following message and aborts when being stopped:
 

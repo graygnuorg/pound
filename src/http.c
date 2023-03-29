@@ -840,55 +840,33 @@ static int
 error_response (POUND_HTTP *phttp)
 {
   int err = phttp->backend->v.error.status;
-  char *file_name = phttp->backend->v.error.file;
+  char *text = phttp->backend->v.error.text;
 
   if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
       rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  if (file_name)
+  if (text)
     {
-      int fd;
-      struct stat st;
-
-      if ((fd = open (file_name, O_RDONLY)) != -1)
+      size_t len = strlen (text);
+      BIO *bin = BIO_new_mem_buf (text, len);
+      bio_http_reply_start (phttp->cl, phttp->request.version,
+			    http_status[err].code,
+			    http_status[err].reason,
+			    err_headers, "text/html",
+			    (CONTENT_LENGTH) len);
+      if (copy_bin (bin, phttp->cl, len, NULL, 0))
 	{
-	  if (fstat (fd, &st) == 0)
-	    {
-	      BIO *bin;
-
-	      bin = BIO_new_fd (fd, BIO_CLOSE);
-	      bio_http_reply_start (phttp->cl, phttp->request.version,
-				    http_status[err].code,
-				    http_status[err].reason,
-				    err_headers, "text/html",
-				    (CONTENT_LENGTH) st.st_size);
-	      if (copy_bin (bin, phttp->cl, st.st_size, NULL, 0))
-		{
-		  if (errno)
-		    logmsg (LOG_NOTICE, "(%"PRItid") error copying file %s: %s",
-			    POUND_TID (), file_name, strerror (errno));
-		}
-
-	      BIO_free (bin);
-	      BIO_flush (phttp->cl);
-
-	      phttp->response_code = http_status[err].code;
-	      return 0;
-	    }
-	  else
-	    {
-	      logmsg (LOG_ERR, "(%"PRItid") failed to stat error file %s: %s",
-		      POUND_TID (), file_name, strerror (errno));
-	      close (fd);
-	    }
+	  if (errno)
+	    logmsg (LOG_NOTICE, "(%"PRItid") error sending response %d: %s",
+		    POUND_TID (), http_status[err].code, strerror (errno));
 	}
-      else
-	logmsg (LOG_ERR, "(%"PRItid") failed to open error file %s: %s",
-		POUND_TID (), file_name, strerror (errno));
-    }
 
-  http_err_reply (phttp, err);
+      BIO_free (bin);
+      BIO_flush (phttp->cl);
+    }
+  else
+    http_err_reply (phttp, err);
 
   phttp->response_code = http_status[err].code;
   return 0;

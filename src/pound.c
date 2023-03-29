@@ -515,10 +515,82 @@ thr_dispatch (void *unused)
   pthread_cleanup_pop (1);
 }
 
-void
+struct file_location
+{
+  int fd;            /* Directory descriptor. */
+  char *basename;    /* Name relative to fd. */
+  char pathname[1];  /* Full pathname (for error reporting). */
+};
+
+static void
+unlink_file_location (void *arg)
+{
+  struct file_location *fil = arg;
+  if (unlinkat (fil->fd, fil->basename, 0))
+    logmsg (LOG_NOTICE, "can't remove file %s: %s", fil->pathname,
+	    strerror (errno));
+  free (fil);
+}
+
+static void
 unlink_file (void *arg)
 {
-  unlink ((char*) arg);
+  char *file_name = arg;
+  if (unlink (file_name))
+    logmsg (LOG_NOTICE, "can't remove file %s: %s", file_name, strerror (errno));
+  free (file_name);
+}
+
+int
+unlink_at_exit (char const *file_name)
+{
+  if (root_jail)
+    {
+      struct file_location *fl;
+      char const *p;
+      size_t dirlen;
+      int fd;
+
+      if ((p = strrchr (file_name, '/')) == NULL)
+	{
+	  dirlen = 0;
+	  fd = open (".", O_RDONLY | O_NONBLOCK | O_DIRECTORY);
+	  if (fd == -1)
+	    {
+	      logmsg (LOG_NOTICE, "can't open CWD: %s", strerror (errno));
+	      return -1;
+	    }
+	}
+      else
+	{
+	  char *dir;
+
+	  dirlen = p - file_name;
+	  dir = xmalloc (dirlen + 1);
+	  memcpy (dir, file_name, dirlen);
+	  dir[dirlen] = 0;
+	  fd = open (dir, O_RDONLY | O_NONBLOCK | O_DIRECTORY);
+	  if (fd == -1)
+	    {
+	      logmsg (LOG_NOTICE, "can't open directory %s: %s",
+		      dir, strerror (errno));
+	      free (dir);
+	      return -1;
+	    }
+	  free (dir);
+	  dirlen++;
+	}
+
+      fl = xmalloc (sizeof (*fl) + strlen (file_name));
+      fl->fd = fd;
+      strcpy (fl->pathname, file_name);
+      fl->basename = fl->pathname + dirlen;
+
+      pound_atexit (unlink_file_location, fl);
+    }
+  else
+    pound_atexit (unlink_file, xstrdup (file_name));
+  return 0;
 }
 
 static void
@@ -532,7 +604,7 @@ pidfile_create (void)
     {
       fprintf (fp, "%d\n", getpid ());
       fclose (fp);
-      pound_atexit (unlink_file, pid_name);
+      unlink_at_exit (pid_name);
     }
   else
     logmsg (LOG_NOTICE, "Create \"%s\": %s", pid_name, strerror (errno));

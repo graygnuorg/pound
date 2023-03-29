@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 28, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "March 29, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -664,11 +664,10 @@ using the traditional \fBkill `cat filename`\fR technique.
 .IP \n+[step].
 Before shutting down,
 .B pound
-removes this file.  This may be not possible in two cases: if it
-switches to another user privileges after startup (at least one of
-\fBUser\fR or \fBGroup\fR used in the configuration file), or if it
-runs in a chrooted environment (\fBRootJail\fR used).  In these cases,
-the PID file will remain on disk after termination of the program.
+removes this file.  However, this may be not possible if it switches to
+privileges of another user after startup (at least one of \fBUser\fR or
+\fBGroup\fR are set in the configuration file) and the file is stored in
+a directory whose permissions forbid write access for that user.
 .RE
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
