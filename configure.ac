@@ -21,6 +21,7 @@ AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
 AM_INIT_AUTOMAKE([1.15 gnu tar-ustar])
+AC_CANONICAL_HOST
 
 # Checks for programs.
 AC_PROG_CC
@@ -131,15 +132,13 @@ AC_ARG_ENABLE([pthread-cancel-probe],
   [case ${enableval} in
    yes) early_pthread_cancel_probe=1;;
    no)  early_pthread_cancel_probe=0;;
-   *)   unset early_pthread_cancel_probe
+   *)   early_pthread_cancel_probe=0;;
    esac],
-  [unset early_pthread_cancel_probe])
-
-if test -z "$early_pthread_cancel_probe"; then
-  AC_CHECK_LIB([gcc_s],[main],
-	       [early_pthread_cancel_probe=1],
-	       [early_pthread_cancel_probe=0])
-fi
+  [case $host_os in
+   *-gnu|*-gnulibc1|*-gnueabi|*-gnueabihf)
+	  early_pthread_cancel_probe=1;;
+   *)     early_pthread_cancel_probe=0;;
+   esac])
 
 AC_DEFINE_UNQUOTED([EARLY_PTHREAD_CANCEL_PROBE],[$early_pthread_cancel_probe],
  [Define to try pthread_cancel before chroot, to force loading necessary libraries])

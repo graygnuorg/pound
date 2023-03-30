@@ -137,13 +137,11 @@ configuration options:
   will do a temptative call to `pthread_cancel` early, before chrooting,
   so that the necessary library will be loaded and remain available after
   `chroot`.  To determine whether to do this _pthread_cancel probe_ hack,
-  `configure` checks if the library `libgcc_s.so.1` is available.  If so,
-  the early probe is enabled.
+  `configure` checks if the program is going to be linked with GNU libc.
 
   These two options allow you to forcefully enable or disable this probe.
   For instance, you may wish to enable it, if another _libc_ implementation
-  exhibits a similar behavior, or if `configure` fails to determine the
-  `libgcc_s.so.1` presence properly.
+  exhibits a similar behavior.
 
 * `--with-maxbuf=`*n*
 

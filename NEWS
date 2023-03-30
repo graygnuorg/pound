@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-29
+Pound -- history of user-visible changes. 2023-03-30
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -60,7 +60,7 @@ This early probe is enabled if pound is linked with GNU libc.  The
 --enable-pthread-cancel-probe configure option is available to
 forcefully enable or disable it, if the need be.
 
-* PID file is properly removed when in RootJail mode.
+* PID file and control socket are properly removed when in RootJail mode.
 
 This doesn not cover the case where the privileges of the user the
 program runs at (as set by the "User" and "Group" configuration

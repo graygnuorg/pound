@@ -529,6 +529,7 @@ unlink_file_location (void *arg)
   if (unlinkat (fil->fd, fil->basename, 0))
     logmsg (LOG_NOTICE, "can't remove file %s: %s", fil->pathname,
 	    strerror (errno));
+  close (fil->fd);
   free (fil);
 }
 
