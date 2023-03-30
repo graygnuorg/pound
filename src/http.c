@@ -2159,7 +2159,6 @@ get_user (char *hdrval, char **u_name)
     {
       logmsg (LOG_WARNING, "(%"PRItid") Can't read BIO_f_base64",
 	      POUND_TID ());
-      BIO_free_all (b64);
       return -1;
     }
 
