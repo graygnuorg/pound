@@ -4183,7 +4183,7 @@ thr_http (void *dummy)
       pound_http_destroy (phttp);
       active_threads_decr ();
     }
-  logmsg (LOG_NOTICE, "thread %"PRItid" terminating on idle timeout",
+  logmsg (LOG_NOTICE, "(%"PRItid") thread terminating on idle timeout",
 	  POUND_TID ());
   return NULL;
 }
