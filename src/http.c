@@ -2981,6 +2981,9 @@ backend_response (POUND_HTTP *phttp)
     {
       int chunked; /* True if request contains Transfer-Enconding: chunked */
 
+      /* Free previous response, if any */
+      http_request_free (&phttp->response);
+
       if (http_request_read (phttp->be, phttp->lstn, &phttp->response))
 	{
 	  logmsg (LOG_NOTICE,
@@ -3430,7 +3433,6 @@ backend_response (POUND_HTTP *phttp)
 		}
 	    }
 	}
-      http_request_free (&phttp->response);
     }
   while (skip);
 
