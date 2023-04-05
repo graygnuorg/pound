@@ -951,8 +951,8 @@ int
 main (const int argc, char **argv)
 {
   LISTENER *lstn;
-  uid_t user_id;
-  gid_t group_id;
+  uid_t user_id = -1;
+  gid_t group_id = -1;
 #ifndef SOL_TCP
   struct protoent *pe;
 #endif
@@ -995,52 +995,6 @@ main (const int argc, char **argv)
   if (log_facility != -1)
     openlog (progname, LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
 
-  logmsg (LOG_NOTICE, "starting...");
-
-  /* open listeners */
-  n_listeners = 0;
-  SLIST_FOREACH (lstn, &listeners, next)
-    {
-      if (lstn->sock == -1)
-	{
-	  /* prepare the socket */
-	  int opt;
-	  int domain;
-	  char abuf[MAX_ADDR_BUFSIZE];
-
-	  switch (lstn->addr.ai_family)
-	    {
-	    case AF_INET:
-	      domain = PF_INET;
-	      break;
-	    case AF_INET6:
-	      domain = PF_INET6;
-	      break;
-	    case AF_UNIX:
-	      domain = PF_UNIX;
-	      unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
-	      break;
-	    default:
-	      abort ();
-	    }
-	  if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
-	    abend ("can't create HTTP socket %s: %s",
-		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		   strerror (errno));
-
-	  opt = 1;
-	  setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
-	  if (bind (lstn->sock, lstn->addr.ai_addr,
-		    (socklen_t) lstn->addr.ai_addrlen) < 0)
-	    abend ("can't bind HTTP socket to %s: %s",
-		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		   strerror (errno));
-
-	  listen (lstn->sock, 512);
-	}
-      n_listeners++;
-    }
-
   /* set uid if necessary */
   if (user)
     {
@@ -1059,6 +1013,66 @@ main (const int argc, char **argv)
       if ((gr = getgrnam (group)) == NULL)
 	abend ("no such group %s", group);
       group_id = gr->gr_gid;
+    }
+
+  logmsg (LOG_NOTICE, "starting...");
+
+  /* open listeners */
+  n_listeners = 0;
+  SLIST_FOREACH (lstn, &listeners, next)
+    {
+      if (lstn->sock == -1)
+	{
+	  /* prepare the socket */
+	  int opt;
+	  int domain;
+	  char abuf[MAX_ADDR_BUFSIZE];
+	  mode_t oldmask;
+
+	  switch (lstn->addr.ai_family)
+	    {
+	    case AF_INET:
+	      domain = PF_INET;
+	      break;
+	    case AF_INET6:
+	      domain = PF_INET6;
+	      break;
+	    case AF_UNIX:
+	      domain = PF_UNIX;
+	      unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
+	      oldmask = umask (0777 & ~lstn->mode);
+	      break;
+	    default:
+	      abort ();
+	    }
+	  if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
+	    abend ("can't create HTTP socket %s: %s",
+		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		   strerror (errno));
+
+	  opt = 1;
+	  setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
+	  if (bind (lstn->sock, lstn->addr.ai_addr,
+		    (socklen_t) lstn->addr.ai_addrlen) < 0)
+	    abend ("can't bind HTTP socket to %s: %s",
+		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		   strerror (errno));
+
+	  if (domain == PF_UNIX)
+	    {
+	      umask (oldmask);
+	      if (lstn->chowner)
+		{
+		  char *sname = ((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path;
+		  if (chown (sname, user_id, group_id))
+		    logmsg (LOG_ERR, "can't chown socket %s to %d:%d: %s",
+			    sname, user_id, group_id, strerror (errno));
+		}
+	    }
+
+	  listen (lstn->sock, 512);
+	}
+      n_listeners++;
     }
 
   print_log = 0;

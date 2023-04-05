@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 29, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "April 5, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -586,12 +586,10 @@ only if OpenSSL-engine is installed on your system.
 Use the named curve for elliptical curve encryption (default: prime256v1).
 .TP
 \fBControl\fR "\fIpathname\fR"
-Set the control socket path. If not defined,
-.B pound
-does not listen for any commands. The commands may be issued by using
-the
-.BR poundctl (8)
-program.
+Set the control socket path.
+See the
+.B Control socket
+section below, for a detailed description of this feature.
 .TP
 \fBIncludeDir\fR "\fIdir\fR"
 Sets the \fIinclude directory\fR.  This is the directory
@@ -669,6 +667,61 @@ privileges of another user after startup (at least one of \fBUser\fR or
 \fBGroup\fR are set in the configuration file) and the file is stored in
 a directory whose permissions forbid write access for that user.
 .RE
+.SS Control socket
+.B Pound
+can be instructed to listen on a UNIX socket for management requests,
+which will allow you to obtain information about the running
+instance, change state of configured listeners, services, and
+backends, etc.  These requests may be issued by using the
+.BR poundctl (8)
+utility.
+.PP
+The use of this
+.I control socket
+is configured via the
+.B Control
+statement.  This statement has two forms.  In
+.I inline
+form, the statement takes a single argument, specifying the name of
+the UNIX socket file to create and listen on.  For example:
+.PP
+.EX
+Control "/run/pound.sock"
+.EE
+.PP
+The file will be owned by the user that started
+.B pound
+(normally root) and will have mode 0600.
+.PP
+The block form allows you to specify file mode and, to certain extent,
+the socket file ownership:
+.PP
+.EX
+Control
+    Socket "/run/pound.sock"
+    Mode 660
+    ChangeOwner true
+End
+.EE
+.PP
+The substatements are:
+.TP
+.B Socket "\fIfilename\fR"
+Specifies the name of the socket file to use.  This is the only
+mandatory statement in the block form.
+.TP
+.B Mode \fIoctal\fR
+Sets the mode of the socket file.
+.TP
+.B ChangeOwner \fIbool\fR
+This statement takes effect if at least one of
+.B User
+or
+.B Group
+global statements is used.  When set to
+.B true
+it will change the owner of the socket file to that spefified by
+those two statements.
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
 .B pound

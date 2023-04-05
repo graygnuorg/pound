@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-03-30
+Pound -- history of user-visible changes. 2023-04-05
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -65,6 +65,26 @@ forcefully enable or disable it, if the need be.
 This doesn not cover the case where the privileges of the user the
 program runs at (as set by the "User" and "Group" configuration
 statements) forbid to remove the file.
+
+* Control socket ownership and mode
+
+The "Control" configuration directory has two forms: inline and
+section.  The inline form remains as it was in previous versions.
+The block "Control" statement allows you to manage the file mode
+and ownership of the socket file.  Its syntax is:
+
+  Control
+    Socket "FILE"
+    Mode OCTAL
+    ChangeOwner BOOL
+  End
+
+The Socket statement sets the name of the UNIX socket file.  This is
+the only mandatory statement in the Control block.  The Mode statement
+sets the mode of the socket file (default is 600).  Finally, if the
+ChangeOwner is true, the ownership of the socket file will be changed
+to the user defined by the User and/or Group statements in the global
+scope.
 
 Version 4.6, 2023-03-07
 

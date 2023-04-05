@@ -625,7 +625,9 @@ typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 typedef struct _listener
 {
   char *name;			/* symbolic name */
-  struct addrinfo addr;		/* IPv4/6 address */
+  struct addrinfo addr;		/* Socket address */
+  int mode;                     /* File mode for AF_UNIX */
+  int chowner;                  /* Change to effective owner, for AF_UNIX */
   int sock;			/* listening socket */
   POUND_CTX_HEAD ctx_head;	/* CTX for SSL connections */
   int clnt_check;		/* client verification mode */

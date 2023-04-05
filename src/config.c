@@ -689,11 +689,11 @@ push_input (const char *filename)
 
   if (fstatat (include_fd, filename, &st, 0))
     {
-      if (include_dir)
+      if (include_fd == AT_FDCWD)
+	conf_error ("can't stat %s: %s", filename, strerror (errno));
+      else
 	conf_error ("can't stat %s/%s: %s", include_dir, filename,
 		    strerror (errno));
-      else
-	conf_error ("can't stat %s: %s", filename, strerror (errno));
       return -1;
     }
 
@@ -1090,6 +1090,24 @@ assign_int_range (int *dst, int min, int max)
       return PARSER_FAIL;
     }
   *dst = n;
+  return PARSER_OK;
+}
+
+static int
+assign_mode (void *call_data, void *section_data)
+{
+  long n;
+  char *end;
+  struct token *tok = gettkn_expect (T_NUMBER);
+
+  errno = 0;
+  n = strtoul (tok->str, &end, 8);
+  if (errno || *end || n > 0777)
+    {
+      conf_error_at_locus_range (&tok->locus, "%s", "invalid file mode");
+      return PARSER_FAIL;
+    }
+  *(mode_t*)call_data = n;
   return PARSER_OK;
 }
 
@@ -3281,6 +3299,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
 
   XZALLOC (lst);
 
+  lst->mode = 0600;
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
@@ -3937,21 +3956,16 @@ parse_threads_compat (void *call_data, void *section_data)
 }
 
 static int
-parse_control_global (void *call_data, void *section_data)
+parse_control_socket (void *call_data, void *section_data)
 {
+  struct addrinfo *addr = call_data;
   struct token *tok;
-  LISTENER *lst;
-  SERVICE *svc;
-  BACKEND *be;
   struct sockaddr_un *sun;
   size_t len;
 
   /* Get socket address */
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
-
-  /* Create listener for that address */
-  lst = listener_alloc (section_data);
 
   len = strlen (tok->str);
   if (len > UNIX_PATH_MAX)
@@ -3967,11 +3981,63 @@ parse_control_global (void *call_data, void *section_data)
   strcpy (sun->sun_path, tok->str);
   unlink_at_exit (sun->sun_path);
 
-  lst->addr.ai_socktype = SOCK_STREAM;
-  lst->addr.ai_family = AF_UNIX;
-  lst->addr.ai_protocol = 0;
-  lst->addr.ai_addr = (struct sockaddr *) sun;
-  lst->addr.ai_addrlen = len;
+  addr->ai_socktype = SOCK_STREAM;
+  addr->ai_family = AF_UNIX;
+  addr->ai_protocol = 0;
+  addr->ai_addr = (struct sockaddr *) sun;
+  addr->ai_addrlen = len;
+
+  return PARSER_OK;
+}
+
+static PARSER_TABLE control_parsetab[] = {
+  { "End",         parse_end },
+  { "Socket",      parse_control_socket, NULL, offsetof (LISTENER, addr) },
+  { "ChangeOwner", assign_bool, NULL, offsetof (LISTENER, chowner) },
+  { "Mode",        assign_mode, NULL, offsetof (LISTENER, mode) },
+  { NULL }
+};
+
+static int
+parse_control (void *call_data, void *section_data)
+{
+  struct token *tok;
+  LISTENER *lst;
+  SERVICE *svc;
+  BACKEND *be;
+  int rc;
+  struct locus_range range;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  lst = listener_alloc (section_data);
+  switch (tok->type)
+    {
+    case '\n':
+      rc = parser_loop (control_parsetab, lst, section_data, &range);
+      if (rc == PARSER_OK)
+	{
+	  if (lst->addr.ai_addrlen == 0)
+	    {
+	      conf_error_at_locus_range (&range, "%s",
+					 "Socket statement is missing");
+	      rc = PARSER_FAIL;
+	    }
+	}
+      break;
+
+    case T_STRING:
+      putback_tkn (tok);
+      rc = parse_control_socket (&lst->addr, section_data);
+      break;
+
+    default:
+      conf_error ("expected string or newline, but found %s", token_type_str (tok->type));
+      rc = PARSER_FAIL;
+    }
+
+  if (rc != PARSER_OK)
+    return PARSER_FAIL;
 
   lst->verb = 1; /* Need PUT and DELETE methods */
   /* Register listener in the global listener list */
@@ -4023,7 +4089,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "HeaderOption", parse_header_options, NULL, offsetof (POUND_DEFAULTS, header_options) },
   { "ECDHCurve", parse_ECDHCurve },
   { "SSLEngine", parse_SSLEngine },
-  { "Control", parse_control_global },
+  { "Control", parse_control },
   { "Anonymise", int_set_one, &anonymise },
   { "Anonymize", int_set_one, &anonymise },
   { "Service", parse_service, &services },
