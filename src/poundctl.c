@@ -29,6 +29,39 @@ char *tmpl_path;
 char *tmpl_file = "poundctl.tmpl";
 char *tmpl_name = "default";
 
+struct keyword
+{
+  char const *name;
+  size_t len;
+  int flag;
+};
+
+#define S(a) a, sizeof (a) - 1
+static struct keyword inline_keyword[] = {
+  { S("control"), 1 },
+  { NULL }
+};
+static struct keyword block_keyword[] = {
+  { S("socket"), 1 },
+  { S("end"), 0 },
+  { NULL }
+};
+
+static struct keyword *keywords[] = {
+  inline_keyword,
+  block_keyword
+};
+
+static int
+find_keyword (int kwtab, char const *arg, size_t len)
+{
+  struct keyword *kw;
+  for (kw = keywords[kwtab]; kw->name; kw++)
+    if (strncasecmp (kw->name, arg, len) == 0)
+      return kw->flag;
+  return -1;
+}
+
 /*
  * A temporary solution to obtain socket name from the pound.cfg file.
  * FIXME: Use the parser from config.c for that.
@@ -39,8 +72,7 @@ get_socket_name (void)
   FILE *fp;
   char  buf[MAXBUF], *name = NULL;
   int line = 0;
-  static char kw_str[] = "control";
-  static size_t kw_len = sizeof (kw_str) - 1;
+  int kwtab = 0;
 
   if (verbose_option)
     errormsg (0, 0, "scanning file %s", conf_name);
@@ -75,10 +107,15 @@ get_socket_name (void)
       if (*p == '#')
 	continue;
 
-      if (strncasecmp (p, kw_str, kw_len) == 0 &&
-	  (p[kw_len] == ' ' || p[kw_len] == '\t'))
+      len = strcspn (p, " \t");
+      switch (find_keyword (kwtab, p, len))
 	{
-	  for (p += kw_len; *p && isspace (*p); p++)
+	case 0:
+	  kwtab = 0;
+	  break;
+
+	case 1:
+	  for (p += len; *p && isspace (*p); p++)
 	    ;
 	  if (*p == '"')
 	    {
@@ -110,14 +147,21 @@ get_socket_name (void)
 		  *q++ = *p++;
 		}
 	      *q = 0;
-	      break;
+	    }
+	  else if (*p == 0 && kwtab == 0)
+	    {
+	      kwtab = 1;
+	      continue;
 	    }
 	  else
 	    {
 	      errormsg (0, 0, "%s:%d:%ld: expected quoted string",
 			conf_name, line, p - buf + 1);
-	      break;
 	    }
+	  goto end;
+
+	default:
+	  continue;
 	}
     }
  end:
