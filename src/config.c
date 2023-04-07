@@ -732,7 +732,7 @@ pop_input (void)
 static int
 gettkn (struct token **tok)
 {
-  int t;
+  int t = EOF;
 
   while (cur_input && (t = input_gettkn (cur_input, tok)) == EOF)
     pop_input ();
@@ -3941,6 +3941,93 @@ parse_listen_https (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static PARSER_TABLE transparent_backend_parsetab[] = {
+  { "End",       parse_end },
+  { "Address",   assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
+  { "Port",      assign_port,    NULL, offsetof (BACKEND, v.reg.addr) },
+  { "TimeOut",   assign_timeout, NULL, offsetof (BACKEND, v.reg.to) },
+  { "ConnTO",    assign_timeout, NULL, offsetof (BACKEND, v.reg.conn_to) },
+  { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
+  { NULL }
+};
+
+static int
+parse_transparent_proxy_backend (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  BACKEND *be;
+  SERVICE *svc;
+
+  if (!SLIST_EMPTY (&lst->services))
+    {
+      conf_error ("%s", "only one backend is allowed in TransparentProxy");
+      return PARSER_FAIL;
+    }
+
+  be = parse_backend_internal (transparent_backend_parsetab, section_data);
+  if (!be)
+    return PARSER_FAIL;
+
+  XZALLOC (svc);
+  service_cond_init (&svc->cond, COND_BOOL);
+  SLIST_INIT (&svc->backends);
+  svc->emergency = be;
+  SLIST_PUSH (&lst->services, svc, next);
+  return PARSER_OK;
+}
+
+static PARSER_TABLE transparent_parsetab[] = {
+  { "End", parse_end },
+  { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
+  { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
+  { "SocketFrom", listener_parse_socket_from },
+  { "Backend", parse_transparent_proxy_backend },
+  { NULL }
+};
+
+static int
+parse_transparent_proxy (void *call_data, void *section_data)
+{
+  LISTENER *lst;
+  LISTENER_HEAD *list_head = call_data;
+  POUND_DEFAULTS *dfl = section_data;
+  struct locus_range range;
+  struct token *tok;
+
+  if ((lst = listener_alloc (dfl)) == NULL)
+    return PARSER_FAIL;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  else if (tok->type == T_STRING)
+    {
+      if (find_listener_ident (list_head, tok->str))
+	{
+	  conf_error ("%s", "listener name is not unique");
+	  return PARSER_FAIL;
+	}
+      lst->name = xstrdup (tok->str);
+    }
+  else
+    putback_tkn (tok);
+  lst->transparent = 1;
+
+  if (parser_loop (transparent_parsetab, lst, section_data, &range))
+    return PARSER_FAIL;
+
+  if (check_addrinfo (&lst->addr, &range, "TransparentProxy") != PARSER_OK)
+    return PARSER_FAIL;
+
+  if (SLIST_EMPTY (&lst->services))
+    {
+      conf_error_at_locus_range (&range, "No backend defined");
+      return PARSER_FAIL;
+    }
+
+  SLIST_PUSH (list_head, lst, next);
+  return PARSER_OK;
+}
+
 static int
 parse_threads_compat (void *call_data, void *section_data)
 {
@@ -4095,6 +4182,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "Service", parse_service, &services },
   { "ListenHTTP", parse_listen_http, &listeners },
   { "ListenHTTPS", parse_listen_https, &listeners },
+  { "TransparentProxy", parse_transparent_proxy, &listeners },
   { "ACL", parse_named_acl, NULL },
   { "PidFile", assign_string, &pid_name },
   { "BackendStats", assign_bool, &enable_backend_stats },

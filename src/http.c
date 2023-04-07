@@ -3791,6 +3791,164 @@ backend_update_stats (BACKEND *be, struct timespec const *start)
   pthread_mutex_unlock (&be->mut);
 }
 
+struct transbuf
+{
+  int avail;          /* Number of bytes available in base */
+  int written;        /* Number of bytes already written */
+  char base[MAXBUF];
+};
+
+#define TRANSBUF_INITIALIZER { 0, 0, }
+
+static inline int
+transbuf_free_space (struct transbuf *buf)
+{
+  return MAXBUF - buf->avail;
+}
+
+static inline int
+transbuf_used_space (struct transbuf *buf)
+{
+  return buf->avail - buf->written;
+}
+
+static int
+transbuf_read (int fd, struct transbuf *buf)
+{
+  int nread;
+
+  if (buf->avail == buf->written)
+    buf->avail = buf->written = 0;
+  nread = read (fd, buf->base + buf->avail, transbuf_free_space (buf));
+  if (nread > 0)
+    buf->avail += nread;
+  return nread;
+}
+
+static int
+transbuf_write (int fd, struct transbuf *buf)
+{
+  int nwr;
+
+  nwr = write (fd, buf->base + buf->written, transbuf_used_space (buf));
+  if (nwr > 0)
+    buf->written += nwr;
+  return nwr;
+}
+
+static void
+do_transparent (POUND_HTTP *phttp)
+{
+  enum { P_CL, P_BE, P_NUM };
+  struct pollfd p[P_NUM];
+  struct transbuf buf[2] = {
+    TRANSBUF_INITIALIZER,
+    TRANSBUF_INITIALIZER
+  };
+  int to;
+
+  phttp->svc = SLIST_FIRST (&phttp->lstn->services);
+  if (select_backend (phttp) != 0)
+    return;
+  to = phttp->backend->v.reg.to * 1000;
+  memset (&p, 0, sizeof p);
+  BIO_get_fd (phttp->cl, &p[P_CL].fd);
+  p[P_CL].events = POLLIN | POLLOUT | POLLPRI;
+
+  BIO_get_fd (phttp->be, &p[P_BE].fd);
+  p[P_BE].events = POLLIN | POLLOUT | POLLPRI;
+
+  while (p[P_CL].fd != -1 || p[P_BE].fd != -1)
+    {
+      ssize_t n;
+
+      if (p[P_CL].fd != -1)
+	{
+	  p[P_CL].events = POLLPRI;
+	  if (transbuf_free_space (&buf[P_CL]) > 0)
+	    p[P_CL].events |= POLLIN;
+	  if (transbuf_used_space (&buf[P_BE]) > 0)
+	    p[P_CL].events |= POLLOUT;
+	}
+
+      if (p[P_BE].fd != -1)
+	{
+	  p[P_BE].events = POLLPRI;
+	  if (transbuf_free_space (&buf[P_BE]) > 0)
+	    p[P_BE].events |= POLLIN;
+	  if (transbuf_used_space (&buf[P_CL]) > 0)
+	    p[P_BE].events |= POLLOUT;
+	}
+
+      n = poll (p, 2, to);
+      if (n == -1)
+	{
+	  if (errno != EINTR)
+	    {
+	      logmsg (LOG_ERR, "poll: %s", strerror (errno));
+	      break;
+	    }
+	  continue;
+	}
+      else if (n == 0)
+	{
+	  logmsg (LOG_ERR, "(%"PRItid") I/O time out in transparent proxy",
+		  POUND_TID ());
+	  break;
+	}
+
+      if (p[P_CL].revents & POLLIN)
+	{
+	  if (transbuf_read (p[P_CL].fd, &buf[P_CL]) <= 0)
+	    {
+	      shutdown (p[P_CL].fd, SHUT_RDWR);
+	      p[P_CL].fd = -1;
+	    }
+	}
+      if (p[P_BE].revents & POLLIN)
+	{
+	  if (transbuf_read (p[P_BE].fd, &buf[P_BE]) <= 0)
+	    {
+	      shutdown (p[P_BE].fd, SHUT_RDWR);
+	      p[P_BE].fd = -1;
+	    }
+	}
+
+      if (p[P_CL].revents & POLLOUT)
+	{
+	  if (transbuf_write (p[P_CL].fd, &buf[P_BE]) < 0)
+	    {
+	      shutdown (p[P_CL].fd, SHUT_RDWR);
+	      p[P_CL].fd = -1;
+	    }
+	}
+
+      if (p[P_BE].revents & POLLOUT)
+	{
+	  if (transbuf_write (p[P_BE].fd, &buf[P_CL]) < 0)
+	    {
+	      shutdown (p[P_BE].fd, SHUT_RDWR);
+	      p[P_BE].fd = -1;
+	    }
+	}
+
+      if (p[P_CL].fd == -1)
+	{
+	  if (transbuf_used_space (&buf[P_CL]) == 0)
+	    p[P_BE].fd = -1;
+	  else
+	    p[P_BE].events &= ~POLLIN;
+	}
+      if (p[P_BE].fd == -1)
+	{
+	  if (transbuf_used_space (&buf[P_BE]) == 0)
+	    p[P_CL].fd = -1;
+	  else
+	    p[P_CL].events &= ~POLLIN;
+	}
+    }
+}
+
 /*
  * handle an HTTP request
  */
@@ -3873,6 +4031,12 @@ do_http (POUND_HTTP *phttp)
   BIO_set_close (phttp->cl, BIO_CLOSE);
   BIO_set_buffer_size (phttp->cl, MAXBUF);
   phttp->cl = BIO_push (bb, phttp->cl);
+
+  if (phttp->lstn->transparent)
+    {
+      do_transparent (phttp);
+      return;
+    }
 
   cl_11 = 0;
   for (;;)

@@ -626,6 +626,7 @@ typedef struct _listener
 {
   char *name;			/* symbolic name */
   struct addrinfo addr;		/* Socket address */
+  int transparent;
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
   int sock;			/* listening socket */
