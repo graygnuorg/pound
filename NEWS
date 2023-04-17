@@ -7,7 +7,7 @@ on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.6.90 (git)
+Version 4.7, 2023-04-17
 
 * Default include directory
 
@@ -16,7 +16,7 @@ for files in the include directory (unless the filename is absolute).
 Initial value of the include directory is set to the system configuration
 directory, as configured at compile time.   It can be changed:
 
-1. on the command line, using the -Winclude-dir=DIR or -Wno-include-dir
+1. from the command line, using the -Winclude-dir=DIR or -Wno-include-dir
    options.  The latter form resets it to the current working
    directory.
 
