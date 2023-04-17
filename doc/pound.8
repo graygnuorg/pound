@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 5, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "April 17, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -27,13 +27,15 @@ pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH DESCRIPTION
 .PP
 .B Pound
-is a reverse-proxy load balancing server. It accepts requests from HTTP/HTTPS
-clients and distributes them to one or more Web servers. The HTTPS requests are
-decrypted and passed to the backends as plain HTTP.
+is a reverse-proxy load balancing server. It accepts requests from
+HTTP/HTTPS clients and distributes them to one or more Web
+servers (\fIbackends\fR). These requests may be passed to backends
+as plain HTTP or re-encrypted as HTTPS.
 .PP
 If more than one backend server is defined,
 .B pound
-chooses one of them randomly, based on defined priorities. By default,
+chooses one of them randomly, based on the requested balancing
+algorithm and backend priorities. By default,
 .B pound
 keeps track of associations between clients and backend servers (sessions).
 .SH GENERAL PRINCIPLES
@@ -51,54 +53,34 @@ A
 .I listener
 is a definition of how
 .B pound
-receives requests from the clients (browsers). Two types of
-.I listeners
-may be defined: regular HTTP
-.I listeners
-and HTTPS (HTTP over SSL/TLS)
-.IR listeners .
-At the very least a
-.I listener
-must define the address and port to listen on, with additional
-requirements for HTTPS
-.IR listeners .
+receives requests from the clients (browsers). Listeners of two types
+are supported: regular HTTP listeners and HTTPS listeners.  In the
+simplest case, a listener must define the address and port to listen
+on, with additional requirements for HTTPS listeners.
 .TP
 \fBServices\fR
 A
 .I service
-is the definition of how the requests are answered. The
-.I services
-may be defined within a
-.I listener
-or at the top level (global). When a request is received,
+routes requests to backends.  Services may be defined within a
+listener or in global scope.  When a request is received,
 .B pound
-attempts to match them to each
-.I service
-in turn, starting with the
-.I services
-defined in the
-.I listener
-itself and, if needed, continuing with the
-.I services
-defined at the global level. The
-.I services
-may define their own conditions as to which requests they can answer:
-typically this involves certain URLs (images only, or a certain path)
-or specific headers (such as the Host header). A
-.I service
-may also define a
+attempts to match it to each service in turn, starting with the
+services defined in the listener itself and, if needed, continuing
+with those defined at the global level.  Services may define their own
+conditions as to which requests they can answer: typically this
+involves certain URLs (images only, or a certain path) or specific
+headers (such as the Host header).  A service may also define a
 .I session
-mechanism: if defined, future requests from a given client will always
+mechanism: if so, future requests from a given client will always
 be answered by the same
 .IR backend .
 .TP
 \fBBackends\fR
-The
-.I backends
+.I Backends
 are the actual servers for the content requested. By itself,
 .B pound
 supplies no responses - all contents must be received from a "real"
-web server. The
+web server.  A
 .I backend
 defines how the server should be contacted.
 .IP
@@ -135,40 +117,32 @@ An error backend creates and returns an HTTP status response.
 .TP
 .I Emergency backend
 A special case of regular backend which will be used only if all other
-backends are "dead".
+regular backends fail to respond.
 .RE
 .IP
-Multiple
-.I backends
-may be defined within a
-.IR service ,
-in which case
+Multiple backends may be defined within a service, in which case
 .B pound
-will balance the load between the available
-.IR backends .
+will balance the load between the available backends.
 .IP
 Two types of load-balancing strategies are implemented: random
 balancing (default), and interleaved weighted round-robin balancing.
 .IP
-If a
-.I backend
-fails to respond, it will be considered "dead", in which case
+If a backend fails to respond, it will be considered "dead", in which
+case
 .B pound
 will stop sending requests to it. Dead
 .I backends
 are periodically checked for availability, and once they respond again they
-are "resurrected" and requests are sent again their way. If no
-.I backends
-are available (none were defined, or all are "dead") then
+are "resurrected" and requests are sent again their way. If no backends
+are available (none were defined, or all are "dead"), then
 .B pound
 will reply with "503 Service Unavailable", without checking additional
-.IR services .
+services.
 .IP
 Normally, the connection between
 .B pound
-and
-.I backends
-is via plain HTTP.  It is, however, possible to use HTTPS as well.
+and its backends is via plain HTTP.  It is, however, possible to use
+HTTPS as well.
 .PP
 A working
 .B pound
@@ -330,10 +304,6 @@ See the discussion of the \fBIncludeDir\fR directive in section
 .BR "GLOBAL DIRECTIVES" ,
 below.
 .RE
-.PP
-In general, any number of backend servers may be specified. Use the
-priority to affect the load distribution among unequal-performance
-servers.
 .SH "CONFIGURATION FILE"
 Each line in the file is considered a complete configuration
 directive. Empty lines and comments are ignored. Comments are
@@ -607,8 +577,8 @@ Include the file as though it were part of the configuration file.  If
 \fIfile\fR is a relative file name, it will be looked in the \fIinclude
 directory\fR (see above).
 .IP
-This is the only directive that is allowed both at topmost level and
-in any subsections of the configuration file.
+This directive is allowed both at topmost level and in any subsections
+of the configuration file.
 .TP
 \fBAnonymise\fR
 (alternative spelling \fBAnonymize\fR also accepted) Replace the last
@@ -737,7 +707,7 @@ All configuration directives enclosed between
 and
 .B End
 are specific to a single HTTP listener.  At the very least you must specify
-and address and a port for each listener. The following directives are
+IP address and port for each listener. The following directives are
 available:
 .TP
 \fBAddress\fR \fIaddress\fR
@@ -865,7 +835,7 @@ within the configuration.
 \fBACME\fR "\fIdirectory\fR"
 Serve ACME challenge requests from the given
 .IR directory .
-See the section
+See section
 .B ACME
 below.
 .TP
@@ -912,18 +882,17 @@ their effect.
 .SS Modification directives
 The following directives modify the incoming request prior to passing
 it to the selected service.  These are discussed in detail
-in the section
+in section
 .BR "REQUEST MODIFICATION" ,
 below.
 .TP
 \fBDeleteHeader\fR "\fIheader\fB: \fIpattern\fR"
 Remove certain headers from the incoming requests. All occurrences of
-the matching specified header will be removed. See the section
-for a detailed discussion of various header modification directives.
+the matching header will be removed.
 .TP
 \fBSetHeader\fR "\fIheader\fB: \fIvalue\fR"
-Add the defined header to the request passed to the backend
-server. The header is added verbatim. Use multiple \fBHeaderAdd\fR
+Add header to the request passed to the backend server. Specified
+header line is added verbatim. Use multiple \fBHeaderAdd\fR
 directives if you need to add more than one header.
 .TP
 \fBSetURL\fR "\fIvalue\fR"
@@ -959,7 +928,7 @@ Same as \fBDeleteHeader\fR.
 \fBHeadRemove\fR "\fIpattern\fR"
 Same as \fBDeleteHeader\fR.
 .SH "HTTPS Listener"
-An HTTPS listener defines an address and port that
+HTTPS listener defines an address and port that
 .B pound
 will listen on for HTTPS requests.  The listener declaration begins with
 the keyword
@@ -1121,13 +1090,13 @@ Semantically it is equivalent to the named ACL reference described above.
 .TP
 \fBURL\fR [\fIoptions\fR] "\fIpattern\fR"
 Match the URL of the incoming request.  By default, \fIpattern\fR is
-treated as case-sensitive regular expression.  This can be changed by
-\fIoptions\fR, described below.
+treated as case-sensitive extended regular expression.  This can be
+changed by \fIoptions\fR, described below.
 .TP
 \fBHeader\fR [\fIoptions\fR] "\fIpattern\fR"
 The request must contain at least one header matching the given
 \fIpattern\fR.  By default, \fIpattern\fR is treated as
-case-insensitive regular expression.  This can be changed by
+case-insensitive extended regular expression.  This can be changed by
 \fIoptions\fR, described below.
 .TP
 \fBHost\fR [\fIoptions\fR] "\fIhostname\fR"
@@ -1294,7 +1263,7 @@ above, for a detailed discussion of these balancing strategies.
 This directive overrides the \fBBalancer\fR directive in global scope.
 .TP
 \fBBackend\fR
-Directives enclosed between a
+Directives enclosed between
 .B Backend
 and
 the following
@@ -1394,14 +1363,14 @@ appended. If your
 .I url
 does contain a path, then the request path is ignored.
 .IP
-Examples: the following reverts first two path components of the
+Examples: the following swaps the first two path components of the
 original URL:
 .IP
 .EX
 Service
     Host -re "(.+)"
     URL "^/([^/]+)/([^/]+)(/.*)?"
-    Redirect "http://%0/$2/$1$3"
+    Redirect "http://$0(1)/$2/$1$3"
 End
 .EE
 .IP
@@ -1449,10 +1418,9 @@ outputs an error page if no service matching the incoming request was
 found.  See the \fBEXAMPLES\fR section for details.
 .TP
 \fBEmergency\fR
-Directives enclosed between an
+Directives enclosed between
 .B Emergency
-and
-the following
+and the following
 .B End
 directives define an emergency backend server (see below for
 details). You may define only one emergency server per service, which
@@ -1466,7 +1434,7 @@ the section
 below for a detailed discussion.
 .TP
 \fBSession\fR
-Directives enclosed between a
+Directives enclosed between
 .B Session
 and
 the following
@@ -1761,7 +1729,8 @@ Case-insensitive comparison.
 .RE
 .PP
 The \fIvalue\fR argument in the above directives is subject to
-.IR "request evaluation", during which ny occurrence of
+.IR "request evaluation" ,
+during which ny occurrence of
 .I request accessors
 found in it is replaced them with the values they produce.
 Syntactically, a request accessor is:
@@ -1818,7 +1787,7 @@ block is:
 .PP
 where dots stand for any number of request matching and request
 modification statements.  The \fBElse\fR part is optional; any number
-of \fBElse\fR blocks can be supplied, providing conditional branching.
+of \fBElse\fR blocks can be supplied, thus providing for conditional branching.
 The following concocted example illustrates it:
 .PP
 .EX
@@ -1873,7 +1842,7 @@ Request modification directives are applied in the same order as they
 appear in the configuration file.
 .SH BUILT-IN HEADERS
 In addition to the \fBSetHeader\fR and \fBDeleteHeader\fR directives
-discussed above, the \fBHeaderOption\fR directive controls addition
+discussed above, the \fBHeaderOption\fR directive controls insertion
 of the built-in headers:
 .TP
 \fBHeaderOption\fR \fIopt\fR...
@@ -1882,15 +1851,14 @@ There are two kinds of such headers: \fIforwarded\fR headers that
 convey information about original destination of the request, and
 \fIssl\fR headers (for \fBHTTPS\fR connections), that hold information
 about server and client SSL certificates.  These are discussed in detail below.
-.IP
+.PP
 By default, both kinds of built-in additional headers are enabled.
 This default can be changed by using the \fBHeaderOption\fR directive.
 Placed in global scope, this directive sets global options.  Used
 within a \fBListenHTTP\fR or \fBListenHTTPS\fR block, it affects only
 settings for that listener.
-.IP
+.PP
 The \fIopt\fR values passed to the directive are:
-.RS
 .TP
 .B none
 Disable both kinds of additional headers.
@@ -1906,7 +1874,6 @@ Enable ssl headers.
 .TP
 .B no\-ssl
 Disable ssl headers.
-.RE
 .PP
 The built-in headers are added before request modification directives
 are applied.  Thus, you can use
@@ -1967,7 +1934,7 @@ the configuration file and (possibly) the server certificate file(s)
 and error message(s), which are opened read-only on startup, read, and
 closed, and the pid file which is opened on start-up, written to and
 immediately closed. Following this there is no disk access whatsoever,
-so using a RootJail directive is only for extra security bonus points.
+so using a \fBRootJail\fR directive is only for extra security bonus points.
 .PP
 .B Pound
 tries to sanitize all HTTP/HTTPS requests: the request itself, the
@@ -2202,7 +2169,7 @@ ListenHTTP
     Service
         Host -re ".+"
         URL ".*"
-        Redirect 301 "https://%0$0"
+        Redirect 301 "https://$0(1)$0"
     End
 End
 
