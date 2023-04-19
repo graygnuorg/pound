@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 17, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "April 19, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -180,7 +180,7 @@ is sum of all priorities.
 .TP
 .B Interleaved Weighted Round Robin Balancing
 Requests are assigned to each backend in turn.  Backend priorities, or
-.I weigths
+.I weights
 are used to control the share of requests handled by each backend.
 The greater the weight, the more requests will be sent to this backend.
 In general, the share of requests assigned to a backend is calculated
@@ -564,7 +564,7 @@ section below, for a detailed description of this feature.
 \fBIncludeDir\fR "\fIdir\fR"
 Sets the \fIinclude directory\fR.  This is the directory
 where \fIpound\fR looks for relative file names that appear in other
-configuratin directives (e.g. \fIInclude\fR).  The default value is
+configuration directives (e.g. \fIInclude\fR).  The default value is
 the system configuration directory as set at compile time (you can
 check its value in the output of \fBpound -V\fR).  This initial value
 can be changed in the command line using the
@@ -690,7 +690,7 @@ or
 .B Group
 global statements is used.  When set to
 .B true
-it will change the owner of the socket file to that spefified by
+it will change the owner of the socket file to that specified by
 those two statements.
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that

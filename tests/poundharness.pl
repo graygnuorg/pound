@@ -91,7 +91,7 @@ $SIG{CHLD} = sub {
     } elsif (WIFSIGNALED($?)) {
 	print STDERR "pound terminated on signal " . WTERMSIG($?) . "\n";
     } else {
-	print STDERR "pound terminated with unrecogized status " . $? . "\n";
+	print STDERR "pound terminated with unrecognized status " . $? . "\n";
     }
     exit(EX_ERROR);
 };
@@ -1214,7 +1214,7 @@ switches or arguments,
 Read source configuration file from I<SRC>, write processed configuration
 to I<DST> and use it as configuration file when running B<pound>.  If
 I<DST> is omitted, F<pound.cfg> is assumed.  If this option is not given,
-I<SRC> defaulst to F<pound.cfi>.
+I<SRC> defaults to F<pound.cfi>.
 
 =item B<-l>, B<--log-level=> I<N>
 
@@ -1258,8 +1258,8 @@ that must be absent in the response. E.g. the header line
 
     -X-Forwarded-Proto: https
 
-means that heade B<X-Forwarded-Proto: https> must be absent in the response.
-The test will fail if it is present.
+means that the response may not contain B<X-Forwarded-Proto: https> header.
+The test will fail if such header is present.
 
 Headers may be followed by a newline and response body (content).  If
 present, it will be matched literally against the actual response.

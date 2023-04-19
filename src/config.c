@@ -43,7 +43,7 @@ typedef unsigned TOKENMASK;
 
 #define T_BIT(t) ((TOKENMASK)1<<((t)-T__BASE))
 #define T_MASK_ISSET(m,t) ((m) & T_BIT(t))
-#define T_ANY 0 /* any token, inlcuding newline */
+#define T_ANY 0 /* any token, including newline */
 /* Unquoted character sequence */
 #define T_UNQ (T_BIT (T_IDENT) | T_BIT (T_NUMBER) | T_BIT (T_LITERAL))
 

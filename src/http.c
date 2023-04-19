@@ -1156,7 +1156,7 @@ bio_callback
     return ret;
 
   /*
-   * a time-out already occured
+   * a time-out already occurred
    */
   if ((to = bio_arg->timeout * 1000) < 0)
     {

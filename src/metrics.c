@@ -56,13 +56,13 @@ metric_labels_add (METRIC_LABELS *head, char const *name, char const *value)
   return 0;
 }
 
-/* Remove last label from the lavel list. */
+/* Remove last label from the list. */
 static void
 metric_labels_pop (METRIC_LABELS *head)
 {
   struct metric_label *label = DLIST_LAST (head);
-  DLIST_REMOVE(head, label, next);
-  free(label);
+  DLIST_REMOVE (head, label, next);
+  free (label);
 }
 
 /* Copy labels from SRC to DST.  Notice: does not initialize or reset DST. */
@@ -332,7 +332,7 @@ static struct metric_family workers_metric_families[] = {
 
 
 /*
- * Metric familiy definitions describe how to iterate over the root
+ * Metric family definitions describe how to iterate over the root
  * object and, if necessary, what family to descend into for each
  * object retrieved.
  */

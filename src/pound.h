@@ -701,7 +701,7 @@ enum
     WSS_RESP_HEADER_CONNECTION_UPGRADE | WSS_RESP_HEADER_UPGRADE_WEBSOCKET
   };
 
-/* Track SSL handshare/renegotiation so we can reject client-renegotiations. */
+/* Track SSL handshake/renegotiation so we can reject client-renegotiations. */
 typedef enum
   {
     RENEG_INIT = 0,

@@ -25,13 +25,12 @@ README: README.md
 .PHONY: ChangeLog
 ChangeLog:
 	@echo "Creating ChangeLog";                                       \
-	 (git log --pretty='format:%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
-                  --date=short;                                           \
-          echo "";                                                        \
-          echo "Local Variables:";                                        \
-          echo "mode: change-log";                                        \
-          echo "version-control: never";                                  \
-          echo "buffer-read-only: t";                                     \
-          echo "End:") > ChangeLog
+	 (git log --pretty='format:%H#%ad  %cn  <%ae>%n%n%w(72,8,8)%s%n%n%b' \
+		  --date=short | sed -r -f ChangeLog.sed;                 \
+	  echo "";                                                        \
+	  echo "Local Variables:";                                        \
+	  echo "mode: change-log";                                        \
+	  echo "version-control: never";                                  \
+	  echo "buffer-read-only: t";                                     \
+	  echo "End:") > ChangeLog
 endif
-
