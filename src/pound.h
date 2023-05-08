@@ -90,7 +90,9 @@
 # include <openssl/engine.h>
 #endif
 
-#if HAVE_LIBPCREPOSIX
+#if HAVE_LIBPCREPOSIX == 2
+# include <pcre2posix.h>
+#elif HAVE_LIBPCREPOSIX == 1
 # if HAVE_PCREPOSIX_H
 #  include <pcreposix.h>
 # elif HAVE_PCRE_PCREPOSIX_H

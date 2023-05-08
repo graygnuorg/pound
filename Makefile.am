@@ -18,6 +18,8 @@ SUBDIRS = src tests doc
 
 EXTRA_DIST = ChangeLog.apsis
 
+ACLOCAL_AMFLAGS = -I am
+
 if FROM_GIT
 README: README.md
 	perl md2txt.pl -o README -l 4 README.md

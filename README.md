@@ -120,12 +120,14 @@ configuration options:
 
 * `--enable-pcreposix` or `--disable-pcreposix`
 
-  Enable or disable the use of the `pcreposix` library.  This is a
-  library that makes it possible to use both POSIX extended and
-  Perl-compatible regular expressions in __pound__ configuration
+  Enable or disable the use of the `libpcreposix2` or `libpcreposix`
+  library.  This is a library that makes it possible to use both POSIX
+  extended and Perl-compatible regular expressions in __pound__ configuration
   file.
 
-  By default, its presence is determined automatically.
+  By default, its presence is determined automatically; `libpcreposix2`
+  is preferred over `libpcreposix`.  To force compiling with the older
+  `libpcreposix`, use `--enable-pcreposix=pcre1`.
 
 * `--enable-pthread-cancel-probe` or `--disable-pthread-cancel-probe`
 
