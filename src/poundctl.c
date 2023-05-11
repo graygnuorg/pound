@@ -104,7 +104,7 @@ get_socket_name (void)
       for (p = buf; *p && isspace (*p); p++)
 	;
 
-      if (*p == '#')
+      if (*p == 0 || *p == '#')
 	continue;
 
       len = strcspn (p, " \t");
