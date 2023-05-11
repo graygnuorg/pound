@@ -67,12 +67,15 @@ vlogmsg (const int priority, const char *fmt, va_list ap)
 {
   if (log_facility == -1 || print_log)
     {
+      va_list aq;
       FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
 		     ? stdout : stderr;
       pthread_mutex_lock (&log_mutex);
       if (progname)
 	fprintf (fp, "%s: ", progname);
-      vfprintf (fp, fmt, ap);
+      va_copy (aq, ap);
+      vfprintf (fp, fmt, aq);
+      va_end (aq);
       fputc ('\n', fp);
       pthread_mutex_unlock (&log_mutex);
     }
