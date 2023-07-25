@@ -218,6 +218,9 @@ running
  cpan -i IO::FDPass
 ```
 
+Testing HTTPS requires additionally Perl modules IO::Socket::SSL
+and Net::SSLeay.  If these are not installed, HTTPS tests will be skipped.
+
 To run tests, type
 
 ```sh
@@ -225,11 +228,11 @@ To run tests, type
 ```
 
 from the top-level source directory.  On success, you will see
-something like that:
+something like that (ellipsis indicating output omitted for brevity):
 
 ```
 ## -------------------------- ##
-## pound 4.5 test suite.      ##
+## pound 4.8 test suite.      ##
 ## -------------------------- ##
   1: Configuration file syntax                       ok
   2: Basic request processing                        ok
@@ -237,24 +240,27 @@ something like that:
   4: CheckURL                                        ok
   5: Custom Error Response                           ok
   6: MaxRequest                                      ok
-  7: HeadRemove                                      ok
-  8: AddHeader                                       ok
-  9: RewriteLocation                                 ok
- 10: HeadRequire                                     ok
- 11: URL                                             ok
+  7: RewriteLocation                                 ok
+
+Listener request modification
+
+  8: Basic set directives                            ok
+
+  ...
 
 ## ------------- ##
 ## Test results. ##
 ## ------------- ##
 
-All 11 tests were successful.
+All 46 tests were successful.
 ```
 
-If a test results in something other than `ok`, it leaves the detailed
-diagnostics in files in the `tests/NN/testsuite.dir` directory, where
-*NN* is the ordinal number of the test.  Pack them all into a single
-tarball and send it over to <gray@gnu.org> for investigation.  See
-also the section [Bug Reporting](#user-content-bug-reporting) below.
+If a test results in something other than `ok`, it leaves detailed
+diagnostics in directory `tests/testsuite.dir/NN`, where *NN* is the
+ordinal number of the test.  If you encounter such failed tests, please
+tar the contents of `tests/testsuite.dir` and send the resulting tarball
+over to <gray@gnu.org> for investigation.  See also section
+[Bug Reporting](#user-content-bug-reporting) below.
 
 ## Installation
 
@@ -756,3 +762,6 @@ If you think you found a bug in __pound__ or in its documentation,
 please send a mail to Sergey Poznyakoff <gray@gnu.org> (or
 <gray+pound@gnu.org.ua>), or use the
 [github issue tracker](https://github.com/graygnuorg/pound/issues).
+
+When reporing failed tests, please make an archive of the `tests/testsuite.dir`
+subdirectory and attach it to your report.

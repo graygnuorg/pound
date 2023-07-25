@@ -927,6 +927,13 @@ sub keepopen { shift->{keepopen} }
 sub count { scalar @{shift->{listeners}} }
 sub create {
     my ($self, $ident, $proto) = @_;
+    if (defined($proto) && lc($proto) eq 'HTTPS') {
+	my ($ok, $why) = HTTP::Tiny->can_ssl;
+	unless ($ok) {
+	    print STDERR "testing HTTPS is not supported: $why\n";
+	    exit(main::EX_SKIP);
+	}
+    }
     my $lst = Listener->new($self->count(), $ident, $self->keepopen, $proto);
     if ($self->keepopen) {
 	$lst->set_pass_fd("lst".$self->count().".sock");
