@@ -218,8 +218,13 @@ running
  cpan -i IO::FDPass
 ```
 
-Testing HTTPS requires additionally Perl modules IO::Socket::SSL
-and Net::SSLeay.  If these are not installed, HTTPS tests will be skipped.
+Testing HTTPS requires additionally Perl modules `IO::Socket::SSL`
+and `Net::SSLeay`.  If these are not installed, HTTPS tests will be skipped.
+To install these on a debian-based system, run:
+
+```sh
+ apt-get install libio-socket-ssl-perl libnet-ssleay-perl
+```
 
 To run tests, type
 
