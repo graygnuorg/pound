@@ -928,7 +928,7 @@ correspondingly.
 Request accessor is \fB%[\fIname\fR\fB]\fR, where \fIname\fR denotes
 part of the incoming request to access.  Accessors are interpreted and
 replaced with the corresponding part of the request.  Some accessors
-take argument, which is specified after accessor name and is delimited
+take an argument, which is specified after accessor name and is delimited
 from it by one or more whitespace characters.
 .IP
 The following accessors are defined:
@@ -1730,7 +1730,7 @@ will be overwritten.  Otherwise, new header will be added to the end
 of the header list.
 .TP
 \fBDeleteHeader\fR [\fIoptions\fR] "\fIpattern\fR"
-Remove from the request all headers matchibg \fIpattern\fR.  By
+Remove from the request all headers matching \fIpattern\fR.  By
 default, \fIpattern\fR is treated as extended POSIX regular
 expression.  One or more \fIoptions\fR can be supplied to modify
 the default behavior.  The \fIoptions\fR argument in the above
@@ -1933,7 +1933,7 @@ so using a \fBRootJail\fR directive is only for extra security bonus points.
 .PP
 .B Pound
 tries to sanitize all HTTP/HTTPS requests: the request itself, the
-headers and the contents are checked for conformance to the RFC's and
+headers and the contents are checked for conformance to the RFCs and
 only valid requests are passed to the backend servers. This is not
 absolutely fool-proof - as the recent Apache problem with chunked
 transfers demonstrated. However, given the current standards, this is
