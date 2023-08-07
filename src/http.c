@@ -231,12 +231,6 @@ submatch_reset (struct submatch *sm)
   sm->matchn = 0;
 }
 
-static void
-submatch_queue_init (struct submatch_queue *smq)
-{
-  memset (smq, 0, sizeof (*smq));
-}
-
 void
 submatch_queue_free (struct submatch_queue *smq)
 {
@@ -249,9 +243,9 @@ submatch_queue_free (struct submatch_queue *smq)
 }
 
 static struct submatch *
-submatch_queue_get (struct submatch_queue *smq, int n)
+submatch_queue_get (struct submatch_queue const *smq, int n)
 {
-  return smq->sm + (smq->cur + SMQ_SIZE - n) % SMQ_SIZE;
+  return (struct submatch *)(smq->sm + (smq->cur + SMQ_SIZE - n) % SMQ_SIZE);
 }
 
 static struct submatch *
@@ -290,7 +284,7 @@ static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
 					 struct query_param **);
 
-typedef int (*accessor_func) (struct http_request *, char const *, int, char const **);
+typedef int (*accessor_func) (struct http_request *, char const *, int, char const **, size_t *);
 
 struct accessor
 {
@@ -301,47 +295,116 @@ struct accessor
 
 static int
 accessor_url (struct http_request *req, char const *arg, int arglen,
-	      char const **ret_val)
+	      char const **ret_val, size_t *ret_len)
 {
-  return http_request_get_url (req, ret_val);
+  char const *val;
+  int rc = http_request_get_url (req, &val);
+  if (rc == RETRIEVE_OK && val)
+    {
+      *ret_len = strlen (val);
+      *ret_val = val;
+    }
+  return rc;
 }
 
 static int
 accessor_path (struct http_request *req, char const *arg, int arglen,
-	       char const **ret_val)
+	       char const **ret_val, size_t *ret_len)
 {
-  return http_request_get_path (req, ret_val);
+  char const *val;
+  int rc = http_request_get_path (req, &val);
+  if (rc == RETRIEVE_OK && val)
+    {
+      *ret_len = strlen (val);
+      *ret_val = val;
+    }
+  return rc;
 }
 
 static int
 accessor_query (struct http_request *req, char const *arg, int arglen,
-		char const **ret_val)
+		char const **ret_val, size_t *ret_len)
 {
-  return http_request_get_query (req, ret_val);
+  char const *val;
+  int rc = http_request_get_query (req, &val);
+  if (rc == RETRIEVE_OK && val)
+    {
+      *ret_len = strlen (val);
+      *ret_val = val;
+    }
+  return rc;
 }
 
 static int
 accessor_param (struct http_request *req, char const *arg, int arglen,
-		char const **ret_val)
+		char const **ret_val, size_t *ret_len)
 {
   struct query_param *qp;
   int rc;
   if ((rc = http_request_get_query_param (req, arg, arglen, &qp)) == RETRIEVE_OK)
-    *ret_val = qp->value;
+    {
+      *ret_val = qp->value;
+      if (qp->value)
+	*ret_len = strlen (qp->value);
+    }
   return rc;
 }
 
 static int
 accessor_header (struct http_request *req, char const *arg, int arglen,
-		 char const **ret_val)
+		 char const **ret_val, size_t *ret_len)
 {
   struct http_header *hdr;
 
   if ((hdr = http_header_list_locate_name (&req->headers, arg, arglen)) == NULL)
     return RETRIEVE_NOT_FOUND;
 
-  *ret_val = http_header_get_value (hdr);
+  if ((*ret_val = http_header_get_value (hdr)) != NULL)
+    *ret_len = strlen (*ret_val);
   return RETRIEVE_OK;
+}
+
+static int
+accessor_host (struct http_request *req, char const *arg, int arglen,
+	       char const **ret_val, size_t *ret_len)
+{
+  char const *host;
+  size_t len;
+  int rc = accessor_header (req, "host", 4, &host, &len);
+  if (rc == RETRIEVE_OK && host)
+    {
+      char *p;
+      *ret_val = host;
+      if ((p = memchr (host, ':', len)) != NULL)
+	*ret_len = p - host;
+      else
+	*ret_len = len;
+    }
+  return rc;
+}
+
+static int
+accessor_port (struct http_request *req, char const *arg, int arglen,
+	       char const **ret_val, size_t *ret_len)
+{
+  char const *host;
+  size_t len;
+  int rc = accessor_header (req, "host", 4, &host, &len);
+  if (rc == RETRIEVE_OK && host)
+    {
+      char *p;
+      if ((p = memchr (host, ':', len)) != NULL)
+	{
+	  *ret_val = p;
+	  *ret_len = len - (p - host);
+	}
+      else
+	{
+	  *ret_val = host + len;
+	  *ret_len = 0;
+	}
+    }
+  return rc;
 }
 
 static struct accessor accessors[] = {
@@ -350,6 +413,8 @@ static struct accessor accessors[] = {
   { "query",    accessor_query },
   { "param",    accessor_param, 1 },
   { "header",   accessor_header, 1 },
+  { "host",     accessor_host },
+  { "port",     accessor_port },
   { NULL }
 };
 
@@ -436,7 +501,7 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
  */
 static int
 expand_string_to_buffer (struct stringbuf *sb, char const *str,
-			 struct submatch_queue *smq, char *what,
+			 struct submatch_queue const *smq, char *what,
 			 struct http_request *req)
 {
   char *p;
@@ -486,9 +551,9 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	    {
 	      stringbuf_add (sb, str, len + 1);
 	    }
-	  else if (acc (req, arg, arglen, &val) == 0 && val)
+	  else if (acc (req, arg, arglen, &val, &len) == 0 && val)
 	    {
-	      stringbuf_add_string (sb, val);
+	      stringbuf_add (sb, val, len);
 	      if (result >= 0)
 		result++;
 	    }
@@ -587,7 +652,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 }
 
 char *
-expand_string (char const *str, struct submatch_queue *smq, char *what,
+expand_string (char const *str, struct submatch_queue const *smq, char *what,
 	       struct http_request *req)
 {
   struct stringbuf sb;
@@ -632,7 +697,8 @@ expand_url (char const *url, struct http_request *req,
 }
 
 static int rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-			  struct http_request *request, struct sockaddr *addr);
+			  struct http_request *request, struct sockaddr *addr,
+			  struct submatch_queue *smq);
 
 /*
  * Reply with a redirect
@@ -678,8 +744,8 @@ redirect_response (POUND_HTTP *phttp)
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   xurl = expand_url (redirect->url, &phttp->request, &phttp->smq, redirect->has_uri);
@@ -790,8 +856,8 @@ acme_response (POUND_HTTP *phttp)
   char *file_name;
   int rc = HTTP_STATUS_OK;
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   file_name = expand_url ("$1", &phttp->request, &phttp->smq, 1);
@@ -842,8 +908,8 @@ error_response (POUND_HTTP *phttp)
   int err = phttp->backend->v.error.status;
   char *text = phttp->backend->v.error.text;
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   if (text)
@@ -2276,7 +2342,7 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       break;
 
     case COND_QUERY_PARAM:
-      switch (http_request_get_query_param_value (req, cond->qp.name, &str))
+      switch (http_request_get_query_param_value (req, cond->sm.string->value, &str))
 	{
 	case RETRIEVE_ERROR:
 	  res = -1;
@@ -2290,7 +2356,7 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	  if (str == NULL)
 	    res = 0;
 	  else
-	    res = submatch_exec (&cond->qp.re, str, submatch_queue_push (smq));
+	    res = submatch_exec (&cond->sm.re, str, submatch_queue_push (smq));
 	}
       break;
 
@@ -2339,6 +2405,21 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	      lognomem ();
 	    }
 	}
+      break;
+
+    case COND_STRING_MATCH:
+      {
+	char *subj;
+
+	subj = expand_string (cond->sm.string->value, smq, "string_match", req);
+	if (subj)
+	  {
+	    res = submatch_exec (&cond->sm.re, subj, submatch_queue_push (smq));
+	    free (subj);
+	  }
+	else
+	  res = -1;
+      }
       break;
 
     case COND_BOOL:
@@ -2877,19 +2958,17 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 
 static int
 rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-	       struct http_request *request, struct sockaddr *addr)
+	       struct http_request *request, struct sockaddr *addr,
+	       struct submatch_queue *smq)
 {
   int res = 0;
   REWRITE_RULE *rule;
-  struct submatch_queue smq;
 
-  submatch_queue_init (&smq);
   SLIST_FOREACH (rule, rewrite_rules, next)
     {
-      if ((res = rewrite_rule_check (rule, request, addr, &smq)) != 0)
+      if ((res = rewrite_rule_check (rule, request, addr, smq)) != 0)
 	break;
     }
-  submatch_queue_free (&smq);
   return res;
 }
 
@@ -3511,8 +3590,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	lognomem ();
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr)
-      || rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr))
+  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq)
+      || rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*

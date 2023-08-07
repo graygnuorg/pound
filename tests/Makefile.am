@@ -90,7 +90,10 @@ TESTSUITE_AT = \
  optorder.at\
  optssl.at\
  or.at\
+ path.at\
  prio.at\
+ query.at\
+ queryparam.at\
  reqacc.at\
  redirect.at\
  rewriteloc.at\
@@ -102,6 +105,7 @@ TESTSUITE_AT = \
  sessparm.at\
  sessurl.at\
  set.at\
+ stringmatch.at\
  template.at\
  url.at\
  virthost.at\

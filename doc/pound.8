@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 19, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 7, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -879,33 +879,112 @@ See the description of \fBHeaderOption\fR directive in \fBGLOBAL
 DIRECTIVES\fR section, and section \fBBUILT-IN HEADERS\fR, for a
 detailed discussion of various header modification directives and
 their effect.
+.SS String expansion
+Some of the statements described below take as their arguments string
+values that undergo several \fIexpansions\fR before use.  These
+expansions are as follows:
+.TP
+.B Backreference expansion
+Backrefence is a construct that refers to a \fIparenthesized
+group\fR within a regular expression matched by one of service
+matching directives described above.  During backreference expansion,
+each occurrence of such construct in a string is replaced with the
+actual value of that parenthesized group.
+.IP
+Syntactically backreference can take two forms.  The construct
+\fB$\fIN\fR (\fIN\fR is a decimal number)
+refers to \fIN\fRth parenthesized subexpression of the most
+recently matched statement, and \fB$\fIN\fB(\fIM\fB)\fR refers to
+\fIN\fRth parenthesized subexpression of \fIM\fRth recently matched
+statement.  Numbering of subexpressions starts at 1 (\fB$0\fR refers
+to the entire matching string).  Numbering of matches starts
+at 0.
+.IP
+For example, given the following statements
+.IP
+.EX
+Host -re "www\\.(.+)"
+Header -re -icase "^Content-Type: *(.*)"
+Path "^/static(/.*)?"
+.EE
+.IP
+\fB$1\fR refers to the subgroup of \fBPath\fR, \fB$1(1)\fR - to that of
+\fBHeader\fR, and \fB$1(2)\fR - to that of \fBHost\fR.
+.IP
+Curly braces may be used to avoid incorrectly parsing text fragment
+that follows the reference as being its part.  This is useful if the
+reference is immediately followed by a decimal digit or opening
+parenthesis, as in: \fB"${1}(text)"\fR.
+.IP
+To insert a literal dollar or percent sign in
+.IR url ,
+use
+.B $$
+or
+.BR $% ,
+correspondingly.
+.TP
+.B Request accessor interpretation
+Request accessor is \fB%[\fIname\fR\fB]\fR, where \fIname\fR denotes
+part of the incoming request to access.  Accessors are interpreted and
+replaced with the corresponding part of the request.  Some accessors
+take argument, which is specified after accessor name and is delimited
+from it by one or more whitespace characters.
+.IP
+The following accessors are defined:
+.RS
+.TP
+.B url
+Request URL.
+.TP
+.B path
+Request path.
+.TP
+.B query
+Query part.
+.TP
+\fBparam \fINAME\fR
+The value of the query parameter \fINAME\fR.
+.TP
+\fBheader \fINAME\fR
+The value of HTTP header \fINAME\fR.
+.TP
+.B host
+Hostname part of the \fBHost\R header.  If the latter
+does not include port number, it is equivalent to \fB%[header
+host]\fR.
+.B port
+If the value of the \fBHost\R header includes port number,
+\fB%[port]\fR evaluates to port number with the leading colon
+character. Otherwise, it evaluates to empty string.
 .SS Modification directives
 The following directives modify the incoming request prior to passing
-it to the selected service.  These are discussed in detail
+it to the selected service. These are discussed in detail
 in section
 .BR "REQUEST MODIFICATION" ,
 below.
 .TP
 \fBDeleteHeader\fR "\fIheader\fB: \fIpattern\fR"
 Remove certain headers from the incoming requests. All occurrences of
-the matching header will be removed.
+the matching header will be removed. The argument is treated verbatim.
 .TP
 \fBSetHeader\fR "\fIheader\fB: \fIvalue\fR"
-Add header to the request passed to the backend server. Specified
-header line is added verbatim. Use multiple \fBHeaderAdd\fR
-directives if you need to add more than one header.
+Add header to the request passed to the backend server. Argument
+undergoes string expansion as described above. The expanded value must
+be a valid header line.
 .TP
 \fBSetURL\fR "\fIvalue\fR"
-Sets the URL part of the request.
+Sets the URL part of the request. Argument is subject to string expansion.
 .TP
 \fBSetPath\fR "\fIvalue\fR"
-Sets the path part.
+Sets the path part of the request. Argument is subject to string expansion.
 .TP
 \fBSetQuery\fR "\fIvalue\fR"
-Sets the query part.
+Sets the query part of the request. Argument is subject to string expansion.
 .TP
 \fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
-Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
+Modifies the query.  Sets the query parameter \fIname\fR to
+\fIvalue\fR. The \fIvalue\fR argument is subject to string expansion.
 .TP
 .BR Rewrite " ... [ " Else " ... ] " End
 Conditionally apply request modification depending on whether request
@@ -1122,10 +1201,16 @@ section.
 Match the path part of the incoming request.
 .TP
 \fBQuery\fR [\fIoptions\fR] "\fIpattern\fR"
-Match the query part of the incoming request.
+Match the query part of the incoming request. The argument must be
+properly percent-encoded, if it contains whitespace or other
+non-printable characters.
 .TP
 \fBQueryParam\fR "\fIname\fR" [\fIoptions\fR] "\fIpattern\fR"
 Match the value of the query parameter \fIname\fR.
+.TP
+\fBStringMatch\fR "\fIstring\fR" [\fIoptions\fR] "\fIpattern\fR"
+Expand \fIstring\fR as described in \fBString expansion\fR (see below)
+and match the resulting value against \fIpattern\fR.
 .PP
 The \fIoptions\fR argument in the above directives can be used to
 select the comparison method.  It consists of zero or more option
@@ -1293,65 +1378,8 @@ or
 .IP
 The redirection destination is determined by the actual
 .I url
-you specify.  It can contain references to parenthesized subexpressions
-in the eight recently matched request matching directives of the enclosing
-.BR Service .
-Syntactically, \fB$\fIN\fR (\fIN\fR is a decimal number)
-refers to \fIN\fRth parenthesized subexpression of the most
-recently matched statement, and \fB$\fIN\fB(\fIM\fB)\fR refers to
-\fIN\fRth parenthesized subexpression of \fIM\fRth recently matched
-statement.  Numbering of subexpressions starts at 1 (\fB$0\fR refers
-to the entire matching string).  Numbering of matches starts
-at 0.
-.IP
-For example, given the following statements
-.IP
-.EX
-Host -re "www\\.(.+)"
-Header -re -icase "^Content-Type: *(.*)"
-Path "^/static(/.*)?"
-.EE
-.IP
-\fB$1\fR refers to the subgroup of \fBPath\fR, \fB$1(1)\fR - to that of
-\fBHeader\fR, and \fB$1(2)\fR - to that of \fBHost\fR.
-.IP
-Curly braces may be used to avoid incorrectly parsing text fragment
-that follows the reference as being its part.  This is useful if the
-reference is immediately followed by a decimal digit or opening
-parenthesis, as in: \fB"${1}(text)"\fR.
-.IP
-To insert a literal dollar or percent sign in
-.IR url ,
-use
-.B $$
-or
-.BR $% ,
-correspondingly.
-.IP
-Beside these constructs,
-.I request accessors
-can be used.  A request accessor is
-.IP
-.RS
-.EX
-.IR %[ name ]
-.EE
-.RE
-.IP
-where \fIname\fR is one of:
-.BR url ,
-.BR path ,
-.BR query ,
-.BR param ,
-and
-.BR header ,
-denoting the corresponding part of the request.  The
-.B param
-and
-.B header
-accessors take a single argument: the name of the query parameter or
-HTPP header.  Accessors are explained in detail in section
-.BR "REQUEST MODIFICATION DIRECTIVES" .
+you specify.  It is expanded as described in \fBString expansion\fR
+above.
 .IP
 For compatibility with previous \fBpound\fR versions, if no
 \fB$\fIN\fR references are found in
@@ -1465,7 +1493,8 @@ This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see
 .BR https://letsencrypt.org/docs/challenge-types/#http-01-challenge ).
 It takes a single argument specifying a directory where ACME
-challenges are stored.
+challenges are stored. The argument is subject to string expansion
+(see the subsection \fBString expansion\fR, above).
 .PP
 It is supposed that another program is started
 periodically, which checks for certificates approaching their
@@ -1729,37 +1758,8 @@ Case-insensitive comparison.
 .RE
 .PP
 The \fIvalue\fR argument in the above directives is subject to
-.IR "request evaluation" ,
-during which ny occurrence of
-.I request accessors
-found in it is replaced them with the values they produce.
-Syntactically, a request accessor is:
-.PP
-.EX
-\fB%[ \fINAME\fR [\fIARG\fR] \fB]\fR
-.EE
-.PP
-where \fINAME\fR is the accessor name and \fIARG\fR is optional
-argument.  Notice, that square brackets shown in bold are part
-of the accessor, whereas those enclosing \fIARG\fR are used to
-denote its optional nature.
-.PP
-The following accessors are defined:
-.TP
-.B url
-Returns the URL part of the request.
-.TP
-.B path
-Returns the path part of the request.
-.TP
-.B query
-Returns the query part of the request.
-.TP
-.BI param " NAME"
-Returns the value of the query parameter \fINAME\fR.
-.TP
-.BI header " NAME"
-Returns the value of the HTTP header \fINAME\fR.
+string expansion. Refer to subsection \fBString expansions\fR, for
+details.
 .PP
 The
 .B Rewrite
@@ -1813,14 +1813,9 @@ with any other extension, the action depends on the host being
 addressed.  The path is prefixed with "/static" if the host is
 "example.org", and with "/assets" otherwise.
 .PP
-When used in this context, arguments to request modification
-directives are also subject to
-.I backreference expansion
-similar to that discussed in the description of the \fBRedirect\fR
-statement, in section
-.B Service
-above.  To illustrate this, here's the
-above example rewritten using backreferences instead of accessors:
+To illustrate the effects of string expansion, here's the the above
+example rewritten using backreference expansion instead of request
+accessors:
 .PP
 .EX
 Rewrite

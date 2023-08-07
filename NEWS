@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-05-28
+Pound -- history of user-visible changes. 2023-08-07
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,31 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.8.90 (git)
+
+* New service matching statement: StringMatch
+
+The syntax is:
+
+  StringMatch "SUBJECT" "PATTERN"
+
+The SUBJECT is subject to backreference expansion and accessor
+interpretation.  Usual matcher options are allowed after the
+StringMatch keyword.
+
+* New request accessors: host and port
+
+The %[host] accessor returns the hostname part of the Host header
+value.  The %[port] accessor returns the port number with leading
+column character.  If no explicit port number is given in the Host
+value, %[port] returns empty string.
+
+* Bugfixes
+
+** Fix the QueryParam statement.
+
+** Improve testsuite and documentation.
 
 Version 4.8, 2023-05-28
 

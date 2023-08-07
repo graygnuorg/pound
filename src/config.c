@@ -2087,9 +2087,11 @@ build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
   switch (mode)
     {
     case MATCH_EXACT:
+      stringbuf_add_char (sb, '^');
       if (pfx)
 	stringbuf_add_string (sb, pfx);
       stringbuf_escape_regex (sb, expr);
+      stringbuf_add_char (sb, '$');
       break;
 
     case MATCH_RE:
@@ -2148,9 +2150,33 @@ parse_regex_compat (regex_t *regex, int flags)
   return PARSER_OK;
 }
 
+STRING_REF *
+string_ref_alloc (char const *str)
+{
+  STRING_REF *ref = xmalloc (sizeof (*ref) + strlen (str));
+  ref->refcount = 1;
+  strcpy (ref->value, str);
+  return ref;
+}
+
+STRING_REF *
+string_ref_incr (STRING_REF *ref)
+{
+  if (ref)
+    ref->refcount++;
+  return ref;
+}
+
+void
+string_ref_free (STRING_REF *ref)
+{
+  if (ref && --ref->refcount == 0)
+    free (ref);
+}
+
 static int
-parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
-		    int mode, int flags, char *param_name)
+parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
+		      int mode, int flags, char const *string)
 {
   struct token *tok;
   int rc;
@@ -2172,6 +2198,7 @@ parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
       FILE *fp;
       char *p;
       char buf[MAXBUF];
+      STRING_REF *ref = NULL;
 
       if ((fp = fopen_include (tok->str)) == NULL)
 	{
@@ -2181,6 +2208,16 @@ parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
 
       cond = service_cond_append (top_cond, COND_BOOL);
       cond->bool.op = BOOL_OR;
+
+      switch (type)
+	{
+	case COND_QUERY_PARAM:
+	case COND_STRING_MATCH:
+	  ref = string_ref_alloc (string);
+	  break;
+	default:
+	  break;
+	}
 
       while ((p = fgets (buf, sizeof buf, fp)) != NULL)
 	{
@@ -2205,13 +2242,19 @@ parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
 	      conf_regcomp_error (rc, &hc->re, NULL);
 	      return PARSER_FAIL;
 	    }
-	  if (type == COND_QUERY_PARAM)
+	  switch (type)
 	    {
-	      regex_t re = hc->re;
-	      hc->qp.re = re;
-	      hc->qp.name = xstrdup (param_name);
+	    case COND_QUERY_PARAM:
+	    case COND_STRING_MATCH:
+	      memmove (&hc->sm.re, &hc->re, sizeof (hc->sm.re));
+	      hc->sm.string = string_ref_incr (ref);
+	      break;
+
+	    default:
+	      break;
 	    }
 	}
+      string_ref_free (ref);
       fclose (fp);
     }
   else
@@ -2224,16 +2267,36 @@ parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
 	  conf_regcomp_error (rc, &cond->re, NULL);
 	  return PARSER_FAIL;
 	}
-      if (type == COND_QUERY_PARAM)
+      switch (type)
 	{
-	  regex_t re = cond->re;
-	  cond->qp.re = re;
-	  cond->qp.name = xstrdup (param_name);
+	case COND_QUERY_PARAM:
+	case COND_STRING_MATCH:
+	  memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));
+	  cond->sm.string = string_ref_alloc (string);
+	  break;
+
+	default:
+	  break;
 	}
     }
   stringbuf_free (&sb);
 
   return PARSER_OK;
+}
+
+static int
+parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
+		    int mode, int flags, char const *string)
+{
+  int rc;
+  char *string_copy;
+  if (string)
+    string_copy = xstrdup (string);
+  else
+    string_copy = NULL;
+  rc = parse_cond_matcher_0 (top_cond, type, mode, flags, string_copy);
+  free (string_copy);
+  return rc;
 }
 
 static int
@@ -2277,12 +2340,35 @@ parse_cond_query_param_matcher (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = section_data;
   int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
   struct token *tok;
+  char *string;
+  int rc;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
+  string = xstrdup (tok->str);
+  rc = parse_cond_matcher (top_cond, COND_QUERY_PARAM, MATCH_RE, flags,
+			   string);
+  free (string);
+  return rc;
+}
 
-  return parse_cond_matcher (top_cond, COND_QUERY_PARAM, MATCH_RE, flags,
-			     tok->str);
+static int
+parse_cond_string_matcher (void *call_data, void *section_data)
+{
+  SERVICE_COND *top_cond = call_data;
+  POUND_DEFAULTS *dfl = section_data;
+  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  struct token *tok;
+  char *string;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  string = xstrdup (tok->str);
+  rc = parse_cond_matcher (top_cond, COND_STRING_MATCH, MATCH_RE, flags,
+			   string);
+  free (string);
+  return rc;
 }
 
 static int
@@ -2561,6 +2647,7 @@ static int parse_not_cond (void *call_data, void *section_data);
   { "QueryParam", parse_cond_query_param_matcher, data, off },	\
   { "Header", parse_cond_hdr_matcher, data, off },		\
   { "Host", parse_cond_host, data, off },			\
+  { "StringMatch", parse_cond_string_matcher, data, off },	\
   { "Match", parse_match, data, off },				\
   { "NOT", parse_not_cond, data, off },				\
     /* compatibility keywords */				\

@@ -496,11 +496,18 @@ enum service_cond_type
     COND_HDR,   /* Header match. */
     COND_HOST,  /* Special case od COND_HDR: matches the value of the
 		   Host: header */
+    COND_STRING_MATCH,/* String match. */
   };
 
-struct query_param_match
+typedef struct string_ref
 {
-  char *name;
+  unsigned refcount;
+  char value[1];
+} STRING_REF;
+
+struct string_match
+{
+  STRING_REF *string;
   regex_t re;
 };
 
@@ -513,7 +520,7 @@ typedef struct _service_cond
     regex_t re;
     struct bool_service_cond bool;
     struct _service_cond *cond;
-    struct query_param_match qp;
+    struct string_match sm; /* COND_QUERY_PARAM and COND_STRING_MATCH */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
