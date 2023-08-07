@@ -472,7 +472,10 @@ input_open (char const *filename, struct stat *st)
     }
   input->ino = st->st_ino;
   input->devno = st->st_dev;
-  input->locus.filename = pathname_alloc (include_dir, filename);
+  if (include_fd == AT_FDCWD)
+    input->locus.filename = xstrdup (filename);
+  else
+    input->locus.filename = pathname_alloc (include_dir, filename);
   input->locus.line = 1;
   input->locus.col = 0;
   return input;
