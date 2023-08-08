@@ -1409,13 +1409,13 @@ static struct method_def methods[] = {
 };
 
 static struct method_def *
-find_method (const char *str, int group)
+find_method (const char *str, int len)
 {
   struct method_def *m;
 
   for (m = methods; m->name; m++)
     {
-      if (strncasecmp (m->name, str, m->length) == 0)
+      if (len == m->length && strncasecmp (m->name, str, m->length) == 0)
 	return m;
     }
   return NULL;
