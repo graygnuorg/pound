@@ -411,6 +411,7 @@ close_include_dir (void)
     {
       close (include_fd);
       include_dir = NULL;
+      include_fd = AT_FDCWD;
     }
 }
 
