@@ -2100,7 +2100,11 @@ build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
 
     case MATCH_RE:
       if (pfx)
-	stringbuf_add_string (sb, pfx);
+	{
+	  stringbuf_add_string (sb, pfx);
+	  if (expr[0] == '^')
+	    expr++;
+	}
       stringbuf_add_string (sb, expr);
       break;
 

@@ -1515,6 +1515,8 @@ http_header_change (struct http_header *hdr, char const *text, int alloc)
     ctext = (char*)text;
   free (hdr->header);
   hdr->header = ctext;
+  free (hdr->value);
+  hdr->value = NULL;
   qualify_header (hdr);
   return 0;
 }
