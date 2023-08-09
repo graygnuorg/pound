@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 7, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 9, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -477,17 +477,45 @@ Using a \fB\-\fR (dash) for the facility name causes
 .B pound
 to log to stdout/stderr.
 .TP
+\fBLogFormat\fR "\fIname\fR" "\fIformat_def\fR"
+Define HTTP log format.  \fIName\fR is a string uniquely identifying
+this format.  \fIFormat_def\fR is the format string definition.  See
+below, section
+.BR "REQUEST LOGGING" ,
+for a detailed description.
+.TP
 \fBLogLevel\fR \fIn\fR
-Specify the logging level: 0 for no logging, 1 (default) for regular
-logging, 2 for extended logging (show chosen backend server as well),
-3 for Apache-like format (Combined Log Format with Virtual Host), 4
-(same as 3 but without the virtual host information) and 5 (same as 4
-but with information about the
+Specify the logging level using built-in format indices: 0 for no
+logging, 1 (default) for regular logging, 2 for extended logging (show
+chosen backend server as well), 3 for Apache-like format (Combined Log
+Format with Virtual Host), 4 (same as 3 but without the virtual host
+information) and 5 (same as 3 but with information about the
 .B Service
 and
 .B Backend
 used).
 This value can be overridden for specific listeners.
+.IP
+See
+below, section
+.BR "REQUEST LOGGING" ,
+for a detailed description.
+.TP
+\fBLogLevel\fR "\fIname\fR"
+Select a named format for logging HTTP requests.  \fIName\fR can
+be either one of five built-in format names
+.RB ( null ,
+.BR regular ,
+.BR extended ,
+.BR vhost_combined ,
+.BR combined ,
+or
+.BR detailed ),
+or a format name defined earlier via the
+.B LogFormat
+directive.  See section
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
 .TP
 \fBIgnoreCase\fR \fIbool\fR
 Ignore case when matching URLs (default: \fIfalse\fR). This value can be
@@ -818,10 +846,35 @@ to change the "Destination:" header in requests. The header is changed
 to point to the backend itself with the correct protocol. Default:
 \fIfalse\fR.
 .TP
-\fBLogLevel\fR \fIvalue\fR
-Override the global
+\fBLogLevel\fR \fIn\fR
+Log HTTP requests using built-in format \fIn\fR.  This statement
+configures logging specific for this listener, overriding the 
+global
 .B LogLevel
-value.
+setting.  See
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
+.TP
+\fBLogLevel\fR "\fIname\fR"
+Select a named format for logging HTTP requests.  \fIName\fR can
+be either one of five built-in format names
+.RB ( null ,
+.BR regular ,
+.BR extended ,
+.BR vhost_combined ,
+.BR combined ,
+or
+.BR detailed ),
+or a format name defined earlier via the
+.B LogFormat
+directive.
+.IP
+This statement configures logging specific for this listener,
+overriding the global
+.B LogLevel
+setting.  See section
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
 .TP
 \fBService\fR [ "\fIname\fR" ]
 This defines a private service (see below for service definition
@@ -1920,6 +1973,195 @@ Certificate serial number (decimal).
 .TP
 .B X\-SSL\-Certificate
 The full client certificate (PEM-format multi-line)
+.SH REQUEST LOGGING
+Logging of HTTP requests and responses is controlled by
+.B LogLevel
+directive.  This directive can appear either in global scope, in which
+case it affects all listeners defined below it, or in listener scope,
+in which case it affects only this listener, overriding the global
+setting.
+.PP
+Argument to the
+.B LogLevel
+directive can be either an integer number in range 0 through 5
+(inclusive), or a quoted string.  Numeric value identifies one of
+the
+.I built-in
+log formats, described later in this section.  String value refers
+either to a built-in format name, or to a user-defined format name.
+In the latter case, the named format must be defined earlier using the
+.B LogFormat
+statement.
+.SS Format specification
+The syntax of the
+.B LogFormat
+statement is:
+.PP
+.EX
+LogFormat "\fIname\fR" "\fIformat_string\fR"
+.EE
+.PP
+First argument, \fIname\fR, is a unique identifier for this format,
+which will be used later to refer to it.  \fIFormat_string\fR is
+a character string composed of ordinary characters (not \fB%\fR),
+which are copied unchanged to the resulting log message, and
+conversion specifications, each of which are replaced by a
+corresponding piece of information about the request or reply.
+.PP
+Conversion specifications are single characters prefixed with a
+percent sign.  Depending on the specification, an optional
+\fIconversion argument\fR in curly brackets can appear between
+\fB%\fR and conversion character.
+.PP
+The following conversion characters are defined:
+.TP
+.B %%
+Replaced with the percent sign.
+.TP
+.B %a
+Client IP address of the request.
+.TP
+.B %A
+Local IP address of the listener.
+.TP
+.B %B
+Size of response in bytes, excluding headers.
+.TP
+.B %b
+Same as \fBB\fR, but in \fICLF\fR format, i.e. a dash is used when
+response size is zero.
+.TP
+.B %D
+The time taken to serve the request, in microseconds.
+.TP
+.B %h
+Same as \fB%a\fR.
+.TP
+.B %H
+The request protocol.
+.TP
+.BI %{ VARNAME }i
+The contents of \fIVARNAME:\fR header line in the request.  Changes
+made by header modification directives affect this.
+.TP
+.BI %{ VARNAME }I
+Same as \fB%i\fR, except that if no such header is present in the
+request, a dash is substituted.
+.TP
+.B %m
+The request method.
+.TP
+.B %P
+Thread ID of the serving thread.
+.TP
+.B %q
+The query string prepended with a \fB?\fR if it exists, otherwise an
+empty string.
+.TP
+.B %r
+First line of request.
+.TP
+.B %R
+Backend identifier.
+.TP
+.B %S
+Service name.
+.TP
+.B %s
+Response status code.
+.TP
+.B %>s
+First line of the response.
+.TP
+.B %t
+Time the request was received, in the format
+.BR "[18/Sep/2011:19:18:28 -0400]" .
+The last number indicates the timezone offset from UTC.
+.TP
+.B %{format}t
+Time the request was received, in the format specified by the argument
+.RB ( strftime (3)).
+If the format starts with \fBbegin:\fR (default) the time is taken at
+the beginning of the request processing.  If it starts with \fRend:\fR
+it is the time after the response from the backend has been sent back
+to the requester.  In addition to
+.BR strftime (3)
+formats, the following specifications are recognized:
+.RS
+.RE
+.TP
+.B sec
+Number of seconds since the Epoch.
+.TP
+.B msec
+Number of milliseconds since the Epoch.
+.TP
+.B usec
+Number of microseconds since the Epoch.
+.TP
+.B msec_frac
+Millisecond fraction of the time.
+.TP
+.B usec_frac
+Microsecond fraction of the time.
+.RE
+.TP
+.B %T
+The time taken to process the request, in seconds.
+.TP
+.BI %{ UNIT }T
+The time taken to process the request, in a time unit given by
+\fIUNIT\fR.  Valid units are \fBms\fR for milliseconds, \fBus\fR for
+microseconds, \fBs\fR for seconds, and \fBf\fR for seconds with
+fractional part.  Using \fBs\fR gives the same result as \fB%T\fR
+without any format; using \fBus\fR gives the same result as \fB%D\fR.
+.TP
+.B %u
+Remote user if the request was authenticated.
+.TP
+.B %U
+The URL path requested.  This is affected by request modification
+directives.
+.TP
+.B %v
+The listener name.
+.SS Built-in formats
+There are five built-in formats.  These can be identified either by
+their numeric index in the format table, or by symbolic name.  The
+table below describes each built-in format using the format
+specification string:
+.TP
+.BR 0 ", " null
+No request logging at all.
+.TP
+.BR 1 ", " regular
+.EX
+"%a %r - %>s"
+.EE
+.TP
+.BR 2 ", " extended
+.EX
+"%a %r - %>s (%{Host}i/%S -> %R) %{f}T sec"
+.EE
+.TP
+.BR 3 ", " vhost_combined
+(Split in two lines for readability)
+.EX
+"%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
+\(rs\(dq%{User-Agent}i\(rs\(dq"
+.EE
+.TP
+.BR 4 ", " combined
+.EX
+"%a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs\(dq%{User-Agent}i\(rs\(dq"
+.EE
+.TP
+.BR 5 ", " detailed
+(Split in two lines for readability)
+.EX
+"%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
+\(rs\(dq%{User-Agent}\(rs\(dq (%S -> %R) %{f}T sec"
+.EE
 .SH SECURITY
 .PP
 In general,

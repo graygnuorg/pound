@@ -157,7 +157,11 @@ i_query (struct stringbuf *sb, struct http_log_instr *instr,
 {
   char const *query = NULL;
   http_request_get_query (&phttp->request, &query);
-  print_str (sb, query);
+  if (query)
+    {
+      stringbuf_add_char (sb, '?');
+      stringbuf_add_string (sb, query);
+    }
 }
 
 static void
