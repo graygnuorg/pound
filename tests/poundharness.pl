@@ -188,16 +188,20 @@ sub preproc {
 # Initial settings by $0
 Daemon 0
 LogFacility -
-LogLevel $log_level
 EOT
-;
+    ;
+	if ($log_level >= 0) {
+	    print $out "LogLevel $log_level\n";
+	}
     }
     my $be;
     while (<$in>) {
 	chomp;
 	if (/^\s*(?:#.)?$/) {
 	    ;
-	} elsif (/^\s*(Daemon|LogFacility|LogLevel)/i) {
+	} elsif (/^\s*(Daemon|LogFacility)/i) {
+	    $_ = "# Commented out: $_";
+	} elsif ($log_level >= 0 && /^\s*LogLevel/i) {
 	    $_ = "# Commented out: $_";
 	} elsif (/^(\s*)Listen(HTTPS?)/i) {
 	    unshift @state, ST_LISTENER;
@@ -1225,7 +1229,8 @@ I<SRC> defaults to F<pound.cfi>.
 
 =item B<-l>, B<--log-level=> I<N>
 
-Set B<pound> I<LogLevel> configuration parameter.
+Set B<pound> I<LogLevel> configuration parameter.  If I<N> is B<-1>,
+I<LogLevel> set in the configuration file is used.
 
 =item B<-s>, B<--statistics>
 

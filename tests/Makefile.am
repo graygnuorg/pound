@@ -83,6 +83,7 @@ TESTSUITE_AT = \
  incldir.at\
  inclnest.at\
  inclscope.at\
+ logfmt.at\
  loglevcomp.at\
  loglevrun.at\
  lstset.at\

@@ -628,11 +628,13 @@ typedef struct _pound_ctx
 typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 
 /* HTTP logger */
-typedef struct http_log_prog *HTTP_LOG_PROG;
+#define MAX_HTTP_LOG_FORMATS 32
 
-HTTP_LOG_PROG http_log_compile (char const *fmt,
-				void (*logfn) (void *, char const *, int),
-				void *logdata);
+int http_log_format_compile (char const *name, char const *fmt,
+			     void (*logfn) (void *, int, char const *, int),
+			     void *logdata);
+int http_log_format_find (char const *name);
+int http_log_format_check (int n);
 
 /* Additional listener options */
 #define HDROPT_NONE              0   /* Nothing special */
@@ -661,7 +663,7 @@ typedef struct _listener
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
-  HTTP_LOG_PROG log_prog;	/* log level for this listener */
+  int log_level;	        /* log level for this listener */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
   SERVICE_HEAD services;
   SLIST_ENTRY (_listener) next;

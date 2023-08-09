@@ -915,7 +915,7 @@ parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data,
 
 typedef struct
 {
-  HTTP_LOG_PROG log_prog;
+  int log_level;
   int facility;
   unsigned clnt_to;
   unsigned be_to;
@@ -3284,32 +3284,38 @@ parse_rewritelocation (void *call_data, void *section_data)
   return assign_int_range (call_data, 0, 2);
 }
 
-
-static char *traditional_log_format[] = {
-  /* 0 - not used */
-  "",
-  /* 1 - regular logging */
-  "%a %r - %>s",
-  /* 2 - extended logging (show chosen backend server as well) */
-  "%a %r - %>s (%{Host}i/%S -> %R) %{f}T sec",
-  /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
-  "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"",
-  /* 4 - same as 3 but without the virtual host information */
-  "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"",
-  /* 5 - same as 3 but with information about the Service and Backend used */
-  "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%S -> %R) %{f}T sec",
+struct canned_log_format
+{
+  char *name;
+  char *fmt;
 };
-static int max_traditional_log_format =
-  sizeof (traditional_log_format) / sizeof (traditional_log_format[0]) - 1;
+
+static struct canned_log_format canned_log_format[] = {
+  /* 0 - not used */
+  { "null", "" },
+  /* 1 - regular logging */
+  { "regular", "%a %r - %>s" },
+  /* 2 - extended logging (show chosen backend server as well) */
+  { "extended", "%a %r - %>s (%{Host}i/%S -> %R) %{f}T sec" },
+  /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
+  { "vhost_combined", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  /* 4 - same as 3 but without the virtual host information */
+  { "combined", "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  /* 5 - same as 3 but with information about the Service and Backend used */
+  { "detailed", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%S -> %R) %{f}T sec" },
+};
+static int max_canned_log_format =
+  sizeof (canned_log_format) / sizeof (canned_log_format[0]);
 
 struct log_format_data
 {
   struct locus_range *locus;
   int fn;
+  int fatal;
 };
 
 void
-log_format_diag (void *data, char const *msg, int off)
+log_format_diag (void *data, int fatal, char const *msg, int off)
 {
   struct log_format_data *ld = data;
   if (ld->fn == -1)
@@ -3323,25 +3329,48 @@ log_format_diag (void *data, char const *msg, int off)
     {
       conf_error_at_locus_range (ld->locus, "INTERNAL ERROR: error compiling built-in format %d", ld->fn);
       conf_error_at_locus_range (ld->locus, "%s: near %s", msg,
-				 traditional_log_format[ld->fn] + off);
+				 canned_log_format[ld->fn].fmt + off);
       conf_error_at_locus_range (ld->locus, "please report");
+    }
+  ld->fatal = fatal;
+}
+
+static void
+compile_canned_formats (void)
+{
+  struct log_format_data ld;
+  int i;
+
+  ld.locus = NULL;
+  ld.fatal = 0;
+
+  for (i = 0; i < max_canned_log_format; i++)
+    {
+      ld.fn = i;
+      if (http_log_format_compile (canned_log_format[i].name,
+				   canned_log_format[i].fmt,
+				   log_format_diag, &ld) == -1 || ld.fatal)
+	exit (1);
     }
 }
 
 static int
 parse_log_level (void *call_data, void *section_data)
 {
-  HTTP_LOG_PROG prog, *prog_ptr = call_data;
-  struct log_format_data ld;
+  int log_level;
+  int *log_level_ptr = call_data;
   struct token *tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_NUMBER));
   if (!tok)
     return PARSER_FAIL;
 
-  ld.locus = &tok->locus;
   if (tok->type == T_STRING)
     {
-      ld.fn = -1;
-      prog = http_log_compile (tok->str, log_format_diag, &ld);
+      log_level = http_log_format_find (tok->str);
+      if (log_level == -1)
+	{
+	  conf_error ("undefined format: %s", tok->str);
+	  return PARSER_FAIL;
+	}
     }
   else
     {
@@ -3350,16 +3379,50 @@ parse_log_level (void *call_data, void *section_data)
 
       errno = 0;
       n = strtol (tok->str, &p, 10);
-      if (errno || *p || n < 0 || n > max_traditional_log_format)
+      if (errno || *p || n < 0 || n > INT_MAX)
 	{
 	  conf_error ("%s", "unsupported log level number");
 	  return PARSER_FAIL;
 	}
-      ld.fn = n;
-      prog = http_log_compile (traditional_log_format[n], log_format_diag, &ld);
+      if (http_log_format_check (n))
+	{
+	  conf_error ("%s", "undefined log level");
+	  return PARSER_FAIL;
+	}
+      log_level = n;
     }
-  *prog_ptr = prog;
+  *log_level_ptr = log_level;
   return PARSER_OK;
+}
+
+static int
+parse_log_format (void *call_data, void *section_data)
+{
+  struct token *tok;
+  char *name;
+  struct log_format_data ld;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  name = strdup (tok->str);
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    {
+      free (name);
+      return PARSER_FAIL;
+    }
+
+  ld.locus = &tok->locus;
+  ld.fn = -1;
+  ld.fatal = 0;
+
+  if (http_log_format_compile (name, tok->str, log_format_diag, &ld) == -1 ||
+      ld.fatal)
+    rc = PARSER_FAIL;
+  else
+    rc = PARSER_OK;
+  free (name);
+  return rc;
 }
 
 static int
@@ -3453,7 +3516,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_prog) },
+  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { NULL }
@@ -3470,7 +3533,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
-  lst->log_prog = dfl->log_prog;
+  lst->log_level = dfl->log_level;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   SLIST_INIT (&lst->rewrite);
@@ -4012,7 +4075,7 @@ static PARSER_TABLE https_parsetab[] = {
 
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_prog) },
+  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },
@@ -4245,7 +4308,8 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "WorkerIdleTimeout", assign_timeout, &worker_idle_timeout },
   { "Grace", assign_timeout, &grace },
   { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },
-  { "LogLevel", parse_log_level, NULL, offsetof (POUND_DEFAULTS, log_prog) },
+  { "LogLevel", parse_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
+  { "LogFormat", parse_log_format },
   { "Alive", assign_timeout, &alive_to },
   { "Client", assign_timeout, NULL, offsetof (POUND_DEFAULTS, clnt_to) },
   { "TimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_to) },
@@ -4273,6 +4337,7 @@ parse_config_file (char const *file)
 {
   int res = -1;
   POUND_DEFAULTS pound_defaults = {
+    .log_level = 1,
     .facility = LOG_DAEMON,
     .clnt_to = 10,
     .be_to = 15,
@@ -4282,12 +4347,8 @@ parse_config_file (char const *file)
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
     .balancer = BALANCER_RANDOM
   };
-  struct log_format_data ld;
 
-  ld.fn = 1;
-  ld.locus = NULL;
-  pound_defaults.log_prog = http_log_compile (traditional_log_format[ld.fn],
-					      log_format_diag, &ld);
+  compile_canned_formats ();
   if (push_input (file) == 0)
     {
       open_include_dir (include_dir);
