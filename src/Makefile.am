@@ -28,6 +28,7 @@ sbin_PROGRAMS=pound
 pound_SOURCES=\
  config.c\
  http.c\
+ log.c\
  metrics.c\
  pound.c\
  svc.c

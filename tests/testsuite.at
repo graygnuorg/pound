@@ -24,6 +24,8 @@ AT_CHECK([pound -c -Wno-dns -Wno-include-dir -f pound.cfg],m4_shift($@))])
 
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
 
+m4_pushdef([HARNESS_OPTIONS])
+
 ## PT_CHECK(CONFIG, SCRIPT)
 m4_define([PT_CHECK],
 [AT_CHECK([
@@ -41,14 +43,16 @@ End],[$1])
 AT_DATA([input],
 [$2
 ])
-perl $HARNESS --transcript xscript.log input
+perl $HARNESS HARNESS_OPTIONS --transcript xscript.log input
 ],
 m4_shift2($@))])
 
 AT_TESTED([pound])
 AT_INIT
 m4_include([config.at])
+m4_include([loglevcomp.at])
 m4_include([echo.at])
+m4_include([loglevrun.at])
 m4_include([xhttp.at])
 m4_include([checkurl.at])
 m4_include([errfile.at])

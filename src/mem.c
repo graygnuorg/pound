@@ -238,3 +238,33 @@ stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
   va_end (ap);
   return rc;
 }
+
+int
+stringbuf_strftime (struct stringbuf *sb, char const *fmt, const struct tm *tm)
+{
+  for (;;)
+    {
+      size_t bufsize = sb->size - sb->len;
+      size_t n;
+
+      n = strftime (sb->base + sb->len, bufsize, fmt, tm);
+      if (n > 0)
+	{
+	  sb->len += n;
+	  break;
+	}
+      else
+	{
+	  char *p = mem2nrealloc (sb->base, &sb->size, 1);
+	  if (p == NULL)
+	    {
+	      if (sb->nomem)
+		sb->nomem ();
+	      sb->err = 1;
+	      return -1;
+	    }
+	  sb->base = p;
+	}
+    }
+  return 0;
+}

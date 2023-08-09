@@ -278,8 +278,6 @@ submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
   return res;
 }
 
-static int http_request_get_url (struct http_request *, char const **);
-static int http_request_get_query (struct http_request *, char const **);
 static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
 					 struct query_param **);
@@ -1420,6 +1418,14 @@ find_method (const char *str, int len)
     }
   return NULL;
 }
+
+char const *
+method_name (int meth)
+{
+  if (meth < 0 || meth >= sizeof (methods) / sizeof (methods[0]))
+    return "BAD";
+  return methods[meth].name;
+}
 
 static int
 qualify_header (struct http_header *hdr)
@@ -1808,7 +1814,7 @@ http_request_get_request_line (struct http_request *req, char const **str)
   return 0;
 }
 
-static char const *
+char const *
 http_request_orig_line (struct http_request *req)
 {
   if (!req)
@@ -1817,7 +1823,7 @@ http_request_orig_line (struct http_request *req)
 	  req->request ? req->request : "";
 }
 
-static int
+int
 http_request_get_url (struct http_request *req, char const **retval)
 {
   *retval = req->url;
@@ -1871,7 +1877,7 @@ http_request_set_path (struct http_request *req, char const *path)
   return http_request_rebuild_url (req);
 }
 
-static int
+int
 http_request_get_query (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
@@ -2069,12 +2075,6 @@ http_request_set_query_param (struct http_request *req, char const *name,
     }
 
   return http_request_rebuild_query (req);
-}
-
-static char const *
-http_request_user_name (struct http_request *req)
-{
-  return (req && req->user) ? req->user : "-";
 }
 
 static char const *
@@ -2445,59 +2445,7 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
   return res;
 }
 
-/*
- * HTTP Logging
- */
-
-static char *
-anon_addr2str (char *buf, size_t size, struct addrinfo const *from_host)
-{
-  if (from_host->ai_family == AF_UNIX)
-    {
-      strncpy (buf, "socket", size);
-    }
-  else
-    {
-      addr2str (buf, size, from_host, 1);
-      if (anonymise)
-	{
-	  char *last;
-
-	  if ((last = strrchr (buf, '.')) != NULL
-	      || (last = strrchr (buf, ':')) != NULL)
-	    strcpy (++last, "0");
-	}
-    }
-  return buf;
-}
-
 #define LOG_TIME_SIZE   32
-
-/*
- * Apache log-file-style time format
- */
-static char *
-log_time_str (char *res, size_t size, struct timespec const *ts)
-{
-  struct tm tm;
-  strftime (res, size, "%d/%b/%Y:%H:%M:%S %z", localtime_r (&ts->tv_sec, &tm));
-  return res;
-}
-
-#define LOG_BYTES_SIZE  32
-
-/*
- * Apache log-file-style number format
- */
-static char *
-log_bytes (char *res, size_t size, CONTENT_LENGTH cnt)
-{
-  if (cnt > 0)
-    snprintf (res, size, "%"PRICLEN, cnt);
-  else
-    strcpy (res, "-");
-  return res;
-}
 
 static char *
 log_duration (char *buf, size_t size, struct timespec const *start)
@@ -2507,181 +2455,6 @@ log_duration (char *buf, size_t size, struct timespec const *start)
   diff = timespec_sub (&end, start);
   snprintf (buf, size, "%ld.%03ld", diff.tv_sec, diff.tv_nsec / 1000000);
   return buf;
-}
-
-static void
-http_log_0 (POUND_HTTP *phttp)
-{
-  /* nothing */
-}
-
-static void
-http_log_1 (POUND_HTTP *phttp)
-{
-  char buf[MAX_ADDR_BUFSIZE];
-  logmsg (LOG_INFO, "%s %s - %s",
-	  anon_addr2str (buf, sizeof (buf), &phttp->from_host),
-	  http_request_orig_line (&phttp->request),
-	  http_request_orig_line (&phttp->response));
-}
-
-static char *
-be_service_name (BACKEND *be)
-{
-  switch (be->be_type)
-    {
-    case BE_BACKEND:
-      if (be->service->name)
-	return be->service->name;
-      break;
-    case BE_REDIRECT:
-      return "(redirect)";
-    case BE_ACME:
-      return "(acme)";
-    case BE_CONTROL:
-      return "(control)";
-    case BE_ERROR:
-      return "(error)";
-    case BE_METRICS:
-      return "(metrics)";
-    }
-  return "-";
-}
-
-static void
-http_log_2 (POUND_HTTP *phttp)
-{
-  char caddr[MAX_ADDR_BUFSIZE];
-  char baddr[MAX_ADDR_BUFSIZE];
-  char timebuf[LOG_TIME_SIZE];
-  char const *v_host = http_request_host (&phttp->request);
-
-  if (v_host)
-    logmsg (LOG_INFO,
-	    "%s %s - %s (%s/%s -> %s) %s sec",
-	    anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	    http_request_orig_line (&phttp->request),
-	    http_request_orig_line (&phttp->response),
-	    v_host, be_service_name (phttp->backend),
-	    str_be (baddr, sizeof (baddr), phttp->backend),
-	    log_duration (timebuf, sizeof (timebuf), &phttp->start_req));
-  else
-    logmsg (LOG_INFO,
-	    "%s %s - %s (%s -> %s) %s sec",
-	    anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	    http_request_orig_line (&phttp->request),
-	    http_request_orig_line (&phttp->response),
-	    be_service_name (phttp->backend),
-	    str_be (baddr, sizeof (baddr), phttp->backend),
-	    log_duration (timebuf, sizeof (timebuf), &phttp->start_req));
-}
-
-static void
-http_log_3 (POUND_HTTP *phttp)
-{
-  char caddr[MAX_ADDR_BUFSIZE];
-  char timebuf[LOG_TIME_SIZE];
-  char bytebuf[LOG_BYTES_SIZE];
-  struct http_request *req = &phttp->request;
-  char const *v_host = http_request_host (req);
-  char *referer = NULL;
-  char *u_agent = NULL;
-  struct http_header *hdr;
-
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_REFERER)) != NULL)
-    referer = http_header_get_value (hdr);
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_USER_AGENT)) != NULL)
-    u_agent = http_header_get_value (hdr);
-
-  logmsg (LOG_INFO,
-	  "%s %s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\"",
-	  v_host ? v_host : "-",
-	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	  http_request_user_name (req),
-	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_orig_line (req),
-	  phttp->response_code,
-	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
-	  referer ? referer : "",
-	  u_agent ? u_agent : "");
-}
-
-static void
-http_log_4 (POUND_HTTP *phttp)
-{
-  struct http_request *req = &phttp->request;
-  char caddr[MAX_ADDR_BUFSIZE];
-  char timebuf[LOG_TIME_SIZE];
-  char bytebuf[LOG_BYTES_SIZE];
-  char *referer = NULL;
-  char *u_agent = NULL;
-  struct http_header *hdr;
-
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_REFERER)) != NULL)
-    referer = http_header_get_value (hdr);
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_USER_AGENT)) != NULL)
-    u_agent = http_header_get_value (hdr);
-
-  logmsg (LOG_INFO,
-	  "%s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\"",
-	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	  http_request_user_name (req),
-	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_orig_line (req),
-	  phttp->response_code,
-	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
-	  referer ? referer : "",
-	  u_agent ? u_agent : "");
-}
-
-static void
-http_log_5 (POUND_HTTP *phttp)
-{
-  struct http_request *req = &phttp->request;
-  char caddr[MAX_ADDR_BUFSIZE];
-  char baddr[MAX_ADDR_BUFSIZE];
-  char timebuf[LOG_TIME_SIZE];
-  char dbuf[LOG_TIME_SIZE];
-  char bytebuf[LOG_BYTES_SIZE];
-  char const *v_host = http_request_host (req);
-  char *referer = NULL;
-  char *u_agent = NULL;
-  struct http_header *hdr;
-
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_REFERER)) != NULL)
-    referer = http_header_get_value (hdr);
-  if ((hdr = http_header_list_locate (&req->headers, HEADER_USER_AGENT)) != NULL)
-    u_agent = http_header_get_value (hdr);
-
-  logmsg (LOG_INFO,
-	  "%s %s - %s [%s] \"%s\" %03d %s \"%s\" \"%s\" (%s -> %s) %s sec",
-	  v_host ? v_host : "-",
-	  anon_addr2str (caddr, sizeof (caddr), &phttp->from_host),
-	  http_request_user_name (req),
-	  log_time_str (timebuf, sizeof (timebuf), &phttp->start_req),
-	  http_request_orig_line (req),
-	  phttp->response_code,
-	  log_bytes (bytebuf, sizeof (bytebuf), phttp->res_bytes),
-	  referer ? referer : "",
-	  u_agent ? u_agent : "",
-	  be_service_name (phttp->backend),
-	  str_be (baddr, sizeof (baddr), phttp->backend),
-	  log_duration (dbuf, sizeof (dbuf), &phttp->start_req));
-}
-
-static void (*http_logger[]) (POUND_HTTP *phttp) = {
-  http_log_0,
-  http_log_1,
-  http_log_2,
-  http_log_3,
-  http_log_4,
-  http_log_5
-};
-
-static void
-http_log (POUND_HTTP *phttp)
-{
-  http_logger[phttp->lstn->log_level] (phttp);
 }
 
 static int
@@ -3857,14 +3630,14 @@ select_backend (POUND_HTTP *phttp)
 }
 
 static void
-backend_update_stats (BACKEND *be, struct timespec const *start)
+backend_update_stats (BACKEND *be, struct timespec const *start,
+		      struct timespec const *end)
 {
-  struct timespec diff, end;
+  struct timespec diff;
   double t;
 
-  clock_gettime (CLOCK_REALTIME, &end);
   pthread_mutex_lock (&be->mut);
-  diff = timespec_sub (&end, start);
+  diff = timespec_sub (end, start);
   t = (double) diff.tv_sec * 1e9 + diff.tv_nsec;
   be->avgtime = (be->numreq * be->avgtime + t) / (be->numreq + 1);
   be->avgsqtime = (be->numreq * be->avgsqtime + t*t) / (be->numreq + 1);
@@ -4099,13 +3872,11 @@ do_http (POUND_HTTP *phttp)
 	       * FIXME: This should not happen.  See the handling of
 	       * HEADER_ILLEGAL in http_header_list_append.
 	       */
-	      if (phttp->lstn->log_level > 0)
-		{
-		  logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
-			  POUND_TID (),
-			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
-			  hdr->header);
-		}
+	      logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
+		      POUND_TID (),
+		      addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
+		      hdr->header);
+
 	      http_header_list_remove (&phttp->request.headers, hdr);
 	      break;
 
@@ -4221,8 +3992,9 @@ do_http (POUND_HTTP *phttp)
 	  break;
 	}
 
+      clock_gettime (CLOCK_REALTIME, &phttp->end_req);
       if (enable_backend_stats)
-	backend_update_stats (phttp->backend, &be_start);
+	backend_update_stats (phttp->backend, &be_start, &phttp->end_req);
 
       if (res == -1)
 	break;

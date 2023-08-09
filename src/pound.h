@@ -199,6 +199,8 @@ enum
     METH_CONNECT,
   };
 
+char const *method_name (int meth);
+
 /* HTTP errors */
 enum
   {
@@ -625,6 +627,13 @@ typedef struct _pound_ctx
 
 typedef SLIST_HEAD (,_pound_ctx) POUND_CTX_HEAD;
 
+/* HTTP logger */
+typedef struct http_log_prog *HTTP_LOG_PROG;
+
+HTTP_LOG_PROG http_log_compile (char const *fmt,
+				void (*logfn) (void *, char const *, int),
+				void *logdata);
+
 /* Additional listener options */
 #define HDROPT_NONE              0   /* Nothing special */
 #define HDROPT_FORWARDED_HEADERS 0x1 /* Add X-Forwarded headers */
@@ -652,7 +661,7 @@ typedef struct _listener
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
-  int log_level;		/* log level for this listener */
+  HTTP_LOG_PROG log_prog;	/* log level for this listener */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
   SERVICE_HEAD services;
   SLIST_ENTRY (_listener) next;
@@ -747,6 +756,7 @@ typedef struct _pound_http
   struct http_request response;
 
   struct timespec start_req; /* Time when original request was received */
+  struct timespec end_req;   /* Time after the response was sent */
 
   int response_code;
 
@@ -775,6 +785,8 @@ typedef struct
   int backend;
   char key[KEY_SIZE + 1];
 } CTRL_CMD;
+
+void http_log (POUND_HTTP *phttp);
 
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
@@ -907,6 +919,8 @@ int stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap);
 int stringbuf_printf (struct stringbuf *sb, char const *fmt, ...)
   ATTR_PRINTFLIKE(2,3);
 char *stringbuf_set (struct stringbuf *sb, int c, size_t n);
+int stringbuf_strftime (struct stringbuf *sb, char const *fmt,
+			const struct tm *tm);
 
 static inline int
 stringbuf_err (struct stringbuf *sb)
@@ -1025,9 +1039,12 @@ enum
     RETRIEVE_ERROR = -1
   };
 
+int http_request_get_url (struct http_request *, char const **);
+int http_request_get_query (struct http_request *, char const **);
 int http_request_get_path (struct http_request *req, char const **retval);
 int http_request_get_query_param_value (struct http_request *req,
 					char const *name,
 					char const **retval);
+char const *http_request_orig_line (struct http_request *req);
 
 void service_lb_init (SERVICE *svc);
