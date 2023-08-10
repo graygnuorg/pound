@@ -1637,6 +1637,12 @@ parse_acl_ref (ACL **ret_acl)
     }
   return PARSER_OK;
 }
+
+static int
+assign_acl (void *call_data, void *section_data)
+{
+  return parse_acl_ref (call_data);
+}
 
 static int
 parse_ECDHCurve (void *call_data, void *section_data)
@@ -2940,6 +2946,8 @@ static PARSER_TABLE service_parsetab[] = {
   { "Metrics", parse_metrics, NULL, offsetof (SERVICE, backends) },
   { "Session", parse_session },
   { "Balancer", parse_balancer, NULL, offsetof (SERVICE, balancer) },
+  { "ForwardedHeader", assign_string, NULL, offsetof (SERVICE, forwarded_header) },
+  { "TrustedIP", assign_acl, NULL, offsetof (SERVICE, trusted_ips) },
   { NULL }
 };
 
@@ -3514,12 +3522,15 @@ static PARSER_TABLE http_parsetab[] = {
   { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
   { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
   { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
-  { NULL }
+  { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
+  { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
+{ NULL }
 };
 
 static LISTENER *
@@ -4076,6 +4087,8 @@ static PARSER_TABLE https_parsetab[] = {
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
+  { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
+  { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
   { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },
@@ -4329,6 +4342,8 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "ACL", parse_named_acl, NULL },
   { "PidFile", assign_string, &pid_name },
   { "BackendStats", assign_bool, &enable_backend_stats },
+  { "ForwardedHeader", assign_string, &forwarded_header },
+  { "TrustedIP", assign_acl, &trusted_ips },
   { NULL }
 };
 

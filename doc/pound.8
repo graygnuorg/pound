@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 9, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 10, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -517,6 +517,51 @@ directive.  See section
 .BR "REQUEST LOGGING" ,
 for a detailed discussion.
 .TP
+\fBForwardedHeader\fR \fIname\fR
+Defines the name of the HTTP header that carries the list of proxies
+the request has passed through.  It is used to report the originator
+IP address when logging.  See the description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" .
+The default is
+.BR X\-Forwarded\-For .
+.TP
+.B TrustedIP
+Defines a list of
+.I trusted proxy
+IP addresses, which is used to determine the originator IP.  See the
+description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
+.IP
+This statement is a special form of \fBACL\fR statement, described
+below.  It can appear as a \fIsection\fR or \fIdirective\fR.  When
+used as a section, it is followed by a list of one or more CIDRs
+each appearing on a separate line.  The \fBEnd\fR keyword terminates
+the statement, e.g.:
+.IP
+.RS
+.EX
+TrustedIP
+  "127.0.0.1/8"
+  "10.16.0.0/16"
+End
+.EE
+.RE
+.IP
+In directive form, this statement takes single argument, the name of
+an access control list defined earlier using the \fBACL\fR statement,
+e.g.
+.IP
+.RS
+.EX
+TrustedIP "proxy_addresses"
+.EE
+.RE
+.TP
 \fBIgnoreCase\fR \fIbool\fR
 Ignore case when matching URLs (default: \fIfalse\fR). This value can be
 overridden for specific services.
@@ -848,7 +893,7 @@ to point to the backend itself with the correct protocol. Default:
 .TP
 \fBLogLevel\fR \fIn\fR
 Log HTTP requests using built-in format \fIn\fR.  This statement
-configures logging specific for this listener, overriding the 
+configures logging specific for this listener, overriding the
 global
 .B LogLevel
 setting.  See
@@ -875,6 +920,32 @@ overriding the global
 setting.  See section
 .BR "REQUEST LOGGING" ,
 for a detailed discussion.
+.TP
+\fBForwardedHeader\fR \fIname\fR
+Defines the name of the HTTP header that carries the list of proxies
+the request has passed through.  It is used to report the originator
+IP address when logging.  See the description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" .
+This statement overrides the \fBForwardedHeader\fR directive from the
+global scope.
+.IP
+The default is
+.BR X\-Forwarded\-For .
+.TP
+.B TrustedIP
+Defines a list of
+.I trusted proxy
+IP addresses, which is used to determine the originator IP.  See the
+description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
+.IP
+This statement overrides the \fBTrustedIP\fR directive from the
+global scope.
 .TP
 \fBService\fR [ "\fIname\fR" ]
 This defines a private service (see below for service definition
@@ -1185,7 +1256,8 @@ All configuration directives enclosed between
 and
 .B End
 are specific to a single service. They can be subdivided into two
-categories: \fIservice matching directives\fR and \fIbackend definitions\fR.
+categories: \fIservice matching directives\fR and \fIbackend
+definitions\fR.
 .SS Service Matching Directives
 These directives determine whether a particular request should be
 handled by this service.  When a request arrives, each service is
@@ -1541,6 +1613,32 @@ Start
 with this service disabled (\fItrue\fR) or enabled (\fIfalse\fR). If
 started as disabled, the service can be later enabled with
 .BR poundctl (8).
+.TP
+\fBForwardedHeader\fR \fIname\fR
+Defines the name of the HTTP header that carries the list of proxies
+the request has passed through.  It is used to report the originator
+IP address when logging.  See the description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" .
+This statement overrides the \fBForwardedHeader\fR directive from the
+listener scope.
+.IP
+The default is
+.BR X\-Forwarded\-For .
+.TP
+.B TrustedIP
+Defines a list of
+.I trusted proxy
+IP addresses, which is used to determine the originator IP.  See the
+description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" ,
+for a detailed discussion.
+.IP
+This statement overrides the \fBTrustedIP\fR directive from the
+listener scope.
 .SH "ACME"
 This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see
@@ -2019,7 +2117,51 @@ The following conversion characters are defined:
 Replaced with the percent sign.
 .TP
 .B %a
-Client IP address of the request.
+Originator IP address of the request.  If the request contains
+the \fBX\-Forwarded\-For\fR header and \fBTrustedIP\fR ACL is
+defined, the value of the header is consulted to obtain the IP
+address.  The value must be a comma-delimited list of intermediate
+useragent IP addresses.  To determine the actual useragent IP, the
+list is traversed from right to left, until an IP is found that is not
+listed in \fBTrustedIP\fR ACL.
+.IP
+If \fBX\-Forwarded\-For\fR header is not present, or \fBTrustedIP\fR
+is not defined, or the above algorithm does not return an IP address,
+\fB%a\fR expands to the actual remote IP address the request came from
+(same as \fB%a\fR).
+.IP
+The \fBTrustedIP\fR ACL can be defined in global scope, or in
+\fBListenHTTP\fR (\fBListenHTTPS\fR) section, or in \fBService\fR
+section.  Most-specific ACL overrides least-specific ones, that is
+\fBTrustedIP\fR defined in \fBService\fR will be used, if it is
+defined.  If not, the one defined in listener will be used, etc.
+The syntax of the \fBTrustedIP\fR statement is the same as that of
+\fBACL\fR, i.e.
+.IP
+.RS
+.EX
+TrustedIP "\fIname\fR"
+.EE
+.RE
+.IP
+refers to the named ACL \fIname\fR (which must be defined earlier),
+and
+.IP
+.RS
+.EX
+TrustedIP
+  "\fICIDR0\fR"
+  "\fICIDR1\fR"
+  ...
+End
+.EE
+.RE
+.IP
+defines the list of trusted IPs in place.
+.IP
+\fBForwardedHeader\fR statement defines the name of the header to use
+instead of \fBX\-Forwarded\-For\fR.  As \fBTrustedIP\fR, this
+statement can appear in global, listener, or in service scope.
 .TP
 .B %A
 Local IP address of the listener.
@@ -2035,7 +2177,7 @@ response size is zero.
 The time taken to serve the request, in microseconds.
 .TP
 .B %h
-Same as \fB%a\fR.
+Client IP address of the request.
 .TP
 .B %H
 The request protocol.

@@ -47,6 +47,9 @@ regex_t HEADER,			/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
   LOCATION;			/* the host we are redirected to */
 
+char *forwarded_header;         /* "forwarded" header name */
+ACL *trusted_ips;               /* Trusted IP addresses */
+
 #ifndef  SOL_TCP
 /* for systems without the definition */
 int SOL_TCP;
@@ -362,6 +365,7 @@ pound_http_destroy (POUND_HTTP *arg)
 {
   free (arg->from_host.ai_addr);
 
+  free (arg->orig_forwarded_header);
   http_request_free (&arg->request);
   http_request_free (&arg->response);
 

@@ -3960,6 +3960,8 @@ do_http (POUND_HTTP *phttp)
       phttp->res_bytes = 0;
       http_request_free (&phttp->response);
 
+      save_forwarded_header (phttp);
+
       clock_gettime (CLOCK_REALTIME, &be_start);
       switch (phttp->backend->be_type)
 	{

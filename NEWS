@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-09
+Pound -- history of user-visible changes. 2023-08-10
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -45,6 +45,35 @@ So, instead of
 one may write
 
   LogLevel "vhost_combined"
+
+* New statements: ForwardedHeader and TrustedIP
+
+These statements control the how the %h log format conversion
+specifier works (see LogFormat, above).
+
+  ForwardedHeader "name"
+    Defines the name of the header that carries the list of
+    proxies the request has passed through.  It is used to
+    report the originator IP address when logging.
+
+    The default is "X-Forwarded-For".  This statement can be
+    used in global, listener, and service scope.
+
+  TrustedIP
+    Defines a list of trusted proxy IP addresses, which is used to
+    determine the originator IP.  This statement is a special form
+    of the ACL statement and, as the latter, it can appear in two
+    forms: directive and section.
+
+    In directive form, it takes a single argument referring to a
+    named access control list, which must have been defined previously
+    using the ACL statement.
+
+    In section form, it is followed by a list of one or more CIDRs
+    each appearing on a separate line.  The End directive on a
+    separate line terminates the statement.
+
+    This statement can be used in global, listener, and service scope.
 
 * New request matching directive: StringMatch
 

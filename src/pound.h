@@ -611,6 +611,9 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+  /* Logging */
+  char *forwarded_header;       /* "forwarded" header name */
+  ACL *trusted_ips;             /* Trusted IP addresses */
   SLIST_ENTRY (_service) next;
 } SERVICE;
 
@@ -664,6 +667,8 @@ typedef struct _listener
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
   int log_level;	        /* log level for this listener */
+  char *forwarded_header;       /* "forwarded" header name */
+  ACL *trusted_ips;             /* Trusted IP addresses */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
   SERVICE_HEAD services;
   SLIST_ENTRY (_listener) next;
@@ -760,6 +765,7 @@ typedef struct _pound_http
   struct timespec start_req; /* Time when original request was received */
   struct timespec end_req;   /* Time after the response was sent */
 
+  char *orig_forwarded_header; /* Original value of forwarded header */
   int response_code;
 
   CONTENT_LENGTH res_bytes;
@@ -788,6 +794,7 @@ typedef struct
   char key[KEY_SIZE + 1];
 } CTRL_CMD;
 
+void save_forwarded_header (POUND_HTTP *phttp);
 void http_log (POUND_HTTP *phttp);
 
 /* add a request to the queue */

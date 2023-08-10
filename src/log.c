@@ -83,24 +83,26 @@ i_print (struct stringbuf *sb, struct http_log_instr *instr,
 }
 
 static char *
+anon_ip (char *buf)
+{
+  if (anonymise)
+    {
+      char *last;
+
+      if ((last = strrchr (buf, '.')) != NULL
+	  || (last = strrchr (buf, ':')) != NULL)
+	strcpy (++last, "0");
+    }
+  return buf;
+}
+
+static char *
 anon_addr2str (char *buf, size_t size, struct addrinfo const *from_host)
 {
   if (from_host->ai_family == AF_UNIX)
-    {
-      strncpy (buf, "socket", size);
-    }
+    strncpy (buf, "socket", size);
   else
-    {
-      addr2str (buf, size, from_host, 1);
-      if (anonymise)
-	{
-	  char *last;
-
-	  if ((last = strrchr (buf, '.')) != NULL
-	      || (last = strrchr (buf, ':')) != NULL)
-	    strcpy (++last, "0");
-	}
-    }
+    anon_ip (addr2str (buf, size, from_host, 1));
   return buf;
 }
 
@@ -110,6 +112,152 @@ i_remote_ip (struct stringbuf *sb, struct http_log_instr *instr,
 {
   char caddr[MAX_ADDR_BUFSIZE];
   print_str (sb, anon_addr2str (caddr, sizeof (caddr), &phttp->from_host));
+}
+
+static int
+acl_match_ip (ACL *acl, char const *ipstr)
+{
+  struct addrinfo hints, *res, *ap;
+
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = PF_UNSPEC;
+  hints.ai_flags = AI_NUMERICHOST;
+
+  if (getaddrinfo (ipstr, NULL, &hints, &res) == 0)
+    {
+      int rc = 0;
+      for (ap = res; ap; ap = ap->ai_next)
+	{
+	  if ((rc = acl_match (acl, ap->ai_addr) == 0))
+	    break;
+	}
+      freeaddrinfo (res);
+      return rc;
+    }
+  return -1;
+}
+
+static char *
+scan_forwarded_header (char const *hdr, ACL *acl)
+{
+  char const *end;
+  char *buf = NULL;
+  size_t bufsize = 0;
+
+  if (!hdr || !acl)
+    return NULL;
+
+  end = hdr + strlen (hdr);
+  while (end > hdr)
+    {
+      char const *p;
+      size_t len, i, j;
+
+      for (p = end - 1; p > hdr && *p != ','; p--)
+	;
+      len = end - p;
+      if (len + 1 > bufsize)
+	{
+	  char *newbuf = realloc (buf, len + 1);
+	  if (newbuf)
+	    {
+	      buf = newbuf;
+	      bufsize = len + 1;
+	    }
+	  else
+	    {
+	      free (buf);
+	      return NULL;
+	    }
+	}
+
+      i = 0;
+      j = 0;
+      if (*p == ',')
+	j++;
+      while (j < len && isspace (p[j]))
+	j++;
+      while (j < len)
+	{
+	  if (isspace (p[j]))
+	    break;
+	  buf[i++] = p[j++];
+	}
+      buf[i] = 0;
+
+      switch (acl_match_ip (acl, buf))
+	{
+	case 0:
+	  return buf;
+
+	case 1:
+	  break;
+
+	default:
+	  goto end;
+	}
+
+      end = p;
+    }
+ end:
+  free (buf);
+  return NULL;
+}
+
+static char const *
+get_forwarded_header_name (POUND_HTTP *phttp)
+{
+  if (phttp->svc->forwarded_header)
+    return phttp->svc->forwarded_header;
+  if (phttp->lstn->forwarded_header)
+    return phttp->lstn->forwarded_header;
+  if (forwarded_header)
+    return forwarded_header;
+  return DEFAULT_FORWARDED_HEADER;
+}
+
+static ACL *
+get_trusted_ips (POUND_HTTP *phttp)
+{
+  if (phttp->svc->trusted_ips)
+    return phttp->svc->trusted_ips;
+  if (phttp->lstn->trusted_ips)
+    return phttp->lstn->trusted_ips;
+  if (trusted_ips)
+    return trusted_ips;
+  return NULL;
+}
+
+void
+save_forwarded_header (POUND_HTTP *phttp)
+{
+  struct http_header *hdr;
+  char const *hname;
+  char const *val;
+
+  free (phttp->orig_forwarded_header);
+  hname = get_forwarded_header_name (phttp);
+  if ((hdr = http_header_list_locate_name (&phttp->request.headers,
+					   hname, strlen (hname))) != NULL
+      && (val = http_header_get_value (hdr)) != NULL)
+    phttp->orig_forwarded_header = xstrdup (val);
+}
+
+static void
+i_forwarded_ip (struct stringbuf *sb, struct http_log_instr *instr,
+		POUND_HTTP *phttp)
+{
+  char *ip;
+  char caddr[MAX_ADDR_BUFSIZE];
+
+  if ((ip = scan_forwarded_header (phttp->orig_forwarded_header,
+				    get_trusted_ips (phttp))) != NULL)
+    {
+      print_str (sb, ip);
+      free (ip);
+    }
+  else
+    print_str (sb, anon_addr2str (caddr, sizeof (caddr), &phttp->from_host));
 }
 
 static void
@@ -409,7 +557,7 @@ static struct http_log_spec http_log_spec[] = {
     /* The percent sign */
     { '%', i_print },
     /* Remote IP-address */
-    { 'a', i_remote_ip },
+    { 'a', i_forwarded_ip },
     /* Local IP-address */
     { 'A', i_local_ip },
     /* Size of response in bytes. */
