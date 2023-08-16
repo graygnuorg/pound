@@ -650,6 +650,27 @@ i_listener (struct stringbuf *sb, struct http_log_instr *instr,
   print_str (sb, phttp->lstn->name);
 }
 
+static struct argprt nameprt[] = {
+  { ARG("backend"), i_backend },
+  { ARG("service"), i_service },
+  { ARG("listener"), i_listener },
+  { NULL }
+};
+
+static int
+p_objname (struct http_log_parser *parser, char const *arg, int len)
+{
+  http_log_printer_fn prt;
+
+  if ((prt = argprt_find (nameprt, arg, len)) == NULL)
+    {
+      http_log_parser_error (parser, "unrecognized Pound object name", arg);
+      return -1;
+    }
+  add_instr (parser->prog, prt, NULL, NULL, 0);
+  return 0;
+}
+
 static void
 i_header (struct stringbuf *sb, struct http_log_instr *instr,
 	  POUND_HTTP *phttp)
@@ -719,8 +740,11 @@ static struct http_log_spec http_log_spec[] = {
     { 'i', i_header, SPEC_REQ_ARG },
     /* Same as %i, but in CLF format. */
     { 'I', i_header_clf, SPEC_REQ_ARG },
-    /* Listener name. */
-    { 'L', i_listener },
+    /* Object name:
+       %{backend}N
+       %{service}N
+       %{listener}N */
+    { 'N', NULL, SPEC_REQ_ARG, p_objname },
     /* The request method. */
     { 'm', i_method },
     /* The canonical port of the server serving the request. */
@@ -732,10 +756,6 @@ static struct http_log_spec http_log_spec[] = {
     { 'q', i_query },
     /* First line of request. */
     { 'r', i_request },
-    /* Backend */
-    { 'R', i_backend },
-    /* Service name */
-    { 'S', i_service },
     /* Status */
     { 's', i_status, SPEC_OPT_ARG },
     /* %t          Time the request was received (standard english format)

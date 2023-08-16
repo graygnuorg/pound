@@ -2190,11 +2190,19 @@ made by header modification directives affect this.
 Same as \fB%i\fR, except that if no such header is present in the
 request, a dash is substituted.
 .TP
-.B %L
-Listener name.
-.TP
 .B %m
 The request method.
+.TP
+.BI %{ OBJNAME }N
+Name of the
+.B Pound
+object that is involved in handling the request.  Valid values for
+.I OBJNAME
+are:
+.BR listener ,
+.BR service ,
+and
+.BR backend .
 .TP
 .B %P
 Thread ID of the serving thread.
@@ -2205,12 +2213,6 @@ empty string.
 .TP
 .B %r
 First line of request.
-.TP
-.B %R
-Backend identifier.
-.TP
-.B %S
-Service name.
 .TP
 .B %s
 Response status code.
