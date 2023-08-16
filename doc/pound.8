@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 10, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 16, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2189,6 +2189,9 @@ made by header modification directives affect this.
 .BI %{ VARNAME }I
 Same as \fB%i\fR, except that if no such header is present in the
 request, a dash is substituted.
+.TP
+.B %L
+Listener name.
 .TP
 .B %m
 The request method.

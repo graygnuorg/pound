@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-10
+Pound -- history of user-visible changes. 2023-08-16
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -25,11 +25,11 @@ Apache.  For example, the built-in format 3 is defined as:
   "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
 
 The LogLevel directive has been extended to take symbolic format name
-as argument.  For example"
+as argument.  For example:
 
   LogLevel "my_format"
 
-Built-in formats are assigned following symbolic names:
+The traditional built-in formats are assigned following symbolic names:
 
   0 - "null"
   1 - "regular"
@@ -48,11 +48,11 @@ one may write
 
 * New statements: ForwardedHeader and TrustedIP
 
-These statements control the how the %h log format conversion
-specifier works (see LogFormat, above).
+These statements control how the %a log format conversion specifier
+works:
 
   ForwardedHeader "name"
-    Defines the name of the header that carries the list of
+    Defines the name of HTTP header that carries the list of
     proxies the request has passed through.  It is used to
     report the originator IP address when logging.
 
@@ -61,9 +61,9 @@ specifier works (see LogFormat, above).
 
   TrustedIP
     Defines a list of trusted proxy IP addresses, which is used to
-    determine the originator IP.  This statement is a special form
-    of the ACL statement and, as the latter, it can appear in two
-    forms: directive and section.
+    determine the originator IP.  This is a special form of the ACL
+    statement and, as the latter, it can appear in two forms: directive
+    and section.
 
     In directive form, it takes a single argument referring to a
     named access control list, which must have been defined previously
@@ -81,7 +81,7 @@ The syntax is:
 
   StringMatch "SUBJECT" [OPTIONS] "PATTERN"
 
-OPTIONS are usual matcher options.  The directive matches, if SUBJECT,
+OPTIONS are usual matcher options.  The directive matches if SUBJECT,
 after backreference expansion and accessor interpretation, matches
 PATTERN.
 
@@ -94,13 +94,13 @@ For example:
       ...
   End
 
-This service will be used for requests whose Host header has the value
+The service above will be used for requests whose Host header value is
 "foobar." followed by a domain name from the file "domain.list".
 
 * New request accessors: host and port
 
 The %[host] accessor returns the hostname part of the Host header
-value.  The %[port] accessor returns the port number with leading
+value.  The %[port] accessor returns port number with leading
 column character.  If no explicit port number is given in the Host
 value, %[port] returns empty string.
 

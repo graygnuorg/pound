@@ -516,6 +516,13 @@ i_service (struct stringbuf *sb, struct http_log_instr *instr,
 }
 
 static void
+i_listener (struct stringbuf *sb, struct http_log_instr *instr,
+	    POUND_HTTP *phttp)
+{
+  print_str (sb, phttp->lstn->name);
+}
+
+static void
 i_header (struct stringbuf *sb, struct http_log_instr *instr,
 	  POUND_HTTP *phttp)
 {
@@ -576,6 +583,8 @@ static struct http_log_spec http_log_spec[] = {
     { 'i', i_header, 1 },
     /* Same as %i, but in CLF format. */
     { 'I', i_header_clf, 1 },
+    /* Listener name. */
+    { 'L', i_listener },
     /* The request method. */
     { 'm', i_method },
     /* The canonical port of the server serving the request. */
