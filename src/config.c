@@ -1906,6 +1906,16 @@ check_addrinfo (struct addrinfo const *addr, struct locus_range const *range, ch
   return PARSER_OK;
 }
 
+static char *
+format_locus_str (struct locus_range *rp)
+{
+  struct stringbuf sb;
+
+  xstringbuf_init (&sb);
+  stringbuf_format_locus_range (&sb, rp);
+  return stringbuf_finish (&sb);
+}
+
 static BACKEND *
 parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
 {
@@ -1928,6 +1938,7 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
 
   if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
     return NULL;
+  be->locus = format_locus_str (&range);
 
   return be;
 }
@@ -2418,6 +2429,9 @@ parse_redirect_backend (void *call_data, void *section_data)
   int code = 302;
   BACKEND *be;
   regmatch_t matches[5];
+  struct locus_range range;
+
+  range.beg = last_token_locus_range ()->beg;
 
   if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
@@ -2444,6 +2458,8 @@ parse_redirect_backend (void *call_data, void *section_data)
 	return PARSER_FAIL;
     }
 
+  range.end = last_token_locus_range ()->end;
+
   if (tok->type != T_STRING)
     {
       conf_error ("expected %s, but found %s", token_type_str (T_STRING), token_type_str (tok->type));
@@ -2451,6 +2467,7 @@ parse_redirect_backend (void *call_data, void *section_data)
     }
 
   XZALLOC (be);
+  be->locus = format_locus_str (&range);
   be->be_type = BE_REDIRECT;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -2482,6 +2499,9 @@ parse_error_backend (void *call_data, void *section_data)
   char *text = NULL;
   BACKEND *be;
   int rc;
+  struct locus_range range;
+
+  range.beg = last_token_locus_range ()->beg;
 
   if ((tok = gettkn_expect (T_NUMBER)) == NULL)
     return PARSER_FAIL;
@@ -2510,7 +2530,10 @@ parse_error_backend (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
+  range.end = last_token_locus_range ()->end;
+
   XZALLOC (be);
+  be->locus = format_locus_str (&range);
   be->be_type = BE_ERROR;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -2924,6 +2947,65 @@ parse_balancer (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static int
+parse_log_suppress (void *call_data, void *section_data)
+{
+  int *result_ptr = call_data;
+  struct token *tok;
+  int n;
+  int result = 0;
+  int type;
+  static struct kwtab status_table[] = {
+    { "all",      STATUS_MASK (100) | STATUS_MASK (200) |
+		  STATUS_MASK (300) | STATUS_MASK (400) | STATUS_MASK (500) },
+    { "info",     STATUS_MASK (100) },
+    { "success",  STATUS_MASK (200) },
+    { "redirect", STATUS_MASK (300) },
+    { "clterr",   STATUS_MASK (400) },
+    { "srverr",   STATUS_MASK (500) },
+    { NULL }
+  };
+
+  if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
+    return PARSER_FAIL;
+
+  do
+    {
+      if (strlen (tok->str) == 1 && isdigit (tok->str[0]))
+	{
+	  n = tok->str[0] - '0';
+	  if (n <= 0 || n >= sizeof (status_table) / sizeof (status_table[0]))
+	    {
+	      conf_error ("%s", "unsupported status mask");
+	      return PARSER_FAIL;
+	    }
+	  n = STATUS_MASK (n * 100);
+	}
+      else if (kw_to_tok (status_table, tok->str, 1, &n) != 0)
+	{
+	  conf_error ("%s", "unsupported status mask");
+	  return PARSER_FAIL;
+	}
+      result |= n;
+    }
+  while ((type = gettkn (&tok)) != EOF && type != T_ERROR &&
+	 T_MASK_ISSET (T_UNQ, type));
+
+  if (type == T_ERROR)
+    return PARSER_FAIL;
+  if (type == EOF)
+    {
+      conf_error ("%s", "unexpected end of file");
+      return PARSER_FAIL;
+    }
+
+  putback_tkn (tok);
+
+  *result_ptr = result;
+
+  return PARSER_OK;
+}
+
 static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
 
@@ -2948,6 +3030,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Balancer", parse_balancer, NULL, offsetof (SERVICE, balancer) },
   { "ForwardedHeader", assign_string, NULL, offsetof (SERVICE, forwarded_header) },
   { "TrustedIP", assign_acl, NULL, offsetof (SERVICE, trusted_ips) },
+  { "LogSuppress", parse_log_suppress, NULL, offsetof (SERVICE, log_suppress_mask) },
   { NULL }
 };
 
@@ -3066,6 +3149,7 @@ parse_service (void *call_data, void *section_data)
 
       SLIST_PUSH (head, svc, next);
     }
+  svc->locus = format_locus_str (&range);
   return PARSER_OK;
 }
 
@@ -3081,6 +3165,9 @@ parse_acme (void *call_data, void *section_data)
   int rc;
   static char re_acme[] = "^/\\.well-known/acme-challenge/(.+)";
   int fd;
+  struct locus_range range;
+
+  range.beg = last_token_locus_range ()->beg;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -3117,6 +3204,9 @@ parse_acme (void *call_data, void *section_data)
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
+
+  range.end = last_token_locus_range ()->beg;
+  svc->locus = format_locus_str (&range);
 
   svc->tot_pri = 1;
   svc->abs_pri = 1;
@@ -3304,13 +3394,13 @@ static struct canned_log_format canned_log_format[] = {
   /* 1 - regular logging */
   { "regular", "%a %r - %>s" },
   /* 2 - extended logging (show chosen backend server as well) */
-  { "extended", "%a %r - %>s (%{Host}i/%S -> %R) %{f}T sec" },
+  { "extended", "%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec" },
   /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
   { "vhost_combined", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 4 - same as 3 but without the virtual host information */
   { "combined", "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 5 - same as 3 but with information about the Service and Backend used */
-  { "detailed", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%S -> %R) %{f}T sec" },
+  { "detailed", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
 };
 static int max_canned_log_format =
   sizeof (canned_log_format) / sizeof (canned_log_format[0]);
@@ -3596,6 +3686,8 @@ parse_listen_http (void *call_data, void *section_data)
 
   if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != PARSER_OK)
     return PARSER_FAIL;
+
+  lst->locus = format_locus_str (&range);
 
   SLIST_PUSH (list_head, lst, next);
   return PARSER_OK;
@@ -4145,6 +4237,8 @@ parse_listen_https (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != PARSER_OK)
     return PARSER_FAIL;
 
+  lst->locus = format_locus_str (&range);
+
   if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error_at_locus_range (&range, "Cert statement is missing");
@@ -4270,8 +4364,10 @@ parse_control (void *call_data, void *section_data)
       break;
 
     case T_STRING:
+      range.beg = last_token_locus_range ()->beg;
       putback_tkn (tok);
       rc = parse_control_socket (&lst->addr, section_data);
+      range.end = last_token_locus_range ()->end;
       break;
 
     default:
@@ -4283,11 +4379,13 @@ parse_control (void *call_data, void *section_data)
     return PARSER_FAIL;
 
   lst->verb = 1; /* Need PUT and DELETE methods */
+  lst->locus = format_locus_str (&range);
   /* Register listener in the global listener list */
   SLIST_PUSH (&listeners, lst, next);
 
   /* Create service */
   XZALLOC (svc);
+  lst->locus = format_locus_str (&range);
   SLIST_INIT (&svc->backends);
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
@@ -4299,6 +4397,7 @@ parse_control (void *call_data, void *section_data)
 
   /* Create backend */
   XZALLOC (be);
+  be->locus = format_locus_str (&range);
   be->be_type = BE_CONTROL;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);

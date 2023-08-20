@@ -412,6 +412,7 @@ struct be_error
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
+  char *locus;                  /* Location in the config file */
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
@@ -594,6 +595,7 @@ typedef enum
 typedef struct _service
 {
   char *name;			/* symbolic name */
+  char *locus;                  /* Location in the config file */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite;
   BACKEND_HEAD backends;
@@ -614,10 +616,14 @@ typedef struct _service
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
   ACL *trusted_ips;             /* Trusted IP addresses */
+  int log_suppress_mask;        /* Suppress HTTP logging for these status
+				   codes.  A bitmask. */
   SLIST_ENTRY (_service) next;
 } SERVICE;
 
 typedef SLIST_HEAD (,_service) SERVICE_HEAD;
+
+#define STATUS_MASK(s) (1 << ((s) / 100))
 
 typedef struct _pound_ctx
 {
@@ -648,6 +654,7 @@ int http_log_format_check (int n);
 typedef struct _listener
 {
   char *name;			/* symbolic name */
+  char *locus;                  /* Location in the config file */
   struct addrinfo addr;		/* Socket address */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */

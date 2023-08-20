@@ -670,6 +670,48 @@ p_objname (struct http_log_parser *parser, char const *arg, int len)
   add_instr (parser->prog, prt, NULL, NULL, 0);
   return 0;
 }
+
+static void
+i_backend_locus (struct stringbuf *sb, struct http_log_instr *instr,
+		 POUND_HTTP *phttp)
+{
+  print_str (sb, phttp->backend->locus);
+}
+
+static void
+i_service_locus (struct stringbuf *sb, struct http_log_instr *instr,
+		 POUND_HTTP *phttp)
+{
+  print_str (sb, phttp->svc->locus);
+}
+
+static void
+i_listener_locus (struct stringbuf *sb, struct http_log_instr *instr,
+		 POUND_HTTP *phttp)
+{
+  print_str (sb, phttp->lstn->locus);
+}
+
+static struct argprt locprt[] = {
+  { ARG("backend"), i_backend_locus },
+  { ARG("service"), i_service_locus },
+  { ARG("listener"), i_listener_locus },
+  { NULL }
+};
+
+static int
+p_objloc (struct http_log_parser *parser, char const *arg, int len)
+{
+  http_log_printer_fn prt;
+
+  if ((prt = argprt_find (locprt, arg, len)) == NULL)
+    {
+      http_log_parser_error (parser, "unrecognized Pound object name", arg);
+      return -1;
+    }
+  add_instr (parser->prog, prt, NULL, NULL, 0);
+  return 0;
+}
 
 static void
 i_header (struct stringbuf *sb, struct http_log_instr *instr,
@@ -740,10 +782,11 @@ static struct http_log_spec http_log_spec[] = {
     { 'i', i_header, SPEC_REQ_ARG },
     /* Same as %i, but in CLF format. */
     { 'I', i_header_clf, SPEC_REQ_ARG },
-    /* Object name:
+    /* Object locus & name:
        %{backend}N
        %{service}N
        %{listener}N */
+    { 'L', NULL, SPEC_REQ_ARG, p_objloc },
     { 'N', NULL, SPEC_REQ_ARG, p_objname },
     /* The request method. */
     { 'm', i_method },
@@ -953,6 +996,8 @@ http_log (POUND_HTTP *phttp)
   char *msg;
 
   if (http_log_format_check (phttp->lstn->log_level))
+    return;
+  if (STATUS_MASK (phttp->response_code) & phttp->svc->log_suppress_mask)
     return;
   prog = http_log_tab + phttp->lstn->log_level;
   if (SLIST_EMPTY (&prog->head))

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 16, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 20, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1074,11 +1074,11 @@ The value of the query parameter \fINAME\fR.
 The value of HTTP header \fINAME\fR.
 .TP
 .B host
-Hostname part of the \fBHost\R header.  If the latter
+Hostname part of the \fBHost\fR header.  If the latter
 does not include port number, it is equivalent to \fB%[header
 host]\fR.
 .B port
-If the value of the \fBHost\R header includes port number,
+If the value of the \fBHost\fR header includes port number,
 \fB%[port]\fR evaluates to port number with the leading colon
 character. Otherwise, it evaluates to empty string.
 .SS Modification directives
@@ -1639,6 +1639,45 @@ for a detailed discussion.
 .IP
 This statement overrides the \fBTrustedIP\fR directive from the
 listener scope.
+.TP
+.BI LogSuppress " class"
+Suppresses HTTP logging for requests that resulted in status codes
+from the specified
+.IR class .
+Valid status classes are:
+.IP
+.RS
+.TP
+.IR info " or " 1
+.I 1xx
+response codes.
+.TP
+.IR success " or " 2
+.I 2xx
+response codes.
+.TP
+.IR redirect " or " 3
+.I 3xx
+response codes.
+.TP
+.IR clterr " or " 4
+.I 4xx
+response codes.
+.TP
+.IR srverr " or " 5
+.I 5xx
+response codes.
+.TP
+.I all
+All response codes.
+.RE
+.IP
+Multiple arguments are allowed.
+.IP
+This statement is designed for services that receive a constant stream
+of similar HTTP requests from a controlled set of IP addresses, such
+as e.g. Openmetric services.  See the \fBMetric\fR section below for
+an example.
 .SH "ACME"
 This statement creates a \fIservice\fR specially crafted for answering
 ACME HTTP-01 challenge requests (see
@@ -1825,6 +1864,20 @@ End
 To control access to the telemetry endpoint, use the
 .B ACL
 statement.
+.PP
+The \fBLogSuppress\fR directive can be used in openmetric
+services to suppress logging of served HTTP requests.
+.PP
+For example:
+.PP
+.EX
+Service
+    URL "/metrics"
+    Metrics
+    ACL "secure"
+    LogSuppress success
+End
+.EE
 .PP
 The metrics output is sufficiently self-documented by
 .B # HELP
@@ -2190,6 +2243,37 @@ made by header modification directives affect this.
 Same as \fB%i\fR, except that if no such header is present in the
 request, a dash is substituted.
 .TP
+.BI %{ OBJNAME }L
+Location of the
+.B Pound
+object that is involved in handling the request.  Valid values for
+.I OBJNAME
+are:
+.BR listener ,
+.BR service ,
+and
+.BR backend .
+The location gives position in the configuration file where the object
+was defined, and is formatted as
+.IP
+.EX
+.IR NAME : LN1 . COL1 - LN2 . COL2
+.EE
+.IP
+where
+.I NAME
+is the configuration file name,
+.I LN1
+and
+.I COL1
+are number of line and column where the object definition begins,
+and
+.I LN2
+and
+.I COL2
+are number of line and column where it ends.  Line and column numbers
+start with 1.
+.TP
 .B %m
 The request method.
 .TP
@@ -2288,7 +2372,7 @@ No request logging at all.
 .TP
 .BR 2 ", " extended
 .EX
-"%a %r - %>s (%{Host}i/%S -> %R) %{f}T sec"
+"%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec"
 .EE
 .TP
 .BR 3 ", " vhost_combined
@@ -2307,7 +2391,7 @@ No request logging at all.
 (Split in two lines for readability)
 .EX
 "%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
-\(rs\(dq%{User-Agent}\(rs\(dq (%S -> %R) %{f}T sec"
+\(rs\(dq%{User-Agent}\(rs\(dq (%{service}N -> %{backend}N) %{f}T sec"
 .EE
 .SH SECURITY
 .PP

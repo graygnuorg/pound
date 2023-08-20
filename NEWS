@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-16
+Pound -- history of user-visible changes. 2023-08-20
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -74,6 +74,28 @@ works:
     separate line terminates the statement.
 
     This statement can be used in global, listener, and service scope.
+
+* New service statement: LogSuppress
+
+Suppresses HTTP logs for requests that resulted in response status
+from a particular group or groups.  The statement takes one or more
+arguments specifying status groups to suppress log messages for:
+
+  info or 1      1xx status codes
+  success or 2   2xx status codes
+  redirect or 3  3xx status codes
+  clterr or 4    4xx status codes
+  srverr or 5    5xx status codes
+  all            all status codes
+
+Suggested usage is for special services that are likely to accept
+multiple similar requests, such as Openmetrics services.  For example:
+
+   Service "metrics"
+       URL "/metrics"
+       Metrics
+       LogSuppress success
+   End
 
 * New request matching directive: StringMatch
 

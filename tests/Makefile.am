@@ -86,6 +86,7 @@ TESTSUITE_AT = \
  logfmt.at\
  loglevcomp.at\
  loglevrun.at\
+ logsup.at\
  lstset.at\
  maxrequest.at\
  not.at\

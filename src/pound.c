@@ -1077,7 +1077,10 @@ main (const int argc, char **argv)
 		}
 	    }
 
-	  listen (lstn->sock, 512);
+	  if (listen (lstn->sock, 512))
+	    abend ("can't listen on %s: %s",
+                   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+                   strerror (errno));
 	}
       n_listeners++;
     }
