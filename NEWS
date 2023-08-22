@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-21
+Pound -- history of user-visible changes. 2023-08-22
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -11,16 +11,16 @@ Version 4.8.91 (git)
 
 * HTTP request logging
 
-In addition to five built-in log formats, you can define your own
-"named" formats and use them.  Log format is defined using the
-following statement:
+In addition to six built-in log formats, you can define your own
+"named" formats and use them in the LogLevel directive.  Log format is
+defined using the following statement:
 
   LogFormat "name" "format_string"
 
 The "name" argument specifies a string uniquely identifying this
-format.  "Format_string" is the format specification.  The format
-specification is roughly modelled after the mod_log_config in
-Apache.  For example, the built-in format 3 is defined as:
+format.  "Format_string" is the format specification.  It is
+modelled after Apache's mod_log_config LogFormat string.  For example,
+the built-in format 3 is defined as:
 
   "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
 
@@ -29,7 +29,7 @@ as argument.  For example:
 
   LogLevel "my_format"
 
-The traditional built-in formats are assigned following symbolic names:
+The traditional built-in formats are assigned the following symbolic names:
 
   0 - "null"
   1 - "regular"
@@ -49,7 +49,7 @@ one may write
 * New statements: ForwardedHeader and TrustedIP
 
 These statements control how the %a log format conversion specifier
-works:
+determines the originator IP address:
 
   ForwardedHeader "name"
     Defines the name of HTTP header that carries the list of
@@ -78,8 +78,8 @@ works:
 * New service statement: LogSuppress
 
 Suppresses HTTP logs for requests that resulted in response status
-from a particular group or groups.  The statement takes one or more
-arguments specifying status groups to suppress log messages for:
+codes from a particular group or groups.  The statement takes one or more
+arguments specifying status code groups to suppress log messages for:
 
   info or 1      1xx status codes
   success or 2   2xx status codes
@@ -89,7 +89,8 @@ arguments specifying status groups to suppress log messages for:
   all            all status codes
 
 Suggested usage is for special services that are likely to accept
-multiple similar requests, such as Openmetrics services.  For example:
+large numbers of similar requests, such as Openmetrics services.  For
+example:
 
    Service "metrics"
        URL "/metrics"
