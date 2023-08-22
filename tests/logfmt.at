@@ -1,5 +1,5 @@
 AT_SETUP([HTTP log formats])
-AT_KEYWORDS([logformat LogFormat logfmt])
+AT_KEYWORDS([log logformat LogFormat logfmt])
 
 m4_pushdef([PT_CHECK_LOG_FORMAT],
 [m4_pushdef([HARNESS_OPTIONS],[--log-level=-1])
