@@ -82,8 +82,8 @@ If you compile it on a Debian-based system, you need to install the
 If you cloned __pound__ from the repository, you will need the
 following tools in order to build it:
 
-* [GNU Autoconf](http://www.gnu.org/software/automake), version 2.69 or later.
-* [GNU Automake](http://www.gnu.org/software/autoconf), version 1.15 or later.
+* [GNU Autoconf](http://www.gnu.org/software/automake), version 2.71 or later.
+* [GNU Automake](http://www.gnu.org/software/autoconf), version 1.16.5 or later.
 
 First, run
 
