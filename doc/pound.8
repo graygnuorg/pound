@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 20, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "August 25, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1693,12 +1693,23 @@ challenges in that directory.
 .SH "Backend"
 A backend is a definition of a single backend server
 .B pound
-will use to reply to incoming requests.  All configuration directives
-enclosed between
+will use to reply to incoming requests.  Backends are defined via
+a
+.B Backend
+statement.  There are two forms of this statement:
+.I service-specific
+and
+.I global
+(or
+.IR named )
+backend.  These will be discussed later in this section.
+All configuration directives enclosed between
 .B Backend
 and
 .B End
-are specific to a single backend. The following directives are available:
+are specific to a single backend.
+
+The following directives are available:
 .TP
 \fBAddress\fR \fIaddress\fR
 The address that
@@ -1778,6 +1789,82 @@ Start
 with this backend disabled (1) or enabled (0). If started as disabled, the
 backend can be later enabled with
 .BR poundctl (8).
+.SS Global and per-service backends
+A
+.B Backend
+definition can appear as a part of the service, i.e. in a
+.B Service
+section.
+or globally.  In the latter case, the
+.B Backend
+keyword must be followed by a symbolic name assigned to this backend, e.g.:
+.PP
+.EX
+Backend "name"
+  ...
+End
+.EE
+.PP
+This name must uniquely identify the backend among other globally
+defined backends.  A global backend is attached to a service using
+the
+.B UseBackend
+statement.  It takes the symbolic name of the backend as its argument.
+The statement
+.PP
+.EX
+UseBackend "name"
+.EE
+.PP
+has essentially the same effect as if full backend definition appeared
+instead of it in this place.  A substantial difference between the use
+of service-specific and global backends is that a single global
+backend can be used in multiple services.  In a way,
+.B UseBackend
+statement
+.I expands
+to a backend definition within the service.
+.PP
+Furthermore, you can
+also adjust the \fBPriority\fR and \fBDisabled\fR parameters of the
+global backend definition for use in a particular service.  To do
+so, use the following syntax:
+.PP
+.EX
+Backend "name"
+  Priority 3
+  Disabled no
+End
+.EE
+.PP
+In this form, the
+.B Backend
+statement acts as
+.BR UseBackend .
+Two directives can appear within such
+.B Backend
+statement:
+.BR Priority ,
+and
+.BR Disabled .
+They override the settings defined in the global backend "\fIname\fR".
+.PP
+Notice, that in spite of their similarity, the two
+.I named
+forms of the
+.B Backend
+statement serve different purposes: when used in global scope, a named
+.B Backend
+.I defines
+a backend for further use in various services, and when used
+within a service, it
+.I creates a copy
+of the backend defined elsewhere and
+.I attaches
+it to this service.
+.PP
+The actual global definition may appear before as well as after
+service or services it is used in.
 .SH "Emergency"
 The emergency server will be used once all existing backends are "dead".
 All configuration directives enclosed between

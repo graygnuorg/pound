@@ -911,7 +911,116 @@ parser_loop (PARSER_TABLE *ptab, void *call_data, void *section_data,
 {
   return parse_statement (ptab, call_data, section_data, 0, retrange);
 }
+
+/*
+ * Named backends
+ */
+typedef struct named_backend
+{
+  char *name;
+  struct locus_range locus;
+  int priority;
+  int disabled;
+  struct be_regular bereg;
+  SLIST_ENTRY (named_backend) link;
+} NAMED_BACKEND;
 
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+DEFINE_LHASH_OF (NAMED_BACKEND);
+#else
+DECLARE_LHASH_OF (NAMED_BACKEND);
+#endif
+
+typedef LHASH_OF (NAMED_BACKEND) NAMED_BACKEND_HASH;
+
+static unsigned long
+named_backend_hash (const NAMED_BACKEND *b)
+{
+  return lh_strhash (b->name);
+}
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static IMPLEMENT_LHASH_HASH_FN (named_backend, NAMED_BACKEND)
+#endif
+
+static int
+named_backend_cmp (const NAMED_BACKEND *b1, const NAMED_BACKEND *b2)
+{
+  return strcmp (b1->name, b2->name);
+}
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+static IMPLEMENT_LHASH_COMP_FN (named_backend, NAMED_BACKEND)
+#endif
+
+#if OPENSSL_VERSION_NUMBER >= 0x10100000L
+# define NAMED_BACKEND_HASH_NEW() lh_NAMED_BACKEND_new (named_backend_hash, named_backend_cmp)
+# define NAMED_BACKEND_HASH_FREE(h) lh_NAMED_BACKEND_free (h)
+# define NAMED_BACKEND_INSERT(tab, node) lh_NAMED_BACKEND_insert (tab, node)
+# define NAMED_BACKEND_RETRIEVE(tab, node) lh_NAMED_BACKEND_retrieve (tab, node)
+#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
+# define NAMED_BACKEND_HASH_NEW() LHM_lh_new (NAMED_BACKEND, named_backend)
+# define NAMED_BACKEND_HASH_FREE(h) LHM_lh_free (NAMED_BACKEND, h)
+# define NAMED_BACKEND_INSERT(tab, node) LHM_lh_insert (NAMED_BACKEND, tab, node)
+# define NAMED_BACKEND_RETRIEVE(tab, node) LHM_lh_retrieve (NAMED_BACKEND, tab, node)
+#endif
+
+typedef struct named_backend_table
+{
+  NAMED_BACKEND_HASH *hash;
+  SLIST_HEAD(,named_backend) head;
+} NAMED_BACKEND_TABLE;
+
+static void
+named_backend_table_init (NAMED_BACKEND_TABLE *tab)
+{
+  tab->hash = NAMED_BACKEND_HASH_NEW ();
+  SLIST_INIT (&tab->head);
+}
+
+static void
+named_backend_table_free (NAMED_BACKEND_TABLE *tab)
+{
+  NAMED_BACKEND_HASH_FREE (tab->hash);
+  while (!SLIST_EMPTY (&tab->head))
+    {
+      NAMED_BACKEND *ent = SLIST_FIRST (&tab->head);
+      SLIST_SHIFT (&tab->head, link);
+      free (ent);
+    }
+}
+
+static NAMED_BACKEND *
+named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name,
+		      struct locus_range const *locus,
+		      BACKEND *be)
+{
+  NAMED_BACKEND *bp, *old;
+
+  bp = xmalloc (sizeof (*bp) + strlen (name) + 1);
+  bp->name = (char*) (bp + 1);
+  strcpy (bp->name, name);
+  bp->locus = *locus;
+  bp->priority = be->priority;
+  bp->disabled = be->disabled;
+  bp->bereg = be->v.reg;
+  if ((old = NAMED_BACKEND_INSERT (tab->hash, bp)) != NULL)
+    {
+      free (bp);
+      return old;
+    }
+  SLIST_PUSH (&tab->head, bp, link);
+  return NULL;
+}
+
+static NAMED_BACKEND *
+named_backend_retrieve (NAMED_BACKEND_TABLE *tab, char const *name)
+{
+  NAMED_BACKEND key;
+
+  key.name = (char*) name;
+  return NAMED_BACKEND_RETRIEVE (tab->hash, &key);
+}
 
 typedef struct
 {
@@ -924,6 +1033,7 @@ typedef struct
   unsigned ignore_case;
   int header_options;
   BALANCER balancer;
+  NAMED_BACKEND_TABLE named_backend_table;
 } POUND_DEFAULTS;
 
 static int
@@ -1872,6 +1982,13 @@ static PARSER_TABLE backend_parsetab[] = {
   { NULL }
 };
 
+static PARSER_TABLE use_backend_parsetab[] = {
+  { "End",       parse_end },
+  { "Priority",  backend_assign_priority, NULL, offsetof (BACKEND, priority) },
+  { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
+  { NULL }
+};
+
 static PARSER_TABLE emergency_parsetab[] = {
   { "End", parse_end },
   { "Address", assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
@@ -1917,7 +2034,8 @@ format_locus_str (struct locus_range *rp)
 }
 
 static BACKEND *
-parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
+parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl,
+			struct locus_point *beg)
 {
   BACKEND *be;
   struct locus_range range;
@@ -1935,7 +2053,8 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl)
 
   if (parser_loop (table, be, dfl, &range))
     return NULL;
-
+  if (beg)
+    range.beg = *beg;
   if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
     return NULL;
   be->locus = format_locus_str (&range);
@@ -1948,10 +2067,58 @@ parse_backend (void *call_data, void *section_data)
 {
   BACKEND_HEAD *head = call_data;
   BACKEND *be;
+  struct token *tok;
+  struct locus_point beg = last_token_locus_range ()->beg;
 
-  be = parse_backend_internal (backend_parsetab, section_data);
-  if (!be)
+  if ((tok = gettkn_any ()) == NULL)
     return PARSER_FAIL;
+
+  if (tok->type == T_STRING)
+    {
+      struct locus_range range;
+
+      range.beg = beg;
+
+      XZALLOC (be);
+      be->be_type = BE_BACKEND_REF;
+      be->v.be_name = xstrdup (tok->str);
+      be->priority = -1;
+      be->disabled = -1;
+      pthread_mutex_init (&be->mut, NULL);
+
+      if (parser_loop (use_backend_parsetab, be, section_data, &range))
+	return PARSER_FAIL;
+      be->locus = format_locus_str (&tok->locus);
+    }
+  else
+    {
+      putback_tkn (tok);
+      be = parse_backend_internal (backend_parsetab, section_data, &beg);
+      if (!be)
+	return PARSER_FAIL;
+    }
+
+  SLIST_PUSH (head, be, next);
+
+  return PARSER_OK;
+}
+
+static int
+parse_use_backend (void *call_data, void *section_data)
+{
+  BACKEND_HEAD *head = call_data;
+  BACKEND *be;
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  XZALLOC (be);
+  be->be_type = BE_BACKEND_REF;
+  be->v.be_name = xstrdup (tok->str);
+  be->locus = format_locus_str (&tok->locus);
+  be->priority = 5;
+  pthread_mutex_init (&be->mut, NULL);
 
   SLIST_PUSH (head, be, next);
 
@@ -1969,7 +2136,7 @@ parse_emergency (void *call_data, void *section_data)
   dfl.be_connto = 120;
   dfl.ws_to = 120;
 
-  be = parse_backend_internal (emergency_parsetab, &dfl);
+  be = parse_backend_internal (emergency_parsetab, &dfl, NULL);
   if (!be)
     return PARSER_FAIL;
 
@@ -3024,6 +3191,7 @@ static PARSER_TABLE service_parsetab[] = {
   { "Redirect", parse_redirect_backend, NULL, offsetof (SERVICE, backends) },
   { "Error", parse_error_backend, NULL, offsetof (SERVICE, backends) },
   { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
+  { "UseBackend", parse_use_backend, NULL, offsetof (SERVICE, backends) },
   { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
   { "Metrics", parse_metrics, NULL, offsetof (SERVICE, backends) },
   { "Session", parse_session },
@@ -4406,7 +4574,50 @@ parse_control (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
+
+static int
+parse_named_backend (void *call_data, void *section_data)
+{
+  NAMED_BACKEND_TABLE *tab = call_data;
+  struct token *tok;
+  BACKEND *be;
+  struct locus_range range;
+  NAMED_BACKEND *olddef;
+  char *name;
 
+  range.beg = last_token_locus_range ()->beg;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  name = xstrdup (tok->str);
+
+  be = parse_backend_internal (backend_parsetab, section_data, NULL);
+  if (!be)
+    return PARSER_FAIL;
+  range.end = last_token_locus_range ()->end;
+  if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
+    return PARSER_FAIL;
+
+  olddef = named_backend_insert (tab, name, &range, be);
+  free (name);
+  pthread_mutex_destroy (&be->mut);
+  free (be->locus);
+  free (be);
+  // FIXME: free address on failure only.
+
+  if (olddef)
+    {
+      conf_error_at_locus_range (&range, "redefinition of named backend %s",
+				 olddef->name);
+      conf_error_at_locus_range (&olddef->locus,
+				 "original definition was here");
+      return PARSER_FAIL;
+    }
+
+  return PARSER_OK;
+}
+
 static PARSER_TABLE top_level_parsetab[] = {
   { "IncludeDir", parse_includedir },
   { "User", assign_string, &user },
@@ -4436,6 +4647,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "Anonymise", int_set_one, &anonymise },
   { "Anonymize", int_set_one, &anonymise },
   { "Service", parse_service, &services },
+  { "Backend", parse_named_backend, NULL, offsetof (POUND_DEFAULTS, named_backend_table) },
   { "ListenHTTP", parse_listen_http, &listeners },
   { "ListenHTTPS", parse_listen_https, &listeners },
   { "ACL", parse_named_acl, NULL },
@@ -4445,6 +4657,32 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "TrustedIP", assign_acl, &trusted_ips },
   { NULL }
 };
+
+static int
+resolve_backend_ref (BACKEND *be, void *data)
+{
+  if (be->be_type == BE_BACKEND_REF)
+    {
+      NAMED_BACKEND_TABLE *tab = data;
+      NAMED_BACKEND *nb;
+
+      nb = named_backend_retrieve (tab, be->v.be_name);
+      if (!nb)
+	{
+	  logmsg (LOG_ERR, "%s: named backend %s is not declared",
+		  be->locus, be->v.be_name);
+	  return -1;
+	}
+      free (be->v.be_name);
+      be->be_type = BE_BACKEND;
+      be->v.reg = nb->bereg;
+      if (be->priority == -1)
+	be->priority = nb->priority;
+      if (be->disabled == -1)
+	be->disabled = nb->disabled;
+    }
+  return 0;
+}
 
 int
 parse_config_file (char const *file)
@@ -4462,6 +4700,7 @@ parse_config_file (char const *file)
     .balancer = BALANCER_RANDOM
   };
 
+  named_backend_table_init (&pound_defaults.named_backend_table);
   compile_canned_formats ();
   if (push_input (file) == 0)
     {
@@ -4472,11 +4711,16 @@ parse_config_file (char const *file)
 	{
 	  if (cur_input)
 	    exit (1);
+	  if (foreach_backend (resolve_backend_ref,
+			       &pound_defaults.named_backend_table))
+	    exit (1);
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
 	  log_facility = pound_defaults.facility;
 	}
     }
+
+  named_backend_table_free (&pound_defaults.named_backend_table);
   return res;
 }
 

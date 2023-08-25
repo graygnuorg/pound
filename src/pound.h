@@ -376,7 +376,8 @@ typedef enum
     BE_ACME,
     BE_CONTROL,
     BE_ERROR,
-    BE_METRICS
+    BE_METRICS,
+    BE_BACKEND_REF,     /* See be_name in BACKEND */
   }
   BACKEND_TYPE;
 
@@ -431,6 +432,7 @@ typedef struct _backend
     struct be_acme acme;
     struct be_redirect redirect;
     struct be_error error;
+    char *be_name;              /* Name of the backend; Used during parsing. */
   } v;
 
 } BACKEND;
@@ -461,7 +463,7 @@ typedef struct session
 
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
 DEFINE_LHASH_OF (SESSION);
-#elif OPENSSL_VERSION_NUMBER >= 0x10000000L
+#else
 DECLARE_LHASH_OF (SESSION);
 #endif
 
@@ -673,7 +675,7 @@ typedef struct _listener
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
-  int log_level;	        /* log level for this listener */
+  int log_level;		/* log level for this listener */
   char *forwarded_header;       /* "forwarded" header name */
   ACL *trusted_ips;             /* Trusted IP addresses */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
@@ -1064,3 +1066,6 @@ int http_request_get_query_param_value (struct http_request *req,
 char const *http_request_orig_line (struct http_request *req);
 
 void service_lb_init (SERVICE *svc);
+
+typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
+int foreach_backend (BACKEND_ITERATOR itr, void *data);

@@ -1702,6 +1702,9 @@ backend_type_str (BACKEND_TYPE t)
 
     case BE_METRICS:
       return "metrics";
+
+    default: /* BE_BACKEND_REF can't happen at this stage. */
+      break;
     }
 
   return "UNKNOWN";
@@ -1809,6 +1812,10 @@ backend_serialize (BACKEND *be)
 	      case BE_CONTROL:
 	      case BE_METRICS:
 		/* FIXME */
+		break;
+
+	      case BE_BACKEND_REF:
+		/* Can't happen */
 		break;
 
 	      case BE_ERROR:
@@ -2660,4 +2667,37 @@ SSLINFO_callback (const SSL * ssl, int where, int rc)
       // Reject any followup renegotiations
       *reneg_state = RENEG_REJECT;
     }
+}
+
+int
+foreach_backend (BACKEND_ITERATOR itr, void *data)
+{
+  LISTENER *lstn;
+  SERVICE *svc;
+  BACKEND *be;
+
+  SLIST_FOREACH (lstn, &listeners, next)
+    {
+      SLIST_FOREACH (svc, &lstn->services, next)
+	{
+	  SLIST_FOREACH (be, &svc->backends, next)
+	    {
+	      int rc;
+	      if ((rc = itr (be, data)) != 0)
+		return rc;
+	    }
+	}
+    }
+
+  SLIST_FOREACH (svc, &services, next)
+    {
+      SLIST_FOREACH (be, &svc->backends, next)
+	{
+	  int rc;
+	  if ((rc = itr (be, data)) != 0)
+	    return rc;
+	}
+    }
+
+  return 0;
 }

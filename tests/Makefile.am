@@ -89,6 +89,7 @@ TESTSUITE_AT = \
  logsup.at\
  lstset.at\
  maxrequest.at\
+ nb.at\
  not.at\
  optfwd.at\
  optorder.at\

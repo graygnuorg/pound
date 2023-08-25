@@ -322,7 +322,7 @@ static void
 i_method (struct stringbuf *sb, struct http_log_instr *instr,
 	  POUND_HTTP *phttp)
 {
-  print_str (sb, method_name(phttp->request.method));
+  print_str (sb, method_name (phttp->request.method));
 }
 
 static void

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-22
+Pound -- history of user-visible changes. 2023-08-25
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,40 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+* Global "Backend" definitions
+
+A "Backend" statement is allowed to appear in global scope.  In this
+case it must be followed by a symbolic name, as in:
+
+  Backend "name"
+    ...
+  End
+
+The "name" must uniquely identify this backend among other backends
+defined in global scope.
+
+Global backend definitions can be used in services using the
+"UseBackend" statement:
+
+  UseBackend "name"
+
+A single globally defined backend can be used in multiple services.
+Its actual global definition may appear before as well as after
+service or services it is used in.
+
+A named form of Backend statement is also allowed for use in
+Service sections.  In this case it acts as "UseBackend" statement,
+except that statements between "Backend" and "End" modify the
+parameters of the backend for use in this particular service.  Only
+two statements are allowed in such named form: "Priority" and
+"Disabled".  The following example attaches the globally defined
+backend "assets" to the service and modifies its priority:
+
+  Backend "assets"
+    Priority 8
+  End
+
 
 Version 4.9, 2023-08-22
 
