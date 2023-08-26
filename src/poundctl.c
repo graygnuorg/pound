@@ -80,7 +80,7 @@ get_socket_name (void)
   if (!fp)
     {
       if (errno != ENOENT || verbose_option)
-	errormsg (0, errno, "can't open %s", strerror (errno));
+	errormsg (0, errno, "can't open %s", conf_name);
       return NULL;
     }
   while (fgets (buf, sizeof (buf), fp))

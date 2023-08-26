@@ -69,6 +69,7 @@ TESTSUITE_AT = \
  checkurl.at\
  chgvis.at\
  config.at\
+ disable.at\
  echo.at\
  errfile.at\
  error.at\
@@ -83,6 +84,7 @@ TESTSUITE_AT = \
  incldir.at\
  inclnest.at\
  inclscope.at\
+ list.at\
  logfmt.at\
  loglevcomp.at\
  loglevrun.at\
@@ -104,6 +106,7 @@ TESTSUITE_AT = \
  rewriteloc.at\
  rwchain.at\
  sessauth.at\
+ sessctl.at\
  sesscookie.at\
  sesshdr.at\
  sessip.at\

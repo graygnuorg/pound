@@ -126,3 +126,9 @@ m4_include([virthost.at])
 
 AT_BANNER([Templates])
 m4_include([template.at])
+
+AT_BANNER([Poundctl])
+m4_include([list.at])
+m4_include([disable.at])
+m4_include([sessctl.at])
+
