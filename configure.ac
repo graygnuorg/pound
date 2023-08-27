@@ -30,6 +30,7 @@ AC_PROG_RANLIB
 # Checks for libraries.
 AX_PTHREAD([CC="$PTHREAD_CC"],
 	   [AC_MSG_ERROR([No suitable pthread library found])])
+AC_CHECK_LIB(crypt, crypt)
 
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
@@ -155,7 +156,7 @@ AC_DEFINE_UNQUOTED([SET_DH_AUTO],[$SET_DH_AUTO],
 
 PND_PCREPOSIX
 
-AC_CHECK_HEADERS([getopt.h pthread.h openssl/ssl.h openssl/engine.h])
+AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
 
 AC_TYPE_UID_T
 AC_TYPE_PID_T

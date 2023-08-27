@@ -2589,6 +2589,18 @@ parse_cond_host (void *call_data, void *section_data)
 }
 
 static int
+parse_cond_basic_auth (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_BASIC_AUTH);
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  cond->pwfile = xstrdup (tok->str);
+  return PARSER_OK;
+}
+
+static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
   BACKEND_HEAD *head = call_data;
@@ -2851,6 +2863,7 @@ static int parse_not_cond (void *call_data, void *section_data);
   { "QueryParam", parse_cond_query_param_matcher, data, off },	\
   { "Header", parse_cond_hdr_matcher, data, off },		\
   { "Host", parse_cond_host, data, off },			\
+  { "BasicAuth", parse_cond_basic_auth, data, off },		\
   { "StringMatch", parse_cond_string_matcher, data, off },	\
   { "Match", parse_match, data, off },				\
   { "NOT", parse_not_cond, data, off },				\
@@ -3757,6 +3770,8 @@ static PARSER_TABLE http_parsetab[] = {
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
+  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
   { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
   { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
@@ -4320,6 +4335,8 @@ static PARSER_TABLE https_parsetab[] = {
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
+  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
   { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
   { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
   { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },

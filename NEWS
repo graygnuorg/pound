@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-25
+Pound -- history of user-visible changes. 2023-08-26
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -25,7 +25,7 @@ Global backend definitions can be used in services using the
   UseBackend "name"
 
 A single globally defined backend can be used in multiple services.
-Its actual global definition may appear before as well as after
+Its actual global definition may appear before as well as after the
 service or services it is used in.
 
 A named form of Backend statement is also allowed for use in

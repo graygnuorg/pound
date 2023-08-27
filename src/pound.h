@@ -206,6 +206,8 @@ enum
   {
     HTTP_STATUS_OK,                // 200
     HTTP_STATUS_BAD_REQUEST,       // 400
+    HTTP_STATUS_UNAUTHORIZED,      // 401
+    HTTP_STATUS_FORBIDDEN,         // 403
     HTTP_STATUS_NOT_FOUND,         // 404
     HTTP_STATUS_PAYLOAD_TOO_LARGE, // 413
     HTTP_STATUS_URI_TOO_LONG,      // 414
@@ -314,7 +316,6 @@ struct http_request
   int method;                /* Method code (see METH_* constants above) */
   int version;               /* HTTP minor version: 0 or 1 */
   char *url;                 /* URL part of the request */
-  char *user;                /* Username extracted from Authorization header */
   char *path;                /* URL Path */
   char *query;               /* URL query */
   QUERY_HEAD query_head;
@@ -501,6 +502,7 @@ enum service_cond_type
     COND_HDR,   /* Header match. */
     COND_HOST,  /* Special case od COND_HDR: matches the value of the
 		   Host: header */
+    COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
   };
 
@@ -526,6 +528,7 @@ typedef struct _service_cond
     struct bool_service_cond bool;
     struct _service_cond *cond;
     struct string_match sm; /* COND_QUERY_PARAM and COND_STRING_MATCH */
+    char const *pwfile;     /* COND_BASIC_AUTH */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -1064,8 +1067,12 @@ int http_request_get_query_param_value (struct http_request *req,
 					char const *name,
 					char const **retval);
 char const *http_request_orig_line (struct http_request *req);
+int http_request_get_basic_auth (struct http_request *req,
+				 char **u_name, char **u_pass);
 
 void service_lb_init (SERVICE *svc);
 
 typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
 int foreach_backend (BACKEND_ITERATOR itr, void *data);
+
+int basic_auth (char const *file, struct http_request *req);

@@ -81,6 +81,20 @@ static HTTP_STATUS http_status[] = {
     "Your browser (or proxy) sent a request that"
     " this server could not understand."
   },
+  [HTTP_STATUS_UNAUTHORIZED] = {
+    401,
+    "Unauthorized",
+    "This server could not verify that you are authorized to access"
+    " the document requested.  Either you supplied the wrong credentials"
+    " (e.g., bad password), or your browser doesn't understand how to supply"
+    " the credentials required."
+  },
+  [HTTP_STATUS_FORBIDDEN] = {
+    403,
+    "Forbidden",
+    "You don't have permission to access this resourse."
+    " It is either read-protected or not readable by the server."
+  },
   [HTTP_STATUS_NOT_FOUND] = {
     404,
     "Not Found",
@@ -121,6 +135,12 @@ static char err_headers[] =
   "Expires: now\r\n"
   "Pragma: no-cache\r\n"
   "Cache-control: no-cache,no-store\r\n";
+
+static char err_401_headers[] =
+  "Expires: now\r\n"
+  "Pragma: no-cache\r\n"
+  "Cache-control: no-cache,no-store\r\n"
+  "WWW-Authenticate: Basic realm=\"Pound auth\"";
 
 static char default_error_page[] = "\
 <!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\
@@ -180,7 +200,7 @@ bio_err_reply (BIO *bio, int proto, int err, char const *content)
 	content = http_status[err].text;
     }
   bio_http_reply (bio, proto, http_status[err].code, http_status[err].reason,
-		  err_headers, "text/html", content);
+		  err == HTTP_STATUS_UNAUTHORIZED ? err_401_headers : err_headers, "text/html", content);
   stringbuf_free (&sb);
 }
 
@@ -906,10 +926,6 @@ error_response (POUND_HTTP *phttp)
   int err = phttp->backend->v.error.status;
   char *text = phttp->backend->v.error.text;
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
-    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-
   if (text)
     {
       size_t len = strlen (text);
@@ -917,7 +933,7 @@ error_response (POUND_HTTP *phttp)
       bio_http_reply_start (phttp->cl, phttp->request.version,
 			    http_status[err].code,
 			    http_status[err].reason,
-			    err_headers, "text/html",
+			    err == HTTP_STATUS_UNAUTHORIZED ? err_401_headers : err_headers, "text/html",
 			    (CONTENT_LENGTH) len);
       if (copy_bin (bin, phttp->cl, len, NULL, 0))
 	{
@@ -2098,7 +2114,6 @@ http_request_free (struct http_request *req)
   free (req->request);
   http_header_list_free (&req->headers);
   free (req->url);
-  free (req->user);
   free (req->path);
   free (req->query);
   http_request_free_query (req);
@@ -2165,23 +2180,25 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 }
 
 /*
- * Extrace username from the Basic Authorization header.
+ * Extract username and/or password from the Basic Authorization header.
  * Input:
  *   hdrval   - value of the Authorization header;
  * Output:
- *   u_name   - return pointer address
+ *   u_name   - return pointer address for user name
+ *   u_pass   - return pointer address for password (can be NULL)
  * Return value:
  *   0        - Success. Name returned in *u_name.
  *   1        - Not a Basic Authorization header.
  *  -1        - Other error.
  */
 static int
-get_user (char *hdrval, char **u_name)
+get_basic_auth (char const *hdrval, char **u_name, char **u_pass)
 {
   size_t len;
   BIO *bb, *b64;
   int inlen, u_len;
   char buf[MAXBUF], *q;
+  int rc;
 
   if (strncasecmp (hdrval, "Basic", 5))
     return 1;
@@ -2230,17 +2247,47 @@ get_user (char *hdrval, char **u_name)
       return -1;
     }
 
+  rc = -1;
   if ((q = memchr (buf, ':', inlen)) != NULL)
     {
+      char *p, *pass;
+
       u_len = q - buf;
-      if ((q = malloc (u_len + 1)) != NULL)
+      if ((p = malloc (u_len + 1)) != NULL)
 	{
-	  memcpy (q, buf, u_len);
-	  q[u_len] = 0;
-	  *u_name = q;
-	  return 0;
+	  memcpy (p, buf, u_len);
+	  p[u_len] = 0;
+	  *u_name = p;
+
+	  inlen -= u_len;
+	  if (u_pass == NULL)
+	    rc = 0;
+	  else if ((pass = malloc (inlen)) != NULL)
+	    {
+	      memcpy (pass, q + 1, inlen-1);
+	      pass[inlen-1] = 0;
+	      *u_pass = pass;
+	      rc = 0;
+	    }
+	  else
+	    free (p);
 	}
     }
+  memset (buf, 0, sizeof (buf));
+  return rc;
+}
+
+int
+http_request_get_basic_auth (struct http_request *req,
+			     char **u_name, char **u_pass)
+{
+  struct http_header *hdr;
+  char const *val;
+
+  if ((hdr = http_header_list_locate (&req->headers,
+				      HEADER_AUTHORIZATION)) != NULL &&
+      (val = http_header_get_value (hdr)) != NULL)
+    return get_basic_auth (val, u_name, u_pass);
   return -1;
 }
 
@@ -2407,6 +2454,10 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	      lognomem ();
 	    }
 	}
+      break;
+
+    case COND_BASIC_AUTH:
+      res = basic_auth (cond->pwfile, req) == 0;
       break;
 
     case COND_STRING_MATCH:
@@ -3879,12 +3930,6 @@ do_http (POUND_HTTP *phttp)
 
 	      http_header_list_remove (&phttp->request.headers, hdr);
 	      break;
-
-	    case HEADER_AUTHORIZATION:
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      get_user (val, &phttp->request.user);
-	      break;
 	    }
 	}
 
@@ -3992,6 +4037,10 @@ do_http (POUND_HTTP *phttp)
 	    /* Process the response. */
 	    res = backend_response (phttp);
 	  break;
+
+	case BE_BACKEND_REF:
+	  /* shouldn't happen */
+	  abort ();
 	}
 
       clock_gettime (CLOCK_REALTIME, &phttp->end_req);

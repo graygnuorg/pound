@@ -26,6 +26,7 @@ LDADD = libpound.a @PCREPOSIX_LIBS@ @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
+ bauth.c\
  config.c\
  http.c\
  log.c\

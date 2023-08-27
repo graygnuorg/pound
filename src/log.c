@@ -572,7 +572,11 @@ static void
 i_user_name (struct stringbuf *sb, struct http_log_instr *instr,
 	     POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->request.user);
+  char *user;
+  if (http_request_get_basic_auth (&phttp->request, &user, NULL))
+    user = NULL;
+  print_str (sb, user);
+  free (user);
 }
 
 static void
@@ -632,6 +636,9 @@ be_service_name (BACKEND *be)
       return "(error)";
     case BE_METRICS:
       return "(metrics)";
+    case BE_BACKEND_REF:
+      /* shouldn't happen */
+      break;
     }
   return "-";
 }
