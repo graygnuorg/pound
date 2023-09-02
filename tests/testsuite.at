@@ -102,6 +102,9 @@ m4_include([backref.at])
 m4_include([chgvis.at])
 m4_include([rwchain.at])
 
+AT_BANNER([Response Rewriting])
+m4_include([resprw.at])
+
 AT_BANNER([Sessions])
 m4_include([sessip.at])
 m4_include([sessauth.at])

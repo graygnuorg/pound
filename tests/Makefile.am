@@ -103,6 +103,7 @@ TESTSUITE_AT = \
  queryparam.at\
  reqacc.at\
  redirect.at\
+ resprw.at\
  rewriteloc.at\
  rwchain.at\
  sessauth.at\

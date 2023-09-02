@@ -842,8 +842,7 @@ char *addr2str (char *, int, const struct addrinfo *, int);
 char *str_be (char *buf, size_t size, BACKEND *be);
 
 /* Find the right service for a request */
-SERVICE *get_service (const LISTENER *, struct sockaddr *,
-		      struct http_request *, struct submatch_queue *);
+SERVICE *get_service (POUND_HTTP *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
@@ -1049,8 +1048,8 @@ struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);
 int metrics_response (POUND_HTTP *phttp);
 
-int match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
-		struct http_request *req, struct submatch_queue *smq);
+int match_cond (const SERVICE_COND *cond, POUND_HTTP *phttp,
+		struct http_request *req);
 
 struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
 char *http_header_get_value (struct http_header *hdr);

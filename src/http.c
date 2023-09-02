@@ -314,7 +314,8 @@ static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
 					 struct query_param **);
 
-typedef int (*accessor_func) (struct http_request *, char const *, int, char const **, size_t *);
+typedef int (*accessor_func) (struct http_request *, char const *, int,
+			      char const **, size_t *);
 
 struct accessor
 {
@@ -531,8 +532,8 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
  */
 static int
 expand_string_to_buffer (struct stringbuf *sb, char const *str,
-			 struct submatch_queue const *smq, char *what,
-			 struct http_request *req)
+			 POUND_HTTP *phttp,
+			 struct http_request *req, char *what)
 {
   char *p;
   char const *start = str; /* Save the string for error reporting. */
@@ -546,7 +547,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
       str += len;
       if (*str == 0)
 	break;
-      else if ((str[0] == '$' && (str[1] == '$' || str[1] == '%')) || str[1] == 0)
+      else if ((str[0] == '$' && (str[1] == '$' || str[1] == '%')) ||
+	       str[1] == 0)
 	{
 	  stringbuf_add_char (sb, str[0]);
 	  str += 2;
@@ -568,7 +570,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  q = strchr (str + 2, ']');
 	  if (q == NULL)
 	    {
-	      logmsg (LOG_WARNING, "%s \"%s\": unclosed %%[ at offset %d", what, start, (int)(str - start));
+	      logmsg (LOG_WARNING, "%s \"%s\": unclosed %%[ at offset %d",
+		      what, start, (int)(str - start));
 	      stringbuf_add (sb, str, 2);
 	      str += 2;
 	      result = -1;
@@ -581,7 +584,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	    {
 	      stringbuf_add (sb, str, len + 1);
 	    }
-	  else if (acc (req, arg, arglen, &val, &len) == 0 && val)
+	  else if (acc (&phttp->request, arg, arglen, &val, &len) == 0 && val)
 	    {
 	      stringbuf_add (sb, val, len);
 	      if (result >= 0)
@@ -617,7 +620,10 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  if (errno || *p != ')')
 		    {
 		      int len = str - start + 1;
-		      logmsg (LOG_WARNING, "%s \"%s\": missing closing parenthesis in reference started in position %d ", what, start, len);
+		      logmsg (LOG_WARNING,
+			      "%s \"%s\": missing closing parenthesis in"
+			      " reference started in position %d ",
+			      what, start, len);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      result = -1;
@@ -626,7 +632,9 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  if (n < 0 || n >= SMQ_SIZE)
 		    {
 		      int len = p - str + 1;
-		      logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, len, len, str);
+		      logmsg (LOG_WARNING,
+			      "%s \"%s\" refers to non-existing group %*.*s",
+			      what, start, len, len, str);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      result = -1;
@@ -641,7 +649,9 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  if (*p != '}')
 		    {
 		      int n = str - start + 1;
-		      logmsg (LOG_WARNING, "%s \"%s\": missing closing brace in reference started in position %d", what, start, n);
+		      logmsg (LOG_WARNING,
+			      "%s \"%s\": missing closing brace in reference"
+			      " started in position %d", what, start, n);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      result = -1;
@@ -650,7 +660,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		  p++;
 		}
 
-	      sm = submatch_queue_get (smq, refno);
+	      sm = submatch_queue_get (&phttp->smq, refno);
 
 	      if (sm->subject && groupno <= sm->matchn)
 		{
@@ -663,7 +673,9 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		{
 		  int n = p - str;
 		  stringbuf_add (sb, str, n);
-		  logmsg (LOG_WARNING, "%s \"%s\" refers to non-existing group %*.*s", what, start, n, n, str);
+		  logmsg (LOG_WARNING,
+			  "%s \"%s\" refers to non-existing group %*.*s",
+			  what, start, n, n, str);
 		  result = -1;
 		}
 	      str = p;
@@ -672,7 +684,9 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
       else
 	{
 	  int n = str - start + 1;
-	  logmsg (LOG_WARNING, "%s \"%s\": unescaped %% character in position %d", what, start, n);
+	  logmsg (LOG_WARNING,
+		  "%s \"%s\": unescaped %% character in position %d",
+		  what, start, n);
 	  stringbuf_add_char (sb, *str);
 	  str++;
 	  result = -1;
@@ -682,29 +696,29 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 }
 
 char *
-expand_string (char const *str, struct submatch_queue const *smq, char *what,
-	       struct http_request *req)
+expand_string (char const *str, POUND_HTTP *phttp, struct http_request *req,
+	       char *what)
 {
   struct stringbuf sb;
   char *p = NULL;
 
   stringbuf_init_log (&sb);
-  if (expand_string_to_buffer (&sb, str, smq, what, req) == -1
+  if (expand_string_to_buffer (&sb, str, phttp, req, what) == -1
       || (p = stringbuf_finish (&sb)) == NULL)
     stringbuf_free (&sb);
   return p;
 }
 
 static char *
-expand_url (char const *url, struct http_request *req,
-	    struct submatch_queue *smq, int has_uri)
+expand_url (char const *url, POUND_HTTP *phttp, int has_uri)
 {
   struct stringbuf sb;
   char *p;
 
   stringbuf_init_log (&sb);
 
-  switch (expand_string_to_buffer (&sb, url, smq, "Redirect expression", req))
+  switch (expand_string_to_buffer (&sb, url, phttp, &phttp->request,
+				   "Redirect expression"))
     {
     case -1:
       stringbuf_free (&sb);
@@ -719,7 +733,7 @@ expand_url (char const *url, struct http_request *req,
 
   /* For compatibility with previous versions */
   if (!has_uri)
-    stringbuf_add_string (&sb, req->url);
+    stringbuf_add_string (&sb, phttp->request.url);
 
   if ((p = stringbuf_finish (&sb)) == NULL)
     stringbuf_free (&sb);
@@ -727,8 +741,7 @@ expand_url (char const *url, struct http_request *req,
 }
 
 static int rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-			  struct http_request *request, struct sockaddr *addr,
-			  struct submatch_queue *smq);
+			  struct http_request *request, POUND_HTTP *phttp);
 
 /*
  * Reply with a redirect
@@ -770,17 +783,19 @@ redirect_response (POUND_HTTP *phttp)
       break;
 
     default:
-      logmsg (LOG_NOTICE, "INTERNAL ERROR: unsupported status code %d passed to redirect_response; please report", code);
+      logmsg (LOG_NOTICE,
+	      "INTERNAL ERROR: unsupported status code %d passed to"
+	      " redirect_response; please report", code);
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
   if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp->from_host.ai_addr, &phttp->smq) ||
+		     phttp) ||
       rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp->from_host.ai_addr, &phttp->smq))
+		     phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  xurl = expand_url (redirect->url, &phttp->request, &phttp->smq, redirect->has_uri);
+  xurl = expand_url (redirect->url, phttp, redirect->has_uri);
   if (!xurl)
     {
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -798,8 +813,9 @@ redirect_response (POUND_HTTP *phttp)
   for (i = 0; xurl[i]; i++)
     {
       if (isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
-	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?' || xurl[i] == '&'
-	  || xurl[i] == ';' || xurl[i] == '-' || xurl[i] == '=')
+	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?'
+	  || xurl[i] == '&' || xurl[i] == ';' || xurl[i] == '-'
+	  || xurl[i] == '=')
 	stringbuf_add_char (&sb_url, xurl[i]);
       else
 	stringbuf_printf (&sb_url, "%%%02x", xurl[i]);
@@ -855,7 +871,8 @@ redirect_response (POUND_HTTP *phttp)
  * Read and write some binary data
  */
 static int
-copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, CONTENT_LENGTH *res_bytes, int no_write)
+copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, CONTENT_LENGTH *res_bytes,
+	  int no_write)
 {
   char buf[MAXBUF];
   int res;
@@ -889,12 +906,12 @@ acme_response (POUND_HTTP *phttp)
   int rc = HTTP_STATUS_OK;
 
   if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp->from_host.ai_addr, &phttp->smq) ||
+		     phttp) ||
       rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp->from_host.ai_addr, &phttp->smq))
+		     phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  file_name = expand_url ("$1", &phttp->request, &phttp->smq, 1);
+  file_name = expand_url ("$1", phttp, 1);
 
   if ((fd = openat (phttp->backend->v.acme.wd, file_name, O_RDONLY)) == -1)
     {
@@ -987,10 +1004,8 @@ error_response (POUND_HTTP *phttp)
   if (parse_header_text (&req.headers, err_headers))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req,
-		     phttp->from_host.ai_addr, &phttp->smq) ||
-      rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req,
-		     phttp->from_host.ai_addr, &phttp->smq))
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp) ||
+      rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   bin = BIO_new_mem_buf (text, len);
@@ -1142,7 +1157,8 @@ get_content_length (char const *arg, int base)
  * Copy chunked
  */
 static int
-copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write, CONTENT_LENGTH max_size)
+copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
+	     CONTENT_LENGTH max_size)
 {
   char buf[MAXBUF];
   CONTENT_LENGTH cont, tot_size;
@@ -1657,7 +1673,8 @@ http_header_list_locate (HTTP_HEADER_LIST *head, int code)
 }
 
 struct http_header *
-http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len)
+http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name,
+			      size_t len)
 {
   struct http_header *hdr;
   if (len == 0)
@@ -2407,7 +2424,8 @@ parse_http_request (struct http_request *req, int group)
 }
 
 static int
-match_headers (HTTP_HEADER_LIST *headers, regex_t const *re, struct submatch *sm)
+match_headers (HTTP_HEADER_LIST *headers, regex_t const *re,
+	       struct submatch *sm)
 {
   struct http_header *hdr;
 
@@ -2420,8 +2438,8 @@ match_headers (HTTP_HEADER_LIST *headers, regex_t const *re, struct submatch *sm
 }
 
 int
-match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
-	    struct http_request *req, struct submatch_queue *smq)
+match_cond (const SERVICE_COND *cond, POUND_HTTP *phttp,
+	    struct http_request *req)
 {
   int res = 1;
   SERVICE_COND *subcond;
@@ -2430,32 +2448,33 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
   switch (cond->type)
     {
     case COND_ACL:
-      res = acl_match (cond->acl, srcaddr) == 0;
+      res = acl_match (cond->acl, phttp->from_host.ai_addr) == 0;
       break;
 
     case COND_URL:
       if (http_request_get_url (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_PATH:
       if (http_request_get_path (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_QUERY:
       if (http_request_get_query (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (smq));
+	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_QUERY_PARAM:
-      switch (http_request_get_query_param_value (req, cond->sm.string->value, &str))
+      switch (http_request_get_query_param_value (req, cond->sm.string->value,
+						  &str))
 	{
 	case RETRIEVE_ERROR:
 	  res = -1;
@@ -2469,23 +2488,26 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
 	  if (str == NULL)
 	    res = 0;
 	  else
-	    res = submatch_exec (&cond->sm.re, str, submatch_queue_push (smq));
+	    res = submatch_exec (&cond->sm.re, str,
+				 submatch_queue_push (&phttp->smq));
 	}
       break;
 
     case COND_HDR:
-      res = match_headers (&req->headers, &cond->re, submatch_queue_push (smq));
+      res = match_headers (&req->headers, &cond->re,
+			   submatch_queue_push (&phttp->smq));
       break;
 
     case COND_HOST:
-      res = match_headers (&req->headers, &cond->re, submatch_queue_push (smq));
+      res = match_headers (&req->headers, &cond->re,
+			   submatch_queue_push (&phttp->smq));
       if (res)
 	{
 	  /*
 	   * On match, adjust subgroup references and subject pointer
 	   * to refer to the Host: header value.
 	   */
-	  struct submatch *sm = submatch_queue_get (smq, 0);
+	  struct submatch *sm = submatch_queue_get (&phttp->smq, 0);
 	  int n, i;
 	  char const *s = sm->subject;
 	  regmatch_t *mv = sm->matchv;
@@ -2528,10 +2550,12 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       {
 	char *subj;
 
-	subj = expand_string (cond->sm.string->value, smq, "string_match", req);
+	subj = expand_string (cond->sm.string->value, phttp, req,
+			      "string_match");
 	if (subj)
 	  {
-	    res = submatch_exec (&cond->sm.re, subj, submatch_queue_push (smq));
+	    res = submatch_exec (&cond->sm.re, subj,
+				 submatch_queue_push (&phttp->smq));
 	    free (subj);
 	  }
 	else
@@ -2543,13 +2567,13 @@ match_cond (const SERVICE_COND *cond, struct sockaddr *srcaddr,
       if (cond->bool.op == BOOL_NOT)
 	{
 	  subcond = SLIST_FIRST (&cond->bool.head);
-	  res = ! match_cond (subcond, srcaddr, req, smq);
+	  res = ! match_cond (subcond, phttp, req);
 	}
       else
 	{
 	  SLIST_FOREACH (subcond, &cond->bool.head, next)
 	    {
-	      res = match_cond (subcond, srcaddr, req, smq);
+	      res = match_cond (subcond, phttp, req);
 	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
@@ -2767,13 +2791,11 @@ add_ssl_headers (POUND_HTTP *phttp)
 
 static int rewrite_rule_check (REWRITE_RULE *rule,
 			       struct http_request *request,
-			       struct sockaddr *srcaddr,
-			       struct submatch_queue *smq);
+			       POUND_HTTP *phttp);
 
 static int
 rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
-		  struct sockaddr *srcaddr,
-		  struct submatch_queue *smq)
+		  POUND_HTTP *phttp)
 {
   int res = 0;
   REWRITE_OP *op;
@@ -2794,7 +2816,7 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
       switch (op->type)
 	{
 	case REWRITE_REWRITE_RULE:
-	  res = rewrite_rule_check (op->v.rule, request, srcaddr, smq);
+	  res = rewrite_rule_check (op->v.rule, request, phttp);
 	  break;
 
 	case REWRITE_HDR_DEL:
@@ -2802,7 +2824,7 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  break;
 
 	case REWRITE_HDR_SET:
-	  if ((s = expand_string (op->v.str, smq, "Header", request)) != NULL)
+	  if ((s = expand_string (op->v.str, phttp, request, "Header")) != NULL)
 	    {
 	      res = http_header_list_append (&request->headers, s, H_REPLACE);
 	      free (s);
@@ -2812,7 +2834,8 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  break;
 
 	case REWRITE_QUERY_PARAM_SET:
-	  if ((s = expand_string (op->v.qp.value, smq, "query parameter", request)) != NULL)
+	  if ((s = expand_string (op->v.qp.value, phttp, request,
+				  "query parameter")) != NULL)
 	    {
 	      res = http_request_set_query_param (request, op->v.qp.name, s);
 	      free (s);
@@ -2822,7 +2845,8 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  break;
 
 	default:
-	  if ((s = expand_string (op->v.str, smq, rwtab[op->type].name, request)) != NULL)
+	  if ((s = expand_string (op->v.str, phttp, request,
+				  rwtab[op->type].name)) != NULL)
 	    {
 	      res = rwtab[op->type].setter (request, s);
 	      free (s);
@@ -2840,15 +2864,15 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 
 static int
 rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
-		    struct sockaddr *srcaddr, struct submatch_queue *smq)
+		    POUND_HTTP *phttp)
 {
   int res = 0;
 
   do
     {
-      if (match_cond (&rule->cond, srcaddr, request, smq))
+      if (match_cond (&rule->cond, phttp, request))
 	{
-	  res = rewrite_op_apply (&rule->ophead, request, srcaddr, smq);
+	  res = rewrite_op_apply (&rule->ophead, request, phttp);
 	  break;
 	}
     }
@@ -2858,15 +2882,14 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 
 static int
 rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-	       struct http_request *request, struct sockaddr *addr,
-	       struct submatch_queue *smq)
+	       struct http_request *request, POUND_HTTP *phttp)
 {
   int res = 0;
   REWRITE_RULE *rule;
 
   SLIST_FOREACH (rule, rewrite_rules, next)
     {
-      if ((res = rewrite_rule_check (rule, request, addr, smq)) != 0)
+      if ((res = rewrite_rule_check (rule, request, phttp)) != 0)
 	break;
     }
   return res;
@@ -2918,8 +2941,10 @@ force_http_10 (POUND_HTTP *phttp)
 
     case 2:
       {
-	char const *agent = http_request_header_value (&phttp->request, HEADER_USER_AGENT);
-	return (phttp->ssl != NULL && agent != NULL && strstr (agent, "MSIE") != NULL);
+	char const *agent = http_request_header_value (&phttp->request,
+						       HEADER_USER_AGENT);
+	return (phttp->ssl != NULL && agent != NULL &&
+		strstr (agent, "MSIE") != NULL);
       }
 
     default:
@@ -2971,16 +2996,17 @@ backend_response (POUND_HTTP *phttp)
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
 		  str_be (caddr2, sizeof (caddr2), phttp->backend),
 		  phttp->request.request, strerror (errno),
-		  log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
+		  log_duration (duration_buf, sizeof (duration_buf),
+				&phttp->start_req));
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
       if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
 			 &phttp->response,
-			 phttp->from_host.ai_addr, &phttp->smq) ||
+			 phttp) ||
 	  rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
 			 &phttp->response,
-			 phttp->from_host.ai_addr, &phttp->smq))
+			 phttp))
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
       be_11 = (phttp->response.request[7] == '1');
@@ -3067,7 +3093,8 @@ backend_response (POUND_HTTP *phttp)
 		  char const *v_host = http_request_host (&phttp->request);
 		  char const *path;
 		  if (v_host && v_host[0] &&
-		      need_rewrite (val, v_host, phttp->lstn, phttp->backend, &path))
+		      need_rewrite (val, v_host, phttp->lstn, phttp->backend,
+				    &path))
 		    {
 		      struct stringbuf sb;
 		      char *p;
@@ -3098,7 +3125,8 @@ backend_response (POUND_HTTP *phttp)
 		  char const *v_host = http_request_host (&phttp->request);
 		  char const *path;
 		  if (v_host && v_host[0] &&
-		      need_rewrite (val, v_host, phttp->lstn, phttp->backend, &path))
+		      need_rewrite (val, v_host, phttp->lstn, phttp->backend,
+				    &path))
 		    {
 		      struct stringbuf sb;
 		      char *p;
@@ -3113,7 +3141,8 @@ backend_response (POUND_HTTP *phttp)
 			{
 			  stringbuf_free (&sb);
 			  logmsg (LOG_WARNING,
-				  "(%"PRItid") rewrite Content-location - out of memory: %s",
+				  "(%"PRItid") rewrite Content-location - "
+				  "out of memory: %s",
 				  POUND_TID (), strerror (errno));
 			  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 			}
@@ -3187,7 +3216,8 @@ backend_response (POUND_HTTP *phttp)
 	       * may have had Content-length, so do raw reads/writes
 	       * for the length
 	       */
-	      if (copy_bin (phttp->be, phttp->cl, content_length, &phttp->res_bytes, skip))
+	      if (copy_bin (phttp->be, phttp->cl, content_length,
+			    &phttp->res_bytes, skip))
 		{
 		  if (errno)
 		    logmsg (LOG_NOTICE,
@@ -3446,7 +3476,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
    * had no back-end before
    */
   if (phttp->lstn->rewr_dest &&
-      (hdr = http_header_list_locate (&phttp->request.headers, HEADER_DESTINATION)) != NULL)
+      (hdr = http_header_list_locate (&phttp->request.headers,
+				      HEADER_DESTINATION)) != NULL)
     {
       regmatch_t matches[4];
 
@@ -3499,9 +3530,9 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
     }
 
   if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp->from_host.ai_addr, &phttp->smq)
+		     phttp)
       || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-			phttp->from_host.ai_addr, &phttp->smq))
+			phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*
@@ -3542,7 +3573,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
 		  str_be (caddr2, sizeof (caddr2), phttp->backend),
 		  phttp->request.request,
-		  log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
+		  log_duration (duration_buf, sizeof (duration_buf),
+				&phttp->start_req));
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
     }
@@ -3551,7 +3583,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       /*
        * had Content-length, so do raw reads/writes for the length
        */
-      if (copy_bin (phttp->cl, phttp->be, content_length, NULL, phttp->backend->be_type != BE_BACKEND))
+      if (copy_bin (phttp->cl, phttp->be, content_length, NULL,
+		    phttp->backend->be_type != BE_BACKEND))
 	{
 	  logmsg (LOG_NOTICE,
 		  "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%s sec)",
@@ -3575,7 +3608,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	      addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
 	      str_be (caddr2, sizeof (caddr2), phttp->backend),
 	      phttp->request.request, strerror (errno),
-	      log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
+	      log_duration (duration_buf, sizeof (duration_buf),
+			    &phttp->start_req));
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
   return 0;
@@ -3694,21 +3728,24 @@ select_backend (POUND_HTTP *phttp)
 		  break;
 
 		default:
-		  logmsg (LOG_WARNING, "(%"PRItid") e503 backend: unknown family %d",
+		  logmsg (LOG_WARNING,
+			  "(%"PRItid") e503 backend: unknown family %d",
 			  POUND_TID (), backend->v.reg.addr.ai_family);
 		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 		}
 
 	      if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
 		{
-		  logmsg (LOG_WARNING, "(%"PRItid") e503 backend %s socket create: %s",
+		  logmsg (LOG_WARNING,
+			  "(%"PRItid") e503 backend %s socket create: %s",
 			  POUND_TID (),
 			  str_be (caddr, sizeof (caddr), backend),
 			  strerror (errno));
 		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 		}
 
-	      if (connect_nb (sock, &backend->v.reg.addr, backend->v.reg.conn_to) == 0)
+	      if (connect_nb (sock, &backend->v.reg.addr,
+			      backend->v.reg.conn_to) == 0)
 		{
 		  int res;
 
@@ -4036,7 +4073,8 @@ do_http (POUND_HTTP *phttp)
       if (phttp->lstn->max_req > 0 && content_length > 0
 	  && content_length > phttp->lstn->max_req)
 	{
-	  logmsg (LOG_NOTICE, "(%"PRItid") e413 request too large (%"PRICLEN") from %s",
+	  logmsg (LOG_NOTICE,
+		  "(%"PRItid") e413 request too large (%"PRICLEN") from %s",
 		  POUND_TID (), content_length,
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
 	  http_err_reply (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE);
@@ -4059,8 +4097,7 @@ do_http (POUND_HTTP *phttp)
        * check that the requested URL still fits the old back-end (if
        * any)
        */
-      if ((phttp->svc = get_service (phttp->lstn, phttp->from_host.ai_addr,
-				     &phttp->request, &phttp->smq)) == NULL)
+      if ((phttp->svc = get_service (phttp)) == NULL)
 	{
 	  char const *v_host = http_request_host (&phttp->request);
 	  logmsg (LOG_NOTICE, "(%"PRItid") e503 no service \"%s\" from %s %s",

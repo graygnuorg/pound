@@ -363,28 +363,24 @@ str_be (char *buf, size_t size, BACKEND *be)
 }
 
 static int
-match_service (const SERVICE *svc, struct sockaddr *srcaddr,
-	       struct http_request *req,
-	       struct submatch_queue *smq)
+match_service (const SERVICE *svc, POUND_HTTP *phttp)
 {
-  return match_cond (&svc->cond, srcaddr, req, smq);
+  return match_cond (&svc->cond, phttp, &phttp->request);
 }
 
 /*
  * Find the right service for a request
  */
 SERVICE *
-get_service (const LISTENER *lstn, struct sockaddr *srcaddr,
-	     struct http_request *req,
-	     struct submatch_queue *smq)
+get_service (POUND_HTTP *phttp)
 {
   SERVICE *svc;
 
-  SLIST_FOREACH (svc, &lstn->services, next)
+  SLIST_FOREACH (svc, &phttp->lstn->services, next)
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, srcaddr, req, smq))
+      if (match_service (svc, phttp))
 	return svc;
     }
 
@@ -393,7 +389,7 @@ get_service (const LISTENER *lstn, struct sockaddr *srcaddr,
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, srcaddr, req, smq))
+      if (match_service (svc, phttp))
 	return svc;
     }
 
