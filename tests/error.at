@@ -35,7 +35,7 @@ m4_pushdef([ERR404],
 <head><title>Custom Not Found Error</title></head>
 <body>
 <p>The requested resource is not found on that server.</p>
-<p>This is custom error page was supplied using the Err404 directive.</p>
+<p>This custom error page was supplied using the Err404 directive.</p>
 </body>
 ])
 

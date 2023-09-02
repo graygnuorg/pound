@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-08-26
+Pound -- history of user-visible changes. 2023-09-02
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -40,6 +40,69 @@ backend "assets" to the service and modifies its priority:
     Priority 8
   End
 
+* Response header modification
+
+The "Rewrite" statement accepts optional argument specifying whether
+it applies to the incoming request, or to the response.  The following
+statement applies to requests and is exactly equivalent to "Rewrite"
+without argument:
+
+  Rewrite request
+    ...
+  End
+
+In contrast, the following statement:
+
+  Rewrite response
+    ...
+  End
+
+applies to the response (received from the regular backend or generated
+by error backend).  In this form, the set of statements that can
+appear inside the section (denoted by ellipsis above) is limited to
+the following: "Not", "Match", "Header", "StringMatch", and
+"SetHeader".  For example:
+
+  Rewrite response
+    Match
+      Header "Content-Type: text/(.*)"
+    End
+    SetHeader "X-Text-Type: $1"
+  End
+
+The same applies to "Else" branches.
+
+* Basic authentication
+
+New request matching statement "BasicAuth" is implemented.  Its
+syntax is:
+
+  BasicAuth "FILE"
+
+It evaluates to true, if the incoming request contains Authorization
+header with scheme "Basic", such that user name and password obtained
+from it match a line in the given disk file.  FILE must be a
+plain-text file created with htpasswd(1) or similar utility, i.e. each
+non-empty line of it must contain username and password hash separated
+by a colon.  Password hash can be one of:
+
+  . Password in plain text.
+  . Hash created by the system crypt(3) function.
+  . Password hashed using SHA1 algorithm and encoded in base64.
+    This hash must be prefixed by {SHA}
+  . Apache-style "APR1" hash.
+
+Combined with the response rewriting described above, this can be
+used to implement basic HTTP authentication in Pound as shown in
+the following example:
+
+  Service "auth"
+      Not BasicAuth "/etc/pound/htpass"
+      Rewrite response
+          SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+      End
+      Error 401
+  End
 
 Version 4.9, 2023-08-22
 

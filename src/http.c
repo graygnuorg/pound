@@ -47,6 +47,24 @@ bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
   BIO_printf (bio, "%s\r\n", headers ? headers : "");
 }
 
+static int http_headers_send (BIO *be, HTTP_HEADER_LIST *head, int safe);
+
+static void
+bio_http_reply_start_list (BIO *bio, int proto, int code, char const *text,
+			   HTTP_HEADER_LIST *head,
+			   CONTENT_LENGTH len)
+{
+  BIO_printf (bio, "HTTP/1.%d %d %s\r\n", proto, code, text);
+  if (proto == 1)
+    {
+      BIO_printf (bio,
+		  "Content-Length: %"PRICLEN"\r\n"
+		  "Connection: close\r\n", len);
+    }
+  http_headers_send (bio, head, 1);
+  BIO_printf (bio, "\r\n");
+}
+
 /*
  * Emit to BIO response line with the given CODE and descriptive TEXT,
  * followed by HEADERS (may be NULL) and given CONTENT.  TYPE and
@@ -136,12 +154,6 @@ static char err_headers[] =
   "Pragma: no-cache\r\n"
   "Cache-control: no-cache,no-store\r\n";
 
-static char err_401_headers[] =
-  "Expires: now\r\n"
-  "Pragma: no-cache\r\n"
-  "Cache-control: no-cache,no-store\r\n"
-  "WWW-Authenticate: Basic realm=\"Pound auth\"";
-
 static char default_error_page[] = "\
 <!DOCTYPE HTML PUBLIC \"-//IETF//DTD HTML 2.0//EN\">\
 <html><head>\
@@ -200,7 +212,7 @@ bio_err_reply (BIO *bio, int proto, int err, char const *content)
 	content = http_status[err].text;
     }
   bio_http_reply (bio, proto, http_status[err].code, http_status[err].reason,
-		  err == HTTP_STATUS_UNAUTHORIZED ? err_401_headers : err_headers, "text/html", content);
+		  err_headers, "text/html", content);
   stringbuf_free (&sb);
 }
 
@@ -762,8 +774,10 @@ redirect_response (POUND_HTTP *phttp)
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   xurl = expand_url (redirect->url, &phttp->request, &phttp->smq, redirect->has_uri);
@@ -874,8 +888,10 @@ acme_response (POUND_HTTP *phttp)
   char *file_name;
   int rc = HTTP_STATUS_OK;
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq) ||
-      rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   file_name = expand_url ("$1", &phttp->request, &phttp->smq, 1);
@@ -920,43 +936,91 @@ acme_response (POUND_HTTP *phttp)
   return rc;
 }
 
+int
+parse_header_text (HTTP_HEADER_LIST *head, char const *text)
+{
+  struct stringbuf sb;
+  int res = 0;
+
+  stringbuf_init_log (&sb);
+  while (*text)
+    {
+      char *hdr;
+      int len = strcspn (text, "\r\n");
+
+      if (len == 0)
+	break;
+
+      stringbuf_reset (&sb);
+      stringbuf_add (&sb, text, len);
+      if ((hdr = stringbuf_finish (&sb)) == NULL ||
+	  http_header_list_append (head, hdr, H_REPLACE))
+	{
+	  res = -1;
+	  break;
+	}
+
+      text += len;
+      if (*text == '\r')
+	text++;
+      if (*text == '\n')
+	text++;
+    }
+  stringbuf_free (&sb);
+  return res;
+}
+
 static int
 error_response (POUND_HTTP *phttp)
 {
   int err = phttp->backend->v.error.status;
-  char *text = phttp->backend->v.error.text;
+  const char *text = phttp->backend->v.error.text
+			? phttp->backend->v.error.text
+			: phttp->lstn->http_err[err]
+			    ? phttp->lstn->http_err[err]
+			    : http_status[err].text;
+  size_t len = strlen (text);
+  struct http_request req;
+  BIO *bin;
 
-  if (text)
+  http_request_init (&req);
+  if (parse_header_text (&req.headers, err_headers))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req,
+		     phttp->from_host.ai_addr, &phttp->smq) ||
+      rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req,
+		     phttp->from_host.ai_addr, &phttp->smq))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  bin = BIO_new_mem_buf (text, len);
+
+  bio_http_reply_start_list (phttp->cl,
+			     phttp->request.version,
+			     http_status[err].code,
+			     http_status[err].reason,
+			     &req.headers,
+			     (CONTENT_LENGTH) len);
+  if (copy_bin (bin, phttp->cl, len, NULL, 0))
     {
-      size_t len = strlen (text);
-      BIO *bin = BIO_new_mem_buf (text, len);
-      bio_http_reply_start (phttp->cl, phttp->request.version,
-			    http_status[err].code,
-			    http_status[err].reason,
-			    err == HTTP_STATUS_UNAUTHORIZED ? err_401_headers : err_headers, "text/html",
-			    (CONTENT_LENGTH) len);
-      if (copy_bin (bin, phttp->cl, len, NULL, 0))
-	{
-	  if (errno)
-	    logmsg (LOG_NOTICE, "(%"PRItid") error sending response %d: %s",
-		    POUND_TID (), http_status[err].code, strerror (errno));
-	}
-
-      BIO_free (bin);
-      BIO_flush (phttp->cl);
+      if (errno)
+	logmsg (LOG_NOTICE, "(%"PRItid") error sending response %d: %s",
+		POUND_TID (), http_status[err].code, strerror (errno));
     }
-  else
-    http_err_reply (phttp, err);
 
+  BIO_free (bin);
+  BIO_flush (phttp->cl);
+  http_request_free
+    (&req);
   phttp->response_code = http_status[err].code;
   return 0;
 }
 
 /*
  * Get a "line" from a BIO, strip the trailing newline, skip the input
- * stream if buffer too small
- * The result buffer is NULL terminated
- * Return 0 on success
+ * stream if buffer too small.
+ * The result buffer is NULL terminated.
+ * Return 0 on success.
  */
 static int
 get_line (BIO *in, char *const buf, int bufsize)
@@ -2509,21 +2573,31 @@ log_duration (char *buf, size_t size, struct timespec const *start)
 }
 
 static int
-http_request_send (BIO *be, struct http_request *req)
+http_headers_send (BIO *be, HTTP_HEADER_LIST *head, int safe)
 {
   struct http_header *hdr;
+  DLIST_FOREACH (hdr, head, link)
+    {
+      if (safe &&
+	  (hdr->code == HEADER_CONTENT_LENGTH ||
+	   hdr->code == HEADER_CONNECTION))
+	continue;
+      if (BIO_printf (be, "%s\r\n", hdr->header) <= 0)
+	return -1;
+    }
+  return 0;
+}
+
+static int
+http_request_send (BIO *be, struct http_request *req)
+{
   char const *s;
 
   if (http_request_get_request_line (req, &s))
     return -1;
   if (BIO_printf (be, "%s\r\n", s) <= 0)
     return -1;
-  DLIST_FOREACH (hdr, &req->headers, link)
-    {
-      if (BIO_printf (be, "%s\r\n", hdr->header) <= 0)
-	return -1;
-    }
-  return 0;
+  return http_headers_send (be, &req->headers, 0);
 }
 
 static int
@@ -2900,6 +2974,14 @@ backend_response (POUND_HTTP *phttp)
 		  log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
+
+      if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
+			 &phttp->response,
+			 phttp->from_host.ai_addr, &phttp->smq) ||
+	  rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
+			 &phttp->response,
+			 phttp->from_host.ai_addr, &phttp->smq))
+	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
       be_11 = (phttp->response.request[7] == '1');
       phttp->response_code = strtol (phttp->response.request+9, NULL, 10);
@@ -3416,8 +3498,10 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	lognomem ();
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq)
-      || rewrite_apply (&phttp->svc->rewrite, &phttp->request, phttp->from_host.ai_addr, &phttp->smq))
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp->from_host.ai_addr, &phttp->smq)
+      || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+			phttp->from_host.ai_addr, &phttp->smq))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*

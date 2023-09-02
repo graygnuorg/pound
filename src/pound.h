@@ -596,13 +596,19 @@ typedef enum
     BALANCER_IWRR,
   } BALANCER;
 
+enum
+  {
+    REWRITE_REQUEST,
+    REWRITE_RESPONSE
+  };
+
 /* service definition */
 typedef struct _service
 {
   char *name;			/* symbolic name */
   char *locus;                  /* Location in the config file */
   SERVICE_COND cond;
-  REWRITE_RULE_HEAD rewrite;
+  REWRITE_RULE_HEAD rewrite[2];
   BACKEND_HEAD backends;
   BACKEND *emergency;
   int abs_pri;			/* abs total priority for all back-ends */
@@ -668,7 +674,7 @@ typedef struct _listener
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   int header_options;           /* additional header options */
-  REWRITE_RULE_HEAD rewrite;
+  REWRITE_RULE_HEAD rewrite[2];
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   int has_pat;			/* was a URL pattern defined? */

@@ -3053,12 +3053,89 @@ parse_sub_rewrite (void *call_data, void *section_data)
   op->v.rule = rewrite_rule_alloc (NULL);
   return parser_loop (rewrite_rule_parsetab, op->v.rule, section_data, NULL);
 }
+
+#define MATCH_RESPONSE_CONDITIONS(data, off)			\
+  { "Header", parse_cond_hdr_matcher, data, off },		\
+  { "StringMatch", parse_cond_string_matcher, data, off },	\
+  { "Match", parse_match, data, off },				\
+  { "NOT", parse_not_cond, data, off }
+
+#define REWRITE_RESPONSE_OPS(data, off)						\
+  { "SetHeader", parse_set_header, data, off },				\
+  { "DeleteHeader", parse_delete_header, data, off }
+
+static int parse_response_else (void *call_data, void *section_data);
+static int parse_response_sub_rewrite (void *call_data, void *section_data);
+
+static PARSER_TABLE response_rewrite_rule_parsetab[] = {
+  { "End", parse_end },
+  { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
+  { "Else", parse_response_else, NULL, offsetof (REWRITE_RULE, iffalse) },
+  MATCH_RESPONSE_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
+  REWRITE_RESPONSE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { NULL }
+};
+
+static PARSER_TABLE response_else_rule_parsetab[] = {
+  { "End", parse_end_else },
+  { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
+  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
+  MATCH_RESPONSE_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
+  REWRITE_RESPONSE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { NULL }
+};
+
+static int
+parse_response_else (void *call_data, void *section_data)
+{
+  REWRITE_RULE *rule = rewrite_rule_alloc (NULL);
+  *(REWRITE_RULE**)call_data = rule;
+  return parser_loop (response_else_rule_parsetab, rule, section_data, NULL);
+}
+
+static int
+parse_response_sub_rewrite (void *call_data, void *section_data)
+{
+  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_REWRITE_RULE);
+  op->v.rule = rewrite_rule_alloc (NULL);
+  return parser_loop (response_rewrite_rule_parsetab, op->v.rule, section_data, NULL);
+}
 
 static int
 parse_rewrite (void *call_data, void *section_data)
 {
-  REWRITE_RULE *rule = rewrite_rule_alloc (call_data);
-  return parser_loop (rewrite_rule_parsetab, rule, section_data, NULL);
+  struct token *tok;
+  PARSER_TABLE *table;
+  REWRITE_RULE_HEAD *rw = call_data, *head;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+  if (tok->type == T_IDENT)
+    {
+      if (strcasecmp (tok->str, "response") == 0)
+	{
+	  table = response_rewrite_rule_parsetab;
+	  head = &rw[REWRITE_RESPONSE];
+	}
+      else if (strcasecmp (tok->str, "request") == 0)
+	{
+	  table = rewrite_rule_parsetab;
+	  head = &rw[REWRITE_REQUEST];
+	}
+      else
+	{
+	  conf_error ("expected response, request, or newline, but found %s",
+		      token_type_str (tok->type));
+	  return PARSER_FAIL;
+	}
+    }
+  else
+    {
+      putback_tkn (tok);
+      table = rewrite_rule_parsetab;
+      head = &rw[REWRITE_REQUEST];
+    }
+  return parser_loop (table, rewrite_rule_alloc (head), section_data, NULL);
 }
 
 static REWRITE_RULE *
@@ -3820,7 +3897,8 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->log_level = dfl->log_level;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
-  SLIST_INIT (&lst->rewrite);
+  SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
+  SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
   return lst;
