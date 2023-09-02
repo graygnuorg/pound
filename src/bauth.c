@@ -1,3 +1,27 @@
+/*
+ * Pound - the reverse-proxy load-balancer
+ * Copyright (C) 2023 Sergey Poznyakoff
+ *
+ * Pound is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Pound is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
+ */
+
+/*
+ * The code below uses MD5 and SHA1 algorithms, which are marked as deprecated
+ * since OpenSSL version 3.0.  These algorithms are used intentionally, for
+ * compatibility with other software (namely, htpasswd program from Apache).
+ */
+#define OPENSSL_SUPPRESS_DEPRECATED 1
 #include "pound.h"
 #if HAVE_CRYPT_H
 # include <crypt.h>
