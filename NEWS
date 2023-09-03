@@ -7,6 +7,8 @@ on 2022-09-19.  See the README.md file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
+Version 4.9.90 (git)
+
 * Global "Backend" definitions
 
 A "Backend" statement is allowed to appear in global scope.  In this
