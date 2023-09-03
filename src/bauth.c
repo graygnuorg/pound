@@ -16,18 +16,9 @@
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
 
-/*
- * The code below uses MD5 and SHA1 algorithms, which are marked as deprecated
- * since OpenSSL version 3.0.  These algorithms are used intentionally, for
- * compatibility with other software (namely, htpasswd program from Apache).
- */
-#define OPENSSL_SUPPRESS_DEPRECATED 1
 #include "pound.h"
 #if HAVE_CRYPT_H
 # include <crypt.h>
-#endif
-#ifndef OPENSSL_NO_MD5
-# include <openssl/md5.h>
 #endif
 
 static pthread_mutex_t crypt_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -54,7 +45,7 @@ auth_crypt (const char *pass, const char *hash)
 
 #ifndef OPENSSL_NO_MD5
 
-static void
+static char *
 to64 (char *s, unsigned long v, int n)
 {
   static unsigned char itoa64[] =         /* 0 ... 63 => ASCII - 64 */
@@ -65,25 +56,34 @@ to64 (char *s, unsigned long v, int n)
       *s++ = itoa64[v&0x3f];
       v >>= 6;
     }
+  return s;
 }
 
 #define APR_MD5_DIGESTSIZE 16
 #define APR1_ID_STR "$apr1$"
 #define APR1_ID_LEN (sizeof (APR1_ID_STR)-1)
 
-char *
-apr_md5_encode(const char *pw, const char *salt, char *result, size_t nbytes)
-{
-  /*
-   * Minimum size is 8 bytes for salt, plus 1 for the trailing NUL,
-   * plus 4 for the '$' separators, plus the password hash itself.
-   */
+/*
+ * Hashed password size is:
+ *   6     bytes for the initial APR1_ID_STR
+ *   8     bytes (at most) of salt
+ *   1     byte for $
+ *  22     bytes of hash
+ *   1     byte for trailing \0
+ *  --
+ *  38     bytes total
+ */
+#define APR1_PW_SIZE 38
 
-   char passwd[120];
+char *
+apr_md5_encode (const char *pw, const char *salt, char *result, size_t nbytes)
+{
+   char passwd[APR1_PW_SIZE];
    char *p;
-   unsigned char final[APR_MD5_DIGESTSIZE];
+   unsigned char final[EVP_MAX_MD_SIZE];
+   unsigned int sz;
    ssize_t slen, plen, i;
-   MD5_CTX ctx, ctx1;
+   EVP_MD_CTX *ctx, *ctx1;
 
    if (!strncmp (salt, APR1_ID_STR, APR1_ID_LEN))
      salt += APR1_ID_LEN;
@@ -95,73 +95,87 @@ apr_md5_encode(const char *pw, const char *salt, char *result, size_t nbytes)
 
    plen = strlen (pw);
 
-   MD5_Init (&ctx);
-   MD5_Update (&ctx, pw, plen);
-   MD5_Update (&ctx, APR1_ID_STR, APR1_ID_LEN);
-   MD5_Update (&ctx, salt, slen);
+   ctx = EVP_MD_CTX_create ();
+   EVP_MD_CTX_init (ctx);
+   EVP_DigestInit (ctx, EVP_md5 ());
 
-   MD5_Init (&ctx1);
-   MD5_Update (&ctx1, pw, plen);
-   MD5_Update (&ctx1, salt, slen);
-   MD5_Update (&ctx1, pw, plen);
-   MD5_Final (final, &ctx1);
+   EVP_DigestUpdate (ctx, pw, plen);
+   EVP_DigestUpdate (ctx, APR1_ID_STR, APR1_ID_LEN);
+   EVP_DigestUpdate (ctx, salt, slen);
+
+   ctx1 = EVP_MD_CTX_create ();
+   EVP_MD_CTX_init (ctx1);
+   EVP_DigestInit (ctx1, EVP_md5 ());
+
+   EVP_DigestUpdate (ctx1, pw, plen);
+   EVP_DigestUpdate (ctx1, salt, slen);
+   EVP_DigestUpdate (ctx1, pw, plen);
+   EVP_DigestFinal_ex (ctx1, final, &sz);
+   if (sz != APR_MD5_DIGESTSIZE)
+     {
+       EVP_MD_CTX_destroy (ctx);
+       EVP_MD_CTX_destroy (ctx1);
+       return NULL;
+     }
 
    for (i = plen; i > 0; i -= APR_MD5_DIGESTSIZE)
-     MD5_Update (&ctx, final,
+     EVP_DigestUpdate (ctx, final,
 		 (i > APR_MD5_DIGESTSIZE) ? APR_MD5_DIGESTSIZE : i);
 
    memset (final, 0, sizeof (final));
 
    for (i = plen; i != 0; i >>= 1)
-     MD5_Update (&ctx, (i & 1) ? (char*)final : pw, 1);
+     EVP_DigestUpdate (ctx, (i & 1) ? (char*)final : pw, 1);
 
    strcpy (passwd, APR1_ID_STR);
    strncat (passwd, salt, slen);
    strcat (passwd, "$");
 
-   MD5_Final (final, &ctx);
+   EVP_DigestFinal_ex (ctx, final, &sz);
+   if (sz != APR_MD5_DIGESTSIZE)
+     {
+       EVP_MD_CTX_destroy (ctx);
+       EVP_MD_CTX_destroy (ctx1);
+       return NULL;
+     }
 
    for (i = 0; i < 1000; i++)
      {
-       MD5_Init (&ctx1);
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+       EVP_MD_CTX_reset (ctx1);
+#else
+       EVP_MD_CTX_cleanup (ctx1);
+#endif
+       EVP_DigestInit (ctx1, EVP_md5 ());
        if (i & 1)
-	 MD5_Update (&ctx1, pw, plen);
+	 EVP_DigestUpdate (ctx1, pw, plen);
        else
-	 MD5_Update (&ctx1, final, APR_MD5_DIGESTSIZE);
+	 EVP_DigestUpdate (ctx1, final, APR_MD5_DIGESTSIZE);
 
        if (i % 3)
-	 MD5_Update (&ctx1, salt, slen);
+	 EVP_DigestUpdate (ctx1, salt, slen);
 
        if (i % 7)
-	 MD5_Update (&ctx1, pw, plen);
+	 EVP_DigestUpdate (ctx1, pw, plen);
 
        if (i & 1)
-	 MD5_Update (&ctx1, final, APR_MD5_DIGESTSIZE);
+	 EVP_DigestUpdate (ctx1, final, APR_MD5_DIGESTSIZE);
        else
-	 MD5_Update (&ctx1, pw, plen);
-       MD5_Final (final, &ctx1);
+	 EVP_DigestUpdate (ctx1, pw, plen);
+       EVP_DigestFinal_ex (ctx1, final, NULL);
      }
+
+   EVP_MD_CTX_destroy (ctx);
+   EVP_MD_CTX_destroy (ctx1);
 
    p = passwd + strlen (passwd);
 
-   to64 (p, (final[0]<<16) | (final[6]<<8) | final[12], 4);
-   p += 4;
-
-   to64 (p, (final[1]<<16) | (final[7]<<8) | final[13], 4);
-   p += 4;
-
-   to64 (p, (final[2]<<16) | (final[8]<<8) | final[14], 4);
-   p += 4;
-
-   to64 (p, (final[3]<<16) | (final[9]<<8) | final[15], 4);
-   p += 4;
-
-   to64 (p, (final[4]<<16) | (final[10]<<8) | final[5], 4);
-   p += 4;
-
-   to64 (p, final[11], 2);
-   p += 2;
-
+   p = to64 (p, (final[0]<<16) | (final[6]<<8) | final[12], 4);
+   p = to64 (p, (final[1]<<16) | (final[7]<<8) | final[13], 4);
+   p = to64 (p, (final[2]<<16) | (final[8]<<8) | final[14], 4);
+   p = to64 (p, (final[3]<<16) | (final[9]<<8) | final[15], 4);
+   p = to64 (p, (final[4]<<16) | (final[10]<<8) | final[5], 4);
+   p = to64 (p, final[11], 2);
    *p = '\0';
 
    memset (final, 0, sizeof (final));
@@ -189,7 +203,8 @@ auth_sha1 (const char *pass, const char *hash)
 {
   int len;
   BIO *bb, *b64;
-  char hashbuf[SHA_DIGEST_LENGTH], resbuf[SHA_DIGEST_LENGTH];
+  char hashbuf[SHA_DIGEST_LENGTH], resbuf[EVP_MAX_MD_SIZE];
+  unsigned int sz;
 
   if ((bb = BIO_new (BIO_s_mem ())) == NULL)
     {
@@ -228,12 +243,11 @@ auth_sha1 (const char *pass, const char *hash)
 
   BIO_free_all (b64);
 
-  SHA_CTX ctx;
-  SHA1_Init (&ctx);
-  SHA1_Update (&ctx, pass, strlen (pass));
-  SHA1_Final ((unsigned char*) resbuf, &ctx);
+  sz = sizeof (resbuf);
+  EVP_Digest (pass, strlen (pass), (unsigned char *)resbuf,
+	      &sz, EVP_sha1 (), NULL);
 
-  return memcmp (resbuf, hashbuf, SHA_DIGEST_LENGTH);
+  return !(sz == SHA_DIGEST_LENGTH && memcmp (resbuf, hashbuf, sz) == 0);
 }
 
 struct auth_matcher
