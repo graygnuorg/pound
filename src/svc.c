@@ -2666,34 +2666,70 @@ SSLINFO_callback (const SSL * ssl, int where, int rc)
 }
 
 int
-foreach_backend (BACKEND_ITERATOR itr, void *data)
+foreach_listener (LISTENER_ITERATOR itr, void *data)
+{
+  LISTENER *lstn;
+  int rc = 0;
+  SLIST_FOREACH (lstn, &listeners, next)
+    {
+      if ((rc = itr (lstn, data)) != 0)
+	break;
+    }
+  return rc;
+}
+
+int
+foreach_service (SERVICE_ITERATOR itr, void *data)
 {
   LISTENER *lstn;
   SERVICE *svc;
-  BACKEND *be;
 
   SLIST_FOREACH (lstn, &listeners, next)
     {
       SLIST_FOREACH (svc, &lstn->services, next)
 	{
-	  SLIST_FOREACH (be, &svc->backends, next)
-	    {
-	      int rc;
-	      if ((rc = itr (be, data)) != 0)
-		return rc;
-	    }
+	  int rc;
+	  if ((rc = itr (svc, data)) != 0)
+	    return rc;
 	}
     }
 
   SLIST_FOREACH (svc, &services, next)
     {
-      SLIST_FOREACH (be, &svc->backends, next)
-	{
-	  int rc;
-	  if ((rc = itr (be, data)) != 0)
-	    return rc;
-	}
+      int rc;
+      if ((rc = itr (svc, data)) != 0)
+	return rc;
     }
 
   return 0;
+}
+
+struct service_backends_iterator
+{
+  BACKEND_ITERATOR itr;
+  void *data;
+};
+
+static int
+itr_service_backends (SERVICE *svc, void *data)
+{
+  struct service_backends_iterator *itp = data;
+  BACKEND *be;
+  SLIST_FOREACH (be, &svc->backends, next)
+    {
+      int rc;
+      if ((rc = itp->itr (be, itp->data)) != 0)
+	return rc;
+    }
+  return 0;
+}
+
+int
+foreach_backend (BACKEND_ITERATOR itr, void *data)
+{
+  struct service_backends_iterator bitr;
+
+  bitr.itr = itr;
+  bitr.data = data;
+  return foreach_service (itr_service_backends, &bitr);
 }

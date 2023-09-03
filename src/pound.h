@@ -257,6 +257,20 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 /* List definitions. */
 #include "list.h"
 
+/* Locations in the source file */
+struct locus_point
+{
+  char const *filename;
+  int line;
+  int col;
+};
+
+struct locus_range
+{
+  struct locus_point beg, end;
+};
+
+
 /* Header types */
 enum
   {
@@ -518,6 +532,14 @@ struct string_match
   regex_t re;
 };
 
+struct pass_file
+{
+  int dir;
+  char *dirname;
+  char *filename;
+  struct locus_range locus;
+};
+
 typedef struct _service_cond
 {
   enum service_cond_type type;
@@ -527,8 +549,8 @@ typedef struct _service_cond
     regex_t re;
     struct bool_service_cond bool;
     struct _service_cond *cond;
-    struct string_match sm; /* COND_QUERY_PARAM and COND_STRING_MATCH */
-    char const *pwfile;     /* COND_BASIC_AUTH */
+    struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
+    struct pass_file pwfile; /* COND_BASIC_AUTH */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -1077,7 +1099,13 @@ int http_request_get_basic_auth (struct http_request *req,
 
 void service_lb_init (SERVICE *svc);
 
+typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);
+int foreach_listener (LISTENER_ITERATOR itr, void *data);
+
+typedef int (*SERVICE_ITERATOR) (SERVICE *, void *);
+int foreach_service (SERVICE_ITERATOR itr, void *data);
+
 typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
 int foreach_backend (BACKEND_ITERATOR itr, void *data);
 
-int basic_auth (char const *file, struct http_request *req);
+int basic_auth (struct pass_file *pwf, struct http_request *req);

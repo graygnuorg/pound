@@ -47,19 +47,6 @@ typedef unsigned TOKENMASK;
 /* Unquoted character sequence */
 #define T_UNQ (T_BIT (T_IDENT) | T_BIT (T_NUMBER) | T_BIT (T_LITERAL))
 
-/* Locations in the source file */
-struct locus_point
-{
-  char const *filename;
-  int line;
-  int col;
-};
-
-struct locus_range
-{
-  struct locus_point beg, end;
-};
-
 /* Token structure */
 struct token
 {
@@ -2596,7 +2583,10 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
-  cond->pwfile = xstrdup (tok->str);
+  cond->pwfile.locus = tok->locus;
+  cond->pwfile.dir = AT_FDCWD;
+  cond->pwfile.dirname = NULL;
+  cond->pwfile.filename = xstrdup (tok->str);
   return PARSER_OK;
 }
 
@@ -4778,7 +4768,100 @@ resolve_backend_ref (BACKEND *be, void *data)
     }
   return 0;
 }
+
+/*
+ * Fix-up password file structures for use in restricted chroot
+ * environment.
+ */
+static int
+cond_pass_file_fixup (SERVICE_COND *cond)
+{
+  int rc = 0;
 
+  switch (cond->type)
+    {
+    case COND_BASIC_AUTH:
+      {
+	/* Split file name into directory and base name, */
+	char *p = strrchr (cond->pwfile.filename, '/');
+	if (p != NULL)
+	  {
+	    cond->pwfile.dirname = cond->pwfile.filename;
+	    *p++ = 0;
+	    cond->pwfile.filename = p;
+
+	    cond->pwfile.dir = open (cond->pwfile.dirname,
+				     O_RDONLY | O_NONBLOCK | O_DIRECTORY);
+	    if (cond->pwfile.dir == -1)
+	      {
+		conf_error_at_locus_range (&cond->pwfile.locus,
+					   "can't open directory %s: %s",
+					   cond->pwfile.dirname,
+					   strerror (errno));
+		rc = -1;
+	      }
+	  }
+      }
+      break;
+
+    case COND_BOOL:
+      {
+	SERVICE_COND *subcond;
+	SLIST_FOREACH (subcond, &cond->bool.head, next)
+	  {
+	    if ((rc = cond_pass_file_fixup (subcond)) != 0)
+	      break;
+	  }
+      }
+      break;
+
+    default:
+      break;
+    }
+  return rc;
+}
+
+static int
+rule_pass_file_fixup (REWRITE_RULE *rule)
+{
+  int rc = 0;
+  do
+    {
+      if ((rc = cond_pass_file_fixup (&rule->cond)) != 0)
+	break;
+    }
+  while ((rule = rule->iffalse) != NULL);
+  return rc;
+}
+
+static int
+pass_file_fixup (REWRITE_RULE_HEAD *head)
+{
+  REWRITE_RULE *rule;
+  int rc = 0;
+
+  SLIST_FOREACH (rule, head, next)
+    {
+      if ((rc = rule_pass_file_fixup (rule)) != 0)
+	break;
+    }
+  return rc;
+}
+
+static int
+service_pass_file_fixup (SERVICE *svc, void *data)
+{
+  if (cond_pass_file_fixup (&svc->cond))
+    return -1;
+  return pass_file_fixup (&svc->rewrite[REWRITE_REQUEST]);
+}
+
+static int
+listener_pass_file_fixup (LISTENER *lstn, void *data)
+{
+  return pass_file_fixup (&lstn->rewrite[REWRITE_REQUEST]);
+}
+
 int
 parse_config_file (char const *file)
 {
@@ -4812,6 +4895,13 @@ parse_config_file (char const *file)
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
 	  log_facility = pound_defaults.facility;
+
+	  if (root_jail)
+	    {
+	      if (foreach_listener (listener_pass_file_fixup, NULL)
+		  || foreach_service (service_pass_file_fixup, NULL))
+		exit (1);
+	    }
 	}
     }
 

@@ -289,17 +289,33 @@ auth_match (const char *pass, const char *hash)
 }
 
 static int
-basic_auth_internal (char const *file, char const *user, char const *pass)
+basic_auth_internal (struct pass_file *pwf, char const *user, char const *pass)
 {
+  int fd;
   FILE *fp;
   char buf[MAXBUF];
   int rc;
 
-  fp = fopen (file, "r");
+  if ((fd = openat (pwf->dir, pwf->filename, O_RDONLY)) == -1)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") can't open %s%s%s: %s",
+	      POUND_TID (),
+	      pwf->dirname ? pwf->dirname : "",
+	      pwf->dirname ? "/" : "",
+	      pwf->filename,
+	      strerror (errno));
+      return 1;
+    }
+  fp = fdopen (fd, "r");
   if (!fp)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") can't open %s: %s", POUND_TID (),
-	      file, strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") fdopen %s%s%s failed: %s",
+	      POUND_TID (),
+	      pwf->dirname ? pwf->dirname : "",
+	      pwf->dirname ? "/" : "",
+	      pwf->filename,
+	      strerror (errno));
+      close (fd);
       return 1;
     }
 
@@ -331,7 +347,7 @@ basic_auth_internal (char const *file, char const *user, char const *pass)
 }
 
 int
-basic_auth (char const *file, struct http_request *req)
+basic_auth (struct pass_file *pwf, struct http_request *req)
 {
   char *user;
   char *pass;
@@ -339,7 +355,7 @@ basic_auth (char const *file, struct http_request *req)
 
   if ((rc = http_request_get_basic_auth (req, &user, &pass)) == 0)
     {
-      rc = basic_auth_internal (file, user, pass);
+      rc = basic_auth_internal (pwf, user, pass);
       memset (pass, 0, strlen (pass));
       free (pass);
       free (user);

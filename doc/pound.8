@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 25, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "September 3, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -844,6 +844,15 @@ limit it to something more reasonable. Please note that this applies
 only to the request path -
 .B pound
 will still check that the request is syntactically correct.
+.TP
+\fBErr400\fR "\fIfilename\fR"
+A file with the text to be displayed if an Error 400 occurs.
+.TP
+\fBErr401\fR "\fIfilename\fR"
+A file with the text to be displayed if an Error 401 occurs.
+.TP
+\fBErr403\fR "\fIfilename\fR"
+A file with the text to be displayed if an Error 401 occurs.
 .TP
 \fBErr404\fR "\fIfilename\fR"
 A file with the text to be displayed if an Error 404 occurs.

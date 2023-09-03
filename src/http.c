@@ -2543,7 +2543,7 @@ match_cond (const SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_BASIC_AUTH:
-      res = basic_auth (cond->pwfile, req) == 0;
+      res = basic_auth (&cond->pwfile, req) == 0;
       break;
 
     case COND_STRING_MATCH:
