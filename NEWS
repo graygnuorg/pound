@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-09-02
+Pound -- history of user-visible changes. 2023-09-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -60,8 +60,8 @@ In contrast, the following statement:
 applies to the response (received from the regular backend or generated
 by error backend).  In this form, the set of statements that can
 appear inside the section (denoted by ellipsis above) is limited to
-the following: "Not", "Match", "Header", "StringMatch", and
-"SetHeader".  For example:
+the following: "Not", "Match", "Header", "StringMatch", 
+"SetHeader", and "DeleteHeader".  For example:
 
   Rewrite response
     Match
