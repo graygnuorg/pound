@@ -1102,17 +1102,22 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   int flags, res, error;
   socklen_t len;
   struct pollfd p;
+  char caddr[MAX_ADDR_BUFSIZE];
 
   if ((flags = fcntl (sockfd, F_GETFL, 0)) < 0)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl GETFL failed: %s",
-	      POUND_TID (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: fcntl GETFL failed: %s",
+	      POUND_TID (),
+	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+	      strerror (errno));
       return -1;
     }
   if (fcntl (sockfd, F_SETFL, flags | O_NONBLOCK) < 0)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl SETFL failed: %s",
-	      POUND_TID (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: fcntl SETFL failed: %s",
+	      POUND_TID (),
+	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+	      strerror (errno));
       return -1;
     }
 
@@ -1120,8 +1125,10 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   if ((res = connect (sockfd, serv_addr->ai_addr, serv_addr->ai_addrlen)) < 0)
     if (errno != EINPROGRESS)
       {
-	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: connect failed: %s",
-		POUND_TID (), strerror (errno));
+	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: connect failed: %s",
+		POUND_TID (),
+		addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		strerror (errno));
 	return -1;
       }
 
@@ -1130,8 +1137,10 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       /* connect completed immediately (usually localhost) */
       if (fcntl (sockfd, F_SETFL, flags) < 0)
 	{
-	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl reSETFL failed: %s",
-		  POUND_TID (), strerror (errno));
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: restore SETFL failed: %s",
+		  POUND_TID (),
+		  addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		  strerror (errno));
 	  return -1;
 	}
       return 0;
@@ -1145,13 +1154,16 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       if (res == 0)
 	{
 	  /* timeout */
-	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: poll timed out",
-		  POUND_TID ());
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: poll timed out",
+		  POUND_TID (),
+		  addr2str (caddr, sizeof (caddr), serv_addr, 0));
 	  errno = ETIMEDOUT;
 	}
       else
-	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: poll failed: %s",
-		POUND_TID (), strerror (errno));
+	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: poll failed: %s",
+		POUND_TID (),
+		addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		strerror (errno));
       return -1;
     }
 
@@ -1159,16 +1171,20 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
   len = sizeof (error);
   if (getsockopt (sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: getsockopt failed: %s",
-	      POUND_TID (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: getsockopt failed: %s",
+	      POUND_TID (),
+	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+	      strerror (errno));
       return -1;
     }
 
   /* restore file status flags */
   if (fcntl (sockfd, F_SETFL, flags) < 0)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: fcntl reSETFL failed: %s",
-	      POUND_TID (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: fcntl restore SETFL failed: %s",
+	      POUND_TID (),
+	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+	      strerror (errno));
       return -1;
     }
 
@@ -1176,8 +1192,10 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
     {
       /* getsockopt() shows an error */
       errno = error;
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: error after getsockopt: %s",
-	      POUND_TID (), strerror (errno));
+      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: error after getsockopt: %s",
+	      POUND_TID (),
+	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+	      strerror (errno));
       return -1;
     }
 
@@ -1249,7 +1267,7 @@ touch_be (void *data)
 	{
 	  be->v.reg.alive = 1;
 	  str_be (buf, sizeof (buf), be);
-	  logmsg (LOG_NOTICE, "Backend %s resurrect", buf);
+	  logmsg (LOG_NOTICE, "Backend %s resurrected", buf);
 	  if (!be->disabled)
 	    {
 	      pthread_mutex_lock (&be->service->mut);
