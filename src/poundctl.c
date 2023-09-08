@@ -307,12 +307,13 @@ xgets (BIO *bio, char *buf, int len)
 }
 
 int
-read_response_line (BIO *bio, char **ret_status, int *ret_version)
+read_response_line (BIO *bio, char *ret_status, size_t size, int *ret_version)
 {
   char buf[MAXBUF];
   int ver;
   char *p, *end;
   long code;
+  size_t len;
 
   xgets (bio, buf, sizeof (buf));
   if (strncmp (buf, "HTTP/1.", 7))
@@ -339,7 +340,11 @@ read_response_line (BIO *bio, char **ret_status, int *ret_version)
     }
 
   p = end + strspn (end, " \n");
-  *ret_status = p;
+  len = strlen (p);
+  if (len >= size)
+    len = size-1;
+  memcpy (ret_status, p, len);
+  ret_status[len] = 0;
   *ret_version = ver;
   return code;
 }
@@ -348,7 +353,6 @@ struct json_value *
 read_response (BIO *bio)
 {
   int code;
-  char *status;
   long content_length = -1;
   char buf[MAXBUF];
   int ver;
@@ -370,9 +374,9 @@ read_response (BIO *bio)
   DEFHDR (content_length, "Content-Length");
   DEFHDR (connection, "Connection");
 
-  if ((code = read_response_line (bio, &status, &ver)) != 200)
+  if ((code = read_response_line (bio, buf, sizeof (buf), &ver)) != 200)
     {
-      errormsg (1, 0, "%s", status);
+      errormsg (1, 0, "%s", buf);
     }
 
   for (;;)

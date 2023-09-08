@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 3, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "September 8, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2339,7 +2339,7 @@ as shown in the following example:
   Service "auth"
       Not BasicAuth "/etc/pound/htpass"
       Rewrite response
-          SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+          SetHeader "WWW-Authenticate: Basic realm=\\"Restricted access\\""
       End
       Error 401
   End
