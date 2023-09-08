@@ -47,7 +47,6 @@ perl $HARNESS HARNESS_OPTIONS --transcript xscript.log input
 ],
 m4_shift2($@))])
 
-AT_TESTED([pound])
 AT_INIT
 m4_include([config.at])
 m4_include([loglevcomp.at])
