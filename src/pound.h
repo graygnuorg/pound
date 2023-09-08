@@ -534,8 +534,6 @@ struct string_match
 
 struct pass_file
 {
-  int dir;
-  char *dirname;
   char *filename;
   struct locus_range locus;
 };
@@ -1070,7 +1068,7 @@ struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);
 int metrics_response (POUND_HTTP *phttp);
 
-int match_cond (const SERVICE_COND *cond, POUND_HTTP *phttp,
+int match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 		struct http_request *req);
 
 struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
@@ -1098,6 +1096,10 @@ int http_request_get_basic_auth (struct http_request *req,
 				 char **u_name, char **u_pass);
 
 void service_lb_init (SERVICE *svc);
+
+FILE *fopen_include (const char *filename);
+void fopen_error (int pri, int ec, const char *filename,
+		  struct locus_range *loc);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);
 int foreach_listener (LISTENER_ITERATOR itr, void *data);

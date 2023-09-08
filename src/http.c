@@ -2438,7 +2438,7 @@ match_headers (HTTP_HEADER_LIST *headers, regex_t const *re,
 }
 
 int
-match_cond (const SERVICE_COND *cond, POUND_HTTP *phttp,
+match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    struct http_request *req)
 {
   int res = 1;

@@ -291,31 +291,13 @@ auth_match (const char *pass, const char *hash)
 static int
 basic_auth_internal (struct pass_file *pwf, char const *user, char const *pass)
 {
-  int fd;
   FILE *fp;
   char buf[MAXBUF];
   int rc;
 
-  if ((fd = openat (pwf->dir, pwf->filename, O_RDONLY)) == -1)
+  if ((fp = fopen_include (pwf->filename)) == NULL)
     {
-      logmsg (LOG_WARNING, "(%"PRItid") can't open %s%s%s: %s",
-	      POUND_TID (),
-	      pwf->dirname ? pwf->dirname : "",
-	      pwf->dirname ? "/" : "",
-	      pwf->filename,
-	      strerror (errno));
-      return 1;
-    }
-  fp = fdopen (fd, "r");
-  if (!fp)
-    {
-      logmsg (LOG_WARNING, "(%"PRItid") fdopen %s%s%s failed: %s",
-	      POUND_TID (),
-	      pwf->dirname ? pwf->dirname : "",
-	      pwf->dirname ? "/" : "",
-	      pwf->filename,
-	      strerror (errno));
-      close (fd);
+      fopen_error (LOG_WARNING, errno, pwf->filename, &pwf->locus);
       return 1;
     }
 

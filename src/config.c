@@ -377,6 +377,8 @@ name_alloc (char const *name)
   return np->name;
 }
 
+//FIXME
+#if 0
 static void
 name_list_free (void)
 {
@@ -387,6 +389,7 @@ name_list_free (void)
       name_list = next;
     }
 }
+#endif
 
 static int include_fd = AT_FDCWD;
 static char const *include_dir = SYSCONFDIR;
@@ -402,6 +405,26 @@ close_include_dir (void)
     }
 }
 
+static char *
+xgetcwd (void)
+{
+  char *buf = NULL;
+  size_t size = 0;
+
+  for (;;)
+    {
+      buf = x2nrealloc (buf, &size, 1);
+      if (getcwd (buf, size) != NULL)
+	break;
+      if (errno != ERANGE)
+	{
+	  logmsg (LOG_CRIT, "getcwd: %s", strerror (errno));
+	  exit (1);
+	}
+    }
+  return buf;
+}
+
 static int
 open_include_dir (char const *dir)
 {
@@ -413,12 +436,12 @@ open_include_dir (char const *dir)
     return -1;
 
   close_include_dir ();
-  include_dir = dir ? name_alloc (dir) : NULL;
+  include_dir = dir ? name_alloc (dir) : xgetcwd ();
   include_fd = fd;
   return fd;
 }
 
-static FILE *
+FILE *
 fopen_include (const char *filename)
 {
   int fd;
@@ -426,6 +449,17 @@ fopen_include (const char *filename)
   if ((fd = openat (include_fd, filename, O_RDONLY)) == -1)
     return NULL;
   return fdopen (fd, "r");
+}
+
+void
+fopen_error (int pri, int ec, const char *filename, struct locus_range *loc)
+{
+  if (filename[0] == '/' || include_dir == NULL)
+    conf_error_at_locus_range (loc, "can't open %s: %s",
+			       filename, strerror (ec));
+  else
+    conf_error_at_locus_range (loc, "can't open %s/%s: %s",
+			       include_dir, filename, strerror (ec));
 }
 
 /*
@@ -2584,8 +2618,6 @@ parse_cond_basic_auth (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
   cond->pwfile.locus = tok->locus;
-  cond->pwfile.dir = AT_FDCWD;
-  cond->pwfile.dirname = NULL;
   cond->pwfile.filename = xstrdup (tok->str);
   return PARSER_OK;
 }
@@ -4769,99 +4801,6 @@ resolve_backend_ref (BACKEND *be, void *data)
   return 0;
 }
 
-/*
- * Fix-up password file structures for use in restricted chroot
- * environment.
- */
-static int
-cond_pass_file_fixup (SERVICE_COND *cond)
-{
-  int rc = 0;
-
-  switch (cond->type)
-    {
-    case COND_BASIC_AUTH:
-      {
-	/* Split file name into directory and base name, */
-	char *p = strrchr (cond->pwfile.filename, '/');
-	if (p != NULL)
-	  {
-	    cond->pwfile.dirname = cond->pwfile.filename;
-	    *p++ = 0;
-	    cond->pwfile.filename = p;
-
-	    cond->pwfile.dir = open (cond->pwfile.dirname,
-				     O_RDONLY | O_NONBLOCK | O_DIRECTORY);
-	    if (cond->pwfile.dir == -1)
-	      {
-		conf_error_at_locus_range (&cond->pwfile.locus,
-					   "can't open directory %s: %s",
-					   cond->pwfile.dirname,
-					   strerror (errno));
-		rc = -1;
-	      }
-	  }
-      }
-      break;
-
-    case COND_BOOL:
-      {
-	SERVICE_COND *subcond;
-	SLIST_FOREACH (subcond, &cond->bool.head, next)
-	  {
-	    if ((rc = cond_pass_file_fixup (subcond)) != 0)
-	      break;
-	  }
-      }
-      break;
-
-    default:
-      break;
-    }
-  return rc;
-}
-
-static int
-rule_pass_file_fixup (REWRITE_RULE *rule)
-{
-  int rc = 0;
-  do
-    {
-      if ((rc = cond_pass_file_fixup (&rule->cond)) != 0)
-	break;
-    }
-  while ((rule = rule->iffalse) != NULL);
-  return rc;
-}
-
-static int
-pass_file_fixup (REWRITE_RULE_HEAD *head)
-{
-  REWRITE_RULE *rule;
-  int rc = 0;
-
-  SLIST_FOREACH (rule, head, next)
-    {
-      if ((rc = rule_pass_file_fixup (rule)) != 0)
-	break;
-    }
-  return rc;
-}
-
-static int
-service_pass_file_fixup (SERVICE *svc, void *data)
-{
-  if (cond_pass_file_fixup (&svc->cond))
-    return -1;
-  return pass_file_fixup (&svc->rewrite[REWRITE_REQUEST]);
-}
-
-static int
-listener_pass_file_fixup (LISTENER *lstn, void *data)
-{
-  return pass_file_fixup (&lstn->rewrite[REWRITE_REQUEST]);
-}
-
 int
 parse_config_file (char const *file)
 {
@@ -4884,7 +4823,6 @@ parse_config_file (char const *file)
     {
       open_include_dir (include_dir);
       res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
-      close_include_dir ();
       if (res == 0)
 	{
 	  if (cur_input)
@@ -4896,15 +4834,24 @@ parse_config_file (char const *file)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
 	  log_facility = pound_defaults.facility;
 
-	  if (root_jail)
+	  if (root_jail || daemonize)
 	    {
-	      if (foreach_listener (listener_pass_file_fixup, NULL)
-		  || foreach_service (service_pass_file_fixup, NULL))
-		exit (1);
+	      if (include_fd == AT_FDCWD)
+		{
+		  int fd = openat (include_fd, ".",
+				   O_RDONLY | O_NONBLOCK | O_DIRECTORY);
+		  if (fd == -1)
+		    {
+		      logmsg (LOG_CRIT,
+			      "can't open current working directory: %s",
+			      strerror (errno));
+		      exit (1);
+		    }
+		  include_fd = fd;
+		}
 	    }
 	}
     }
-
   named_backend_table_free (&pound_defaults.named_backend_table);
   return res;
 }
@@ -5107,7 +5054,6 @@ config_parse (int argc, char **argv)
 
   if (parse_config_file (conf_name))
     exit (1);
-  name_list_free ();
 
   if (check_only)
     {

@@ -363,7 +363,7 @@ str_be (char *buf, size_t size, BACKEND *be)
 }
 
 static int
-match_service (const SERVICE *svc, POUND_HTTP *phttp)
+match_service (SERVICE *svc, POUND_HTTP *phttp)
 {
   return match_cond (&svc->cond, phttp, &phttp->request);
 }
