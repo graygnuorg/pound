@@ -288,44 +288,119 @@ auth_match (const char *pass, const char *hash)
   return 1;
 }
 
+static void
+user_pass_free (USER_PASS_HEAD *head)
+{
+  while (!SLIST_EMPTY (head))
+    {
+      struct user_pass *up = SLIST_FIRST (head);
+      SLIST_SHIFT (head, link);
+      free (up);
+    }
+}
+
 static int
-basic_auth_internal (struct pass_file *pwf, char const *user, char const *pass)
+pass_file_changed (struct pass_file *pwf, struct stat const *st)
+{
+#if HAVE_STRUCT_STAT_ST_MTIM
+  if (timespec_cmp (&pwf->mtim, &st->st_mtim))
+    {
+      pwf->mtim = st->st_mtim;
+      return 1;
+    }
+#else
+  if (pwf->mtim.tv_sec != st->st_mtime)
+    {
+      pwf->mtim.tv_sec = st->st_mtime;
+      return 1;
+    }
+#endif
+  return 0;
+}
+
+static void
+pass_file_fill (struct pass_file *pwf)
 {
   FILE *fp;
   char buf[MAXBUF];
-  int rc;
+  struct stat st;
 
   if ((fp = fopen_include (pwf->filename)) == NULL)
     {
-      fopen_error (LOG_WARNING, errno, pwf->filename, &pwf->locus);
-      return 1;
+      int ec = errno;
+      fopen_error (LOG_WARNING, ec, pwf->filename, &pwf->locus);
+      if (ec == ENOENT)
+	{
+	  user_pass_free (&pwf->head);
+	  memset (&pwf->mtim, 0, sizeof (pwf->mtim));
+	}
+      return;
     }
 
-  rc = 1;
-  while (fgets (buf, sizeof (buf), fp))
+  if (fstat (fileno (fp), &st))
     {
-      char *p, *q;
-      for (p = buf; *p && (*p == ' ' || *p == '\t'); p++);
-      if (*p == '#')
-	continue;
-      q = p + strlen (p);
-      if (q == p)
-	continue;
-      if (q[-1] == '\n')
-	*--q = 0;
-      if (!*p)
-	continue;
-      if ((q = strchr (p, ':')) == NULL)
-	continue;
-      *q++ = 0;
-      if (strcmp (p, user))
-	continue;
-      rc = auth_match (pass, q);
-      break;
+      logmsg (LOG_WARNING, "fstat(%s) failed: %s", pwf->filename,
+	      strerror (errno));
+      fclose (fp);
+      return;
+    }
+
+  if (pass_file_changed (pwf, &st))
+    {
+      /* Free existing entries. */
+      user_pass_free (&pwf->head);
+
+      /* Rescan the file. */
+      while (fgets (buf, sizeof (buf), fp))
+	{
+	  struct user_pass *up;
+	  char *p, *q;
+	  int ulen;
+
+	  for (p = buf; *p && (*p == ' ' || *p == '\t'); p++);
+	  if (*p == '#')
+	    continue;
+	  q = p + strlen (p);
+	  if (q == p)
+	    continue;
+	  if (q[-1] == '\n')
+	    *--q = 0;
+	  if (!*p)
+	    continue;
+	  if ((q = strchr (p, ':')) == NULL)
+	    continue;
+	  ulen = q - p;
+
+	  if ((up = malloc (sizeof (up[0]) + strlen (p))) == NULL)
+	    {
+	      lognomem ();
+	      break;
+	    }
+
+	  strcpy (up->user, p);
+	  up->user[ulen] = 0;
+	  up->pass = up->user + ulen + 1;
+
+	  SLIST_PUSH (&pwf->head, up, link);
+	}
     }
   fclose (fp);
+  return;
+}
 
-  return rc;
+static int
+basic_auth_internal (struct pass_file *pwf, char const *user, char const *pass)
+{
+  struct user_pass *up;
+
+  pass_file_fill (pwf);
+  SLIST_FOREACH (up, &pwf->head, link)
+    {
+      if (strcmp (user, up->user) == 0)
+	return auth_match (pass, up->pass);
+    }
+
+  return 1;
 }
 
 int

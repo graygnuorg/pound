@@ -532,10 +532,21 @@ struct string_match
   regex_t re;
 };
 
+struct user_pass
+{
+  SLIST_ENTRY (user_pass) link;
+  char *pass;
+  char user[1];
+};
+
+typedef SLIST_HEAD(,user_pass) USER_PASS_HEAD;
+
 struct pass_file
 {
   char *filename;
   struct locus_range locus;
+  struct timespec mtim;
+  USER_PASS_HEAD head;
 };
 
 typedef struct _service_cond

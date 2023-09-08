@@ -56,6 +56,12 @@ CPPFLAGS=$saved_CPPFLAGS
 LDFLAGS=$saved_LDFLAGS
 AM_CONDITIONAL([OPENSSL_V3],[test "$openssl_v3" = "yes"])
 
+# Check for structures
+AC_CHECK_MEMBERS([struct stat.st_mtim],[],[],
+ [#include <sys/types.h>
+#include <sys/stat.h>
+])
+
 AC_ARG_WITH([t_rsa],
  [AS_HELP_STRING([--with-t_rsa=nnn],[Timeout for RSA ephemeral keys generation])],
  [T_RSA_KEYS=${withval}],

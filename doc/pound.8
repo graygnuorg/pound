@@ -1309,7 +1309,14 @@ Evaluates to true if the incoming request passes basic authorization
 as described in RFC 7617.  \fIfilename\fR is the name of a plain text
 file containing usernames and passwords, created with
 .BR htpasswd (1)
-or similar utility.  See the section entitled
+or similar utility.  Unless it starts with a slash, it is taken
+relative to the \fBIncludeDir\fR directory.  The file is cached in
+the memory on the first authorization attempt, so that further
+authorizations do not result in disk operations.  The file will
+be rescanned if \fBPound\fR notices that its modification time has
+changed.
+.IP
+See the section entitled
 .BR "BASIC AUTHENTICATION" ,
 for a detailed discussion.
 .TP

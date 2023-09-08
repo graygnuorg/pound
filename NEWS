@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-09-03
+Pound -- history of user-visible changes. 2023-09-08
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -105,6 +105,12 @@ the following example:
       End
       Error 401
   End
+
+Unless file name starts with a slash, it is taken relative to the
+"IncludeDir" directory.  The file is cached in the memory on the first
+authorization attempt, so that further authorizations do not result in
+disk operations.  It will be rescanned if Pound notices that the
+file's modification time has changed.
 
 Version 4.9, 2023-08-22
 
