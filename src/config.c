@@ -1637,13 +1637,14 @@ parse_cidr (ACL *acl)
 
 /*
  * List of named ACLs.
- * There shouldn't be many of them so it's perhaps no use in implementing
+ * There shouldn't be many of them, so it's perhaps no use in implementing
  * more sophisticated data structures than a mere singly-linked list.
  */
 static ACL_HEAD acl_list = SLIST_HEAD_INITIALIZER (acl_list);
 
 /*
- * Return a pointer to the named ACL or NULL if no ACL with such name is found.
+ * Return a pointer to the named ACL, or NULL if no ACL with such name is
+ * found.
  */
 static ACL *
 acl_by_name (char const *name)
