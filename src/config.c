@@ -366,6 +366,8 @@ pathname_alloc (char const *dir, char const *name)
   return np->name;
 }
 
+//FIXME
+#if 0
 static char const *
 name_alloc (char const *name)
 {
@@ -377,8 +379,6 @@ name_alloc (char const *name)
   return np->name;
 }
 
-//FIXME
-#if 0
 static void
 name_list_free (void)
 {
@@ -391,19 +391,9 @@ name_list_free (void)
 }
 #endif
 
-static int include_fd = AT_FDCWD;
-static char const *include_dir = SYSCONFDIR;
+typedef DLIST_HEAD (, workdir) WORKDIR_HEAD;
 
-static void
-close_include_dir (void)
-{
-  if (include_fd != AT_FDCWD)
-    {
-      close (include_fd);
-      include_dir = NULL;
-      include_fd = AT_FDCWD;
-    }
-}
+static WORKDIR_HEAD workdir_head = DLIST_HEAD_INITIALIZER (workdir_head);
 
 static char *
 xgetcwd (void)
@@ -425,41 +415,131 @@ xgetcwd (void)
   return buf;
 }
 
-static int
-open_include_dir (char const *dir)
+static WORKDIR *
+workdir_get (char const *name)
 {
+  WORKDIR *wp;
+  char *cwd = NULL;
   int fd;
 
-  if (dir == NULL)
-    fd = AT_FDCWD;
-  else if ((fd = open (dir, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
-    return -1;
+  if (name == NULL)
+    {
+      cwd = xgetcwd ();
+      name = cwd;
+    }
 
+  DLIST_FOREACH (wp, &workdir_head, link)
+    if (strcmp (wp->name, name) == 0)
+      {
+	wp->refcount++;
+	free (cwd);
+	return wp;
+      }
+
+  if (cwd)
+    fd = AT_FDCWD;
+  else if ((fd = open (name, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
+    {
+      free (cwd);
+      return NULL;
+    }
+
+  wp = xzalloc (sizeof (*wp) + strlen (name));
+  strcpy (wp->name, name);
+  wp->refcount = 1;
+  wp->fd = fd;
+  DLIST_PUSH (&workdir_head, wp, link);
+  free (cwd);
+  return wp;
+}
+
+static inline WORKDIR *
+workdir_ref (WORKDIR *wd)
+{
+  wd->refcount++;
+  return wd;
+}
+
+static inline void
+workdir_unref (WORKDIR *wd)
+{
+  assert (wd->refcount > 0);
+  wd->refcount--;
+}
+
+static void
+workdir_free (WORKDIR *wd)
+{
+  if (wd->refcount == 0)
+    {
+      DLIST_REMOVE (&workdir_head, wd, link);
+      if (wd->fd != AT_FDCWD)
+	close (wd->fd);
+      free (wd);
+    }
+}
+
+static void
+workdir_cleanup (void)
+{
+  WORKDIR *wp, *tmp;
+  DLIST_FOREACH_SAFE (wp, tmp, &workdir_head, link)
+    {
+      workdir_free (wp);
+    }
+}
+
+static char const *include_dir = SYSCONFDIR;
+static WORKDIR *include_wd;
+
+static void
+close_include_dir (void)
+{
+  if (include_wd)
+    {
+      workdir_free (include_wd);
+      include_wd = NULL;
+    }
+}
+
+static WORKDIR *
+open_include_dir (char const *dir)
+{
   close_include_dir ();
-  include_dir = dir ? name_alloc (dir) : xgetcwd ();
-  include_fd = fd;
-  return fd;
+  return include_wd = workdir_get (dir);
 }
 
 FILE *
-fopen_include (const char *filename)
+fopen_wd (WORKDIR *wd, const char *filename)
 {
   int fd;
+  int dirfd = AT_FDCWD;
 
-  if ((fd = openat (include_fd, filename, O_RDONLY)) == -1)
+  if (!wd)
+    wd = include_wd;
+  if (wd)
+    dirfd = wd->fd;
+  if ((fd = openat (dirfd, filename, O_RDONLY)) == -1)
     return NULL;
   return fdopen (fd, "r");
 }
 
-void
-fopen_error (int pri, int ec, const char *filename, struct locus_range *loc)
+static FILE *
+fopen_include (const char *filename)
 {
-  if (filename[0] == '/' || include_dir == NULL)
+  return fopen_wd (include_wd, filename);
+}
+
+void
+fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
+	     struct locus_range *loc)
+{
+  if (filename[0] == '/' || wd == NULL)
     conf_error_at_locus_range (loc, "can't open %s: %s",
 			       filename, strerror (ec));
   else
     conf_error_at_locus_range (loc, "can't open %s/%s: %s",
-			       include_dir, filename, strerror (ec));
+			       wd->name, filename, strerror (ec));
 }
 
 /*
@@ -494,10 +574,10 @@ input_open (char const *filename, struct stat *st)
     }
   input->ino = st->st_ino;
   input->devno = st->st_dev;
-  if (include_fd == AT_FDCWD)
+  if (include_wd == NULL || include_wd->fd == AT_FDCWD)
     input->locus.filename = xstrdup (filename);
   else
-    input->locus.filename = pathname_alloc (include_dir, filename);
+    input->locus.filename = pathname_alloc (include_wd->name, filename);
   input->locus.line = 1;
   input->locus.col = 0;
   return input;
@@ -712,12 +792,12 @@ push_input (const char *filename)
   struct stat st;
   struct input *input;
 
-  if (fstatat (include_fd, filename, &st, 0))
+  if (fstatat (include_wd->fd, filename, &st, 0))
     {
-      if (include_fd == AT_FDCWD)
+      if (include_wd->fd == AT_FDCWD)
 	conf_error ("can't stat %s: %s", filename, strerror (errno));
       else
-	conf_error ("can't stat %s/%s: %s", include_dir, filename,
+	conf_error ("can't stat %s/%s: %s", include_wd->name, filename,
 		    strerror (errno));
       return -1;
     }
@@ -1063,7 +1143,7 @@ parse_includedir (void *call_data, void *section_data)
   struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
-  if (open_include_dir (tok->str) == -1)
+  if (open_include_dir (tok->str) == NULL)
     {
       conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
       return PARSER_FAIL;
@@ -1116,18 +1196,18 @@ assign_string_from_file (void *call_data, void *section_data)
   struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return PARSER_FAIL;
-  if (stat (tok->str, &st))
+  if ((fp = fopen_include (tok->str)) == NULL)
+    {
+      fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
+      return PARSER_FAIL;
+    }
+  if (fstat (fileno (fp), &st))
     {
       conf_error ("can't stat %s: %s", tok->str, strerror (errno));
       return PARSER_FAIL;
     }
   // FIXME: Check st_size bounds.
   s = xmalloc (st.st_size + 1);
-  if ((fp = fopen (tok->str, "r")) == NULL)
-    {
-      conf_error ("can't open %s: %s", tok->str, strerror (errno));
-      return PARSER_FAIL;
-    }
   if (fread (s, st.st_size, 1, fp) != 1)
     {
       conf_error ("%s: read error: %s", tok->str, strerror (errno));
@@ -2416,7 +2496,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
 
       if ((fp = fopen_include (tok->str)) == NULL)
 	{
-	  conf_error ("can't open file %s: %s", tok->str, strerror (errno));
+	  fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
 	  return PARSER_FAIL;
 	}
 
@@ -4802,6 +4882,105 @@ resolve_backend_ref (BACKEND *be, void *data)
   return 0;
 }
 
+/*
+ * Fix-up password file structures for use in restricted chroot
+ * environment.
+ */
+static int
+cond_pass_file_fixup (SERVICE_COND *cond)
+{
+  int rc = 0;
+
+  switch (cond->type)
+    {
+    case COND_BASIC_AUTH:
+      if (cond->pwfile.filename[0] == '/')
+	{
+	  if (root_jail)
+	    {
+	      /* Split file name into directory and base name, */
+	      char *p = strrchr (cond->pwfile.filename, '/');
+	      if (p != NULL)
+		{
+		  char *dir = cond->pwfile.filename;
+		  *p++ = 0;
+		  cond->pwfile.filename = xstrdup (p);
+		  if ((cond->pwfile.wd = workdir_get (dir)) == NULL)
+		    {
+		      conf_error_at_locus_range (&cond->pwfile.locus,
+						 "can't open directory %s: %s",
+						 dir,
+						 strerror (errno));
+		      free (dir);
+		      rc = -1;
+		      break;
+		    }
+		  free (dir);
+		}
+	    }
+	}
+      else
+	cond->pwfile.wd = workdir_ref (include_wd);
+      break;
+
+    case COND_BOOL:
+      {
+	SERVICE_COND *subcond;
+	SLIST_FOREACH (subcond, &cond->bool.head, next)
+	  {
+	    if ((rc = cond_pass_file_fixup (subcond)) != 0)
+	      break;
+	  }
+      }
+      break;
+
+    default:
+      break;
+    }
+  return rc;
+}
+
+static int
+rule_pass_file_fixup (REWRITE_RULE *rule)
+{
+  int rc = 0;
+  do
+    {
+      if ((rc = cond_pass_file_fixup (&rule->cond)) != 0)
+	break;
+    }
+  while ((rule = rule->iffalse) != NULL);
+  return rc;
+}
+
+static int
+pass_file_fixup (REWRITE_RULE_HEAD *head)
+{
+  REWRITE_RULE *rule;
+  int rc = 0;
+
+  SLIST_FOREACH (rule, head, next)
+    {
+      if ((rc = rule_pass_file_fixup (rule)) != 0)
+	break;
+    }
+  return rc;
+}
+
+static int
+service_pass_file_fixup (SERVICE *svc, void *data)
+{
+  if (cond_pass_file_fixup (&svc->cond))
+    return -1;
+  return pass_file_fixup (&svc->rewrite[REWRITE_REQUEST]);
+}
+
+static int
+listener_pass_file_fixup (LISTENER *lstn, void *data)
+{
+  return pass_file_fixup (&lstn->rewrite[REWRITE_REQUEST]);
+}
+
 int
 parse_config_file (char const *file)
 {
@@ -4820,7 +4999,10 @@ parse_config_file (char const *file)
 
   named_backend_table_init (&pound_defaults.named_backend_table);
   compile_canned_formats ();
-  if (push_input (file) == 0)
+  open_include_dir (NULL);
+  res = push_input (file);
+  workdir_unref (include_wd);
+  if (res == 0)
     {
       open_include_dir (include_dir);
       res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
@@ -4837,9 +5019,12 @@ parse_config_file (char const *file)
 
 	  if (root_jail || daemonize)
 	    {
-	      if (include_fd == AT_FDCWD)
+	      if (foreach_listener (listener_pass_file_fixup, NULL)
+		  || foreach_service (service_pass_file_fixup, NULL))
+		exit (1);
+	      if (include_wd->refcount > 0 && include_wd->fd == AT_FDCWD)
 		{
-		  int fd = openat (include_fd, ".",
+		  int fd = openat (include_wd->fd, ".",
 				   O_RDONLY | O_NONBLOCK | O_DIRECTORY);
 		  if (fd == -1)
 		    {
@@ -4848,12 +5033,16 @@ parse_config_file (char const *file)
 			      strerror (errno));
 		      exit (1);
 		    }
-		  include_fd = fd;
+		  include_wd->fd = fd;
 		}
 	    }
+	  workdir_unref (include_wd);
 	}
     }
   named_backend_table_free (&pound_defaults.named_backend_table);
+  if (include_wd->refcount == 0)
+    include_wd = NULL;
+  workdir_cleanup ();
   return res;
 }
 

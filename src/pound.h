@@ -270,6 +270,14 @@ struct locus_range
   struct locus_point beg, end;
 };
 
+typedef struct workdir
+{
+  DLIST_ENTRY (workdir) link;
+  int refcount;
+  int fd;
+  char name[1];
+} WORKDIR;
+
 
 /* Header types */
 enum
@@ -543,6 +551,7 @@ typedef SLIST_HEAD(,user_pass) USER_PASS_HEAD;
 
 struct pass_file
 {
+  WORKDIR *wd;
   char *filename;
   struct locus_range locus;
   struct timespec mtim;
@@ -1108,8 +1117,8 @@ int http_request_get_basic_auth (struct http_request *req,
 
 void service_lb_init (SERVICE *svc);
 
-FILE *fopen_include (const char *filename);
-void fopen_error (int pri, int ec, const char *filename,
+FILE *fopen_wd (WORKDIR *wd, const char *filename);
+void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
 		  struct locus_range *loc);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);

@@ -325,10 +325,10 @@ pass_file_fill (struct pass_file *pwf)
   char buf[MAXBUF];
   struct stat st;
 
-  if ((fp = fopen_include (pwf->filename)) == NULL)
+  if ((fp = fopen_wd (pwf->wd, pwf->filename)) == NULL)
     {
       int ec = errno;
-      fopen_error (LOG_WARNING, ec, pwf->filename, &pwf->locus);
+      fopen_error (LOG_WARNING, ec, pwf->wd, pwf->filename, &pwf->locus);
       if (ec == ENOENT)
 	{
 	  user_pass_free (&pwf->head);
