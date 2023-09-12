@@ -4982,7 +4982,7 @@ listener_pass_file_fixup (LISTENER *lstn, void *data)
 }
 
 int
-parse_config_file (char const *file)
+parse_config_file (char const *file, int nosyslog)
 {
   int res = -1;
   POUND_DEFAULTS pound_defaults = {
@@ -5015,7 +5015,8 @@ parse_config_file (char const *file)
 	    exit (1);
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
-	  log_facility = pound_defaults.facility;
+	  if (!nosyslog)
+	    log_facility = pound_defaults.facility;
 
 	  if (root_jail || daemonize)
 	    {
@@ -5242,7 +5243,7 @@ config_parse (int argc, char **argv)
       exit (1);
     }
 
-  if (parse_config_file (conf_name))
+  if (parse_config_file (conf_name, stderr_option))
     exit (1);
 
   if (check_only)
@@ -5260,12 +5261,7 @@ config_parse (int argc, char **argv)
   if (foreground_option)
     daemonize = 0;
 
-  if (daemonize == 0)
-    {
-      if (stderr_option)
-	log_facility = -1;
-    }
-  else
+  if (daemonize)
     {
       if (log_facility == -1)
 	log_facility = LOG_DAEMON;
