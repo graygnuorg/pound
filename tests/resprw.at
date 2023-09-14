@@ -74,7 +74,7 @@ end
 
 PT_CHECK([ListenHTTP
 	Service
-		Host "[([^:]+)(:.*)?]"
+		Host -re "[([^:]+)(:.*)?]"
 		Rewrite response
 			SetHeader "X-My-Host: $1"
 		End

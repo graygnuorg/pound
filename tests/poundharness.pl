@@ -22,6 +22,7 @@ use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
 use Cwd qw(abs_path);
+use File::Spec;
 
 my $config = 'pound.cfi:pound.cfg';
 my @preproc_files;
@@ -174,8 +175,36 @@ exit ($ps->failures ? EX_FAILURE : EX_SUCCESS);
 ## Configuration file processing
 ## -----------------------------
 
+sub dequote {
+    my $arg = shift;
+    $arg =~ s/^\"(.+)\"$/$1/;
+    return $arg;
+}
+
+sub addport {
+    my ($infile, $outfile, $port) = @_;
+    open(my $in, '<', $infile)
+	or die "can't open $infile for reading: $!";
+    open(my $out, '>', $outfile)
+	or die "can't create $outfile: $!";
+    while (<$in>) {
+	chomp;
+	print $out "$_:$port\n";
+    }
+    close $in;
+    close $out;
+}
+
 sub preproc {
-    my ($infile, $outfile, $init) = @_;
+    my ($infile, $outfile, $init, $initstate) = @_;
+    if (!$init && $include_dir) {
+	unless (File::Spec->file_name_is_absolute($infile)) {
+	    $infile = File::Spec->catfile($include_dir, $infile)
+	}
+	unless (File::Spec->file_name_is_absolute($outfile)) {
+	    $outfile = File::Spec->catfile($include_dir, $outfile)
+	}
+    }
     if ($verbose) {
 	print "Preprocessing $infile into $outfile\n";
     }
@@ -192,7 +221,7 @@ sub preproc {
 	ST_SESSION => 4
     };
     my @state;
-    unshift @state, ST_INIT;
+    unshift @state, $initstate // ST_INIT;
     if ($init) {
 	print $out <<EOT;
 # Initial settings by $0
@@ -223,6 +252,12 @@ EOT
 	    print $out "# Addition by $0\n";
 	    print $out "$1\tSocketFrom \"".$lst->sockname."\"\n";
 	    next;
+	} elsif (/^(?<indent>\s*)Include\s+(?<arg>.+)/) {
+	    my $arg = dequote($+{arg});
+	    my $file = $arg . '.pha';
+	    preproc($arg, $file, 0, $state[0]);
+	    print $out "$+{indent}# Edited by $0\n";
+	    $_ = "$+{indent}Include \"$file\"";
 	} elsif (/^\s*Service/i) {
 	    unshift @state, ST_SERVICE;
 	} elsif (/^\s*Session/i) {
@@ -244,6 +279,42 @@ EOT
 	} elsif ($state[0] == ST_LISTENER) {
 	    if (/^\s*(Address|Port|SocketFrom)/i) {
 		    $_ = "# Commented out: $_";
+	    }
+	} elsif ($state[0] == ST_SERVICE) {
+	    if (/^(\s*)Host\s+(.+)\s*$/) {
+		if (my $lst = $listeners->last()) {
+		    my $indent = $1;
+		    my $hostline = $2;
+		    my @opts;
+		    my $exact = 1;
+		    my $file;
+		    while ($hostline =~ m/^\s*(-\S+)(.*)/) {
+			push @opts, $1;
+			if ($1 eq '-re' || $1 eq '-beg' || $1 eq '-end') {
+			    $exact = 0;
+			} elsif ($1 eq '-file') {
+			    $file = 1;
+			}
+			$hostline = $2;
+		    }
+		    $hostline =~ s/^\s+//;
+		    $hostline = dequote($hostline);
+		    if ($exact || @opts == 0) {
+			if ($file) {
+			    my $ofile = $hostline . '.port';
+			    addport($hostline, $ofile, $lst->port);
+			    $hostline = $ofile;
+			} else {
+			    $hostline = $hostline . ':' . $lst->port;
+			}
+			print $out "$indent# Edited by $0\n"
+		    }
+		    $_ = $indent . "Host";
+		    if (@opts) {
+			$_ .= ' ' . join(' ', @opts);
+		    }
+		    $_ .= " \"$hostline\"";
+		}
 	    }
 	} elsif (/^\s*Socket/) {
 	    $_ = "# Commented out: $_";
@@ -1108,6 +1179,10 @@ sub get {
     my ($self, $n) = @_;
     return ${$self->{listeners}}[$n];
 }
+sub last {
+    my ($self) = @_;
+    return $self->get($self->count - 1)
+}
 sub send_fd {
     my $self = shift;
     croak "not applicable" unless $self->keepopen;
@@ -1340,7 +1415,7 @@ I<SCRIPT>
 
 =head1 DESCRIPTION
 
-Upon startup, B<poundharness> reads B<pound> configuration file F<pound.cfi>
+Upon startup, B<poundharness> reads B<pound> configuration file F<pound.cfi>,
 modifies the settings as described below and writes the resulting configuration
 to B<pound.cfg>.  During modification, the following statements are removed:
 B<Daemon>, B<LogFacility> and B<LogLevel>.  The settings suitable for running
@@ -1355,13 +1430,28 @@ socket information is stored in the B<Address> and B<Port> statements that
 replace the removed ones and a backend HTTP server is started listening
 on that socket.
 
+B<Include> statements are processed in the following manner: the file
+supplied as the argument is preprocessed and the result is written to
+a file with the name obtained by appending suffix C<.pha> to the original
+name.  An B<Include> statement with this name is output.
+
+When a B<Host> statement with exact comparison method is encountered,
+a colon and actual port number of the enclosing listener is appended
+to its argument.  If the argument is a file name, this operation is performed
+on each line of the file and the result is written to the file F<I<file>.port>.
+This file name is used in the output.  If B<Host> appears in a top-level
+B<Service>, port number of the last declared listener is used instead.
+If no listeners are defined (i.e. if the B<Service> statement appears
+before the first listener), the statement is output unmodified.  Notice,
+that this means that it cannot be matched.
+
 When this configuration processing is finished, B<pound> is started in
 foreground mode.  When it is up and ready to serve requests, the I<SCRIPT>
 file is opened and processed.  It consists of a series of HTTP requests and
 expected responses.  Each request is sent to the specified listener (the one
 created in the preprocessing step described above), and the obtained response
 is compared with the expectation.  If it matches, the test succeeds.  See
-the section B<SCRIPT FILE>], for a detailed discussion of the script file
+the section B<SCRIPT FILE>, for a detailed discussion of the script file
 format.
 
 When all the tests from I<SCRIPT> are run, the program terminates.  Its
@@ -1606,6 +1696,14 @@ Keeps PID of the running B<pound> instance.
 
 Temporary UNIX sockets for passing created socket descriptors to B<pound>.
 These are removed on success.
+
+=item I<FILE>.pha
+
+Preprocessed output of the include file I<FILE>.
+
+=item I<FILE>.port
+
+Preprocessed output of the I<FILE> from B<Host -file "I<FILE>"> statement.
 
 =back
 

@@ -2686,7 +2686,7 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
-  return parse_cond_matcher (call_data, COND_HOST, MATCH_RE,
+  return parse_cond_matcher (call_data, COND_HOST, MATCH_EXACT,
 			     REG_EXTENDED | REG_ICASE, NULL);
 }
 

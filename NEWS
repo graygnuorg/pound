@@ -111,6 +111,10 @@ Unless the file name starts with a slash, it is taken relative to the
 authorization attempt, so that further authorizations do not result in
 disk i/o operations.  It will be rescanned if Pound notices that the
 file's modification time has changed.
+
+* Bugfixes
+
+** The Host statement assumes exact match by default.
 
 Version 4.9, 2023-08-22
 
