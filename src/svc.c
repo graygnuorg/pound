@@ -1099,8 +1099,7 @@ need_rewrite (const char *location, const char *v_host,
 int
 connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
 {
-  int flags, res, error;
-  socklen_t len;
+  int flags;
   struct pollfd p;
   char caddr[MAX_ADDR_BUFSIZE];
 
@@ -1121,78 +1120,68 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
       return -1;
     }
 
-  error = 0;
-  if ((res = connect (sockfd, serv_addr->ai_addr, serv_addr->ai_addrlen)) < 0)
-    if (errno != EINPROGRESS)
-      {
-	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: connect failed: %s",
-		POUND_TID (),
-		addr2str (caddr, sizeof (caddr), serv_addr, 0),
-		strerror (errno));
-	return -1;
-      }
-
-  if (res == 0)
+  if (connect (sockfd, serv_addr->ai_addr, serv_addr->ai_addrlen) < 0)
     {
-      /* connect completed immediately (usually localhost) */
-      if (fcntl (sockfd, F_SETFL, flags) < 0)
+      if (errno != EINPROGRESS)
 	{
-	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: restore SETFL failed: %s",
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: connect failed: %s",
 		  POUND_TID (),
 		  addr2str (caddr, sizeof (caddr), serv_addr, 0),
 		  strerror (errno));
 	  return -1;
 	}
-      return 0;
-    }
 
-  memset (&p, 0, sizeof (p));
-  p.fd = sockfd;
-  p.events = POLLOUT;
-  if ((res = poll (&p, 1, to * 1000)) != 1)
-    {
-      if (res == 0)
+      memset (&p, 0, sizeof (p));
+      p.fd = sockfd;
+      p.events = POLLOUT;
+      switch (poll (&p, 1, to * 1000))
 	{
+	case 1:
+	  break;
+
+	case 0:
 	  /* timeout */
 	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: poll timed out",
 		  POUND_TID (),
 		  addr2str (caddr, sizeof (caddr), serv_addr, 0));
 	  errno = ETIMEDOUT;
-	}
-      else
-	logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: poll failed: %s",
-		POUND_TID (),
-		addr2str (caddr, sizeof (caddr), serv_addr, 0),
-		strerror (errno));
-      return -1;
-    }
+	  return -1;
 
-  /* socket is writeable == operation completed */
-  len = sizeof (error);
-  if (getsockopt (sockfd, SOL_SOCKET, SO_ERROR, &error, &len) < 0)
-    {
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: getsockopt failed: %s",
-	      POUND_TID (),
-	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
-	      strerror (errno));
-      return -1;
+	default:
+	  logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: poll failed: %s",
+		  POUND_TID (),
+		  addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		  strerror (errno));
+	  return -1;
+	}
+
+      if (!(p.revents & POLLOUT))
+	{
+	  int error;
+	  socklen_t len = sizeof (error);
+	  if (getsockopt (sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0)
+	    {
+	      logmsg (LOG_WARNING,
+		      "(%"PRItid") connect_nb: %s: connection failed: %s",
+		      POUND_TID (),
+		      addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		      strerror (error));
+	      errno = error;
+	    }
+	  else
+	    logmsg (LOG_WARNING,
+		    "(%"PRItid") connect_nb: %s: getsockopt failed: %s",
+		    POUND_TID (),
+		    addr2str (caddr, sizeof (caddr), serv_addr, 0),
+		    strerror (errno));
+	  return -1;
+	}
     }
 
   /* restore file status flags */
   if (fcntl (sockfd, F_SETFL, flags) < 0)
     {
       logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: fcntl restore SETFL failed: %s",
-	      POUND_TID (),
-	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
-	      strerror (errno));
-      return -1;
-    }
-
-  if (error)
-    {
-      /* getsockopt() shows an error */
-      errno = error;
-      logmsg (LOG_WARNING, "(%"PRItid") connect_nb: %s: error after getsockopt: %s",
 	      POUND_TID (),
 	      addr2str (caddr, sizeof (caddr), serv_addr, 0),
 	      strerror (errno));
