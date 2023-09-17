@@ -21,6 +21,7 @@
 #include "extern.h"
 #include <openssl/x509v3.h>
 #include <assert.h>
+#include <limits.h>
 
 
 /*

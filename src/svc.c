@@ -20,6 +20,7 @@
 #include "pound.h"
 #include "extern.h"
 #include "json.h"
+#include <limits.h>
 
 /*
  * basic hashing function, based on fmv

@@ -26,6 +26,7 @@
 
 #include "pound.h"
 #include <assert.h>
+#include <limits.h>
 #include "json.h"
 
 static void

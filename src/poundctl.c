@@ -19,6 +19,7 @@
 #include "pound.h"
 #include "json.h"
 #include <assert.h>
+#include <limits.h>
 
 char *conf_name = POUND_CONF;
 char *socket_name;
