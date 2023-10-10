@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 8, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "October 10, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -233,7 +233,7 @@ server.
 .TP
 \fB\-e\fR
 Log to standard error (standard output for \fBLOG_DEBUG\fR and
-\fBLOG_INFO\fR facilities).  This option implies \fIforeground mode\fR
+\fBLOG_INFO\fR severity levels).  This option implies \fIforeground mode\fR
 (\fB\-F\fR) and overrides the \fILogLevel\fR configuration setting.
 .TP
 \fB\-F\fR
@@ -269,7 +269,7 @@ section below, for a detailed discussion of this file.
 .TP
 \fB\-v\fR
 Verbose mode: during startup, error messages will be sent to stderr
-(stdout for \fBLOG_DEBUG\fR and \fBLOG_INFO\fR facilities).  If
+(stdout for \fBLOG_DEBUG\fR and \fBLOG_INFO\fR severity levels).  If
 .B pound
 was configured to log to syslog, error diagnostics will be duplicated
 there as well.  After startup the configuration settings take effect.
@@ -563,11 +563,19 @@ TrustedIP "proxy_addresses"
 .RE
 .TP
 \fBIgnoreCase\fR \fIbool\fR
-Ignore case when matching URLs (default: \fIfalse\fR). This value can be
-overridden for specific services.
+Ignore case when doing regex matching (default: \fIfalse\fR). This
+directive sets the default for the following service matching
+directives:
+.BR URL ,
+.BR Path ,
+.BR QueryParam ,
+.BR Query ,
+.BR StringMatch ,
+as well as for the \fBDeleteHeader\fR modification directive.  Its
+value can be overridden for specific services.
 .IP
 This statement is deprecated and will be removed in future versions.
-Please, use the \fB\-icase\fR option to the \fBURL\fR directive
+Please, use the \fB\-icase\fR option to the service matching directive
 instead.  See the discussion of \fIoptions\fR in
 .B Service Matching Directives
 section below.
@@ -614,7 +622,7 @@ This value can be overridden for specific backends.
 \fBGrace\fR \fIn\fR
 How long should
 .B pound
-continue to answer existing connections after a receiving and INT or HUP
+continue to answer existing connections after a receiving a INT or HUP
 signal (default: 30 seconds). The configured listeners are closed
 immediately. You can bypass this behaviour by stopping
 .B pound
@@ -694,9 +702,6 @@ the following:
 .RS
 .nr step 1 1
 .IP \n[step].
-PID file is used only in daemon mode (\fBDaemon on\fR in the
-configuration file).
-.IP \n+[step].
 When running with a supervisor, this file holds PID of the supervisor
 process.  Otherwise, it holds PID of the main
 .B pound
@@ -791,9 +796,7 @@ that must be resolvable at run-time, or a full pathname of a UNIX
 socket.  Either this parameter or
 .B SocketFrom
 (see below) must be present. The address 0.0.0.0 may be used as an
-alias for 'all available addresses on this machine', but this practice
-is strongly discouraged, as it will interfere with the rewriting
-mechanisms (see below).
+alias for 'all available addresses on this machine'.
 .TP
 \fBPort\fR \fIport\fR
 The port number or service name that
@@ -2392,7 +2395,7 @@ corresponding piece of information about the request or reply.
 .PP
 Conversion specifications are single characters prefixed with a
 percent sign.  Depending on the specification, an optional
-\fIconversion argument\fR in curly brackets can appear between
+\fIconversion argument\fR in curly brackets may appear between
 \fB%\fR and conversion character.
 .PP
 The following conversion characters are defined:
@@ -2412,7 +2415,7 @@ listed in \fBTrustedIP\fR ACL.
 If \fBX\-Forwarded\-For\fR header is not present, or \fBTrustedIP\fR
 is not defined, or the above algorithm does not return an IP address,
 \fB%a\fR expands to the actual remote IP address the request came from
-(same as \fB%a\fR).
+(same as \fB%h\fR).
 .IP
 The \fBTrustedIP\fR ACL can be defined in global scope, or in
 \fBListenHTTP\fR (\fBListenHTTPS\fR) section, or in \fBService\fR
@@ -2454,7 +2457,7 @@ Local IP address of the listener.
 Size of response in bytes, excluding headers.
 .TP
 .B %b
-Same as \fBB\fR, but in \fICLF\fR format, i.e. a dash is used when
+Same as \fB%B\fR, but in \fICLF\fR format, i.e. a dash is used when
 response size is zero.
 .TP
 .B %D
@@ -2598,31 +2601,31 @@ No request logging at all.
 .TP
 .BR 1 ", " regular
 .EX
-"%a %r - %>s"
+"%a %r \- %>s"
 .EE
 .TP
 .BR 2 ", " extended
 .EX
-"%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec"
+"%a %r \- %>s (%{Host}i/%{service}N \-> %{backend}N) %{f}T sec"
 .EE
 .TP
 .BR 3 ", " vhost_combined
 (Split in two lines for readability)
 .EX
 "%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
-\(rs\(dq%{User-Agent}i\(rs\(dq"
+\(rs\(dq%{User\-Agent}i\(rs\(dq"
 .EE
 .TP
 .BR 4 ", " combined
 .EX
-"%a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs\(dq%{User-Agent}i\(rs\(dq"
+"%a \- %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs\(dq%{User\-Agent}i\(rs\(dq"
 .EE
 .TP
 .BR 5 ", " detailed
 (Split in two lines for readability)
 .EX
 "%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
-\(rs\(dq%{User-Agent}\(rs\(dq (%{service}N -> %{backend}N) %{f}T sec"
+\(rs\(dq%{User\-Agent}\(rs\(dq (%{service}N \-> %{backend}N) %{f}T sec"
 .EE
 .SH SECURITY
 .PP
