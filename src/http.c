@@ -1140,16 +1140,36 @@ strip_eol (char *lin)
   return 0;
 }
 
+enum
+  {
+    CL_HEADER,
+    CL_CHUNK
+  };
+
 CONTENT_LENGTH
-get_content_length (char const *arg, int base)
+get_content_length (char const *arg, int mode)
 {
   char *p;
   CONTENT_LENGTH n;
 
-  errno = 0;
-  n = STRTOCLEN (arg, &p, base);
-  if (errno || n < 0 || (*p && !isspace (*p)))
+  while (*arg == ' ' || *arg == '\t')
+    arg++;
+  if (*arg == 0 || *arg == '-' ||
+      (*arg == '0' && (arg[1] == 'x' || arg[1] == 'X')))
     return NO_CONTENT_LENGTH;
+
+  errno = 0;
+  n = STRTOCLEN (arg, &p, mode == CL_HEADER ? 10 : 16);
+  if (errno || n < 0)
+    return NO_CONTENT_LENGTH;
+  while (*p == ' ' || *p == '\t')
+    p++;
+  if (*p)
+    {
+      if (!(mode == CL_CHUNK && *p == ';'))
+	return NO_CONTENT_LENGTH;
+    }
+
   return n;
 }
 
@@ -1179,7 +1199,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	 */
 	return 0;
 
-      if ((cont = get_content_length (buf, 16)) == NO_CONTENT_LENGTH)
+      if ((cont = get_content_length (buf, CL_CHUNK)) == NO_CONTENT_LENGTH)
 	{
 	  /*
 	   * not chunk header
@@ -3077,7 +3097,7 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_CONTENT_LENGTH:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if ((content_length = get_content_length (val, 10)) == NO_CONTENT_LENGTH)
+	      if ((content_length = get_content_length (val, CL_HEADER)) == NO_CONTENT_LENGTH)
 		{
 		  logmsg (LOG_WARNING, "(%"PRItid") invalid content length: %s",
 			  POUND_TID (), val);
@@ -4008,7 +4028,7 @@ do_http (POUND_HTTP *phttp)
 		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
 		}
-	      else if ((content_length = get_content_length (val, 10)) == NO_CONTENT_LENGTH)
+	      else if ((content_length = get_content_length (val, CL_HEADER)) == NO_CONTENT_LENGTH)
 		{
 		  logmsg (LOG_NOTICE,
 			  "(%"PRItid") e400 Content-length bad value \"%s\" from %s",
