@@ -48,6 +48,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <fnmatch.h>
+#include <limits.h>
 
 #if HAVE_GETOPT_H
 # include <getopt.h>
