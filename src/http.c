@@ -1154,7 +1154,7 @@ get_content_length (char const *arg, int mode)
 
   while (*arg == ' ' || *arg == '\t')
     arg++;
-  if (*arg == 0 || *arg == '-' ||
+  if (*arg == 0 || *arg == '-' || *arg == '+' ||
       (*arg == '0' && (arg[1] == 'x' || arg[1] == 'X')))
     return NO_CONTENT_LENGTH;
 
