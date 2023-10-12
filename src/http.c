@@ -4003,16 +4003,19 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (!strcasecmp ("chunked", val))
-		chunked = 1;
-	      else
+	      if (chunked)
 		{
 		  logmsg (LOG_NOTICE,
-			  "(%"PRItid") e400 multiple Transfer-encoding \"%s\" from %s",
+			  "(%"PRItid") e400 multiple Transfer-encoding: chunked on \"%s\" from %s",
 			  POUND_TID (), phttp->request.url,
 			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
 		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
+		}
+	      else
+		{
+		  if (!strcasecmp ("chunked", val))
+		    chunked = 1;
 		}
 	      break;
 
