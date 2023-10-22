@@ -1,23 +1,28 @@
 AT_SETUP([HTTP log formats])
 AT_KEYWORDS([log logformat LogFormat logfmt])
 
+m4_pushdef([PT_ADD_CFG])
+m4_pushdef([PT_ADD_HDR])
+
 m4_pushdef([PT_CHECK_LOG_FORMAT],
 [m4_pushdef([HARNESS_OPTIONS],[--log-level=-1])
 PT_CHECK(
-[LogFormat "default" "$1"
+[PT_ADD_CFG[]dnl
+LogFormat "default" "$1"
 LogLevel "default"
 ListenHTTP "main"
 	Service "default"
-                Backend
-                        Address
-                        Port
-                End
+		Backend
+			Address
+			Port
+		End
 	End
 End],
 [GET /echo/foo?index=1&q=text
 Host: example.com
 X-Header: test value
 Authorization: Basic QWxhZGRpbjpvcGVuIHNlc2FtZQ==
+PT_ADD_HDR[]dnl
 end
 
 200
@@ -52,7 +57,106 @@ PT_CHECK_LOG_FORMAT([%T],
 PT_CHECK_LOG_FORMAT([%{ms}T],
  [[-e '/^[0-9][0-9]*/d']])
 
+# ################
+# Check handling of X-Forwarded-For and similar headers
+# ################
+
+# 1. One-line X-Forwarded-For
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+End
+])
+m4_pushdef([PT_ADD_HDR], [X-Forwarded-For: 192.0.2.4, 192.0.2.5
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.5
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
+# 2. TrustedIP ACLs
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+    "192.0.2.5"
+End
+])
+m4_pushdef([PT_ADD_HDR], [X-Forwarded-For: 192.0.2.4, 192.0.2.5
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.4
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
+# 3. Multiple X-Forwarded-For values.
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+End
+])
+m4_pushdef([PT_ADD_HDR], [X-Forwarded-For: 192.0.2.4, 192.0.2.5
+X-Foo: bar
+X-Forwarded-For: 192.0.2.10
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.10
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
+# 4. Multiple X-Forwarded-For with CombineHeaders mode.
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+End
+CombineHeaders
+    "X-Forwarded-For"
+End
+])
+m4_pushdef([PT_ADD_HDR], [X-Forwarded-For: 192.0.2.4, 192.0.2.5
+X-Foo: bar
+X-Forwarded-For: 192.0.2.10
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.10
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
+# 5. Alternative ForwardedFor header.
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+End
+ForwardedHeader "X-My-Forwarded-For"
+])
+m4_pushdef([PT_ADD_HDR], [X-My-Forwarded-For: 192.0.2.4, 192.0.2.5
+X-Foo: bar
+X-My-Forwarded-For: 192.0.2.10
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.10
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
+# 6. TrustedIP
+m4_pushdef([PT_ADD_CFG],
+[TrustedIP
+    "127.0.0.1"
+    "192.0.2.10"
+End
+CombineHeaders
+    "X-Forwarded-For"
+End
+])
+m4_pushdef([PT_ADD_HDR], [X-Forwarded-For: 192.0.2.4, 192.0.2.5
+X-Foo: bar
+X-Forwarded-For: 192.0.2.10
+])
+PT_CHECK_LOG_FORMAT([%a],[],[192.0.2.5
+])
+m4_popdef([PT_ADD_HDR])
+m4_popdef([PT_ADD_CFG])
+
 m4_popdef([PT_CHECK_LOG_FORMAT])
+m4_popdef([PT_ADD_CFG])
+m4_popdef([PT_ADD_HDR])
 AT_CLEANUP
-
-

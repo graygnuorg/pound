@@ -218,7 +218,8 @@ sub preproc {
 	ST_LISTENER => 1,
 	ST_SERVICE => 2,
 	ST_BACKEND => 3,
-	ST_SESSION => 4
+	ST_SESSION => 4,
+	ST_SECTION => 5
     };
     my @state;
     unshift @state, $initstate // ST_INIT;
@@ -268,6 +269,8 @@ EOT
 	    if ($verbose) {
 		print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
 	    }
+	} elsif (/^s*(TrustedIP|ACL|CombineHeaders)\b/) {
+	    unshift @state, ST_SECTION
 	} elsif (/^\s*End/i) {
 	    shift @state
 	} elsif ($state[0] == ST_BACKEND) {
@@ -676,7 +679,16 @@ sub parse_headers {
 	}
 
 	if (/^(?<name>[A-Za-z][A-Za-z0-9_-]*):\s*(?<value>.*)$/) {
-	    $self->{REQ}{HEADERS}{lc($+{name})} = $self->expandvars($+{value});
+	    my $name = lc($+{name});
+	    if (exists($self->{REQ}{HEADERS}{$name})) {
+		my $val = $self->{REQ}{HEADERS}{$name};
+		if (ref($val) ne 'ARRAY') {
+		    $self->{REQ}{HEADERS}{$name} = [$val];
+		}
+		push @{$self->{REQ}{HEADERS}{$name}}, $self->expandvars($+{value})
+	    } else {
+		$self->{REQ}{HEADERS}{lc($+{name})} = $self->expandvars($+{value});
+	    }
 	} else {
 	    $self->syntax_error;
 	    return;

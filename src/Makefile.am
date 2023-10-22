@@ -50,7 +50,7 @@ install-exec-hook:
 		done; \
 	fi
 
-noinst_HEADERS=pound.h extern.h list.h
+noinst_HEADERS=pound.h extern.h list.h ht.h
 
 if SET_DH_AUTO
 DHSRC =

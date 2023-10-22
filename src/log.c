@@ -262,11 +262,39 @@ save_forwarded_header (POUND_HTTP *phttp)
   char const *val;
 
   free (phttp->orig_forwarded_header);
+  phttp->orig_forwarded_header = NULL;
   hname = get_forwarded_header_name (phttp);
   if ((hdr = http_header_list_locate_name (&phttp->request.headers,
-					   hname, strlen (hname))) != NULL
-      && (val = http_header_get_value (hdr)) != NULL)
-    phttp->orig_forwarded_header = xstrdup (val);
+					   hname, strlen (hname))) != NULL)
+    {
+      if (is_combinable_header (hdr))
+	{
+	  if ((val = http_header_get_value (hdr)) != NULL)
+	    phttp->orig_forwarded_header = xstrdup (val);
+	}
+      else
+	{
+	  struct stringbuf sb;
+
+	  stringbuf_init_log (&sb);
+	  for (;;)
+	    {
+	      size_t len = hdr->val_end - hdr->val_start;
+
+	      stringbuf_add (&sb, hdr->header + hdr->val_start, len);
+	      if ((hdr = http_header_list_next (hdr)) != NULL)
+		{
+		  if (len > 0)
+		    stringbuf_add (&sb, ", ", 2);
+		}
+	      else
+		break;
+	    }
+	  phttp->orig_forwarded_header = stringbuf_finish (&sb);
+	  if (!phttp->orig_forwarded_header)
+	    stringbuf_free (&sb);
+	}
+    }
 }
 
 static void

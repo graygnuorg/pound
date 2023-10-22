@@ -13,10 +13,13 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Header directives ordering])
-AT_KEYWORDS([order])
 
-PT_CHECK([ListenHTTP
+# See https://github.com/graygnuorg/pound/issues/18
+
+AT_SETUP([Multiple Transfer-Encoding headers])
+AT_KEYWORDS([multival chunked])
+PT_CHECK(
+[ListenHTTP
 	Service
 		Backend
 			Address
@@ -25,20 +28,17 @@ PT_CHECK([ListenHTTP
 	End
 End
 ],
-[GET /echo/X
-Host: example.com
-X-Forwarded-For: 192.0.2.2
+[GET /echo/foo
+Transfer-Encoding: chunked
+Transfer-Encoding: chunked
 end
 
-200
-x-orig-header-X-Forwarded-For: 192.0.2.2, 127.0.0.1
+400
 end
 ])
 
-PT_CHECK([ListenHTTP
-	HeaderOption forwarded
-	HeaderAdd "X-Forwarded-For: 192.0.2.2"
-	HeaderRemove "X-Forwarded-Port"
+PT_CHECK(
+[ListenHTTP
 	Service
 		Backend
 			Address
@@ -47,15 +47,11 @@ PT_CHECK([ListenHTTP
 	End
 End
 ],
-[GET /echo/Y
-Host: example.com
+[GET /echo/foo
+Transfer-Encoding: chunked, flow
 end
 
-200
-x-orig-header-X-Forwarded-For: 192.0.2.2
--x-orig-header-X-Forwarded-Port:
+400
 end
 ])
-
 AT_CLEANUP
-

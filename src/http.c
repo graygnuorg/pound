@@ -110,7 +110,7 @@ static HTTP_STATUS http_status[] = {
   [HTTP_STATUS_FORBIDDEN] = {
     403,
     "Forbidden",
-    "You don't have permission to access this resourse."
+    "You don't have permission to access this resource."
     " It is either read-protected or not readable by the server."
   },
   [HTTP_STATUS_NOT_FOUND] = {
@@ -1543,6 +1543,155 @@ method_name (int meth)
   return methods[meth].name;
 }
 
+/*
+ * Table of headers whose value is a comma-separated list, and which
+ * therefore are allowed to occur multiple times in the same message.
+ *
+ * RFC 7230, sect. 3.2.2
+ *  A sender MUST NOT generate multiple header fields with the same field
+ *  name in a message unless either the entire field value for that
+ *  header field is defined as a comma-separated list [i.e., #(values)]
+ *  or the header field is a well-known exception (as noted below).
+ *
+ *  A recipient MAY combine multiple header fields with the same field
+ *  name into one "field-name: field-value" pair, without changing the
+ *  semantics of the message, by appending each subsequent field value to
+ *  the combined field value in order, separated by a comma.
+ *
+ * Headers from that table are rebuilt as described above in order to
+ * simplify header matching.
+ */
+typedef struct
+{
+  char *name;
+  size_t len;
+} HEADER_NAME;
+
+/*
+ * A modified version of strhash function from OpenSSL.
+ */
+static unsigned long
+strhash_ci (const char *c, size_t len)
+{
+  unsigned long ret = 0;
+  long n;
+  unsigned long v;
+  int r;
+
+  if ((c == NULL) || (*c == '\0'))
+    return ret;
+
+  n = 0x100;
+  while (len--)
+    {
+      v = n | tolower (*c);
+      n += 0x100;
+      r = (int)((v >> 2) ^ v) & 0x0f;
+      /* cast to uint64_t to avoid 32 bit shift of 32 bit value */
+      ret = (ret << r) | (unsigned long)((uint64_t)ret >> (32 - r));
+      ret &= 0xFFFFFFFFL;
+      ret ^= v * v;
+      c++;
+    }
+  return (ret >> 16) ^ ret;
+}
+
+static unsigned long
+HEADER_NAME_hash (const HEADER_NAME *hname)
+{
+  return strhash_ci (hname->name, hname->len);
+}
+
+static int
+HEADER_NAME_cmp (const HEADER_NAME *a, const HEADER_NAME *b)
+{
+  return a->len != b->len || strncasecmp (a->name, b->name, a->len);
+}
+
+#define HT_TYPE HEADER_NAME
+#define HT_TYPE_HASH_FN_DEFINED 1
+#define HT_TYPE_CMP_FN_DEFINED 1
+#define HT_NO_FOREACH
+#define HT_NO_HASH_FREE
+#define HT_NO_DELETE
+#include "ht.h"
+
+static HEADER_NAME_HASH *combinable_headers;
+
+/* Add header to the multi-value header table. */
+void
+combinable_header_add (char const *name)
+{
+  HEADER_NAME *hname;
+
+  if (!combinable_headers)
+    {
+      if ((combinable_headers = HEADER_NAME_HASH_NEW ()) == NULL)
+	xnomem ();
+    }
+  XZALLOC (hname);
+  hname->name = xstrdup (name);
+  hname->len = strlen (name);
+  if (HEADER_NAME_INSERT (combinable_headers, hname))
+    {
+      free (hname->name);
+      free (hname);
+    }
+}
+
+/* Return true if the name given is a name of a combinble multi-value header. */
+int
+is_combinable_header (struct http_header *hdr)
+{
+  HEADER_NAME key;
+  if (!combinable_headers)
+    return 0;
+  key.name = (char*) http_header_name_ptr (hdr);
+  key.len = http_header_name_len (hdr);
+  return HEADER_NAME_RETRIEVE (combinable_headers, &key) != NULL;
+}
+
+/*
+ * Find first occurrence of TOK in a comma-separated list of values SUBJ.
+ * Use case-insensitive comparison unless CI is 0.  Ignore whitespace.
+ *
+ * Return pointer to the first occurrence of TOK, if found or NULL
+ * otherwise.
+ * Unless NEXTP is NULL, initialize it with the pointer to the next item in
+ * SUBJ.
+ */
+static char *
+cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
+{
+  size_t toklen = strlen (tok);
+  char const *next = NULL;
+
+  while (*subj)
+    {
+      size_t i, len;
+
+      while (*subj && isspace (*subj))
+	subj++;
+      if (!*subj)
+	return NULL;
+      len = strcspn (subj, ",");
+      for (i = len; i > 0; i--)
+	if (!isspace (subj[i-1]))
+	  break;
+      next = subj + len;
+      if (*next)
+	next++;
+      if (i == toklen && (ci ? strncasecmp : strncmp) (subj, tok, i) == 0)
+	break;
+      subj = next;
+    }
+
+  if (nextp)
+    *nextp = (char*) next;
+
+  return *subj != 0 ? (char*) subj : NULL;
+}
+
 static int
 qualify_header (struct http_header *hdr)
 {
@@ -1701,8 +1850,23 @@ http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name,
     len = strcspn (name, ":");
   DLIST_FOREACH (hdr, head, link)
     {
-      if (hdr->name_end - hdr->name_start == len &&
-	  strncasecmp (hdr->header + hdr->name_start, name, len) == 0)
+      if (http_header_name_len (hdr) == len &&
+	  strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
+	return hdr;
+    }
+  return NULL;
+}
+
+/* Return next header with the same name as hdr. */
+struct http_header *
+http_header_list_next (struct http_header *hdr)
+{
+  size_t len = http_header_name_len (hdr);
+  char const *name = http_header_name_ptr (hdr);
+  while ((hdr = DLIST_NEXT (hdr, link)) != NULL)
+    {
+      if (http_header_name_len (hdr) == len &&
+	  strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
 	return hdr;
     }
   return NULL;
@@ -1723,10 +1887,38 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 
   if ((hdr = http_header_list_locate_name (head, text, 0)) != NULL)
     {
-      if (replace)
-	return http_header_change (hdr, text, 1);
-      else
-	return 0;
+      switch (replace)
+	{
+	case H_KEEP:
+	  return 0;
+
+	case H_REPLACE:
+	  return http_header_change (hdr, text, 1);
+
+	case H_APPEND:
+	  {
+	    char *val = http_header_get_value (hdr);
+	    if (*val)
+	      {
+		struct stringbuf sb;
+
+		stringbuf_init_log (&sb);
+		stringbuf_add (&sb, hdr->header,
+			       hdr->val_end - hdr->name_start);
+		stringbuf_add_char (&sb, ',');
+		val = text + hdr->name_end + 1;
+		if (!isspace (*val))
+		  stringbuf_add_char (&sb, ' ');
+		stringbuf_add_string (&sb, val);
+		val = stringbuf_finish (&sb);
+		if (!val)
+		  return -1;
+		return http_header_change (hdr, val, 0);
+	      }
+	    else
+	      http_header_change (hdr, text, 1);
+	  }
+	}
     }
   else if ((hdr = http_header_alloc (text)) == NULL)
     return -1;
@@ -2222,11 +2414,89 @@ http_request_free (struct http_request *req)
   http_request_init (req);
 }
 
+typedef struct
+{
+  struct http_header *hdr;
+  struct stringbuf sb;
+} COMPOSE_HEADER;
+
+static unsigned long
+COMPOSE_HEADER_hash (const COMPOSE_HEADER *cp)
+{
+  return strhash_ci (http_header_name_ptr (cp->hdr),
+		     http_header_name_len (cp->hdr));
+}
+
+static int
+COMPOSE_HEADER_cmp (const COMPOSE_HEADER *a, const COMPOSE_HEADER *b)
+{
+  size_t alen, blen;
+  alen = http_header_name_len (a->hdr);
+  blen = http_header_name_len (b->hdr);
+  return alen != blen || strncasecmp (http_header_name_ptr (a->hdr),
+				      http_header_name_ptr (b->hdr), alen);
+}
+
+#define HT_TYPE COMPOSE_HEADER
+#define HT_TYPE_HASH_FN_DEFINED 1
+#define HT_TYPE_CMP_FN_DEFINED 1
+#define HT_NO_DELETE 1
+#include "ht.h"
+
+static void
+compose_header_free (COMPOSE_HEADER *hdr, void *data)
+{
+  stringbuf_free (&hdr->sb);
+  free (hdr);
+}
+
+static void
+compose_header_hash_free (COMPOSE_HEADER_HASH *chash)
+{
+  if (chash)
+    {
+      COMPOSE_HEADER_FOREACH (chash, compose_header_free, NULL);
+      COMPOSE_HEADER_HASH_FREE (chash);
+    }
+}
+
+static void
+compose_header_finish (COMPOSE_HEADER *chdr, void *data)
+{
+  int *errp = data;
+
+  if (*errp == 0)
+    {
+      char *val = stringbuf_finish (&chdr->sb);
+      if (val)
+	http_header_change (chdr->hdr, val, 0);
+      else
+	{
+	  *errp = 1;
+	  stringbuf_free (&chdr->sb);
+	}
+    }
+  else
+    stringbuf_free (&chdr->sb);
+  free (chdr);
+}
+
 static int
 http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 {
   char buf[MAXBUF];
   int res;
+  COMPOSE_HEADER_HASH *chash = NULL;
+
+  if (combinable_headers)
+    {
+      chash = COMPOSE_HEADER_HASH_NEW ();
+      if (!chash)
+	{
+	  lognomem ();
+	  return -1;
+	}
+    }
 
   http_request_init (req);
 
@@ -2248,6 +2518,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
   if ((req->request = strdup (buf)) == NULL)
     {
       lognomem ();
+      compose_header_hash_free (chash);
       return -1;
     }
 
@@ -2258,6 +2529,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
       if (get_line (in, buf, sizeof (buf)))
 	{
 	  http_request_free (req);
+	  compose_header_hash_free (chash);
 	  /*
 	   * this is not necessarily an error, EOF/timeout are possible
 	   */
@@ -2270,13 +2542,74 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
       if ((hdr = http_header_alloc (buf)) == NULL)
 	{
 	  http_request_free (req);
+	  compose_header_hash_free (chash);
 	  return -1;
 	}
       else if (hdr->code == HEADER_ILLEGAL)
 	http_header_free (hdr);
       else
-	DLIST_INSERT_TAIL (&req->headers, hdr, link);
+	{
+	  if (is_combinable_header (hdr))
+	    {
+	      COMPOSE_HEADER *comp, key;
+
+	      key.hdr = hdr;
+	      if ((comp = COMPOSE_HEADER_RETRIEVE (chash, &key)) != NULL)
+		{
+		  stringbuf_add (&comp->sb, ", ", 2);
+		  stringbuf_add (&comp->sb, hdr->header + hdr->val_start,
+				 hdr->val_end - hdr->val_start);
+		  http_header_free (hdr);
+		  if (stringbuf_err (&comp->sb))
+		    {
+		      http_request_free (req);
+		      compose_header_hash_free (chash);
+		      return -1;
+		    }
+		  continue;
+		}
+	      else
+		{
+		  if ((comp = malloc (sizeof (*comp))) == NULL)
+		    {
+		      lognomem ();
+		      http_request_free (req);
+		      compose_header_hash_free (chash);
+		      return -1;
+		    }
+		  comp->hdr = hdr;
+		  stringbuf_init_log (&comp->sb);
+		  stringbuf_add (&comp->sb, http_header_name_ptr (hdr),
+				 http_header_name_len (hdr));
+		  stringbuf_add (&comp->sb, ": ", 2);
+		  stringbuf_add (&comp->sb, hdr->header + hdr->val_start,
+				 hdr->val_end - hdr->val_start);
+		  if (stringbuf_err (&comp->sb))
+		    {
+		      http_request_free (req);
+		      compose_header_hash_free (chash);
+		      return -1;
+		    }
+		  COMPOSE_HEADER_INSERT (chash, comp);
+		}
+	    }
+	  DLIST_INSERT_TAIL (&req->headers, hdr, link);
+	}
     }
+
+  /* Finalize multiple-value headers */
+  if (chash)
+    {
+      res = 0;
+      COMPOSE_HEADER_FOREACH (chash, compose_header_finish, &res);
+      COMPOSE_HEADER_HASH_FREE (chash);
+      if (res)
+	{
+	  http_request_free (req);
+	  return -1;
+	}
+    }
+
   return 0;
 }
 
@@ -2657,7 +2990,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
   stringbuf_printf (&sb, "X-Forwarded-For: %s",
 		    addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
   if ((str = stringbuf_finish (&sb)) == NULL
-      || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+      || http_header_list_append (&phttp->request.headers, str, H_APPEND))
     {
       stringbuf_free (&sb);
       return -1;
@@ -3003,7 +3336,7 @@ backend_response (POUND_HTTP *phttp)
   phttp->res_bytes = 0;
   do
     {
-      int chunked; /* True if request contains Transfer-Enconding: chunked */
+      int chunked; /* True if request contains Transfer-Encoding: chunked */
 
       /* Free previous response, if any */
       http_request_free (&phttp->response);
@@ -3080,14 +3413,14 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_UPGRADE:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (!strcasecmp ("websocket", val))
+	      if (cs_locate_token (val, "websocket", 1, NULL))
 		phttp->ws_state |= WSS_RESP_HEADER_UPGRADE_WEBSOCKET;
 	      break;
 
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (!strcasecmp ("chunked", val))
+	      if (cs_locate_token (val, "chunked", 1, NULL))
 		{
 		  chunked = 1;
 		  phttp->no_cont = 0;
@@ -3867,7 +4200,7 @@ do_http (POUND_HTTP *phttp)
 {
   int cl_11;  /* Whether client connection is using HTTP/1.1 */
   int res;  /* General-purpose result variable */
-  int chunked; /* True if request contains Transfer-Enconding: chunked
+  int chunked; /* True if request contains Transfer-Encoding: chunked
 		* FIXME: this belongs to struct http_request, perhaps.
 		*/
   BIO *bb;
@@ -4006,7 +4339,7 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_CONNECTION:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (!strcasecmp ("close", val))
+	      if (cs_locate_token (val, "close", 1, NULL))
 		phttp->conn_closed = 1;
 	      /*
 	       * Connection: upgrade
@@ -4018,14 +4351,14 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_UPGRADE:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (!strcasecmp ("websocket", val))
+	      if (cs_locate_token (val, "websocket", 1, NULL))
 		phttp->ws_state |= WSS_REQ_HEADER_UPGRADE_WEBSOCKET;
 	      break;
 
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (chunked)
+	      else if (chunked)
 		{
 		  logmsg (LOG_NOTICE,
 			  "(%"PRItid") e400 multiple Transfer-encoding: chunked on \"%s\" from %s",
@@ -4036,8 +4369,25 @@ do_http (POUND_HTTP *phttp)
 		}
 	      else
 		{
-		  if (!strcasecmp ("chunked", val))
-		    chunked = 1;
+		  char *next;
+		  if (cs_locate_token (val, "chunked", 1, &next))
+		    {
+		      if (*next)
+			{
+			  /*
+			   * When the "chunked" transfer-coding is used,
+			   * it MUST be the last transfer-coding applied
+			   * to the message-body.
+			   */
+			  logmsg (LOG_NOTICE,
+				  "(%"PRItid") e400 multiple Transfer-encoding on \"%s\" from %s",
+				  POUND_TID (), phttp->request.url,
+				  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
+			  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
+			  return;
+			}
+		      chunked = 1;
+		    }
 		}
 	      break;
 

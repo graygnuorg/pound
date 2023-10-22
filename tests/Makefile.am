@@ -68,6 +68,7 @@ TESTSUITE_AT = \
  bemix.at\
  checkurl.at\
  chgvis.at\
+ chunked2.at\
  config.at\
  disable.at\
  echo.at\
@@ -91,6 +92,7 @@ TESTSUITE_AT = \
  logsup.at\
  lstset.at\
  maxrequest.at\
+ multival.at\
  nb.at\
  not.at\
  optfwd.at\

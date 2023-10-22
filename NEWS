@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-10-13
+Pound -- history of user-visible changes. 2023-10-23
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,43 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.10.90 (git)
+
+* Combining multi-value headers
+
+HTTP protocol allows for certain headers to appear in the message
+multiple times.  Namely, multiple headers with the same header name
+are permitted if that header field is defined as a comma-separated
+list.  The standard specifies that such fields can be combined in
+a single "header: value" pair, by appending each subsequent field
+value to the previous one, each separated by a comma.
+
+Pound is able to perform such combining both on incoming requests as
+well as on responses.  To enable this feature, declare names of headers
+that can be combined using the CombineHeader statement, e.g.:
+
+    CombineHeaders
+	"Accept"
+	"Allow"
+	"Forwarded"
+    End
+
+* SNI in HTTPS backends
+
+New directive ServerName is provided for use in Backend section after
+HTTPS statement.  This directive sets the host name to be used in server
+name identification (SNI).  Its argument is a quoted string specifying
+the host name.  This directive also rewrites the Host: header
+accordingly.  Example usage:
+
+
+    Backend
+	HTTPS
+	Address 192.0.2.1
+	Port 443
+	ServerName "www.example.org"
+    End
 
 Version 4.10, 2023-10-13
 
@@ -62,7 +99,7 @@ In contrast, the following statement:
 applies to the response (received from the regular backend or generated
 by error backend).  In this form, the set of statements that can
 appear inside the section (denoted by ellipsis above) is limited to
-the following: "Not", "Match", "Header", "StringMatch", 
+the following: "Not", "Match", "Header", "StringMatch",
 "SetHeader", and "DeleteHeader".  For example:
 
   Rewrite response
@@ -101,7 +138,7 @@ the following example:
   Service "auth"
       Not BasicAuth "/etc/pound/htpass"
       Rewrite response
-          SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+	  SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
       End
       Error 401
   End

@@ -1026,45 +1026,8 @@ typedef struct named_backend
   SLIST_ENTRY (named_backend) link;
 } NAMED_BACKEND;
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-DEFINE_LHASH_OF (NAMED_BACKEND);
-#else
-DECLARE_LHASH_OF (NAMED_BACKEND);
-#endif
-
-typedef LHASH_OF (NAMED_BACKEND) NAMED_BACKEND_HASH;
-
-static unsigned long
-named_backend_hash (const NAMED_BACKEND *b)
-{
-  return lh_strhash (b->name);
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static IMPLEMENT_LHASH_HASH_FN (named_backend, NAMED_BACKEND)
-#endif
-
-static int
-named_backend_cmp (const NAMED_BACKEND *b1, const NAMED_BACKEND *b2)
-{
-  return strcmp (b1->name, b2->name);
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static IMPLEMENT_LHASH_COMP_FN (named_backend, NAMED_BACKEND)
-#endif
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define NAMED_BACKEND_HASH_NEW() lh_NAMED_BACKEND_new (named_backend_hash, named_backend_cmp)
-# define NAMED_BACKEND_HASH_FREE(h) lh_NAMED_BACKEND_free (h)
-# define NAMED_BACKEND_INSERT(tab, node) lh_NAMED_BACKEND_insert (tab, node)
-# define NAMED_BACKEND_RETRIEVE(tab, node) lh_NAMED_BACKEND_retrieve (tab, node)
-#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
-# define NAMED_BACKEND_HASH_NEW() LHM_lh_new (NAMED_BACKEND, named_backend)
-# define NAMED_BACKEND_HASH_FREE(h) LHM_lh_free (NAMED_BACKEND, h)
-# define NAMED_BACKEND_INSERT(tab, node) LHM_lh_insert (NAMED_BACKEND, tab, node)
-# define NAMED_BACKEND_RETRIEVE(tab, node) LHM_lh_retrieve (NAMED_BACKEND, tab, node)
-#endif
+#define HT_TYPE NAMED_BACKEND
+#include "ht.h"
 
 typedef struct named_backend_table
 {
@@ -4835,6 +4798,53 @@ parse_named_backend (void *call_data, void *section_data)
 
   return PARSER_OK;
 }
+
+static int
+parse_combine_headers (void *call_data, void *section_data)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return PARSER_FAIL;
+
+  if (tok->type != '\n')
+    {
+      conf_error ("expected newline, but found %s", token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+
+  for (;;)
+    {
+      int rc;
+      if ((tok = gettkn_any ()) == NULL)
+	return PARSER_FAIL;
+      if (tok->type == '\n')
+	continue;
+      if (tok->type == T_IDENT)
+	{
+	  if (strcasecmp (tok->str, "end") == 0)
+	    break;
+	  if (strcasecmp (tok->str, "include") == 0)
+	    {
+	      if ((rc = parse_include (NULL, NULL)) == PARSER_FAIL)
+		return rc;
+	      continue;
+	    }
+	  conf_error ("expected quoted string, \"Include\", or \"End\", but found %s",
+		      token_type_str (tok->type));
+	  return PARSER_FAIL;
+	}
+      if (tok->type == T_STRING)
+	combinable_header_add (tok->str);
+      else
+	{
+	  conf_error ("expected quoted string, \"Include\", or \"End\", but found %s",
+		      token_type_str (tok->type));
+	  return PARSER_FAIL;
+	}
+    }
+  return PARSER_OK;
+}
 
 static PARSER_TABLE top_level_parsetab[] = {
   { "IncludeDir", parse_includedir },
@@ -4873,6 +4883,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "BackendStats", assign_bool, &enable_backend_stats },
   { "ForwardedHeader", assign_string, &forwarded_header },
   { "TrustedIP", assign_acl, &trusted_ips },
+  { "CombineHeaders", parse_combine_headers },
   { NULL }
 };
 

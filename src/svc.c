@@ -21,48 +21,6 @@
 #include "extern.h"
 #include "json.h"
 
-/*
- * basic hashing function, based on fmv
- */
-static unsigned long
-session_hash (const SESSION *e)
-{
-  unsigned long res;
-  char *k;
-
-  k = e->key;
-  res = 2166136261;
-  while (*k)
-    res = ((res ^ *k++) * 16777619) & 0xFFFFFFFF;
-  return res;
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static IMPLEMENT_LHASH_HASH_FN (session, SESSION)
-#endif
-
-static int
-session_cmp (const SESSION *d1, const SESSION *d2)
-{
-  return strcmp (d1->key, d2->key);
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-static IMPLEMENT_LHASH_COMP_FN (session, SESSION)
-#endif
-
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define SESSION_HASH_NEW() lh_SESSION_new (session_hash, session_cmp)
-# define SESSION_INSERT(tab, node) lh_SESSION_insert (tab, node)
-# define SESSION_RETRIEVE(tab, node) lh_SESSION_retrieve (tab, node)
-# define SESSION_DELETE(tab, node) lh_SESSION_delete (tab, node)
-#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
-# define SESSION_HASH_NEW() LHM_lh_new (SESSION, session)
-# define SESSION_INSERT(tab, node) LHM_lh_insert (SESSION, tab, node)
-# define SESSION_RETRIEVE(tab, node) LHM_lh_retrieve (SESSION, tab, node)
-# define SESSION_DELETE(tab, node) LHM_lh_delete (SESSION, tab, node)
-#endif
-
 SESSION_TABLE *
 session_table_new (void)
 {

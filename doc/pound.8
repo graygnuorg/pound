@@ -642,6 +642,15 @@ See the
 .B Control socket
 section below, for a detailed description of this feature.
 .TP
+\fBCombineHeaders\fR ... \fBEnd\fR
+Declare names of the headers that can appear multiple times in a
+message, and that should be combined into one value.  Header names
+must appear one per line between \fBCombineHeaders\fR and \fBEnd\fR.
+.IP
+See the section
+.BR "MULTI-VALUE HEADERS" ,
+for a detailed discussion of this feature.
+.TP
 \fBIncludeDir\fR "\fIdir\fR"
 Sets the \fIinclude directory\fR.  This is the directory
 where \fIpound\fR looks for relative file names that appear in other
@@ -2321,6 +2330,41 @@ Remove matching headers from the response.
 Add header to the response.  Argument
 undergoes string expansion as described above. The expanded value must
 be a valid header line.
+.SH MULTI-VALUE HEADERS
+HTTP protocol allows for certain headers to appear in the message
+multiple times.  Namely, multiple headers with the same header name
+are permitted if that header field is defined as a comma-separated
+list.  The standard specifies that such fields can be combined in
+a single \fIheader: value\fR pair, by appending each subsequent field
+value to the previous one, each separated by a comma.
+.PP
+.B Pound
+is able to perform such combining both on incoming requests and on
+responses.  To enable this feature, declare names of headers
+that can be combined using the
+.B CombineHeaders
+section statement.  This statement must be followed by header names,
+each on a separate line, and terminated with an
+.B End
+statement.  E.g.:
+.PP
+.EX
+CombineHeaders
+    "Accept"
+    "Allow"
+    "Forwarded"
+End
+.EE
+.PP
+You can also store header names in a file, and include that file after
+.BR CombineHeaders ,
+e.g.:
+.PP
+.EX
+CombineHeaders
+    Include "multivalue.txt"
+End
+.EE
 .SH BASIC AUTHENTICATION
 To limit access to a service or services to certain authenticated
 users, use a combination of \fBBasicAuth\fR matching and response

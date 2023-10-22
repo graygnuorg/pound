@@ -319,7 +319,7 @@ pound_http_dequeue (void)
 	    {
 	      /*
 	       * worker_count might have changed while we were waiting,
-	       * so check again if the mimnimal worker count is reached.
+	       * so check again if the minimal worker count is reached.
 	       */
 	      if (worker_count == worker_min_count)
 		continue;

@@ -122,6 +122,10 @@ AT_BANNER([Request routing])
 m4_include([balancing.at])
 m4_include([prio.at])
 
+AT_BANNER([Multiple headers])
+m4_include([multival.at])
+m4_include([chunked2.at])
+
 AT_BANNER([HTTPS])
 m4_include([https.at])
 m4_include([virthost.at])

@@ -312,12 +312,26 @@ struct http_header
   DLIST_ENTRY (http_header) link;
 };
 
+static inline char const *
+http_header_name_ptr (struct http_header *hdr)
+{
+  return hdr->header + hdr->name_start;
+}
+
+static inline size_t
+http_header_name_len (struct http_header *hdr)
+{
+  return hdr->name_end - hdr->name_start;
+}
+
 typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
 
+/* Append modes: what to do if the header with that name already exist. */
 enum
   {
-    H_DROP,
-    H_REPLACE
+    H_KEEP,     /* Keep old header, discard changes. */
+    H_REPLACE,  /* Replace old header with the new one. */
+    H_APPEND    /* Append to the value (assume #(values)) */
   };
 
 int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
@@ -483,16 +497,13 @@ typedef struct session
   DLIST_ENTRY (session) link;
 } SESSION;
 
-/* maximal session key size */
 #define KEY_SIZE    127
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-DEFINE_LHASH_OF (SESSION);
-#else
-DECLARE_LHASH_OF (SESSION);
-#endif
-
-typedef LHASH_OF (SESSION) SESSION_HASH;
+#define HT_TYPE SESSION
+#define HT_NAME_FIELD key
+#define HT_NO_FOREACH
+#define HT_NO_HASH_FREE
+#include "ht.h"
 
 typedef struct
 {
@@ -524,7 +535,7 @@ enum service_cond_type
     COND_QUERY, /* Raw query match. */
     COND_QUERY_PARAM, /* Query parameter match */
     COND_HDR,   /* Header match. */
-    COND_HOST,  /* Special case od COND_HDR: matches the value of the
+    COND_HOST,  /* Special case of COND_HDR: matches the value of the
 		   Host: header */
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
@@ -835,25 +846,6 @@ typedef struct _pound_http
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
-/* control request stuff */
-typedef enum
-{
-  CTRL_LST,
-  CTRL_EN_LSTN, CTRL_DE_LSTN,
-  CTRL_EN_SVC, CTRL_DE_SVC,
-  CTRL_EN_BE, CTRL_DE_BE,
-  CTRL_ADD_SESS, CTRL_DEL_SESS
-} CTRL_CODE;
-
-typedef struct
-{
-  CTRL_CODE cmd;
-  int listener;
-  int service;
-  int backend;
-  char key[KEY_SIZE + 1];
-} CTRL_CMD;
-
 void save_forwarded_header (POUND_HTTP *phttp);
 void http_log (POUND_HTTP *phttp);
 
@@ -1094,6 +1086,7 @@ int match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 		struct http_request *req);
 
 struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
+struct http_header *http_header_list_next (struct http_header *hdr);
 char *http_header_get_value (struct http_header *hdr);
 
 /*
@@ -1133,3 +1126,6 @@ typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
 int foreach_backend (BACKEND_ITERATOR itr, void *data);
 
 int basic_auth (struct pass_file *pwf, struct http_request *req);
+
+void combinable_header_add (char const *name);
+int is_combinable_header (struct http_header *hdr);
