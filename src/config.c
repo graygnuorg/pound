@@ -2005,6 +2005,25 @@ backend_assign_ciphers (void *call_data, void *section_data)
 }
 
 static int
+backend_parse_servername (void *call_data, void *section_data)
+{
+  BACKEND *be = call_data;
+  struct token *tok;
+
+  if (be->v.reg.ctx == NULL)
+    {
+      conf_error ("%s", "HTTPS must be used before this statement");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+  be->v.reg.servername = xstrdup (tok->str);
+
+  return PARSER_OK;
+}
+
+static int
 backend_assign_priority (void *call_data, void *section_data)
 {
   return assign_int_range (call_data, 0, 9);
@@ -2051,7 +2070,7 @@ set_proto_opt (int *opt)
 static int
 disable_proto (void *call_data, void *section_data)
 {
-  SSL_CTX *ctx = call_data;
+  SSL_CTX *ctx = *(SSL_CTX**) call_data;
   int n = 0;
 
   if (ctx == NULL)
@@ -2081,6 +2100,7 @@ static PARSER_TABLE backend_parsetab[] = {
   { "Ciphers",   backend_assign_ciphers },
   { "Disable",   disable_proto,  NULL, offsetof (BACKEND, v.reg.ctx) },
   { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
+  { "ServerName",backend_parse_servername, NULL },
   { NULL }
 };
 

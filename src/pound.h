@@ -413,6 +413,7 @@ struct be_regular
   unsigned conn_to;	/* connection time-out */
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
+  char *servername;     /* SNI */
 };
 
 struct be_redirect

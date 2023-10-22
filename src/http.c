@@ -3549,6 +3549,26 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	lognomem ();
     }
 
+  if (phttp->backend->v.reg.servername)
+    {
+      struct stringbuf sb;
+      char *hf;
+      int rc;
+
+      stringbuf_init_log (&sb);
+      stringbuf_printf (&sb, "Host: %s", phttp->backend->v.reg.servername);
+      hf = stringbuf_finish (&sb);
+      if (!hf)
+	{
+	  stringbuf_free (&sb);
+	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	}
+      rc = http_header_list_append (&phttp->request.headers, hf, H_REPLACE);
+      stringbuf_free (&sb);
+      if (rc)
+	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
+
   if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
 		     phttp)
       || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
@@ -3670,6 +3690,8 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 	  logmsg (LOG_WARNING, "(%"PRItid") be SSL_new: failed", POUND_TID ());
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 	}
+      if (backend->v.reg.servername)
+	SSL_set_tlsext_host_name (be_ssl, backend->v.reg.servername);
       SSL_set_bio (be_ssl, phttp->be, phttp->be);
       if ((bb = BIO_new (BIO_f_ssl ())) == NULL)
 	{

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 10, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "October 22, 2023" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1769,6 +1769,14 @@ parameter for non Unix-domain backends.
 .TP
 \fBHTTPS\fR
 The backend is using HTTPS.
+.TP
+\fBServerName\fR "\fIname\fR"
+Specify the name to use for server name identification (\fBSNI\fR).
+This directive also rewrites the \fBHost:\fR header for this
+particular backend.  This means you don't have to use \fBSetHeader\fR
+in addition to it.
+.IP
+This directive may appear only after the \fBHTTPS\fR directive.
 .TP
 \fBCert\fR "\fIfilename\fR"
 Specify the certificate that
