@@ -1173,10 +1173,15 @@ defined for HTTP listeners are applicable to HTTPS listeners as well. The
 following additional directives are also available:
 .TP
 \fBCert\fR "\fIfilename\fR"
-Specify the server certificate. The
+Specify the server certificate.  \fIFilename\fR is either a
 .I certificate file
-is the file containing the certificate, possibly a certificate chain
-and the signature for this server. This directive is
+name, or the name of a directory containing certificate files.
+.IP
+.I Certificate file
+is a file containing the certificate, possibly a certificate chain
+and the signature for this server, in that order.
+.IP
+This directive is
 .B mandatory
 for HTTPS listeners.
 .IP

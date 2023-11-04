@@ -149,6 +149,15 @@ stringbuf_expand (struct stringbuf *sb, size_t len)
 }
 
 int
+stringbuf_truncate (struct stringbuf *sb, size_t len)
+{
+  if (len > sb->size)
+    return stringbuf_expand (sb, len - sb->size);
+  sb->len = len;
+  return 0;
+}
+
+int
 stringbuf_add_char (struct stringbuf *sb, int c)
 {
   if (stringbuf_expand (sb, 1))

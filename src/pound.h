@@ -970,6 +970,7 @@ struct stringbuf
 
 void stringbuf_init (struct stringbuf *sb, void (*nomem) (void));
 void stringbuf_reset (struct stringbuf *sb);
+int stringbuf_truncate (struct stringbuf *sb, size_t len);
 char *stringbuf_finish (struct stringbuf *sb);
 void stringbuf_free (struct stringbuf *sb);
 int stringbuf_add (struct stringbuf *sb, char const *str, size_t len);

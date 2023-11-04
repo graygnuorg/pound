@@ -21,6 +21,8 @@
 #include "extern.h"
 #include <openssl/x509v3.h>
 #include <assert.h>
+#include <dirent.h>
+#include <sys/stat.h>
 
 
 /*
@@ -318,10 +320,15 @@ regcomp_error_at_locus_range (struct locus_range const *loc, int rc, regex_t *rx
 }
 
 static void
-openssl_error_at_locus_range (struct locus_range const *loc, char const *msg)
+openssl_error_at_locus_range (struct locus_range const *loc,
+			      char const *filename, char const *msg)
 {
   unsigned long n = ERR_get_error ();
-  conf_error_at_locus_range (loc, "%s: %s", msg, ERR_error_string (n, NULL));
+  if (filename)
+    conf_error_at_locus_range (loc, "%s: %s: %s", filename, msg,
+			       ERR_error_string (n, NULL));
+  else
+    conf_error_at_locus_range (loc, "%s: %s", msg, ERR_error_string (n, NULL));
 
   if ((n = ERR_get_error ()) != 0)
     {
@@ -783,8 +790,8 @@ last_token_locus_range (void)
 #define conf_regcomp_error(rc, rx, expr) \
   regcomp_error_at_locus_range (last_token_locus_range (), rc, rx, expr)
 
-#define conf_openssl_error(msg) \
-  openssl_error_at_locus_range (last_token_locus_range (), msg)
+#define conf_openssl_error(file, msg)				\
+  openssl_error_at_locus_range (last_token_locus_range (), file, msg)
 
 static int
 push_input (const char *filename)
@@ -1882,7 +1889,7 @@ backend_parse_https (void *call_data, void *section_data)
 
   if ((be->v.reg.ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
     {
-      conf_openssl_error ("SSL_CTX_new");
+      conf_openssl_error (NULL, "SSL_CTX_new");
       return PARSER_FAIL;
     }
 
@@ -1929,19 +1936,19 @@ backend_parse_cert (void *call_data, void *section_data)
 
   if (SSL_CTX_use_certificate_chain_file (be->v.reg.ctx, tok->str) != 1)
     {
-      conf_openssl_error ("SSL_CTX_use_certificate_chain_file");
+      conf_openssl_error (tok->str, "SSL_CTX_use_certificate_chain_file");
       return PARSER_FAIL;
     }
 
   if (SSL_CTX_use_PrivateKey_file (be->v.reg.ctx, tok->str, SSL_FILETYPE_PEM) != 1)
     {
-      conf_openssl_error ("SSL_CTX_use_PrivateKey_file");
+      conf_openssl_error (tok->str, "SSL_CTX_use_PrivateKey_file");
       return PARSER_FAIL;
     }
 
   if (SSL_CTX_check_private_key (be->v.reg.ctx) != 1)
     {
-      conf_openssl_error ("SSL_CTX_check_private_key failed");
+      conf_openssl_error (tok->str, "SSL_CTX_check_private_key failed");
       return PARSER_FAIL;
     }
 
@@ -4088,43 +4095,32 @@ get_subjectaltnames (X509 *x509, POUND_CTX *pc, size_t san_max)
 }
 
 static int
-https_parse_cert (void *call_data, void *section_data)
+load_cert (char const *filename, LISTENER *lst)
 {
-  LISTENER *lst = call_data;
-  struct token *tok;
   POUND_CTX *pc;
-
-  if (lst->has_other)
-    {
-      conf_error ("%s", "Cert directives MUST precede other SSL-specific directives");
-      return PARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
 
   XZALLOC (pc);
 
   if ((pc->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
     {
-      conf_openssl_error ("SSL_CTX_new");
+      conf_openssl_error (NULL, "SSL_CTX_new");
       return PARSER_FAIL;
     }
 
-  if (SSL_CTX_use_certificate_chain_file (pc->ctx, tok->str) != 1)
+  if (SSL_CTX_use_certificate_chain_file (pc->ctx, filename) != 1)
     {
-      conf_openssl_error ("SSL_CTX_use_certificate_chain_file");
+      conf_openssl_error (filename, "SSL_CTX_use_certificate_chain_file");
       return PARSER_FAIL;
     }
-  if (SSL_CTX_use_PrivateKey_file (pc->ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+  if (SSL_CTX_use_PrivateKey_file (pc->ctx, filename, SSL_FILETYPE_PEM) != 1)
     {
-      conf_openssl_error ("SSL_CTX_use_PrivateKey_file");
+      conf_openssl_error (filename, "SSL_CTX_use_PrivateKey_file");
       return PARSER_FAIL;
     }
 
   if (SSL_CTX_check_private_key (pc->ctx) != 1)
     {
-      conf_openssl_error ("SSL_CTX_check_private_key");
+      conf_openssl_error (filename, "SSL_CTX_check_private_key");
       return PARSER_FAIL;
     }
 
@@ -4137,9 +4133,10 @@ https_parse_cert (void *call_data, void *section_data)
     int i;
     size_t san_max;
 
-    if ((fcert = fopen (tok->str, "r")) == NULL)
+    if ((fcert = fopen (filename, "r")) == NULL)
       {
-	conf_error ("%s", "ListenHTTPS: could not open certificate file");
+	conf_error ("%s: could not open certificate file: %s", filename,
+		    strerror (errno));
 	return PARSER_FAIL;
       }
 
@@ -4148,7 +4145,7 @@ https_parse_cert (void *call_data, void *section_data)
 
     if (!x509)
       {
-	conf_error ("%s", "could not get certificate subject");
+	conf_error ("%s: could not get certificate subject", filename);
 	return PARSER_FAIL;
       }
 
@@ -4185,17 +4182,94 @@ https_parse_cert (void *call_data, void *section_data)
 
     if (pc->server_name == NULL)
       {
-	conf_error ("%s", "no CN in certificate subject name\n");
+	conf_error ("%s: no CN in certificate subject name", filename);
 	return PARSER_FAIL;
       }
   }
 #else
   if (res->ctx)
-    conf_error ("%s", "multiple certificates not supported");
+    conf_error ("%s: multiple certificates not supported", filename);
 #endif
   SLIST_PUSH (&lst->ctx_head, pc, next);
 
   return PARSER_OK;
+}
+
+static int
+https_parse_cert (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  struct token *tok;
+  struct stat st;
+
+  if (lst->has_other)
+    {
+      conf_error ("%s", "Cert directives MUST precede other SSL-specific directives");
+      return PARSER_FAIL;
+    }
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return PARSER_FAIL;
+
+  if (stat (tok->str, &st))
+    {
+      conf_error ("%s: stat error: %s", tok->str, strerror (errno));
+      return PARSER_FAIL;
+    }
+
+  if (S_ISREG (st.st_mode))
+    return load_cert (tok->str, lst);
+
+  if (S_ISDIR (st.st_mode))
+    {
+      DIR *dp;
+      struct dirent *ent;
+      struct stringbuf namebuf;
+      size_t dirlen;
+      int rc = PARSER_OK;
+
+      dirlen = strlen (tok->str);
+      while (dirlen > 0 && tok->str[dirlen-1] == '/')
+	dirlen--;
+
+      xstringbuf_init (&namebuf);
+      stringbuf_add (&namebuf, tok->str, dirlen);
+      stringbuf_add_char (&namebuf, '/');
+      dirlen++;
+
+      dp = opendir (tok->str);
+      if (dp == NULL)
+	{
+	  conf_error ("%s: error opening directory: %s", tok->str,
+		      strerror (errno));
+	  stringbuf_free (&namebuf);
+	  return PARSER_FAIL;
+	}
+
+      while ((ent = readdir (dp)) != NULL)
+	{
+	  char *filename;
+
+	  stringbuf_add_string (&namebuf, ent->d_name);
+	  filename = stringbuf_finish (&namebuf);
+	  if (stat (filename, &st))
+	    {
+	      conf_error ("%s: stat error: %s", filename, strerror (errno));
+	    }
+	  else if (S_ISREG (st.st_mode))
+	    {
+	      if ((rc = load_cert (filename, lst)) != PARSER_OK)
+		break;
+	    }
+	  stringbuf_truncate (&namebuf, dirlen);
+	}
+      closedir (dp);
+      stringbuf_free (&namebuf);
+      return rc;
+    }
+
+  conf_error ("%s: not a regular file or directory", tok->str);
+  return PARSER_FAIL;
 }
 
 static int
@@ -4406,7 +4480,7 @@ https_parse_calist (void *call_data, void *section_data)
 
   if ((cert_names = SSL_load_client_CA_file (tok->str)) == NULL)
     {
-      conf_openssl_error ("SSL_load_client_CA_file");
+      conf_openssl_error (NULL, "SSL_load_client_CA_file");
       return PARSER_FAIL;
     }
 
@@ -4436,7 +4510,7 @@ https_parse_verifylist (void *call_data, void *section_data)
   SLIST_FOREACH (pc, &lst->ctx_head, next)
     if (SSL_CTX_load_verify_locations (pc->ctx, tok->str, NULL) != 1)
       {
-	conf_openssl_error ("SSL_CTX_load_verify_locations");
+	conf_openssl_error (NULL, "SSL_CTX_load_verify_locations");
 	return PARSER_FAIL;
       }
 
@@ -4467,13 +4541,13 @@ https_parse_crlist (void *call_data, void *section_data)
       store = SSL_CTX_get_cert_store (pc->ctx);
       if ((lookup = X509_STORE_add_lookup (store, X509_LOOKUP_file ())) == NULL)
 	{
-	  conf_openssl_error ("X509_STORE_add_lookup");
+	  conf_openssl_error (NULL, "X509_STORE_add_lookup");
 	  return PARSER_FAIL;
 	}
 
       if (X509_load_crl_file (lookup, tok->str, X509_FILETYPE_PEM) != 1)
 	{
-	  conf_openssl_error ("X509_load_crl_file failed");
+	  conf_openssl_error (tok->str, "X509_load_crl_file failed");
 	  return PARSER_FAIL;
 	}
 
@@ -4601,7 +4675,7 @@ parse_listen_https (void *call_data, void *section_data)
       if (!SSL_CTX_set_tlsext_servername_callback (ctx, SNI_server_name)
 	  || !SSL_CTX_set_tlsext_servername_arg (ctx, &lst->ctx_head))
 	{
-	  conf_openssl_error ("can't set SNI callback");
+	  conf_openssl_error (NULL, "can't set SNI callback");
 	  return PARSER_FAIL;
 	}
     }

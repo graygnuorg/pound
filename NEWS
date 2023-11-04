@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-10-23
+Pound -- history of user-visible changes. 2023-11-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -43,6 +43,12 @@ accordingly.  Example usage:
 	Port 443
 	ServerName "www.example.org"
     End
+
+* "Cert" statement in "ListenHTTPS" section
+
+The argument to the "Cert" statement in "ListenHTTPS" section can be
+the name of a directory containing certificate files.  All files from
+that directory will be loaded.
 
 Version 4.10, 2023-10-13
 
