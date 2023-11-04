@@ -4250,6 +4250,9 @@ https_parse_cert (void *call_data, void *section_data)
 	{
 	  char *filename;
 
+	  if (strcmp (ent->d_name, ".") == 0 || strcmp (ent->d_name, "..") == 0)
+	    continue;
+
 	  stringbuf_add_string (&namebuf, ent->d_name);
 	  filename = stringbuf_finish (&namebuf);
 	  if (stat (filename, &st))
@@ -4261,6 +4264,8 @@ https_parse_cert (void *call_data, void *section_data)
 	      if ((rc = load_cert (filename, lst)) != PARSER_OK)
 		break;
 	    }
+	  else
+	    conf_error ("warning: ignoring %s: not a regular file", filename);
 	  stringbuf_truncate (&namebuf, dirlen);
 	}
       closedir (dp);
