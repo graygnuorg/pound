@@ -37,8 +37,8 @@ pound_SOURCES=\
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
 
-pkgdata_DATA = poundctl.tmpl
-EXTRA_DIST = poundctl.tmpl
+pkgdata_DATA = poundctl.tmpl mvh.inc
+EXTRA_DIST = poundctl.tmpl mvh.inc
 
 install-exec-hook:
 	-@if test "$${EUID:-65535}" -eq 0; then \

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2023-11-04
+Pound -- history of user-visible changes. 2023-11-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -28,6 +28,12 @@ that can be combined using the CombineHeader statement, e.g.:
 	"Forwarded"
     End
 
+Pound distribution includes file "mvh.inc" which declares all
+multiple-value headers in a form suitable for inclusion to the main
+pound configuration file.  This file is installed in the package
+data directory, which is normally /usr/local/share/pound or
+/usr/share/pound, depending on the installation prefix used.
+
 * SNI in HTTPS backends
 
 New directive ServerName is provided for use in Backend section after
@@ -35,7 +41,6 @@ HTTPS statement.  This directive sets the host name to be used in server
 name identification (SNI).  Its argument is a quoted string specifying
 the host name.  This directive also rewrites the Host: header
 accordingly.  Example usage:
-
 
     Backend
 	HTTPS
