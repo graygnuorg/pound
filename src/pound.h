@@ -107,15 +107,17 @@
 
 #ifdef  HAVE_LONG_LONG_INT
 typedef long long CONTENT_LENGTH;
-# define STRTOCLEN strtoll
+# define CONTENT_LENGTH_MAX LLONG_MAX
 # define PRICLEN "lld"
 #else
 typedef long CONTENT_LENGTH;
-# define STRTOCLEN strtol
+# define CONTENT_LENGTH_MAX LONG_MAX
 # define PRICLEN "ld"
 #endif
 
 #define NO_CONTENT_LENGTH ((CONTENT_LENGTH) -1)
+
+int strtoclen (char const *arg, int base, CONTENT_LENGTH *retval, char **endptr);
 
 #ifndef DEFAULT_WORKER_MIN
 # define DEFAULT_WORKER_MIN 5

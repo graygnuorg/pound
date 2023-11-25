@@ -403,7 +403,15 @@ sub send_and_expect {
 	$options{headers} = $self->{REQ}{HEADERS};
     }
     if (exists($self->{REQ}{BODY})) {
-	$options{content} = $self->{REQ}{BODY};
+	my $body = $self->{REQ}{BODY};
+	if ($body =~ /@@/) {
+	    my @chunks = split /@@/, $body;
+	    $options{content} = sub {
+		return shift(@chunks)
+	    }
+	} else {
+	    $options{content} = $body;
+	}
     }
     if ($verbose) {
 	print "URL $self->{REQ}{METHOD} $url\n";
@@ -544,6 +552,8 @@ sub assert {
 	if (exists($self->{EXP}{BODY}) &&
 	    $self->{EXP}{BODY} ne $response->{content}) {
 	    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: response content mismatch\n";
+	    print STDERR "EXP '".$self->{EXP}{BODY}."'\n";
+	    print STDERR "GOT '".$response->{content}."'\n";
 	}
     }
     return 1
@@ -973,9 +983,9 @@ sub parse_expect_body {
 	    return;
 	}
 
-	if (/^(?:#.*)?$/) {
-	    next;
-	}
+	# if (/^(?:#.*)?$/) {
+	#     next;
+	# }
 
 	if (/\\(.*)/) {
 	    push @{$self->{EXP}{BODY}}, $1;
@@ -1374,9 +1384,22 @@ sub ParseHeader {
 
 sub GetBody {
     my $http = shift;
-    if (my $len = $http->header('Content-Length')) {
+    if ($http->header('Transfer-Encoding')//'' eq 'chunked') {
+	my @chunks;
+	my $chunk_ext;
+	while (my $chunk_size_ext = $http->getline()) {
+	    (my $chunk_size, $chunk_ext) = split /;/, $chunk_size_ext, 2;
+	    my $len = hex($chunk_size);
+	    last if $len == 0;
+	    read($http->{fh}, my $chunk, $len);
+	    push @chunks, $chunk_size_ext, $chunk;
+	    read($http->{fh}, my $s, 2);
+	    # FIXME: error checking
+	}
+	$http->{BODY} = join("\n", @chunks);
+    } elsif (my $len = $http->header('Content-Length')) {
 	read($http->{fh}, $http->{BODY}, $len);
-    }
+    } # FIXME: else...
 }
 
 sub parse {
@@ -1528,6 +1551,10 @@ A request starts with a line specifying the request method in uppercase
 by arbitrary number of HTTP headers, newline and request body.  The request
 is terminated with the word B<end> on a line alone.
 
+The sequence B<@@> has a special meaning when used in the body.  These
+characters instruct B<poundharness> to send the body using B<chunked> transfer
+coding and indicate the beginning of each chunk.
+
 An expected response must follow each request.  It begins with a
 three digit response code on a line alone.  The code may be followed by
 any number of response headers.  If present, the test will succeed only
@@ -1664,6 +1691,9 @@ Copy of the original URI.
 The value of the header I<header> in the request.
 
 =back
+
+If the body was sent using B<chunked> encoding, it is reproduced
+verbatim, instead of reconstructing it as per RFC 9112, 7.1.3.
 
 =head2 /redirect
 

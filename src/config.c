@@ -1306,9 +1306,7 @@ assign_CONTENT_LENGTH (void *call_data, void *section_data)
   if (!tok)
     return PARSER_FAIL;
 
-  errno = 0;
-  n = STRTOCLEN (tok->str, &p, 10);
-  if (errno || *p)
+  if (strtoclen (tok->str, 10, &n, &p) || *p)
     {
       conf_error ("%s", "bad long number");
       return PARSER_FAIL;

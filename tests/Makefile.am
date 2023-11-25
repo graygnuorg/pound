@@ -68,6 +68,7 @@ TESTSUITE_AT = \
  bemix.at\
  checkurl.at\
  chgvis.at\
+ chunked.at\
  chunked2.at\
  config.at\
  disable.at\

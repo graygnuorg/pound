@@ -21,10 +21,10 @@ m4_pushdef([ERR501],
 <body>
 <p>This method is not allowed.</p>
 <p>This is custom error page was supplied using the Err501 directive.</p>
-</body>
-])
+</body>])
 
-AT_DATA([501.html],[ERR501])
+AT_DATA([501.html],[ERR501
+])
 
 PT_CHECK([ListenHTTP
 	Err501 "501.html"

@@ -1140,6 +1140,70 @@ strip_eol (char *lin)
   return 0;
 }
 
+/*
+ * Convert string ARG into numeric value of type CONTENT_LENGTH.
+ * Input:
+ *   arg    -   string to convert
+ *   base   -   conversion base: 10 or 16
+ * Output:
+ *   retval -  converted value
+ *   endptr -  if not NULL, pointer to the character in arg at which the
+ *             conversion stopped,
+ * Return value:
+ *   0      - success
+ *  -1      - invalid input (including overflow)
+ */
+int
+strtoclen (char const *arg, int base, CONTENT_LENGTH *retval, char **endptr)
+{
+  int c;
+  int rc = 0;
+  char const *s = arg;
+  CONTENT_LENGTH val = 0;
+  CONTENT_LENGTH cutoff = CONTENT_LENGTH_MAX / (CONTENT_LENGTH) base;
+  CONTENT_LENGTH cutlim = CONTENT_LENGTH_MAX % (CONTENT_LENGTH) base;
+
+  for (c = *s; c != '\0'; c = *++s)
+    {
+      if (c >= '0' && c <= '9')
+        c -= '0';
+      else if (base == 16)
+	{
+	  if (c >= 'a' && c <= 'f')
+	    c -= 'a' - 10;
+	  else if (c >= 'A' && c <= 'F')
+	    c -= 'A' - 10;
+	  else
+	    break;
+	}
+      else
+	break;
+      if (val > cutoff || (val == cutoff && c > cutlim))
+	{
+	  /* Overflow. */
+	  rc = -1;
+	  break;
+	}
+      else
+        {
+          val *= (CONTENT_LENGTH) base;
+          val += c;
+        }
+    }
+
+  if (rc == 0)
+    {
+      if (s == arg)
+	rc = -1;
+      else if (val < 0)
+	rc = -1;
+    }
+  *retval = val;
+  if (endptr)
+    *endptr = (char*)s;
+  return rc;
+}
+
 enum
   {
     CL_HEADER,
@@ -1152,15 +1216,13 @@ get_content_length (char const *arg, int mode)
   char *p;
   CONTENT_LENGTH n;
 
-  while (*arg == ' ' || *arg == '\t')
-    arg++;
-  if (*arg == 0 || *arg == '-' || *arg == '+' ||
-      (*arg == '0' && (arg[1] == 'x' || arg[1] == 'X')))
-    return NO_CONTENT_LENGTH;
+  if (mode == CL_HEADER)
+    {
+      while (*arg == ' ' || *arg == '\t')
+	arg++;
+    }
 
-  errno = 0;
-  n = STRTOCLEN (arg, &p, mode == CL_HEADER ? 10 : 16);
-  if (errno || n < 0)
+  if (strtoclen (arg, mode == CL_HEADER ? 10 : 16, &n, &p))
     return NO_CONTENT_LENGTH;
   while (*p == ' ' || *p == '\t')
     p++;
@@ -1191,13 +1253,15 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  logmsg (LOG_NOTICE, "(%"PRItid" chunked read error: %s",
 		  POUND_TID (),
 		  strerror (errno));
-	  return -1;
+	  return res < 0
+	         ? HTTP_STATUS_INTERNAL_SERVER_ERROR
+	         : HTTP_STATUS_BAD_REQUEST;
 	}
       else if (res > 0)
 	/*
 	 * EOF
 	 */
-	return 0;
+	return HTTP_STATUS_OK;
 
       if ((cont = get_content_length (buf, CL_CHUNK)) == NO_CONTENT_LENGTH)
 	{
@@ -1206,14 +1270,14 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	   */
 	  logmsg (LOG_NOTICE, "(%"PRItid") bad chunk header <%s>: %s",
 		  POUND_TID (), buf, strerror (errno));
-	  return -2;
+	  return HTTP_STATUS_BAD_REQUEST;
 	}
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
 	    logmsg (LOG_NOTICE, "(%"PRItid") error write chunked: %s",
 		    POUND_TID (), strerror (errno));
-	    return -3;
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	  }
 
       tot_size += cont;
@@ -1221,7 +1285,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	{
 	  logmsg (LOG_WARNING, "(%"PRItid") chunk content too large",
 		  POUND_TID ());
-	  return -4;
+	  return HTTP_STATUS_PAYLOAD_TOO_LARGE;
 	}
 
       if (cont > 0)
@@ -1229,9 +1293,9 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  if (copy_bin (cl, be, cont, res_bytes, no_write))
 	    {
 	      if (errno)
-		logmsg (LOG_NOTICE, "(%"PRItid") error copy chunk cont: %s",
-			POUND_TID (), strerror (errno));
-	      return -4;
+		logmsg (LOG_NOTICE, "(%"PRItid") error copyinh chunk of length %"PRICLEN": %s",
+			POUND_TID (), cont, strerror (errno));
+	      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	    }
 	}
       else
@@ -1244,13 +1308,15 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  logmsg (LOG_NOTICE, "(%"PRItid") error after chunk: %s",
 		  POUND_TID (),
 		  strerror (errno));
-	  return -5;
+	  return res < 0
+	         ? HTTP_STATUS_INTERNAL_SERVER_ERROR
+	         : HTTP_STATUS_BAD_REQUEST;
 	}
       else if (res > 0)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected EOF after chunk",
 		  POUND_TID ());
-	  return -5;
+	  return HTTP_STATUS_BAD_REQUEST;
 	}
       if (buf[0])
 	logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
@@ -1260,7 +1326,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  {
 	    logmsg (LOG_NOTICE, "(%"PRItid") error after chunk write: %s",
 		    POUND_TID (), strerror (errno));
-	    return -6;
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	  }
     }
   /*
@@ -1273,7 +1339,9 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk: %s",
 		  POUND_TID (),
 		  strerror (errno));
-	  return -7;
+	  return res < 0
+	         ? HTTP_STATUS_INTERNAL_SERVER_ERROR
+	         : HTTP_STATUS_BAD_REQUEST;
 	}
       else if (res > 0)
 	break;
@@ -1282,7 +1350,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  {
 	    logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk write: %s",
 		    POUND_TID (), strerror (errno));
-	    return -8;
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	  }
       if (!buf[0])
 	break;
@@ -1292,9 +1360,9 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
       {
 	logmsg (LOG_NOTICE, "(%"PRItid") copy_chunks flush error: %s",
 		POUND_TID (), strerror (errno));
-	return -4;
+	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
       }
-  return 0;
+  return HTTP_STATUS_OK;
 }
 
 static int err_to = -1;
@@ -3555,7 +3623,8 @@ backend_response (POUND_HTTP *phttp)
 	       * had Transfer-encoding: chunked so read/write all
 	       * the chunks (HTTP/1.1 only)
 	       */
-	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes, skip, 0))
+	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes,
+			       skip, 0) != HTTP_STATUS_OK)
 		{
 		  /*
 		   * copy_chunks() has its own error messages
@@ -3936,19 +4005,21 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        * had Transfer-encoding: chunked so read/write all the chunks
        * (HTTP/1.1 only)
        */
-      if (copy_chunks (phttp->cl, phttp->be, NULL,
-		       phttp->backend->be_type != BE_BACKEND,
-		       phttp->lstn->max_req))
+      int rc = copy_chunks (phttp->cl, phttp->be, NULL,
+			    phttp->backend->be_type != BE_BACKEND,
+			    phttp->lstn->max_req);
+      if (rc != HTTP_STATUS_OK)
 	{
 	  logmsg (LOG_NOTICE,
-		  "(%"PRItid") e500 for %s copy_chunks to %s/%s (%s sec)",
+		  "(%"PRItid") e%d for %s copy_chunks to %s/%s (%s sec)",
 		  POUND_TID (),
+		  pound_to_http_status(rc),
 		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
 		  str_be (caddr2, sizeof (caddr2), phttp->backend),
 		  phttp->request.request,
 		  log_duration (duration_buf, sizeof (duration_buf),
 				&phttp->start_req));
-	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	  return rc;
 	}
     }
   else if (content_length > 0)

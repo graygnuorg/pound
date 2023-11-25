@@ -60,6 +60,7 @@ m4_include([errfile.at])
 m4_include([maxrequest.at])
 m4_include([rewriteloc.at])
 m4_include([nb.at])
+m4_include([chunked.at])
 
 AT_BANNER([Listener request modification])
 m4_include([lstset.at])
