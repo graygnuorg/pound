@@ -78,6 +78,7 @@ TESTSUITE_AT = \
  experr.at\
  fromfile.at\
  headdeny.at\
+ header.at\
  headrem.at\
  headrequire.at\
  host.at\
