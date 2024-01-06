@@ -210,9 +210,14 @@ stringbuf_vprintf (struct stringbuf *sb, char const *fmt, va_list ap)
       size_t bufsize = sb->size - sb->len;
       ssize_t n;
       va_list aq;
+      char *sb_end = sb->base;
+      if (sb->len > 0)
+        {
+          sb_end += sb->len;
+        }
 
       va_copy (aq, ap);
-      n = vsnprintf (sb->base + sb->len, bufsize, fmt, aq);
+      n = vsnprintf (sb_end, bufsize, fmt, aq);
       va_end (aq);
 
       if (n < 0 || n >= bufsize || !memchr (sb->base + sb->len, '\0', n + 1))
