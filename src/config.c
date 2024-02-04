@@ -447,7 +447,9 @@ workdir_get (char const *name)
     fd = AT_FDCWD;
   else if ((fd = open (name, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
     {
+      int ec = errno;
       free (cwd);
+      errno = ec;
       return NULL;
     }
 
@@ -470,11 +472,14 @@ workdir_ref (WORKDIR *wd)
 static inline void
 workdir_unref (WORKDIR *wd)
 {
-  assert (wd->refcount > 0);
-  wd->refcount--;
+  if (wd)
+    {
+      assert (wd->refcount > 0);
+      wd->refcount--;
+    }
 }
 
-static void
+static int
 workdir_free (WORKDIR *wd)
 {
   if (wd->refcount == 0)
@@ -483,37 +488,66 @@ workdir_free (WORKDIR *wd)
       if (wd->fd != AT_FDCWD)
 	close (wd->fd);
       free (wd);
+      return 0;
     }
+  return 1;
 }
 
-static void
+static int
 workdir_cleanup (void)
 {
-  WORKDIR *wp, *tmp;
-  DLIST_FOREACH_SAFE (wp, tmp, &workdir_head, link)
+  WORKDIR *wd, *tmp;
+  int cwd = -1;
+  DLIST_FOREACH_SAFE (wd, tmp, &workdir_head, link)
     {
-      workdir_free (wp);
+      if (workdir_free (wd))
+	{
+	  if (wd->fd == AT_FDCWD && (root_jail || daemonize))
+	    {
+	      if (cwd == -1)
+		{
+		  int fd = openat (wd->fd, ".",
+				   O_RDONLY | O_NONBLOCK | O_DIRECTORY);
+		  if (fd == -1)
+		    {
+		      logmsg (LOG_CRIT,
+			      "can't open current working directory: %s",
+			      strerror (errno));
+		      return -1;
+		    }
+		  cwd = fd;
+		}
+	      wd->fd = cwd;
+	    }
+	}
     }
+  return 0;
 }
 
 static char const *include_dir = SYSCONFDIR;
 static WORKDIR *include_wd;
 
-static void
-close_include_dir (void)
+static WORKDIR *
+get_include_wd_at_locus_range (struct locus_range *locus)
 {
-  if (include_wd)
+  if (!include_wd)
     {
-      workdir_free (include_wd);
-      include_wd = NULL;
+      include_wd = workdir_get (include_dir);
+      if (!include_wd)
+	conf_error_at_locus_range (locus,
+				   "can't open include directory %s: %s",
+				   include_dir,
+				   strerror (errno));
     }
+  return include_wd;
 }
 
+static struct locus_range *last_token_locus_range (void);
+
 static WORKDIR *
-open_include_dir (char const *dir)
+get_include_wd (void)
 {
-  close_include_dir ();
-  return include_wd = workdir_get (dir);
+  return get_include_wd_at_locus_range (last_token_locus_range ());
 }
 
 FILE *
@@ -534,7 +568,10 @@ fopen_wd (WORKDIR *wd, const char *filename)
 static FILE *
 fopen_include (const char *filename)
 {
-  return fopen_wd (include_wd, filename);
+  WORKDIR *wd = get_include_wd ();
+  if (!wd)
+    return NULL;
+  return fopen_wd (wd, filename);
 }
 
 void
@@ -798,10 +835,18 @@ push_input (const char *filename)
 {
   struct stat st;
   struct input *input;
+  int fd = AT_FDCWD;
 
-  if (fstatat (include_wd->fd, filename, &st, 0))
+  if (filename[0] != '/')
     {
-      if (include_wd->fd == AT_FDCWD)
+      if (get_include_wd () == NULL)
+	return -1;
+      fd = include_wd->fd;
+    }
+
+  if (fstatat (fd, filename, &st, 0))
+    {
+      if (fd == AT_FDCWD || filename[0] == '/')
 	conf_error ("can't stat %s: %s", filename, strerror (errno));
       else
 	conf_error ("can't stat %s/%s: %s", include_wd->name, filename,
@@ -816,7 +861,7 @@ push_input (const char *filename)
 	  if (input->prev)
 	    {
 	      conf_error ("%s already included", filename);
-	      conf_error_at_locus_point (&input->prev->locus, "here is the place of original inclusion");
+	      conf_error_at_locus_point (&input->prev->locus, "here is the location of original inclusion");
 	    }
 	  else
 	    {
@@ -1111,13 +1156,16 @@ static int
 parse_includedir (void *call_data, void *section_data)
 {
   struct token *tok = gettkn_expect (T_STRING);
+  WORKDIR *wd;
   if (!tok)
     return PARSER_FAIL;
-  if (open_include_dir (tok->str) == NULL)
+  if ((wd = workdir_get (tok->str)) == NULL)
     {
       conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
       return PARSER_FAIL;
     }
+  workdir_free (include_wd);
+  include_wd = wd;
   return PARSER_OK;
 }
 
@@ -5028,7 +5076,15 @@ cond_pass_file_fixup (SERVICE_COND *cond)
 	    }
 	}
       else
-	cond->pwfile.wd = workdir_ref (include_wd);
+	{
+	  WORKDIR *wd = get_include_wd_at_locus_range (&cond->pwfile.locus);
+	  if (!wd)
+	    {
+	      rc = -1;
+	      break;
+	    }
+	  cond->pwfile.wd = workdir_ref (wd);
+	}
       break;
 
     case COND_BOOL:
@@ -5107,51 +5163,46 @@ parse_config_file (char const *file, int nosyslog)
 
   named_backend_table_init (&pound_defaults.named_backend_table);
   compile_canned_formats ();
-  open_include_dir (NULL);
+  if ((include_wd = workdir_get (NULL)) == NULL)
+    {
+      logmsg (LOG_ERR, "can't open cwd: %s", strerror (errno));
+      return -1;
+    }
   res = push_input (file);
+
+  /* Make sure an attempt to open include_dir will be made if needed. */
   workdir_unref (include_wd);
+  include_wd = NULL;
+
   if (res == 0)
     {
-      open_include_dir (include_dir);
       res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
       if (res == 0)
 	{
 	  if (cur_input)
-	    exit (1);
+	    return -1;
 	  if (foreach_backend (resolve_backend_ref,
 			       &pound_defaults.named_backend_table))
-	    exit (1);
+	    return -1;
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
 	  if (!nosyslog)
 	    log_facility = pound_defaults.facility;
 
-	  if (root_jail || daemonize)
-	    {
-	      if (foreach_listener (listener_pass_file_fixup, NULL)
-		  || foreach_service (service_pass_file_fixup, NULL))
-		exit (1);
-	      if (include_wd->refcount > 0 && include_wd->fd == AT_FDCWD)
-		{
-		  int fd = openat (include_wd->fd, ".",
-				   O_RDONLY | O_NONBLOCK | O_DIRECTORY);
-		  if (fd == -1)
-		    {
-		      logmsg (LOG_CRIT,
-			      "can't open current working directory: %s",
-			      strerror (errno));
-		      exit (1);
-		    }
-		  include_wd->fd = fd;
-		}
-	    }
+	  if (foreach_listener (listener_pass_file_fixup, NULL)
+	      || foreach_service (service_pass_file_fixup, NULL))
+	    return -1;
+
 	  workdir_unref (include_wd);
 	}
     }
   named_backend_table_free (&pound_defaults.named_backend_table);
-  if (include_wd->refcount == 0)
+  /* Make sure include_wd doesn't get dangling after cleanup. */
+  if (include_wd && include_wd->refcount == 0)
     include_wd = NULL;
-  workdir_cleanup ();
+  /* Remove unreferenced wd's and resolve CWD */
+  if (workdir_cleanup ())
+    res = -1;
   return res;
 }
 
@@ -5175,8 +5226,19 @@ set_include_dir (int enabled, char const *val)
 {
   if (enabled)
     {
+      struct stat st;
       if (val && (*val == 0 || strcmp (val, ".") == 0))
 	val = NULL;
+      else if (stat (val, &st))
+	{
+	  logmsg (LOG_ERR, "include-dir: can't stat %s: %s", val, strerror (errno));
+	  exit (1);
+	}
+      else if (!S_ISDIR (st.st_mode))
+	{
+	  logmsg (LOG_ERR, "include-dir: %s is not a directory", val);
+	  exit (1);
+	}
       include_dir = val;
     }
   else
