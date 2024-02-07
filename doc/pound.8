@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 22, 2023" "pound" "System Manager's Manual"
+.TH POUND 8 "February 7, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2184,8 +2184,14 @@ Else
 End
 .EE
 .PP
-Request modification directives are applied in the same order as they
-appear in the configuration file.
+Request modification directives from
+.B ListenHTTP
+(or
+.BR ListenHTTPS )
+section are applied first, followed by directives from the
+.B Service
+section.  Directives appearing within a single section are
+applied in the same order as they appear in the configuration file.
 .SH BUILT-IN HEADERS
 In addition to the \fBSetHeader\fR and \fBDeleteHeader\fR directives
 discussed above, the \fBHeaderOption\fR directive controls insertion
@@ -2300,6 +2306,15 @@ This directive can be used in
 and
 .B Service
 definitions.
+.PP
+Response modification directives from the
+.B Service
+section are applied first, followed by directives from the
+.B ListenHTTP
+(or
+.BR ListenHTTPS )
+section.  Directives appearing within a single section are
+applied in the same order as they appear in the configuration file.
 .PP
 Response matching statements are:
 .TP

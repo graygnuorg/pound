@@ -1004,8 +1004,8 @@ error_response (POUND_HTTP *phttp)
   if (parse_header_text (&req.headers, err_headers))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp) ||
-      rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp))
+  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
+      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   bin = BIO_new_mem_buf (text, len);
@@ -3422,10 +3422,10 @@ backend_response (POUND_HTTP *phttp)
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
-      if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
+      if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
 			 &phttp->response,
 			 phttp) ||
-	  rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
+	  rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
 			 &phttp->response,
 			 phttp))
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
