@@ -2138,6 +2138,7 @@ static PARSER_TABLE emergency_parsetab[] = {
   { "Cert", backend_parse_cert },
   { "Ciphers", backend_assign_ciphers },
   { "Disable", disable_proto, NULL, offsetof (BACKEND, v.reg.ctx) },
+  { "ServerName",backend_parse_servername, NULL },
   { NULL }
 };
 
