@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 7, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "February 22, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1066,7 +1066,7 @@ correspondingly.
 .TP
 .B Request accessor interpretation
 Request accessor is \fB%[\fIname\fR\fB]\fR, where \fIname\fR denotes
-part of the incoming request to access.  Accessors are interpreted and
+a part of the incoming request to access.  Accessors are interpreted and
 replaced with the corresponding part of the request.  Some accessors
 take an argument, which is specified after accessor name and is delimited
 from it by one or more whitespace characters.
@@ -2083,10 +2083,8 @@ of the header list.
 \fBDeleteHeader\fR [\fIoptions\fR] "\fIpattern\fR"
 Remove from the request all headers matching \fIpattern\fR.  By
 default, \fIpattern\fR is treated as extended POSIX regular
-expression.  One or more \fIoptions\fR can be supplied to modify
-the default behavior.  The \fIoptions\fR argument in the above
-directives can be used to select the comparison method.  It consists
-of zero or more option flags from the following list:
+expression.  The \fIoptions\fR argument can be used to change this
+behvior.  It consists of zero or more option flags from the following list:
 .RS
 .TP
 .B \-re

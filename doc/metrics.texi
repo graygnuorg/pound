@@ -1,0 +1,253 @@
+@c This file is part of the pound manual.
+@c Copyright (C) 2024 Sergey Poznyakoff
+@c This file is distributed under GFDL 1.3 or any later version
+@c published by the Free Software Foundation.
+
+This appendix describes metric families returned in the output of
+@dfn{openmetrics} @command{pound} backends (@pxref{Metrics}).
+
+@deftypevr {Metric family} gauge pound_workers
+Number of pound workers (@pxref{Worker model}).  Indexed by types:
+
+@table @samp
+@item active
+Number of workers currently active.
+@item count
+Number of workers running (both idle and active).
+@item min
+Minimum number of workers as set by the @code{WorkerMinCount}
+configuration directive (@pxref{Global directives, WorkerMinCount}).
+@item max
+Maximum number of workers as set by the @code{WorkerMaxCount}
+configuration directive (@pxref{Global directives, WorkerMaxCount}).
+@end table
+
+Example:
+
+@example
+@group
+pound_workers@{type="active"@} 2
+pound_workers@{type="count"@} 5
+pound_workers@{type="max"@} 128
+pound_workers@{type="min"@} 5
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} stateset pound_listener_enabled
+State of a listener: enabled/disabled.  Indexed by the listener
+ordinal number.
+
+@example
+@group
+pound_listener_enabled@{listener="0"@} 1
+pound_listener_enabled@{listener="1"@} 0
+pound_listener_enabled@{listener="2"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} info pound_listener_info
+Description of a listener.  Each instance contains the following
+indices:
+
+@table @samp
+@item listener
+Listener ordinal number.
+
+@item name
+Listener name, as set in the @code{ListenHTTP} or @code{ListenHTTPS}
+statement (@pxref{ListenHTTP}).
+
+@item address
+Listener address.  For INET family, it is formatted as
+@samp{@var{IP}:@var{PORT}}, for UNIX sockets, it is the pathname of
+the socket.
+
+@item protocol
+Either @samp{http} or @samp{https}.
+@end table
+
+The value of this metrics is always @samp{1}.
+
+@example
+@group
+pound_listener_info@{listener="0",name="",address="/run/pound.sock",protocol="http"@} 1
+pound_listener_info@{listener="1",name="plain",address="0.0.0.0:80",protocol="http"@} 1
+pound_listener_info@{listener="2",name="tls",address="0.0.0.0:443",protocol="https"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} info pound_service_info
+Description of a service.  Indices:
+
+@table @code
+@item listener
+Listener ordinal number.  This index is absent for globally defined
+services.
+
+@item service
+Index of the service in listener (or in global configuration, for
+globally defined services).
+
+@item name
+Service name as set in the @code{Service} definition
+(@pxref{Service}).
+@end table
+
+@example
+@group
+pound_service_info@{listener="0",service="0",name=""@} 1
+pound_service_info@{listener="1",service="0",name=""@} 1
+pound_service_info@{listener="1",service="1",name="redirect"@} 1
+pound_service_info@{listener="2",service="0",name="metrics"@} 1
+pound_service_info@{listener="2",service="1",name="web"@} 1
+pound_service_info@{service="0",name="fallback"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} stateset pound_service_enabled
+State of a particular service.
+
+@example
+@group
+pound_service_enabled@{listener="0",service="0"@} 1
+pound_service_enabled@{listener="1",service="0"@} 1
+pound_service_enabled@{listener="2",service="0"@} 1
+pound_service_enabled@{service="0"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_service_pri
+Service priority value.  This is the sum of priorities of all
+backends defined in the service (@pxref{Balancer}).  Indexes:
+
+@table @code
+@item listener
+Listener ordinal number.  This index is absent for globally defined
+services.
+
+@item service
+Index of the service in listener (or in global configuration, for
+globally defined services).
+
+@item entity
+If @samp{total}, the metrics contains the sum of priorities of all
+currently active backends, if @samp{absolute}, the sum of priorities
+of all backends, both active and inactive.
+@end table
+
+@example
+@group
+pound_service_pri@{listener="0",service="0",entity="total"@} 10
+pound_service_pri@{listener="0",service="0",entity="absolute"@} 15
+pound_service_pri@{service="0",entity="total"@} 1
+pound_service_pri@{service="0",entity="absolute"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_backends
+Number of backends per service: total, alive, enabled, and active
+(both alive and enabled).  Indices:
+
+@table @code
+@item listener
+Listener ordinal number.  This index is absent for globally defined
+services.
+
+@item service
+Index of the service in listener (or in global configuration, for
+globally defined services).
+
+@item state
+Backend state: @samp{total}, @samp{alive}, @samp{enabled}, or
+@samp{active}.
+@end table
+
+Example:
+
+@example
+@group
+pound_backends@{listener="0",service="0",state="total"@} 5
+pound_backends@{listener="0",service="0",state="enabled"@} 3
+pound_backends@{listener="0",service="0",state="alive"@} 3
+pound_backends@{service="0",state="total"@} 1
+pound_backends@{service="0",state="enabled"@} 1
+pound_backends@{service="0",state="alive"@} 1
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} stateset pound_backend_state
+State of each backend.  Indices:
+
+@table @code
+@item listener
+Listener ordinal number.  This index is absent for globally defined
+services.
+
+@item service
+Index of the service in listener (or in global configuration, for
+globally defined services).
+
+@item backend
+Index of the backend in service.
+
+@item state
+@samp{enabled}: whether the backend is enabled or not.
+@* @samp{alive}: whether the backend is alive or not.
+@end table
+
+Example:
+
+@example
+@group
+pound_backend_state@{listener="0",service="0",backend="0",state="alive"@} 1
+pound_backend_state@{listener="0",service="0",backend="0",state="enabled"@} 1
+pound_backend_state@{listener="0",service="0",backend="1",state="alive"@} 1
+pound_backend_state@{listener="0",service="0",backend="1",state="enabled"@} 0
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_backend_requests
+Number of requests processed by backend.  This metrics is available
+only if backend statistics is enabled (@pxref{BackendStats}).
+
+Example:
+
+@example
+@group
+pound_backend_requests@{listener="0",service="0",backend="0"@} 40587
+pound_backend_requests@{listener="1",service="0",backend="0"@} 13858
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_backend_request_time_avg_nanoseconds
+Average time per request spent in backend (nanoseconds).  This metrics
+is available only if backend statistics is enabled (@pxref{BackendStats}).
+
+@example
+@group
+pound_backend_request_time_avg_nanoseconds@{listener="0",service="0",backend="0"@} 156254
+pound_backend_request_time_avg_nanoseconds@{listener="1",service="2",backend="0"@} 26147
+@end group
+@end example
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_backend_request_stddev_nanoseconds
+Standard deviation of the average time per request.  This metrics
+is available only if backend statistics is enabled (@pxref{BackendStats}).
+
+@example
+@group
+pound_backend_request_stddev_nanoseconds@{listener="0",service="0",backend="0"@} 0
+pound_backend_request_stddev_nanoseconds@{listener="1",service="2",backend="0"@} 59
+@end group
+@end example
+@end deftypevr

@@ -1,0 +1,9 @@
+@multitable @columnfractions 0.30 .5
+@item @uref{../$FILE(info_gz),$BASEFILE(info_gz)} @tab Info document compressed ($SIZE(info_gz) characters gzipped tar file)
+@item @uref{../$FILE(ascii),$BASEFILE(ascii)} @tab ASCII text ($SIZE(ascii) characters)
+@item @uref{../$FILE(ascii_gz),$BASEFILE(ascii_gz)} @tab ASCII text, compressed ($SIZE(ascii_gz) characters)
+@item @uref{../$FILE(dvi_gz),$BASEFILE(dvi_gz)} @tab TeX dvi file ($SIZE(dvi_gz) characters gzipped)
+@item @uref{../$FILE(pdf),$BASEFILE(pdf)} @tab PDF file ($SIZE(pdf) characters gzipped)
+@item @uref{../$FILE(texinfo_gz),$BASEFILE(texinfo_gz)} @tab Texinfo source ($SIZE(texinfo_gz) characters gzipped tar file)
+@end multitable
+

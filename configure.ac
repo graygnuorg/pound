@@ -205,6 +205,12 @@ fi
 AC_MSG_RESULT([$build_from_git])
 AM_CONDITIONAL([FROM_GIT],[test "$build_from_git" = yes])
 
+# Documentation
+AC_ARG_VAR([MAKEINFO_INIT_FILE],
+ [Initialization file for generation of the html manual])
+
+AM_CONDITIONAL([COND_MAKEINFO_INIT_FILE],[test -n "$MAKEINFO_INIT_FILE"])
+
 AC_CONFIG_COMMANDS([status],[
 cat <<EOF
 

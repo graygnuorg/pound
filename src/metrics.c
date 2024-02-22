@@ -306,7 +306,7 @@ static struct metric_family backend_metric_families[] = {
   { "pound_backend_requests",
     "gauge",
     NULL,
-    "Number of requests processed by backend,",
+    "Number of requests processed by backend.",
     gen_backend_requests },
   { "pound_backend_request_time_avg_nanoseconds",
     "gauge",

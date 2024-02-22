@@ -13,7 +13,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL.TMPL 5 "February 7, 2023" "pound" "File Formats Manual"
+.TH POUNDCTL.TMPL 5 "February 21, 2024" "pound" "File Formats Manual"
 .SH NAME
 poundctl.tmpl \- templates for poundctl.
 .SH DESCRIPTION
@@ -81,7 +81,7 @@ value is copied to the output.
 .BI "{{if " pipeline }} " T1 " {{end}}
 If the value of the \fIpipeline\fR is empty, no output is generated;
 otherwise, \fIT1\fR is executed.  The empty values are \fBnull\fR,
-\fBfalse\fR, numeric \fB0\fR, \fBnull\fR, empty string (\fB""\fR),
+\fBfalse\fR, numeric \fB0\fR, empty string (\fB""\fR),
 array (\fB[]\fR), or object (\fB{}\fR).	 Dot is unaffected.
 .TP
 .BI "{{if " pipeline }} " T1 " {{else}} " T0 " {{end}}
@@ -207,7 +207,7 @@ where \fIfunc\fR is the name of one of the built-in functions
 discussed below.
 .PP
 Pipelines are executed from left to right, with the result of the
-previous command implicitly added to the list of argument of each
+previous command implicitly added to the list of arguments of each
 subsequent command.  For example, the pipeline
 .PP
 .EX
@@ -234,7 +234,7 @@ evaluation: both pipelines are evaluated prior to calling \fBand\fR.
 .BI or " A1 A2"
 Evaluates to \fItrue\fR if at least one of the pipelines \fIA1\fR and
 \fIA2\fR evaluates to \fItrue\fR.  Notice, that there is no boolean shortcut
-evaluation: both pipelines are evaluated prior to calling \fBand\fR.
+evaluation: both pipelines are evaluated prior to calling \fBor\fR.
 .TP
 \fBindex \fIA1 A2...\fR
 Returns the result of indexing its first argument by the following
@@ -258,7 +258,7 @@ if both \fIA1\fR and \fIA2\fR are numeric or if they both are strings.
 .TP
 .BI ne " A1 A2"
 Returns \fItrue\fR if its arguments (both must be numeric or strings)
-are not strings.
+are not equal.
 .TP
 .BI lt " A1 A2"
 Returns \fItrue\fR if \fIA1\fR is numerically less than \fIA2\fR.
@@ -376,7 +376,7 @@ A full listing contains the following attributes:
 An array of \fIlistener\fR objects.  See below for a description.
 .TP
 .B services
-An array of \fIservices\fR objects, representing services defined in
+An array of \fIservice\fR objects, representing services defined in
 the global scope of the \fBpound\fR configuration file.
 .TP
 .B pid
@@ -431,7 +431,7 @@ Protocol used: either \fBhttp\fR or \fBhttps\fR.
 .TP
 .B services
 Array of \fIservice\fR objects representing services defined in this
-listener.  See below for a definition of \fIservice\fR object.
+listener.  See below for the definition of a \fIservice\fR object.
 .TP
 .B enabled
 .BR Boolean .

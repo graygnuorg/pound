@@ -18,11 +18,9 @@ On April 2020, Apsis started development of __pound__ 3.0 -
 essentially an attempt to rewrite __pound__ from scratch, introducing
 dependencies on some third-party software.
 
-On 2022-09-19, Robert
-[announced](https://groups.google.com/g/pound_proxy/c/O8xaIIODw18)
-that he stops further development and maintenance of __pound__.  Following
-that, Sergey decided to continue development of the program starting
-from his fork.
+On 2022-09-19, Robert announced that he stops further development and
+maintenance of __pound__.  Following that, Sergey decided to continue
+development of the program starting from his fork.
 
 ## What Pound Is
 
@@ -63,8 +61,8 @@ versioning and avoid confusion, my versioning of __pound__ starts with
 
 ## Documentation
 
-Documentation in manpage format is available in the distribution.  A
-copy of the documentation is [available online](https://www.gnu.org.ua/software/pound/pound.html).
+Documentation in texinfo and manpage formats is available in the distribution.
+A copy of the documentation is [available online](https://www.gnu.org.ua/software/pound/pound.html).
 
 ## Build requirements
 
@@ -732,34 +730,6 @@ __Pound__ tries to open all files and devices it needs before
 chrooting.  There might be cases, however, when it is not enough
 and you would need to copy certain system files to the chroot
 directory.
-
-### Notes for users of __pound__ versions prior to 4.7
-
-When using `RootJail`, __pound__ does not remove its PID file
-before shutting down.
-
-If __pound__ displays the following message and aborts when being stopped:
-
-```
-libgcc_s.so.1 must be installed for pthread_cancel to work
-```
-
-then you need to copy that library to the `RootJail` directory, e.g.:
-
-```sh
-mkdir /var/pound/lib64
-cp /usr/lib64/libgcc_s.so.1 /var/pound/lib64
-```
-
-or make sure it is loaded at program startup by defining the
-`LD_PRELOAD` variable:
-
-```sh
-export LD_PRELOAD=/usr/lib64/libgcc_s.so
-```
-
-This problem was fixed in version 4.7 (see the description of the
-`--enable-pthread-cancel-probe` configure option above).
 
 ## Bug-reporting
 

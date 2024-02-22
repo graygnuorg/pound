@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "November 6, 2023" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "February 21, 2024" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -119,11 +119,11 @@ Disable listener, service, or backend.
 Same as \fBdisable\fR.
 .TP
 \fBdelete\fR \fB/\fIL\fB/\fIS\fR \fIKEY\fR
-Delete session with the given key.  Notice that backend may not be
+Delete the session with the given key.  Notice that backend may not be
 specified.
 .TP
 \fBadd\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR \fIKEY\fR
-Add session with given key.
+Add a session with the given key.
 .SH TEMPLATES
 Information received from
 .B pound
@@ -174,7 +174,7 @@ Location of \fBpound\fR configuration file.
 \fB\-i \fIN\fR
 Sets indentation level for JSON output.
 .TP
-\fB\-j\fr
+\fB\-j\fR
 JSON output format.
 .TP
 \fB\-h\fR
