@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-01-03
+Pound -- history of user-visible changes. 2024-03-12
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,27 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.11.90 (git)
+
+* Add manual in texinfo format
+
+* Change the order of applying rewrites to responses
+
+When rewriting a response, rules defined in the service section are
+applied first, followed by the ones defined in the listener.
+
+When rewriting incoming requests, the order is opposite: first the
+rules in the listener, then the ones in the service.
+
+* ServerName directive is allowed in the Emergency section
+
+* Bugfixes
+
+** Don't try to access the include directory, unless needed by configuration.
+
+** Fix handling of session deletion/addition on request from poundctl.
+
 
 Version 4.11, 2024-01-03
 
