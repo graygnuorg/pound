@@ -2446,6 +2446,7 @@ session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   if (keylen > sizeof (keybuf) - 1)
     return HTTP_STATUS_BAD_REQUEST;
   strncpy (keybuf, key, keylen);
+  keybuf[keylen] = 0;
 
   pthread_mutex_lock (&svc->mut);
   service_session_remove_by_key (svc, keybuf);
@@ -2489,6 +2490,7 @@ session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   if (keylen > sizeof (keybuf) - 1)
     return HTTP_STATUS_BAD_REQUEST;
   strncpy (keybuf, key, keylen);
+  keybuf[keylen] = 0;
 
   pthread_mutex_lock (&svc->mut);
   service_session_add (svc, keybuf, be);
