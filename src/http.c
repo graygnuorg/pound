@@ -1293,7 +1293,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  if (copy_bin (cl, be, cont, res_bytes, no_write))
 	    {
 	      if (errno)
-		logmsg (LOG_NOTICE, "(%"PRItid") error copyinh chunk of length %"PRICLEN": %s",
+		logmsg (LOG_NOTICE, "(%"PRItid") error copying chunk of length %"PRICLEN": %s",
 			POUND_TID (), cont, strerror (errno));
 	      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	    }
@@ -4030,13 +4030,14 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       if (copy_bin (phttp->cl, phttp->be, content_length, NULL,
 		    phttp->backend->be_type != BE_BACKEND))
 	{
-	  logmsg (LOG_NOTICE,
-		  "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%s sec)",
-		  POUND_TID (),
-		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
-		  str_be (caddr2, sizeof (caddr2), phttp->backend),
-		  phttp->request.request, strerror (errno),
-		  log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
+	  if (errno)
+	    logmsg (LOG_NOTICE,
+		    "(%"PRItid") e500 for %s error copy client cont to %s/%s: %s (%s sec)",
+		    POUND_TID (),
+		    addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
+		    str_be (caddr2, sizeof (caddr2), phttp->backend),
+		    phttp->request.request, strerror (errno),
+		    log_duration (duration_buf, sizeof (duration_buf), &phttp->start_req));
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
     }
