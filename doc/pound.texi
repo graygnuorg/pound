@@ -4458,7 +4458,7 @@ Structures of each object are discussed in subsections that follow.
 @subsubsection Full listing
 A full listing contains the following attributes:
 
-@table @asis
+@table @code
 @item listeners
 An array of @dfn{listener} objects.  See below for a description.
 
