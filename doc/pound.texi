@@ -320,6 +320,12 @@ Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
 features.  As of version @value{VERSION}, the following features are
 implemented:
 
+@defvr Feature deprecation
+When parsing the configuration file, warn if any deprecated statements
+are used in it.  This is the default.  To suppress deprecation
+messages, use @option{-W no-deprecation}.
+@end defvr
+
 @defvr Feature dns
 Resolve host names found in configuration file.  This is the default.
 You can use @option{-W no-dns} to disable it, in order to

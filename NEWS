@@ -9,7 +9,7 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.11.90 (git)
 
-* Add manual in texinfo format
+* Includes manual in texinfo format
 
 * Change the order of applying rewrites to responses
 
@@ -18,6 +18,17 @@ applied first, followed by the ones defined in the listener.
 
 When rewriting incoming requests, the order is opposite: first the
 rules in the listener, then the ones in the service.
+
+* Deprecated configuration statements
+
+Pound issues a warning for each deprecated statement used in the
+configuration file.  The warning message contains a suggestion on what
+to use instead of the offending statement.  You are advised to replace
+each occurrence of deprecated statements in accordance with these
+suggestions, since such statements will be removed in future releases.
+
+If it is not feasible to do so for a while, you can suppress these
+messages by using the "-W no-deprecation" command line option.
 
 * ServerName directive is allowed in the Emergency section
 

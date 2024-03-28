@@ -954,10 +954,16 @@ typedef int (*PARSER) (void *, void *);
 
 typedef struct parser_table
 {
-  char *name;
-  PARSER parser;
-  void *data;
-  size_t off;
+  char *name;        /* The keyword. */
+  PARSER parser;     /* Parser function. */
+  void *data;        /* Data pointer to pass to parser in its first
+			parameter. */
+  size_t off;        /* Offset data by this number of bytes before passing. */
+
+  /* For deprecated statements: */
+  char *deprecation; /* Deprecation message or the keyword to use instead of
+			this. */
+  int full_message;  /* If 1, deprecation contains full message. */
 } PARSER_TABLE;
 
 static PARSER_TABLE *
@@ -1018,6 +1024,17 @@ parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
 	  if (ent)
 	    {
 	      void *data = ent->data ? ent->data : call_data;
+
+	      if (ent->deprecation && feature_is_set (FEATURE_DEPRECATION))
+		{
+		  if (ent->full_message)
+		    conf_error ("warning: deprecated statement, %s",
+				ent->deprecation);
+		  else
+		    conf_error ("warning: deprecated statement,"
+				" use \"%s\" instead", ent->deprecation);
+		}
+
 	      switch (ent->parser ((char*)data + ent->off, section_data))
 		{
 		case PARSER_OK:
@@ -3027,8 +3044,8 @@ static int parse_not_cond (void *call_data, void *section_data);
   { "Match", parse_match, data, off },				\
   { "NOT", parse_not_cond, data, off },				\
     /* compatibility keywords */				\
-  { "HeadRequire", parse_cond_hdr_matcher, data, off },         \
-  { "HeadDeny", parse_cond_head_deny_matcher, data, off }
+  { "HeadRequire", parse_cond_hdr_matcher, data, off, "Header" },	\
+  { "HeadDeny", parse_cond_head_deny_matcher, data, off, "Not Header" }
 
 static PARSER_TABLE negate_parsetab[] = {
   MATCH_CONDITIONS (NULL, 0),
@@ -3435,7 +3452,6 @@ static PARSER_TABLE service_parsetab[] = {
   { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (SERVICE, rewrite) },
   { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (SERVICE, rewrite) },
 
-  { "IgnoreCase", assign_dfl_ignore_case },
   { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
   { "Redirect", parse_redirect_backend, NULL, offsetof (SERVICE, backends) },
   { "Error", parse_error_backend, NULL, offsetof (SERVICE, backends) },
@@ -3448,6 +3464,11 @@ static PARSER_TABLE service_parsetab[] = {
   { "ForwardedHeader", assign_string, NULL, offsetof (SERVICE, forwarded_header) },
   { "TrustedIP", assign_acl, NULL, offsetof (SERVICE, trusted_ips) },
   { "LogSuppress", parse_log_suppress, NULL, offsetof (SERVICE, log_suppress_mask) },
+
+  /* Backward compatibility */
+  { "IgnoreCase", assign_dfl_ignore_case, NULL, 0,
+    "use -icase flag with the matching statement instead", 1 },
+
   { NULL }
 };
 
@@ -4027,21 +4048,45 @@ static PARSER_TABLE http_parsetab[] = {
   { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
 
   /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
-  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
-  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL,
+    offsetof (LISTENER, rewrite),
+    "SetHeader" },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL,
+    offsetof (LISTENER, rewrite),
+    "SetHeader" },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
+    "DeleteHeader" },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
+    "DeleteHeader" },
+  { "Err400", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
+    "ErrorFile 400" },
+  { "Err401", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
+    "ErrorFile 401" },
+  { "Err403", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
+    "ErrorFile 403" },
+  { "Err404", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
+    "ErrorFile 404" },
+  { "Err413", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
+    "ErrorFile 413" },
+  { "Err414", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
+    "ErrorFile 414" },
+  { "Err500", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
+    "ErrorFile 500" },
+  { "Err501", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
+    "ErrorFile 501" },
+  { "Err503", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
+    "ErrorFile 503" },
 
-{ NULL }
+  { NULL }
 };
 
 static LISTENER *
@@ -4676,19 +4721,45 @@ static PARSER_TABLE https_parsetab[] = {
   { "NoHTTPS11", https_parse_nohttps11 },
 
   /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
-  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
-  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL,
+    offsetof (LISTENER, rewrite),
+    "SetHeader" },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL,
+    offsetof (LISTENER, rewrite),
+    "SetHeader" },
+  { "HeaderRemove", parse_header_remove, NULL,
+    offsetof (LISTENER, rewrite),
+    "DeleteHeader" },
+  { "HeadRemove", parse_header_remove, NULL,
+    offsetof (LISTENER, rewrite),
+    "DeleteHeader" },
+  { "Err400", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
+    "ErrorFile 400" },
+  { "Err401", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
+    "ErrorFile 401" },
+  { "Err403", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
+    "ErrorFile 403" },
+  { "Err404", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
+    "ErrorFile 404" },
+  { "Err413", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
+    "ErrorFile 413" },
+  { "Err414", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
+    "ErrorFile 414" },
+  { "Err500", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
+    "ErrorFile 500" },
+  { "Err501", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
+    "ErrorFile 501" },
+  { "Err503", assign_string_from_file, NULL,
+    offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
+    "ErrorFile 503" },
   { NULL }
 };
 
@@ -5014,7 +5085,6 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "TimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_to) },
   { "WSTimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, ws_to) },
   { "ConnTO", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_connto) },
-  { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case) },
   { "Balancer", parse_balancer, NULL, offsetof (POUND_DEFAULTS, balancer) },
   { "HeaderOption", parse_header_options, NULL, offsetof (POUND_DEFAULTS, header_options) },
   { "ECDHCurve", parse_ECDHCurve },
@@ -5032,6 +5102,11 @@ static PARSER_TABLE top_level_parsetab[] = {
   { "ForwardedHeader", assign_string, &forwarded_header },
   { "TrustedIP", assign_acl, &trusted_ips },
   { "CombineHeaders", parse_combine_headers },
+
+  /* Backward compatibility. */
+  { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case),
+    "use -icase flag with the matching statement instead", 1 },
+
   { NULL }
 };
 
@@ -5279,6 +5354,11 @@ static struct pound_feature feature[] = {
     .descr = "include file directory",
     .enabled = F_DFL,
     .setfn = set_include_dir
+  },
+  [FEATURE_DEPRECATION] = {
+    .name = "deprecation",
+    .descr = "warn if deprecated configuration statements are used",
+    .enabled = F_DFL,
   },
   { NULL }
 };
