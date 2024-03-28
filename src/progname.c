@@ -29,7 +29,7 @@ set_progname (char const *arg)
     progname++;
 }
 
-static int copyright_year = 2023;
+static int copyright_year = 2024;
 
 #define VALUE_COLUMN 28
 
