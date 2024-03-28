@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 22, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "March 28, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -857,33 +857,29 @@ only to the request path -
 .B pound
 will still check that the request is syntactically correct.
 .TP
-\fBErr400\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 400 occurs.
+\fBErrorFile\fR \fINNN\fR "\fIfilename\fR"
+Read the content to be returned along with the HTTP status code
+\fINNN\fR from the file \fIfilename\fR.  The file will be read
+exactly once, at the program startup.
+.IP
+Allowed values for \fINNN\fR are:
+.BR 400 ,
+.BR 401 ,
+.BR 404 ,
+.BR 413 ,
+.BR 414 ,
+.BR 500 ,
+.BR 501 ,
+.BR 503 .
 .TP
-\fBErr401\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 401 occurs.
-.TP
-\fBErr403\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 401 occurs.
-.TP
-\fBErr404\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 404 occurs.
-.TP
-\fBErr413\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 413 occurs.
-Default text: "Request too large.".
-.TP
-\fBErr414\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 414 occurs.
-.TP
-\fBErr500\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 500 occurs.
-.TP
-\fBErr501\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 501 occurs.
-.TP
-\fBErr503\fR "\fIfilename\fR"
-A file with the text to be displayed if an Error 503 occurs.
+\fBErr\fINNN\fR "\fIfilename\fR"
+This statement is equivalent to
+.IP
+.EX
+ErrorFile \fINNN\fR "\fIfilename\fR"
+.EE
+.IP
+It is provided for compatibility with previous versions of the program.
 .TP
 \fBMaxRequest\fR \fIn\fR
 Maximum allowed size of incoming request. All requests will be limited
@@ -1614,7 +1610,7 @@ Special case of backend that returns HTTP error page.  The \fISTATUS\fR
 argument supplies HTTP status code.  Optional \fIFILE\fR argument is
 the name of a disk file with the error page content (HTML).  If not
 supplied, the text is determined as usual: first the
-.BI Err STATUS
+.BI ErrorFile " STATUS"
 statement for the enclosing listener is consulted.  If it is not present, the
 default error page is used.
 .IP

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-03-12
+Pound -- history of user-visible changes. 2024-03-28
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -20,6 +20,16 @@ When rewriting incoming requests, the order is opposite: first the
 rules in the listener, then the ones in the service.
 
 * ServerName directive is allowed in the Emergency section
+
+* New statement: ErrorFile
+
+  ErrorFile NNN "FILENAME"
+
+This statement defines content of the response page returned with
+the HTTP status NNN from the file FILENAME.  It obsoletes the
+Err400 - Err503 statements used in previous versions.  These
+statements are still supported for backward compatibility, although
+their use is discouraged.
 
 * Bugfixes
 

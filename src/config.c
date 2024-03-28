@@ -2864,6 +2864,25 @@ parse_error_backend (void *call_data, void *section_data)
 
   return rc;
 }
+
+static int
+parse_errorfile (void *call_data, void *section_data)
+{
+  struct token *tok;
+  int status;
+  char **http_err = call_data;
+
+  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
+    return PARSER_FAIL;
+
+  if ((status = http_status_to_pound (atoi (tok->str))) == -1)
+    {
+      conf_error ("%s", "unsupported status code");
+      return PARSER_FAIL;
+    }
+
+  return assign_string_from_file (&http_err[status], section_data);
+}
 
 struct service_session
 {
@@ -3986,15 +4005,7 @@ static PARSER_TABLE http_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
-  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
-  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
-  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
+  { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
   { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
 
   { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
@@ -4007,12 +4018,6 @@ static PARSER_TABLE http_parsetab[] = {
 
   { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
 
-  /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
@@ -4020,6 +4025,22 @@ static PARSER_TABLE http_parsetab[] = {
   { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
   { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
+
+  /* Backward compatibility */
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
+  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
+
 { NULL }
 };
 
@@ -4624,15 +4645,7 @@ static PARSER_TABLE https_parsetab[] = {
   { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
-  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
-  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
-  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
-  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
-  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
-  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
-  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
-  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
-  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
+  { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
   { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
 
   { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
@@ -4644,12 +4657,6 @@ static PARSER_TABLE https_parsetab[] = {
   { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
 
   { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
-
-  /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
 
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
@@ -4667,6 +4674,21 @@ static PARSER_TABLE https_parsetab[] = {
   { "VerifyList", https_parse_verifylist },
   { "CRLlist", https_parse_crlist },
   { "NoHTTPS11", https_parse_nohttps11 },
+
+  /* Backward compatibility */
+  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "AddHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite) },
+  { "Err400", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]) },
+  { "Err401", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]) },
+  { "Err403", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]) },
+  { "Err404", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]) },
+  { "Err413", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]) },
+  { "Err414", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]) },
+  { "Err500", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]) },
+  { "Err501", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]) },
+  { "Err503", assign_string_from_file, NULL, offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]) },
   { NULL }
 };
 

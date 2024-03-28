@@ -1026,7 +1026,7 @@ and want @command{pound} to notice changes, you will have to restart
 it.
 
  If the second argument is not supplied, the error text is determined
-by the @code{Err@var{code}} statement in the enclosing listener (where
+by the @code{ErrorFile @var{code}} statement in the enclosing listener (where
 @var{code} is the HTTP code in question).  If it is not supplied, the
 built-in default text is used.  @xref{Error definitions}.
 
@@ -2243,8 +2243,8 @@ of the configuration file.
 Set the @dfn{include directory}, i.e. the directory where
 @command{pound} looks for relative file names that appear in other
 configuration directives: @code{Include}, @code{BasicAuth},
-@code{Err400} through @code{Err503}, as well as in the argument to
-@option{-file} option in service matching directives
+@code{ErrorFile} (or @code{Err400} through @code{Err503}), as well as
+in the argument to @option{-file} option in service matching directives
 (@pxref{-file}).
 
 The default value is the system configuration directory as set at
@@ -2533,102 +2533,126 @@ Additionally allow MS extension WebDAV verbs: @code{SUBSCRIBE},
 
 When @command{pound} returns an error status, it uses built-in
 error-specific description code and status page template.  These
-values can be customized using @code{Err@var{nnn}} statements:
+values can be customized using the @code{ErrorFile} statement.
+
+@deffn {ListenHTTP directive} ErrorFile @var{code} "@var{filename}"
+Read HTML page for HTTP status code @var{code} from file
+@var{filename}.
+
+The @var{code} argument is a three-digit HTTP response status, and
+@var{filename} is the name of a file which supplies text of the error
+page to be returned.  The file is read once, at program startup.
+@end deffn
+
+@kwindex Err400
+@kwindex Err401
+@kwindex Err403
+@kwindex Err404
+@kwindex Err413
+@kwindex Err414
+@kwindex Err500
+@kwindex Err501
+@kwindex Err503
+For compatibility with @command{pound} versions up to 4.11, the
+following statement is also recognized:
 
 @example
-Err@var{nnn} "@var{name}"
+Err@var{nnn} "@var{filename}"
 @end example
 
 @noindent
-where @var{nnn} is a three-digit HTTP response status, and @var{name}
-is the name of a file which supplies text of the error page to be
-returned.  The file is read once, at program startup.
+where @var{nnn} is a three-digit HTTP status code.  This statement
+is entirely equivalent to
+
+@example
+ErrorFile @var{nnn} "@var{filename}"
+@end example
 
 @command{Pound} produces only a subset of all possible status codes,
 so not all @var{nnn} codes are allowed.  The discussion below lists
-all available @code{Err@var{nnn}} statements, along with the error
-description and default error page text.
+available HTTP codes, along with the error description and default
+error page text.
 
-@deffn {ListenHTTP directive} Err400 "@var{filename}"
+@defvr {HTTP status} 400
 @samp{Bad Request}
 @*
-@quotation Default text
+@quotation
 Your browser (or proxy) sent a request that this server could not
 understand.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err401 "@var{filename}"
+@defvr {HTTP status} 401
 @samp{Unauthorized}
 @*
-@quotation Default text
+@quotation
 This server could not verify that you are authorized to access
 the document requested.  Either you supplied the wrong credentials
 (e.g., bad password), or your browser doesn't understand how to supply
 the credentials required.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err403 "@var{filename}"
+@defvr {HTTP status} 403
 @samp{Forbidden}
 @*
-@quotation Default text
+@quotation
 You don't have permission to access this resource.
 It is either read-protected or not readable by the server.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err404 "@var{filename}"
+@defvr {HTTP status} 404
 @samp{Not Found}
 @*
-@quotation Default text
+@quotation
 The requested URL was not found on this server.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err413 "@var{filename}"
+@defvr {HTTP status} 413
 @samp{Payload Too Large}
 @*
-@quotation Default text
+@quotation
 The request content is larger than the proxy server is able to
 process.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err414 "@var{filename}"
+@defvr {HTTP status} 414
 @samp{URI Too Long}
 @*
-@quotation Default text
+@quotation
 The length of the requested URL exceeds the capacity limit for this
 server.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err500 "@var{filename}"
+@defvr {HTTP status} 500
 @samp{Internal Server Error}
 @*
-@quotation Default text
+@quotation
 The server encountered an internal error and was unable to complete
 your request.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err501 "@var{filename}"
+@defvr {HTTP status} 501
 @samp{Not Implemented}
 @*
-@quotation Default text
+@quotation
 The server does not support the action requested.
 @end quotation
-@end deffn
+@end defvr
 
-@deffn {ListenHTTP directive} Err503 "@var{filename}"
+@defvr {HTTP status} 503
 @samp{Service Unavailable}
 @*
-@quotation Default text
+@quotation
 The server is temporarily unable to service your request due to
 maintenance downtime or capacity problems. Please try again later.
 @end quotation
-@end deffn
+@end defvr
 
 @node Listener logging
 @subsection Listener logging
@@ -3054,7 +3078,7 @@ expression.  Use @var{options} to alter this behavior.
 @xref{deleteheader-option}, for a list of available options.
 @end deffn
 
-@deffn {Response modification} "@var{name}: @var{value}"
+@deffn {Response modification} SetHeader "@var{name}: @var{value}"
 Sets the HTTP response header.  Argument
 undergoes string expansion (@xref{String Expansions}).  If the header
 @var{name} already exists, it will be overwritten.  Otherwise, new
@@ -3690,7 +3714,7 @@ The @var{status} argument supplies the HTTP status code to return.
 
 Optional @var{file} argument is the name of a disk file with the error
 page content.  If not supplied, the text is determined as usual: first
-the @code{Err@var{status}} statement from the enclosing listener is
+the @code{ErrorFile @var{status}} statement from the enclosing listener is
 consulted.  If it is not present, the default error page is used.
 
 This directive is useful in a catch-all service, which outputs an

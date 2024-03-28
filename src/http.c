@@ -21,7 +21,7 @@
 #include "extern.h"
 
 /*
- * Emit to BIO response line with the given CODE, descriptive TEXT and
+ * Emit to BIO a response line with the given CODE, descriptive TEXT and
  * HEADERS (may be NULL).  TYPE and LEN supply values for Content-Type
  * and Content-Length, correspondingly.  PROTO gives the minor version
  * of the HTTP protocol version: 0 or 1.  If it is 1, the Connection:
