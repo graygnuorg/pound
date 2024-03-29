@@ -4328,6 +4328,13 @@ backend_update_stats (BACKEND *be, struct timespec const *start,
   pthread_mutex_unlock (&be->mut);
 }
 
+enum transfer_encoding
+  {
+    TRANSFER_ENCODING_NONE,
+    TRANSFER_ENCODING_CHUNKED,
+    TRANSFER_ENCODING_UNKNOWN
+  };
+
 /*
  * handle an HTTP request
  */
@@ -4336,9 +4343,8 @@ do_http (POUND_HTTP *phttp)
 {
   int cl_11;  /* Whether client connection is using HTTP/1.1 */
   int res;  /* General-purpose result variable */
-  int chunked; /* True if request contains Transfer-Encoding: chunked
-		* FIXME: this belongs to struct http_request, perhaps.
-		*/
+  /* FIXME: this belongs to struct http_request, perhaps. */
+  int transfer_encoding = TRANSFER_ENCODING_NONE;
   BIO *bb;
   char caddr[MAX_ADDR_BUFSIZE];
   CONTENT_LENGTH content_length;
@@ -4463,7 +4469,7 @@ do_http (POUND_HTTP *phttp)
       /*
        * check headers
        */
-      chunked = 0;
+      transfer_encoding = TRANSFER_ENCODING_NONE;
       content_length = NO_CONTENT_LENGTH;
       DLIST_FOREACH_SAFE (hdr, hdrtemp, &phttp->request.headers, link)
 	{
@@ -4491,10 +4497,10 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      else if (chunked)
+	      else if (transfer_encoding == TRANSFER_ENCODING_CHUNKED)
 		{
 		  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-			     "multiple Transfer-Encoding: chunked");
+			     "multiple Transfer-Encoding headers");
 		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 		  return;
 		}
@@ -4515,8 +4521,10 @@ do_http (POUND_HTTP *phttp)
 			  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
 			  return;
 			}
-		      chunked = 1;
+		      transfer_encoding = TRANSFER_ENCODING_CHUNKED;
 		    }
+		  else
+		    transfer_encoding = TRANSFER_ENCODING_UNKNOWN;
 		}
 	      break;
 
@@ -4577,7 +4585,8 @@ do_http (POUND_HTTP *phttp)
       /*
        * check for possible request smuggling attempt
        */
-      if (chunked != 0 && content_length != NO_CONTENT_LENGTH)
+      if (transfer_encoding != TRANSFER_ENCODING_NONE &&
+	  content_length != NO_CONTENT_LENGTH)
 	{
 	  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
 		     "both Transfer-Encoding and Content-Length given");
@@ -4667,7 +4676,9 @@ do_http (POUND_HTTP *phttp)
 
 	case BE_BACKEND:
 	  /* Send the request. */
-	  res = send_to_backend (phttp, cl_11 && chunked, content_length);
+	  res = send_to_backend (phttp,
+				 cl_11 && (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
+				 content_length);
 	  if (res == 0)
 	    /* Process the response. */
 	    res = backend_response (phttp);
