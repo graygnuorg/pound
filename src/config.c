@@ -4315,12 +4315,6 @@ https_parse_cert (void *call_data, void *section_data)
   struct token *tok;
   struct stat st;
 
-  if (lst->has_other)
-    {
-      conf_error ("%s", "Cert directives MUST precede other SSL-specific directives");
-      return PARSER_FAIL;
-    }
-
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
@@ -4451,7 +4445,6 @@ https_parse_client_cert (void *call_data, void *section_data)
       conf_error ("%s", "ClientCert may only be used after Cert");
       return PARSER_FAIL;
     }
-  lst->has_other = 1;
 
   if (assign_int_range (&lst->clnt_check, 0, 3) != PARSER_OK)
     return PARSER_FAIL;
@@ -4522,7 +4515,6 @@ https_parse_ciphers (void *call_data, void *section_data)
       conf_error ("%s", "Ciphers may only be used after Cert");
       return PARSER_FAIL;
     }
-  lst->has_other = 1;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -4591,7 +4583,6 @@ https_parse_calist (void *call_data, void *section_data)
       conf_error ("%s", "CAList may only be used after Cert");
       return PARSER_FAIL;
     }
-  lst->has_other = 1;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -4620,7 +4611,6 @@ https_parse_verifylist (void *call_data, void *section_data)
       conf_error ("%s", "VerifyList may only be used after Cert");
       return PARSER_FAIL;
     }
-  lst->has_other = 1;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
@@ -4649,7 +4639,6 @@ https_parse_crlist (void *call_data, void *section_data)
       conf_error ("%s", "CRlist may only be used after Cert");
       return PARSER_FAIL;
     }
-  lst->has_other = 1;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;

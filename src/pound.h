@@ -749,7 +749,6 @@ typedef struct _listener
   /* Used during configuration parsing */
   int ssl_op_enable;
   int ssl_op_disable;
-  int has_other;
 } LISTENER;
 
 typedef SLIST_HEAD(,_listener) LISTENER_HEAD;
