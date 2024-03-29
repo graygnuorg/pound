@@ -4585,13 +4585,21 @@ do_http (POUND_HTTP *phttp)
       /*
        * check for possible request smuggling attempt
        */
-      if (transfer_encoding != TRANSFER_ENCODING_NONE &&
-	  content_length != NO_CONTENT_LENGTH)
+      if (transfer_encoding != TRANSFER_ENCODING_NONE)
 	{
-	  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-		     "both Transfer-Encoding and Content-Length given");
-	  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-	  return;
+	  if (transfer_encoding == TRANSFER_ENCODING_UNKNOWN)
+	    {
+	      log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
+			 "unknown Transfer-Encoding");
+	      http_err_reply (phttp, HTTP_STATUS_NOT_IMPLEMENTED);
+	    }
+	  else if (content_length != NO_CONTENT_LENGTH)
+	    {
+	      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+			 "both Transfer-Encoding and Content-Length given");
+	      http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
+	      return;
+	    }
 	}
 
       /*
