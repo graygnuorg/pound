@@ -889,7 +889,7 @@ pop_input (void)
 static int
 gettkn (struct token **tok)
 {
-  int t;
+  int t = EOF;
 
   while (cur_input && (t = input_gettkn (cur_input, tok)) == EOF)
     pop_input ();
