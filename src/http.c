@@ -4457,8 +4457,8 @@ do_http (POUND_HTTP *phttp)
       if (phttp->request.method == METH_GET)
 	phttp->ws_state |= WSS_REQ_GET;
 
-      if (phttp->lstn->has_pat &&
-	  regexec (&phttp->lstn->url_pat, phttp->request.url, 0, NULL, 0))
+      if (phttp->lstn->url_pat &&
+	  regexec (phttp->lstn->url_pat, phttp->request.url, 0, NULL, 0))
 	{
 	  log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
 		     "bad URL \"%s\"", phttp->request.url);

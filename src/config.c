@@ -3682,7 +3682,7 @@ listener_parse_checkurl (void *call_data, void *section_data)
   struct token *tok;
   int rc;
 
-  if (lst->has_pat)
+  if (lst->url_pat)
     {
       conf_error ("%s", "CheckURL multiple pattern");
       return PARSER_FAIL;
@@ -3691,15 +3691,16 @@ listener_parse_checkurl (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  rc = regcomp (&lst->url_pat, tok->str,
+  XZALLOC (lst->url_pat);
+
+  rc = regcomp (lst->url_pat, tok->str,
 		REG_NEWLINE | REG_EXTENDED |
 		(dfl->ignore_case ? REG_ICASE : 0));
   if (rc)
     {
-      conf_regcomp_error (rc, &lst->url_pat, NULL);
+      conf_regcomp_error (rc, lst->url_pat, NULL);
       return PARSER_FAIL;
     }
-  lst->has_pat = 1;
 
   return PARSER_OK;
 }

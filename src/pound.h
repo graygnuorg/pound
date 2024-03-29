@@ -732,8 +732,7 @@ typedef struct _listener
   REWRITE_RULE_HEAD rewrite[2];
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
-  int has_pat;			/* was a URL pattern defined? */
-  regex_t url_pat;		/* pattern to match the request URL against */
+  regex_t *url_pat;		/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req;	/* max. request size */
   int rewr_loc;			/* rewrite location response */
