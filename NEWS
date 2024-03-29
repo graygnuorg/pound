@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-03-28
+Pound -- history of user-visible changes. 2024-03-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -18,6 +18,10 @@ applied first, followed by the ones defined in the listener.
 
 When rewriting incoming requests, the order is opposite: first the
 rules in the listener, then the ones in the service.
+
+* Requests with unrecognized Transfer-Encoding are rejected
+
+* Requests containing both Transfer-Encoding and Content-Length are rejected
 
 * Deprecated configuration statements
 
