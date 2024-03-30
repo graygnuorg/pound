@@ -2503,6 +2503,14 @@ A request bigger than that will be responded with status
 By default, there is no limit on the request size.
 @end deffn
 
+@deffn {ListenHTTP directive} MaxURI @var{n}
+Limits the maximum allowed length of incoming request URI.
+A request with an URI longer than that will be responded with status
+414.
+
+By default, there is no limit on the URI length.
+@end deffn
+
 @deffn {ListenHTTP directive} CheckURL "@var{pattern}"
 Define a pattern that must be matched by each request sent to this
 listener.  A request that does not match will be returned a 501

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-03-29
+Pound -- history of user-visible changes. 2024-03-30
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -45,6 +45,11 @@ the HTTP status NNN from the file FILENAME.  It obsoletes the
 Err400 - Err503 statements used in previous versions.  These
 statements are still supported for backward compatibility, although
 their use is discouraged.
+
+* New statement: MaxURI
+
+This statement sets the maximum allowed length of the request URI.
+It can be used in ListenHTTP and ListenHTTPS sections.
 
 * Bugfixes
 

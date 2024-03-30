@@ -4095,7 +4095,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        */
       int rc = copy_chunks (phttp->cl, phttp->be, NULL,
 			    phttp->backend->be_type != BE_BACKEND,
-			    phttp->lstn->max_req);
+			    phttp->lstn->max_req_size);
       if (rc != HTTP_STATUS_OK)
 	{
 	  log_error (phttp, rc, errno, "error sending chunks");
@@ -4603,11 +4603,36 @@ do_http (POUND_HTTP *phttp)
 	    }
 	}
 
+      if (phttp->lstn->max_uri_length > 0)
+	{
+	  int rc;
+	  char const *url;
+	  rc = http_request_get_url (&phttp->request, &url);
+	  if (rc == RETRIEVE_OK)
+	    {
+	      size_t urlen;
+	      if ((urlen = strlen (url)) > phttp->lstn->max_uri_length)
+		{
+		  log_error (phttp, HTTP_STATUS_URI_TOO_LONG, 0,
+			     "URI too long: %zu bytes",
+			     urlen);
+		  http_err_reply (phttp, HTTP_STATUS_URI_TOO_LONG);
+		  return;
+		}
+	    }
+	  else
+	    {
+	      log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
+			 "can't get URL from the request (shouldn't happen)");
+	      goto err;
+	    }
+	}
+
       /*
        * possibly limited request size
        */
-      if (phttp->lstn->max_req > 0 && content_length > 0
-	  && content_length > phttp->lstn->max_req)
+      if (phttp->lstn->max_req_size > 0 && content_length > 0
+	  && content_length > phttp->lstn->max_req_size)
 	{
 	  log_error (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE, 0,
 		     "request too large: %"PRICLEN" bytes",

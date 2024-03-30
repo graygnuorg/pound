@@ -734,7 +734,8 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   regex_t *url_pat;		/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
-  CONTENT_LENGTH max_req;	/* max. request size */
+  CONTENT_LENGTH max_req_size;	/* max. request size */
+  unsigned max_uri_length;      /* max. URI length */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */

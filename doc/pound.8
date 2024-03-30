@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 28, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "March 30, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -888,6 +888,10 @@ It is provided for compatibility with previous versions of the program.
 Maximum allowed size of incoming request. All requests will be limited
 to these many bytes. If a request contains more data than allowed, an
 error 413 is returned. Default: unlimited.
+.TP
+\fBMaxURI\fR \fIn\fR
+Maximum allowed length of an URI.  If the URI of a request is longer than
+\fIn\fR bytes, an error 414 is returned. Default: unlimited.
 .TP
 \fBRewriteLocation\fR 0|1|2
 If set to 1, force

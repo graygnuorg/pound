@@ -4028,8 +4028,8 @@ static PARSER_TABLE http_parsetab[] = {
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
-  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
-
+  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req_size) },
+  { "MaxURI", assign_unsigned, NULL, offsetof (LISTENER, max_uri_length) },
   { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
   { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
   { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
@@ -4681,7 +4681,8 @@ static PARSER_TABLE https_parsetab[] = {
   { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
   { "CheckURL", listener_parse_checkurl },
   { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
-  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req) },
+  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req_size) },
+  { "MaxURI", assign_unsigned, NULL, offsetof (LISTENER, max_uri_length) },
 
   { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
   { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },

@@ -95,6 +95,7 @@ TESTSUITE_AT = \
  logsup.at\
  lstset.at\
  maxrequest.at\
+ maxuri.at\
  multival.at\
  nb.at\
  not.at\
