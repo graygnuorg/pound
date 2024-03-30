@@ -4592,6 +4592,7 @@ do_http (POUND_HTTP *phttp)
 	      log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
 			 "unknown Transfer-Encoding");
 	      http_err_reply (phttp, HTTP_STATUS_NOT_IMPLEMENTED);
+	      return;
 	    }
 	  else if (content_length != NO_CONTENT_LENGTH)
 	    {
