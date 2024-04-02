@@ -320,10 +320,10 @@ Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
 features.  As of version @value{VERSION}, the following features are
 implemented:
 
-@defvr Feature deprecation
-When parsing the configuration file, warn if any deprecated statements
-are used in it.  This is the default.  To suppress deprecation
-messages, use @option{-W no-deprecation}.
+@defvr Feature warn-deprecated
+When parsing the configuration file, warn if it uses any deprecated
+statements.  This is the default.  To suppress deprecation
+messages, use @option{-W no-warn-deprecated}.
 @end defvr
 
 @defvr Feature dns
@@ -2746,8 +2746,6 @@ advised against using them.
 @end deffn
 
 @deffn {ListenerHTTP directive} DeleteHeader [@var{options}] "@var{pattern}"
-@deffnx {ListenerHTTP directive} HeaderRemove [@var{options}] "@var{pattern}"
-@deffnx {ListenerHTTP directive} HeadRemove [@var{options}] "@var{pattern}"
 Remove from the request all headers matching @var{pattern}.  The
 @code{HeaderRemove} and @code{HeadRemove} forms are retained for
 backward compatibility with earlier @command{pound} versions.  You are
@@ -2787,6 +2785,15 @@ of zero or more option flags from the following list:
 @item @code{-icase} @tab Case-insensitive comparison.
 @end multitable
 @end float
+@end deffn
+
+@deffn {ListenerHTTP directive} HeaderRemove "@var{pattern}"
+@deffnx {ListenerHTTP directive} HeadRemove "@var{pattern}"
+These are obsolete keywords, equivalent to
+
+@example
+DeleteHeader -icase "@var{pattern}"
+@end example
 @end deffn
 
 @node Rewrite

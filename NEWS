@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-03-30
+Pound -- history of user-visible changes. 2024-04-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -32,7 +32,7 @@ each occurrence of deprecated statements in accordance with these
 suggestions, since such statements will be removed in future releases.
 
 If it is not feasible to do so for a while, you can suppress these
-messages by using the "-W no-deprecation" command line option.
+messages by using the "-W no-warn-deprecated" command line option.
 
 * ServerName directive is allowed in the Emergency section
 

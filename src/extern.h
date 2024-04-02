@@ -45,7 +45,7 @@ enum
   {
     FEATURE_DNS,
     FEATURE_INCLUDE_DIR,
-    FEATURE_DEPRECATION
+    FEATURE_WARN_DEPRECATED
   };
 
 int feature_is_set (int f);

@@ -960,8 +960,6 @@ enum keyword_type
     KWT_SOFTREF,      /* Same as above, but overrides data/off pair of it. */
   };
 
-#define DEPRECATED 1
-
 typedef struct parser_table
 {
   char *name;        /* The keyword. */
@@ -978,7 +976,7 @@ typedef struct parser_table
   /* For deprecated statements: */
   int deprecated;    /* Whether the statement is deprecated. */
   char *message;     /* Deprecation message. For KWT_ALIAS it can be NULL,
-		        in which case a default message will be generated. */
+			in which case a default message will be generated. */
 } PARSER_TABLE;
 
 /*
@@ -1034,7 +1032,10 @@ parser_find (PARSER_TABLE *tab, char const *name, PARSER_TABLE *buf,
 static int parse_include (void *call_data, void *section_data);
 
 static PARSER_TABLE global_parsetab[] = {
-  { "Include", parse_include },
+  {
+    .name = "Include",
+    .parser = parse_include
+  },
   { NULL }
 };
 
@@ -1077,7 +1078,7 @@ parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
 	  if (!single_statement && ent == NULL)
 	    ent = parser_find (global_parsetab, tok->str, &buf, &ref);
 
-	  if (ref && ref->deprecated && feature_is_set (FEATURE_DEPRECATION))
+	  if (ref && ref->deprecated && feature_is_set (FEATURE_WARN_DEPRECATED))
 	    {
 	      if (ent->message)
 		conf_error ("warning: deprecated statement, %s", ref->message);
@@ -2176,41 +2177,138 @@ disable_proto (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE backend_parsetab[] = {
-  { "End",       parse_end },
-  { "Address",   assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
-  { "Port",      assign_port,    NULL, offsetof (BACKEND, v.reg.addr) },
-  { "Priority",  backend_assign_priority, NULL, offsetof (BACKEND, priority) },
-  { "TimeOut",   assign_timeout, NULL, offsetof (BACKEND, v.reg.to) },
-  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.ws_to) },
-  { "ConnTO",    assign_timeout, NULL, offsetof (BACKEND, v.reg.conn_to) },
-  { "HTTPS",     backend_parse_https },
-  { "Cert",      backend_parse_cert },
-  { "Ciphers",   backend_assign_ciphers },
-  { "Disable",   disable_proto,  NULL, offsetof (BACKEND, v.reg.ctx) },
-  { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
-  { "ServerName",backend_parse_servername, NULL },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Address",
+    .parser = assign_address,
+    .off = offsetof (BACKEND, v.reg.addr)
+  },
+  {
+    .name = "Port",
+    .parser = assign_port,
+    .off = offsetof (BACKEND, v.reg.addr)
+  },
+  {
+    .name = "Priority",
+    .parser = backend_assign_priority,
+    .off = offsetof (BACKEND, priority)
+  },
+  {
+    .name = "TimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.to)
+  },
+  {
+    .name = "WSTimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.ws_to)
+  },
+  {
+    .name = "ConnTO",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.conn_to)
+  },
+  {
+    .name = "HTTPS",
+    .parser = backend_parse_https
+  },
+  {
+    .name = "Cert",
+    .parser = backend_parse_cert
+  },
+  {
+    .name = "Ciphers",
+    .parser = backend_assign_ciphers
+  },
+  {
+    .name = "Disable",
+    .parser = disable_proto,
+    .off = offsetof (BACKEND, v.reg.ctx)
+  },
+  {
+    .name = "Disabled",
+    .parser = assign_bool,
+    .off = offsetof (BACKEND, disabled)
+  },
+  {
+    .name = "ServerName",
+    .parser = backend_parse_servername
+  },
   { NULL }
 };
 
 static PARSER_TABLE use_backend_parsetab[] = {
-  { "End",       parse_end },
-  { "Priority",  backend_assign_priority, NULL, offsetof (BACKEND, priority) },
-  { "Disabled",  assign_bool,    NULL, offsetof (BACKEND, disabled) },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Priority",
+    .parser = backend_assign_priority,
+    .off = offsetof (BACKEND, priority)
+  },
+  {
+    .name = "Disabled",
+    .parser = assign_bool,
+    .off = offsetof (BACKEND, disabled)
+  },
   { NULL }
 };
 
 static PARSER_TABLE emergency_parsetab[] = {
-  { "End", parse_end },
-  { "Address", assign_address, NULL, offsetof (BACKEND, v.reg.addr) },
-  { "Port", assign_port, NULL, offsetof (BACKEND, v.reg.addr) },
-  { "TimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.to) },
-  { "WSTimeOut", assign_timeout, NULL, offsetof (BACKEND, v.reg.ws_to) },
-  { "ConnTO", assign_timeout, NULL, offsetof (BACKEND, v.reg.conn_to) },
-  { "HTTPS", backend_parse_https },
-  { "Cert", backend_parse_cert },
-  { "Ciphers", backend_assign_ciphers },
-  { "Disable", disable_proto, NULL, offsetof (BACKEND, v.reg.ctx) },
-  { "ServerName",backend_parse_servername, NULL },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Address",
+    .parser = assign_address,
+    .off = offsetof (BACKEND, v.reg.addr)
+  },
+  {
+    .name = "Port",
+    .parser = assign_port,
+    .off = offsetof (BACKEND, v.reg.addr)
+  },
+  {
+    .name = "TimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.to)
+  },
+  {
+    .name = "WSTimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.ws_to)
+  },
+  {
+    .name = "ConnTO",
+    .parser = assign_timeout,
+    .off = offsetof (BACKEND, v.reg.conn_to)
+  },
+  {
+    .name = "HTTPS",
+    .parser = backend_parse_https
+  },
+  {
+    .name = "Cert",
+    .parser = backend_parse_cert
+  },
+  {
+    .name = "Ciphers",
+    .parser = backend_assign_ciphers
+  },
+  {
+    .name = "Disable",
+    .parser = disable_proto,
+    .off = offsetof (BACKEND, v.reg.ctx)
+  },
+  {
+    .name = "ServerName",
+    .parser = backend_parse_servername
+  },
   { NULL }
 };
 
@@ -3002,10 +3100,24 @@ session_type_parser (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE session_parsetab[] = {
-  { "End", parse_end },
-  { "Type", session_type_parser },
-  { "TTL", assign_timeout, NULL, offsetof (SERVICE, sess_ttl) },
-  { "ID", assign_string, NULL, offsetof (SERVICE, sess_id) },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Type",
+    .parser = session_type_parser
+  },
+  {
+    .name = "TTL",
+    .parser = assign_timeout,
+    .off = offsetof (SERVICE, sess_ttl)
+  },
+  {
+    .name = "ID",
+    .parser = assign_string,
+    .off = offsetof (SERVICE, sess_id)
+  },
   { NULL }
 };
 
@@ -3087,25 +3199,70 @@ parse_match (void *call_data, void *section_data)
 static int parse_not_cond (void *call_data, void *section_data);
 
 static PARSER_TABLE match_conditions[] = {
-  { "ACL", parse_cond_acl },
-  { "URL", parse_cond_url_matcher },
-  { "Path", parse_cond_path_matcher },
-  { "Query", parse_cond_query_matcher },
-  { "QueryParam", parse_cond_query_param_matcher },
-  { "Header", parse_cond_hdr_matcher },
-  { "HeadRequire", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
-  { "HeadDeny", parse_cond_head_deny_matcher, NULL, 0,
-    KWT_REG, NULL, DEPRECATED, "use \"Not Header\" instead" },
-  { "Host", parse_cond_host },
-  { "BasicAuth", parse_cond_basic_auth },
-  { "StringMatch", parse_cond_string_matcher },
-  { "Match", parse_match },
-  { "NOT", parse_not_cond },
+  {
+    .name = "ACL",
+    .parser = parse_cond_acl
+  },
+  {
+    .name = "URL",
+    .parser = parse_cond_url_matcher
+  },
+  {
+    .name = "Path",
+    .parser = parse_cond_path_matcher
+  },
+  {
+    .name = "Query",
+    .parser = parse_cond_query_matcher
+  },
+  {
+    .name = "QueryParam",
+    .parser = parse_cond_query_param_matcher
+  },
+  {
+    .name = "Header",
+    .parser = parse_cond_hdr_matcher
+  },
+  {
+    .name = "HeadRequire",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "HeadDeny",
+    .parser = parse_cond_head_deny_matcher,
+    .deprecated = 1,
+    .message = "use \"Not Header\" instead"
+  },
+  {
+    .name = "Host",
+    .parser = parse_cond_host
+  },
+  {
+    .name = "BasicAuth",
+    .parser = parse_cond_basic_auth
+  },
+  {
+    .name = "StringMatch",
+    .parser = parse_cond_string_matcher
+  },
+  {
+    .name = "Match",
+    .parser = parse_match
+  },
+  {
+    .name = "NOT",
+    .parser = parse_not_cond
+  },
   { NULL }
 };
 
 static PARSER_TABLE negate_parsetab[] = {
-  { "", NULL, NULL, 0, KWT_SOFTREF, match_conditions },
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = match_conditions
+  },
   { NULL }
 };
 
@@ -3118,8 +3275,15 @@ parse_not_cond (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE logcon_parsetab[] = {
-  { "End", parse_end },
-  { "", NULL, NULL, 0, KWT_SOFTREF, match_conditions },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = match_conditions
+  },
   { NULL }
 };
 
@@ -3144,21 +3308,59 @@ static int parse_set_query_param (void *call_data, void *section_data);
 static int parse_sub_rewrite (void *call_data, void *section_data);
 
 static PARSER_TABLE rewrite_ops[] = {
-  { "SetHeader", parse_set_header },
-  { "DeleteHeader", parse_delete_header },
-  { "SetURL", parse_set_url },
-  { "SetPath", parse_set_path },
-  { "SetQuery", parse_set_query },
-  { "SetQueryParam", parse_set_query_param },
+  {
+    .name = "SetHeader",
+    .parser = parse_set_header
+  },
+  {
+    .name = "DeleteHeader",
+    .parser = parse_delete_header
+  },
+  {
+    .name = "SetURL",
+    .parser = parse_set_url },
+  {
+    .name = "SetPath",
+    .parser = parse_set_path
+  },
+  {
+    .name = "SetQuery",
+    .parser = parse_set_query
+  },
+  {
+    .name = "SetQueryParam",
+    .parser = parse_set_query_param
+  },
   { NULL }
 };
 
 static PARSER_TABLE rewrite_rule_parsetab[] = {
-  { "End", parse_end },
-  { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
-  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF, match_conditions },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF, rewrite_ops },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Rewrite",
+    .parser = parse_sub_rewrite,
+    .off = offsetof (REWRITE_RULE, ophead)
+  },
+  {
+    .name = "Else",
+    .parser = parse_else,
+    .off = offsetof (REWRITE_RULE, iffalse)
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, cond),
+    .type = KWT_SOFTREF,
+    .ref = match_conditions
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, ophead),
+    .type = KWT_SOFTREF,
+    .ref = rewrite_ops
+  },
   { NULL }
 };
 
@@ -3172,11 +3374,32 @@ parse_end_else (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE else_rule_parsetab[] = {
-  { "End", parse_end_else },
-  { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
-  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF, match_conditions },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF, rewrite_ops },
+  {
+    .name = "End",
+    .parser = parse_end_else
+  },
+  {
+    .name = "Rewrite",
+    .parser = parse_sub_rewrite,
+    .off = offsetof (REWRITE_RULE, ophead)
+  },
+  {
+    .name = "Else",
+    .parser = parse_else,
+    .off = offsetof (REWRITE_RULE, iffalse)
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, cond),
+    .type = KWT_SOFTREF,
+    .ref = match_conditions
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, ophead),
+    .type = KWT_SOFTREF,
+    .ref = rewrite_ops
+  },
   { NULL }
 };
 
@@ -3290,16 +3513,34 @@ parse_sub_rewrite (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE match_response_conditions[] = {
-  { "Header", parse_cond_hdr_matcher },
-  { "StringMatch", parse_cond_string_matcher },
-  { "Match", parse_match },
-  { "NOT", parse_not_cond },
+  {
+    .name = "Header",
+    .parser = parse_cond_hdr_matcher
+  },
+  {
+    .name = "StringMatch",
+    .parser = parse_cond_string_matcher
+  },
+  {
+    .name = "Match",
+    .parser = parse_match
+  },
+  {
+    .name = "NOT",
+    .parser = parse_not_cond
+  },
   { NULL }
 };
 
 static PARSER_TABLE rewrite_response_ops[] = {
-  { "SetHeader", parse_set_header },
-  { "DeleteHeader", parse_delete_header },
+  {
+    .name = "SetHeader",
+    .parser = parse_set_header
+  },
+  {
+    .name = "DeleteHeader",
+    .parser = parse_delete_header
+  },
   { NULL },
 };
 
@@ -3307,24 +3548,62 @@ static int parse_response_else (void *call_data, void *section_data);
 static int parse_response_sub_rewrite (void *call_data, void *section_data);
 
 static PARSER_TABLE response_rewrite_rule_parsetab[] = {
-  { "End", parse_end },
-  { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
-  { "Else", parse_response_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF,
-    match_response_conditions },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF,
-    rewrite_response_ops },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Rewrite",
+    .parser = parse_response_sub_rewrite,
+    .off = offsetof (REWRITE_RULE, ophead)
+  },
+  {
+    .name = "Else",
+    .parser = parse_response_else,
+    .off = offsetof (REWRITE_RULE, iffalse)
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, cond),
+    .type = KWT_SOFTREF,
+    .ref = match_response_conditions
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, ophead),
+    .type = KWT_SOFTREF,
+    .ref = rewrite_response_ops
+  },
   { NULL }
 };
 
 static PARSER_TABLE response_else_rule_parsetab[] = {
-  { "End", parse_end_else },
-  { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
-  { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF,
-    match_response_conditions },
-  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF,
-    rewrite_response_ops },
+  {
+    .name = "End",
+    .parser = parse_end_else
+  },
+  {
+    .name = "Rewrite",
+    .parser = parse_response_sub_rewrite,
+    .off = offsetof (REWRITE_RULE, ophead)
+  },
+  {
+    .name = "Else",
+    .parser = parse_else,
+    .off = offsetof (REWRITE_RULE, iffalse)
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, cond),
+    .type = KWT_SOFTREF,
+    .ref = match_response_conditions
+  },
+  {
+    .name = "",
+    .off = offsetof (REWRITE_RULE, ophead),
+    .type = KWT_SOFTREF,
+    .ref = rewrite_response_ops
+  },
   { NULL }
 };
 
@@ -3507,35 +3786,121 @@ parse_log_suppress (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE service_parsetab[] = {
-  { "End", parse_end },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
 
-  { "", NULL, NULL, offsetof (SERVICE, cond), KWT_SOFTREF, match_conditions },
+  {
+    .name = "",
+    .off = offsetof (SERVICE, cond),
+    .type = KWT_SOFTREF,
+    .ref = match_conditions
+  },
 
-  { "Rewrite", parse_rewrite, NULL, offsetof (SERVICE, rewrite) },
-  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (SERVICE, rewrite) },
-  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (SERVICE, rewrite) },
-  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (SERVICE, rewrite) },
-  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (SERVICE, rewrite) },
-  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (SERVICE, rewrite) },
-  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (SERVICE, rewrite) },
+  {
+    .name = "Rewrite",
+    .parser = parse_rewrite,
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "SetHeader",
+    .parser = SETFN_SVC_NAME (set_header),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "DeleteHeader",
+    .parser = SETFN_SVC_NAME (delete_header),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "SetURL",
+    .parser = SETFN_SVC_NAME (set_url),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "SetPath",
+    .parser = SETFN_SVC_NAME (set_path),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "SetQuery",
+    .parser = SETFN_SVC_NAME (set_query),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "SetQueryParam",
+    .parser = SETFN_SVC_NAME (set_query_param),
+    .off = offsetof (SERVICE, rewrite)
+  },
 
-  { "Disabled", assign_bool, NULL, offsetof (SERVICE, disabled) },
-  { "Redirect", parse_redirect_backend, NULL, offsetof (SERVICE, backends) },
-  { "Error", parse_error_backend, NULL, offsetof (SERVICE, backends) },
-  { "Backend", parse_backend, NULL, offsetof (SERVICE, backends) },
-  { "UseBackend", parse_use_backend, NULL, offsetof (SERVICE, backends) },
-  { "Emergency", parse_emergency, NULL, offsetof (SERVICE, emergency) },
-  { "Metrics", parse_metrics, NULL, offsetof (SERVICE, backends) },
-  { "Session", parse_session },
-  { "Balancer", parse_balancer, NULL, offsetof (SERVICE, balancer) },
-  { "ForwardedHeader", assign_string, NULL, offsetof (SERVICE, forwarded_header) },
-  { "TrustedIP", assign_acl, NULL, offsetof (SERVICE, trusted_ips) },
-  { "LogSuppress", parse_log_suppress, NULL, offsetof (SERVICE, log_suppress_mask) },
+  {
+    .name = "Disabled",
+    .parser = assign_bool,
+    .off = offsetof (SERVICE, disabled)
+  },
+  {
+    .name = "Redirect",
+    .parser = parse_redirect_backend,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "Error",
+    .parser = parse_error_backend,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "Backend",
+    .parser = parse_backend,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "UseBackend",
+    .parser = parse_use_backend,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "Emergency",
+    .parser = parse_emergency,
+    .off = offsetof (SERVICE, emergency)
+  },
+  {
+    .name = "Metrics",
+    .parser = parse_metrics,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "Session",
+    .parser = parse_session
+  },
+  {
+    .name = "Balancer",
+    .parser = parse_balancer,
+    .off = offsetof (SERVICE, balancer)
+  },
+  {
+    .name = "ForwardedHeader",
+    .parser = assign_string,
+    .off = offsetof (SERVICE, forwarded_header)
+  },
+  {
+    .name = "TrustedIP",
+    .parser = assign_acl,
+    .off = offsetof (SERVICE, trusted_ips)
+  },
+  {
+    .name = "LogSuppress",
+    .parser = parse_log_suppress,
+    .off = offsetof (SERVICE, log_suppress_mask)
+  },
 
   /* Backward compatibility */
-  { "IgnoreCase", assign_dfl_ignore_case, NULL, 0,
-    KWT_REG, NULL, DEPRECATED,
-    "use -icase flag with the matching statement instead" },
+  {
+    .name = "IgnoreCase",
+    .parser = assign_dfl_ignore_case,
+    .deprecated = 1,
+    .message = "use -icase flag with the matching statement instead"
+  },
 
   { NULL }
 };
@@ -4088,79 +4453,237 @@ parse_header_options (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE http_common[] = {
-  { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
-  { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
-  { "SocketFrom", listener_parse_socket_from },
-  { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
-  { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
-  { "CheckURL", listener_parse_checkurl },
-  { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
-  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req_size) },
-  { "MaxURI", assign_unsigned, NULL, offsetof (LISTENER, max_uri_length) },
+  {
+    .name = "Address",
+    .parser = assign_address,
+    .off = offsetof (LISTENER, addr)
+  },
+  {
+    .name = "Port",
+    .parser = assign_port,
+    .off = offsetof (LISTENER, addr)
+  },
+  {
+    .name = "SocketFrom",
+    .parser = listener_parse_socket_from
+  },
+  {
+    .name = "xHTTP",
+    .parser = listener_parse_xhttp,
+    .off = offsetof (LISTENER, verb)
+  },
+  {
+    .name = "Client",
+    .parser = assign_timeout,
+    .off = offsetof (LISTENER, to)
+  },
+  {
+    .name = "CheckURL",
+    .parser = listener_parse_checkurl
+  },
+  {
+    .name = "ErrorFile",
+    .parser = parse_errorfile,
+    .off = offsetof (LISTENER, http_err)
+  },
+  {
+    .name = "MaxRequest",
+    .parser = assign_CONTENT_LENGTH,
+    .off = offsetof (LISTENER, max_req_size)
+  },
+  {
+    .name = "MaxURI",
+    .parser = assign_unsigned,
+    .off = offsetof (LISTENER, max_uri_length)
+  },
 
-  { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
-  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderAdd", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
-  { "AddHeader", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
-  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
-    KWT_REG, NULL, DEPRECATED, "use \"DeleteHeader\" instead" },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
-    KWT_REG, NULL, DEPRECATED, "use \"DeleteHeader\" instead" },
-  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (LISTENER, rewrite) },
-  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
-  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
-  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
+  {
+    .name = "Rewrite",
+    .parser = parse_rewrite,
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "SetHeader",
+    .parser = SETFN_SVC_NAME (set_header),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "HeaderAdd",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "AddHeader",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "DeleteHeader",
+    .parser = SETFN_SVC_NAME (delete_header),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "HeaderRemove",
+    .parser = parse_header_remove,
+    .off = offsetof (LISTENER, rewrite),
+    .deprecated = 1,
+    .message = "use \"DeleteHeader\" instead"
+  },
+  {
+    .name = "HeadRemove",
+    .type = KWT_ALIAS,
+    .deprecated = 1,
+    .message = "use \"DeleteHeader\" instead"
+  },
+  {
+    .name = "SetURL",
+    .parser = SETFN_SVC_NAME (set_url),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "SetPath",
+    .parser = SETFN_SVC_NAME (set_path),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "SetQuery",
+    .parser = SETFN_SVC_NAME (set_query),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "SetQueryParam",
+    .parser = SETFN_SVC_NAME (set_query_param),
+    .off = offsetof (LISTENER, rewrite)
+  },
 
-  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
+  {
+    .name = "HeaderOption",
+    .parser = parse_header_options,
+    .off = offsetof (LISTENER, header_options)
+  },
 
-  { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
-  { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
-  { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
-  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
+  {
+    .name = "RewriteLocation",
+    .parser = parse_rewritelocation,
+    .off = offsetof (LISTENER, rewr_loc)
+  },
+  {
+    .name = "RewriteDestination",
+    .parser = assign_bool,
+    .off = offsetof (LISTENER, rewr_dest)
+  },
+  {
+    .name = "LogLevel",
+    .parser = parse_log_level,
+    .off = offsetof (LISTENER, log_level)
+  },
+  {
+    .name = "ForwardedHeader",
+    .parser = assign_string,
+    .off = offsetof (LISTENER, forwarded_header)
+  },
+  {
+    .name = "TrustedIP",
+    .parser = assign_acl,
+    .off = offsetof (LISTENER, trusted_ips)
+  },
+  {
+    .name = "Service",
+    .parser = parse_service,
+    .off = offsetof (LISTENER, services)
+  },
   { NULL }
 };
 
 static PARSER_TABLE http_deprecated[] = {
   /* Backward compatibility */
-  { "Err400", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 400\" instead" },
-  { "Err401", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 401\" instead" },
-  { "Err403", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 403\" instead" },
-  { "Err404", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 404\" instead" },
-  { "Err413", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 413\" instead" },
-  { "Err414", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 414\" instead" },
-  { "Err500", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 500\" instead" },
-  { "Err501", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 501\" instead" },
-  { "Err503", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
-    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 503\" instead" },
+  {
+    .name = "Err400",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 400\" instead"
+  },
+  {
+    .name = "Err401",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 401\" instead"
+  },
+  {
+    .name = "Err403",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 403\" instead"
+  },
+  {
+    .name = "Err404",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 404\" instead"
+  },
+  {
+    .name = "Err413",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 413\" instead"
+  },
+  {
+    .name = "Err414",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 414\" instead"
+  },
+  {
+    .name = "Err500",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 500\" instead"
+  },
+  {
+    .name = "Err501",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 501\" instead"
+  },
+  {
+    .name = "Err503",
+    .parser = assign_string_from_file,
+    .off = offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
+    .deprecated = 1,
+    .message = "use \"ErrorFile 503\" instead"
+  },
 
   { NULL }
 };
 
 static PARSER_TABLE http_parsetab[] = {
-  { "End", parse_end },
-  { "", NULL, NULL, 0, KWT_TABREF, http_common },
-  { "", NULL, NULL, 0, KWT_TABREF, http_deprecated },
-  { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_common
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_deprecated
+  },
+  {
+    .name = "ACME",
+    .parser = parse_acme,
+    .off = offsetof (LISTENER, services)
+  },
 
   { NULL }
 };
@@ -4748,21 +5271,62 @@ https_parse_nohttps11 (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE https_parsetab[] = {
-  { "End", parse_end },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
 
-  { "", NULL, NULL, 0, KWT_TABREF, http_common },
-  { "", NULL, NULL, 0, KWT_TABREF, http_deprecated },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_common
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_deprecated
+  },
 
-  { "Cert", https_parse_cert },
-  { "ClientCert", https_parse_client_cert },
-  { "Disable", https_parse_disable },
-  { "Ciphers", https_parse_ciphers },
-  { "SSLHonorCipherOrder", https_parse_honor_cipher_order },
-  { "SSLAllowClientRenegotiation", https_parse_allow_client_renegotiation },
-  { "CAlist", https_parse_calist },
-  { "VerifyList", https_parse_verifylist },
-  { "CRLlist", https_parse_crlist },
-  { "NoHTTPS11", https_parse_nohttps11 },
+  {
+    .name = "Cert",
+    .parser = https_parse_cert
+  },
+  {
+    .name = "ClientCert",
+    .parser = https_parse_client_cert
+  },
+  {
+    .name = "Disable",
+    .parser = https_parse_disable
+  },
+  {
+    .name = "Ciphers",
+    .parser = https_parse_ciphers
+  },
+  {
+    .name = "SSLHonorCipherOrder",
+    .parser = https_parse_honor_cipher_order
+  },
+  {
+    .name = "SSLAllowClientRenegotiation",
+    .parser = https_parse_allow_client_renegotiation
+  },
+  {
+    .name = "CAlist",
+    .parser = https_parse_calist
+  },
+  {
+    .name = "VerifyList",
+    .parser = https_parse_verifylist
+  },
+  {
+    .name = "CRLlist",
+    .parser = https_parse_crlist
+  },
+  {
+    .name = "NoHTTPS11",
+    .parser = https_parse_nohttps11
+  },
 
   { NULL }
 };
@@ -4900,10 +5464,25 @@ parse_control_socket (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE control_parsetab[] = {
-  { "End",         parse_end },
-  { "Socket",      parse_control_socket, NULL, offsetof (LISTENER, addr) },
-  { "ChangeOwner", assign_bool, NULL, offsetof (LISTENER, chowner) },
-  { "Mode",        assign_mode, NULL, offsetof (LISTENER, mode) },
+  {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
+    .name = "Socket",
+    .parser = parse_control_socket,
+    .off = offsetof (LISTENER, addr)
+  },
+  {
+    .name = "ChangeOwner",
+    .parser = assign_bool,
+    .off = offsetof (LISTENER, chowner)
+  },
+  {
+    .name = "Mode",
+    .parser = assign_mode,
+    .off = offsetof (LISTENER, mode)
+  },
   { NULL }
 };
 
@@ -5070,47 +5649,186 @@ parse_combine_headers (void *call_data, void *section_data)
 }
 
 static PARSER_TABLE top_level_parsetab[] = {
-  { "IncludeDir", parse_includedir },
-  { "User", assign_string, &user },
-  { "Group", assign_string, &group },
-  { "RootJail", assign_string, &root_jail },
-  { "Daemon", assign_bool, &daemonize },
-  { "Supervisor", assign_bool, &enable_supervisor },
-  { "WorkerMinCount", assign_unsigned, &worker_min_count },
-  { "WorkerMaxCount", assign_unsigned, &worker_max_count },
-  { "Threads", parse_threads_compat },
-  { "WorkerIdleTimeout", assign_timeout, &worker_idle_timeout },
-  { "Grace", assign_timeout, &grace },
-  { "LogFacility", assign_log_facility, NULL, offsetof (POUND_DEFAULTS, facility) },
-  { "LogLevel", parse_log_level, NULL, offsetof (POUND_DEFAULTS, log_level) },
-  { "LogFormat", parse_log_format },
-  { "Alive", assign_timeout, &alive_to },
-  { "Client", assign_timeout, NULL, offsetof (POUND_DEFAULTS, clnt_to) },
-  { "TimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_to) },
-  { "WSTimeOut", assign_timeout, NULL, offsetof (POUND_DEFAULTS, ws_to) },
-  { "ConnTO", assign_timeout, NULL, offsetof (POUND_DEFAULTS, be_connto) },
-  { "Balancer", parse_balancer, NULL, offsetof (POUND_DEFAULTS, balancer) },
-  { "HeaderOption", parse_header_options, NULL, offsetof (POUND_DEFAULTS, header_options) },
-  { "ECDHCurve", parse_ECDHCurve },
-  { "SSLEngine", parse_SSLEngine },
-  { "Control", parse_control },
-  { "Anonymise", int_set_one, &anonymise },
-  { "Anonymize", int_set_one, &anonymise },
-  { "Service", parse_service, &services },
-  { "Backend", parse_named_backend, NULL, offsetof (POUND_DEFAULTS, named_backend_table) },
-  { "ListenHTTP", parse_listen_http, &listeners },
-  { "ListenHTTPS", parse_listen_https, &listeners },
-  { "ACL", parse_named_acl, NULL },
-  { "PidFile", assign_string, &pid_name },
-  { "BackendStats", assign_bool, &enable_backend_stats },
-  { "ForwardedHeader", assign_string, &forwarded_header },
-  { "TrustedIP", assign_acl, &trusted_ips },
-  { "CombineHeaders", parse_combine_headers },
+  {
+    .name = "IncludeDir",
+    .parser = parse_includedir
+  },
+  {
+    .name = "User",
+    .parser = assign_string,
+    .data = &user
+  },
+  {
+    .name = "Group",
+    .parser = assign_string,
+    .data = &group
+  },
+  {
+    .name = "RootJail",
+    .parser = assign_string,
+    .data = &root_jail
+  },
+  {
+    .name = "Daemon",
+    .parser = assign_bool,
+    .data = &daemonize
+  },
+  {
+    .name = "Supervisor",
+    .parser = assign_bool,
+    .data = &enable_supervisor
+  },
+  {
+    .name = "WorkerMinCount",
+    .parser = assign_unsigned,
+    .data = &worker_min_count
+  },
+  {
+    .name = "WorkerMaxCount",
+    .parser = assign_unsigned,
+    .data = &worker_max_count
+  },
+  {
+    .name = "Threads",
+    .parser = parse_threads_compat
+  },
+  {
+    .name = "WorkerIdleTimeout",
+    .parser = assign_timeout,
+    .data = &worker_idle_timeout
+  },
+  {
+    .name = "Grace",
+    .parser = assign_timeout,
+    .data = &grace
+  },
+  {
+    .name = "LogFacility",
+    .parser = assign_log_facility,
+    .off = offsetof (POUND_DEFAULTS, facility)
+  },
+  {
+    .name = "LogLevel",
+    .parser = parse_log_level,
+    .off = offsetof (POUND_DEFAULTS, log_level)
+  },
+  {
+    .name = "LogFormat",
+    .parser = parse_log_format
+  },
+  {
+    .name = "Alive",
+    .parser = assign_timeout,
+    .data = &alive_to
+  },
+  {
+    .name = "Client",
+    .parser = assign_timeout,
+    .off = offsetof (POUND_DEFAULTS, clnt_to)
+  },
+  {
+    .name = "TimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (POUND_DEFAULTS, be_to)
+  },
+  {
+    .name = "WSTimeOut",
+    .parser = assign_timeout,
+    .off = offsetof (POUND_DEFAULTS, ws_to)
+  },
+  {
+    .name = "ConnTO",
+    .parser = assign_timeout,
+    .off = offsetof (POUND_DEFAULTS, be_connto)
+  },
+  {
+    .name = "Balancer",
+    .parser = parse_balancer,
+    .off = offsetof (POUND_DEFAULTS, balancer)
+  },
+  {
+    .name = "HeaderOption",
+    .parser = parse_header_options,
+    .off = offsetof (POUND_DEFAULTS, header_options)
+  },
+  {
+    .name = "ECDHCurve",
+    .parser = parse_ECDHCurve
+  },
+  {
+    .name = "SSLEngine",
+    .parser = parse_SSLEngine
+  },
+  {
+    .name = "Control",
+    .parser = parse_control
+  },
+  {
+    .name = "Anonymise",
+    .parser = int_set_one,
+    .data = &anonymise
+  },
+  {
+    .name = "Anonymize",
+    .type = KWT_ALIAS
+  },
+  {
+    .name = "Service",
+    .parser = parse_service,
+    .data = &services
+  },
+  {
+    .name = "Backend",
+    .parser = parse_named_backend,
+    .off = offsetof (POUND_DEFAULTS, named_backend_table)
+  },
+  {
+    .name = "ListenHTTP",
+    .parser = parse_listen_http,
+    .data = &listeners
+  },
+  {
+    .name = "ListenHTTPS",
+    .parser = parse_listen_https,
+    .data = &listeners
+  },
+  {
+    .name = "ACL",
+    .parser = parse_named_acl
+  },
+  {
+    .name = "PidFile",
+    .parser = assign_string,
+    .data = &pid_name
+  },
+  {
+    .name = "BackendStats",
+    .parser = assign_bool,
+    .data = &enable_backend_stats
+  },
+  {
+    .name = "ForwardedHeader",
+    .parser = assign_string,
+    .data = &forwarded_header
+  },
+  {
+    .name = "TrustedIP",
+    .parser = assign_acl,
+    .data = &trusted_ips
+  },
+  {
+    .name = "CombineHeaders",
+    .parser = parse_combine_headers
+  },
 
   /* Backward compatibility. */
-  { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case),
-    KWT_REG, NULL, DEPRECATED,
-    "use -icase flag with the matching statement instead" },
+  {
+    .name = "IgnoreCase",
+    .parser = assign_bool,
+    .off = offsetof (POUND_DEFAULTS, ignore_case),
+    .deprecated = 1,
+    .message = "use -icase flag with the matching statement instead"
+  },
 
   { NULL }
 };
@@ -5360,9 +6078,9 @@ static struct pound_feature feature[] = {
     .enabled = F_DFL,
     .setfn = set_include_dir
   },
-  [FEATURE_DEPRECATION] = {
-    .name = "deprecation",
-    .descr = "warn if deprecated configuration statements are used",
+  [FEATURE_WARN_DEPRECATED] = {
+    .name = "warn-deprecated",
+    .descr = "warn if deprecated configuration statements are used (default)",
     .enabled = F_DFL,
   },
   { NULL }
