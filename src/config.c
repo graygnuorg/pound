@@ -952,6 +952,16 @@ enum
 
 typedef int (*PARSER) (void *, void *);
 
+enum keyword_type
+  {
+    KWT_REG,          /* Regular keyword */
+    KWT_ALIAS,        /* Alias to another keyword */
+    KWT_TABREF,       /* Reference to another table */
+    KWT_SOFTREF,      /* Same as above, but overrides data/off pair of it. */
+  };
+
+#define DEPRECATED 1
+
 typedef struct parser_table
 {
   char *name;        /* The keyword. */
@@ -960,18 +970,64 @@ typedef struct parser_table
 			parameter. */
   size_t off;        /* Offset data by this number of bytes before passing. */
 
+  enum keyword_type type;  /* Entry type. */
+
+  /* For KWT_TABREF & KWT_SOFTREF */
+  struct parser_table *ref;
+
   /* For deprecated statements: */
-  char *deprecation; /* Deprecation message or the keyword to use instead of
-			this. */
-  int full_message;  /* If 1, deprecation contains full message. */
+  int deprecated;    /* Whether the statement is deprecated. */
+  char *message;     /* Deprecation message. For KWT_ALIAS it can be NULL,
+		        in which case a default message will be generated. */
 } PARSER_TABLE;
 
+/*
+ * Find in TAB an entry describing the keyword NAME.  If the keyword is an
+ * alias to another one, return the aliased keyword, and place in *REF a
+ * pointer to the entry describing the alias.  Otherwise, initialize *REF to
+ * NULL.
+ *
+ * Instead of returning a pointer to the TAB entry itself, copy it to *BUF
+ * first and return BUF.
+ */
 static PARSER_TABLE *
-parser_find (PARSER_TABLE *tab, char const *name)
+parser_find (PARSER_TABLE *tab, char const *name, PARSER_TABLE *buf,
+	     PARSER_TABLE **ref)
 {
-  for (; tab->name; tab++)
-    if (strcasecmp (tab->name, name) == 0)
-      return tab;
+  PARSER_TABLE *p;
+
+  *ref = NULL;
+  for (p = tab; p->name; p++)
+    {
+      if (p->type == KWT_TABREF)
+	{
+	  PARSER_TABLE *result = parser_find (p->ref, name, buf, ref);
+	  if (result)
+	    return result;
+	}
+      else if (p->type == KWT_SOFTREF)
+	{
+	  PARSER_TABLE *result = parser_find (p->ref, name, buf, ref);
+	  if (result)
+	    {
+	      result->data = p->data;
+	      result->off = p->off;
+	      return result;
+	    }
+	}
+      else if (strcasecmp (p->name, name) == 0)
+	{
+	  *ref = p;
+	  if (p->type == KWT_ALIAS)
+	    {
+	      while (p > tab && p->type == KWT_ALIAS)
+		p--;
+	      assert (p->type == KWT_REG);
+	    }
+	  *buf = *p;
+	  return buf;
+	}
+    }
   return NULL;
 }
 
@@ -1016,24 +1072,23 @@ parse_statement (PARSER_TABLE *ptab, void *call_data, void *section_data,
 
       if (tok->type == T_IDENT)
 	{
-	  PARSER_TABLE *ent = parser_find (ptab, tok->str);
+	  PARSER_TABLE buf, *ref, *ent = parser_find (ptab, tok->str, &buf, &ref);
 
 	  if (!single_statement && ent == NULL)
-	    ent = parser_find (global_parsetab, tok->str);
+	    ent = parser_find (global_parsetab, tok->str, &buf, &ref);
+
+	  if (ref && ref->deprecated && feature_is_set (FEATURE_DEPRECATION))
+	    {
+	      if (ent->message)
+		conf_error ("warning: deprecated statement, %s", ref->message);
+	      else
+		conf_error ("warning: deprecated statement,"
+			    " use \"%s\" instead", ent->name);
+	    }
 
 	  if (ent)
 	    {
 	      void *data = ent->data ? ent->data : call_data;
-
-	      if (ent->deprecation && feature_is_set (FEATURE_DEPRECATION))
-		{
-		  if (ent->full_message)
-		    conf_error ("warning: deprecated statement, %s",
-				ent->deprecation);
-		  else
-		    conf_error ("warning: deprecated statement,"
-				" use \"%s\" instead", ent->deprecation);
-		}
 
 	      switch (ent->parser ((char*)data + ent->off, section_data))
 		{
@@ -3031,24 +3086,26 @@ parse_match (void *call_data, void *section_data)
 
 static int parse_not_cond (void *call_data, void *section_data);
 
-#define MATCH_CONDITIONS(data, off)				\
-  { "ACL", parse_cond_acl, data, off },				\
-  { "URL", parse_cond_url_matcher, data, off },			\
-  { "Path", parse_cond_path_matcher, data, off },		\
-  { "Query", parse_cond_query_matcher, data, off },		\
-  { "QueryParam", parse_cond_query_param_matcher, data, off },	\
-  { "Header", parse_cond_hdr_matcher, data, off },		\
-  { "Host", parse_cond_host, data, off },			\
-  { "BasicAuth", parse_cond_basic_auth, data, off },		\
-  { "StringMatch", parse_cond_string_matcher, data, off },	\
-  { "Match", parse_match, data, off },				\
-  { "NOT", parse_not_cond, data, off },				\
-    /* compatibility keywords */				\
-  { "HeadRequire", parse_cond_hdr_matcher, data, off, "Header" },	\
-  { "HeadDeny", parse_cond_head_deny_matcher, data, off, "Not Header" }
+static PARSER_TABLE match_conditions[] = {
+  { "ACL", parse_cond_acl },
+  { "URL", parse_cond_url_matcher },
+  { "Path", parse_cond_path_matcher },
+  { "Query", parse_cond_query_matcher },
+  { "QueryParam", parse_cond_query_param_matcher },
+  { "Header", parse_cond_hdr_matcher },
+  { "HeadRequire", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
+  { "HeadDeny", parse_cond_head_deny_matcher, NULL, 0,
+    KWT_REG, NULL, DEPRECATED, "use \"Not Header\" instead" },
+  { "Host", parse_cond_host },
+  { "BasicAuth", parse_cond_basic_auth },
+  { "StringMatch", parse_cond_string_matcher },
+  { "Match", parse_match },
+  { "NOT", parse_not_cond },
+  { NULL }
+};
 
 static PARSER_TABLE negate_parsetab[] = {
-  MATCH_CONDITIONS (NULL, 0),
+  { "", NULL, NULL, 0, KWT_SOFTREF, match_conditions },
   { NULL }
 };
 
@@ -3062,7 +3119,7 @@ parse_not_cond (void *call_data, void *section_data)
 
 static PARSER_TABLE logcon_parsetab[] = {
   { "End", parse_end },
-  MATCH_CONDITIONS (NULL, 0),
+  { "", NULL, NULL, 0, KWT_SOFTREF, match_conditions },
   { NULL }
 };
 
@@ -3086,20 +3143,22 @@ static int parse_set_query (void *call_data, void *section_data);
 static int parse_set_query_param (void *call_data, void *section_data);
 static int parse_sub_rewrite (void *call_data, void *section_data);
 
-#define REWRITE_OPS(data, off)						\
-  { "SetHeader", parse_set_header, data, off },				\
-  { "DeleteHeader", parse_delete_header, data, off },			\
-  { "SetURL", parse_set_url, data, off },				\
-  { "SetPath", parse_set_path, data, off },				\
-  { "SetQuery", parse_set_query, data, off },				\
-  { "SetQueryParam", parse_set_query_param, data, off }
+static PARSER_TABLE rewrite_ops[] = {
+  { "SetHeader", parse_set_header },
+  { "DeleteHeader", parse_delete_header },
+  { "SetURL", parse_set_url },
+  { "SetPath", parse_set_path },
+  { "SetQuery", parse_set_query },
+  { "SetQueryParam", parse_set_query_param },
+  { NULL }
+};
 
 static PARSER_TABLE rewrite_rule_parsetab[] = {
   { "End", parse_end },
   { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
   { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  MATCH_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
-  REWRITE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF, match_conditions },
+  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF, rewrite_ops },
   { NULL }
 };
 
@@ -3116,8 +3175,8 @@ static PARSER_TABLE else_rule_parsetab[] = {
   { "End", parse_end_else },
   { "Rewrite", parse_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
   { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  MATCH_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
-  REWRITE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF, match_conditions },
+  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF, rewrite_ops },
   { NULL }
 };
 
@@ -3230,15 +3289,19 @@ parse_sub_rewrite (void *call_data, void *section_data)
   return parser_loop (rewrite_rule_parsetab, op->v.rule, section_data, NULL);
 }
 
-#define MATCH_RESPONSE_CONDITIONS(data, off)			\
-  { "Header", parse_cond_hdr_matcher, data, off },		\
-  { "StringMatch", parse_cond_string_matcher, data, off },	\
-  { "Match", parse_match, data, off },				\
-  { "NOT", parse_not_cond, data, off }
+static PARSER_TABLE match_response_conditions[] = {
+  { "Header", parse_cond_hdr_matcher },
+  { "StringMatch", parse_cond_string_matcher },
+  { "Match", parse_match },
+  { "NOT", parse_not_cond },
+  { NULL }
+};
 
-#define REWRITE_RESPONSE_OPS(data, off)						\
-  { "SetHeader", parse_set_header, data, off },				\
-  { "DeleteHeader", parse_delete_header, data, off }
+static PARSER_TABLE rewrite_response_ops[] = {
+  { "SetHeader", parse_set_header },
+  { "DeleteHeader", parse_delete_header },
+  { NULL },
+};
 
 static int parse_response_else (void *call_data, void *section_data);
 static int parse_response_sub_rewrite (void *call_data, void *section_data);
@@ -3247,8 +3310,10 @@ static PARSER_TABLE response_rewrite_rule_parsetab[] = {
   { "End", parse_end },
   { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
   { "Else", parse_response_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  MATCH_RESPONSE_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
-  REWRITE_RESPONSE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF,
+    match_response_conditions },
+  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF,
+    rewrite_response_ops },
   { NULL }
 };
 
@@ -3256,8 +3321,10 @@ static PARSER_TABLE response_else_rule_parsetab[] = {
   { "End", parse_end_else },
   { "Rewrite", parse_response_sub_rewrite, NULL, offsetof (REWRITE_RULE, ophead) },
   { "Else", parse_else, NULL, offsetof (REWRITE_RULE, iffalse) },
-  MATCH_RESPONSE_CONDITIONS (NULL, offsetof (REWRITE_RULE, cond)),
-  REWRITE_RESPONSE_OPS (NULL, offsetof (REWRITE_RULE, ophead)),
+  { "", NULL, NULL, offsetof (REWRITE_RULE, cond), KWT_SOFTREF,
+    match_response_conditions },
+  { "", NULL, NULL, offsetof (REWRITE_RULE, ophead), KWT_SOFTREF,
+    rewrite_response_ops },
   { NULL }
 };
 
@@ -3442,7 +3509,7 @@ parse_log_suppress (void *call_data, void *section_data)
 static PARSER_TABLE service_parsetab[] = {
   { "End", parse_end },
 
-  MATCH_CONDITIONS (NULL, offsetof (SERVICE, cond)),
+  { "", NULL, NULL, offsetof (SERVICE, cond), KWT_SOFTREF, match_conditions },
 
   { "Rewrite", parse_rewrite, NULL, offsetof (SERVICE, rewrite) },
   { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (SERVICE, rewrite) },
@@ -3467,7 +3534,8 @@ static PARSER_TABLE service_parsetab[] = {
 
   /* Backward compatibility */
   { "IgnoreCase", assign_dfl_ignore_case, NULL, 0,
-    "use -icase flag with the matching statement instead", 1 },
+    KWT_REG, NULL, DEPRECATED,
+    "use -icase flag with the matching statement instead" },
 
   { NULL }
 };
@@ -4019,8 +4087,7 @@ parse_header_options (void *call_data, void *section_data)
   return PARSER_OK_NONL;
 }
 
-static PARSER_TABLE http_parsetab[] = {
-  { "End", parse_end },
+static PARSER_TABLE http_common[] = {
   { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
   { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
   { "SocketFrom", listener_parse_socket_from },
@@ -4030,9 +4097,16 @@ static PARSER_TABLE http_parsetab[] = {
   { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
   { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req_size) },
   { "MaxURI", assign_unsigned, NULL, offsetof (LISTENER, max_uri_length) },
+
   { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
   { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderAdd", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
+  { "AddHeader", NULL, NULL, 0, KWT_ALIAS, NULL, DEPRECATED },
   { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
+  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
+    KWT_REG, NULL, DEPRECATED, "use \"DeleteHeader\" instead" },
+  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
+    KWT_REG, NULL, DEPRECATED, "use \"DeleteHeader\" instead" },
   { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (LISTENER, rewrite) },
   { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
   { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
@@ -4043,49 +4117,50 @@ static PARSER_TABLE http_parsetab[] = {
   { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
   { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
   { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
-  { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
   { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
   { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
+  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
+  { NULL }
+};
 
+static PARSER_TABLE http_deprecated[] = {
   /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL,
-    offsetof (LISTENER, rewrite),
-    "SetHeader" },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL,
-    offsetof (LISTENER, rewrite),
-    "SetHeader" },
-  { "HeaderRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
-    "DeleteHeader" },
-  { "HeadRemove", parse_header_remove, NULL, offsetof (LISTENER, rewrite),
-    "DeleteHeader" },
   { "Err400", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
-    "ErrorFile 400" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 400\" instead" },
   { "Err401", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
-    "ErrorFile 401" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 401\" instead" },
   { "Err403", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
-    "ErrorFile 403" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 403\" instead" },
   { "Err404", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
-    "ErrorFile 404" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 404\" instead" },
   { "Err413", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
-    "ErrorFile 413" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 413\" instead" },
   { "Err414", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
-    "ErrorFile 414" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 414\" instead" },
   { "Err500", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
-    "ErrorFile 500" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 500\" instead" },
   { "Err501", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
-    "ErrorFile 501" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 501\" instead" },
   { "Err503", assign_string_from_file, NULL,
     offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
-    "ErrorFile 503" },
+    KWT_REG, NULL, DEPRECATED, "use \"ErrorFile 503\" instead" },
+
+  { NULL }
+};
+
+static PARSER_TABLE http_parsetab[] = {
+  { "End", parse_end },
+  { "", NULL, NULL, 0, KWT_TABREF, http_common },
+  { "", NULL, NULL, 0, KWT_TABREF, http_deprecated },
+  { "ACME", parse_acme, NULL, offsetof (LISTENER, services) },
 
   { NULL }
 };
@@ -4674,32 +4749,10 @@ https_parse_nohttps11 (void *call_data, void *section_data)
 
 static PARSER_TABLE https_parsetab[] = {
   { "End", parse_end },
-  { "Address", assign_address, NULL, offsetof (LISTENER, addr) },
-  { "Port", assign_port, NULL, offsetof (LISTENER, addr) },
-  { "SocketFrom", listener_parse_socket_from },
-  { "xHTTP", listener_parse_xhttp, NULL, offsetof (LISTENER, verb) },
-  { "Client", assign_timeout, NULL, offsetof (LISTENER, to) },
-  { "CheckURL", listener_parse_checkurl },
-  { "ErrorFile", parse_errorfile, NULL, offsetof (LISTENER, http_err) },
-  { "MaxRequest", assign_CONTENT_LENGTH, NULL, offsetof (LISTENER, max_req_size) },
-  { "MaxURI", assign_unsigned, NULL, offsetof (LISTENER, max_uri_length) },
 
-  { "Rewrite", parse_rewrite, NULL, offsetof (LISTENER, rewrite) },
-  { "SetHeader", SETFN_SVC_NAME (set_header), NULL, offsetof (LISTENER, rewrite) },
-  { "DeleteHeader", SETFN_SVC_NAME (delete_header), NULL, offsetof (LISTENER, rewrite) },
-  { "SetURL", SETFN_SVC_NAME (set_url), NULL, offsetof (LISTENER, rewrite) },
-  { "SetPath", SETFN_SVC_NAME (set_path), NULL, offsetof (LISTENER, rewrite) },
-  { "SetQuery", SETFN_SVC_NAME (set_query), NULL, offsetof (LISTENER, rewrite) },
-  { "SetQueryParam", SETFN_SVC_NAME (set_query_param), NULL, offsetof (LISTENER, rewrite) },
+  { "", NULL, NULL, 0, KWT_TABREF, http_common },
+  { "", NULL, NULL, 0, KWT_TABREF, http_deprecated },
 
-  { "HeaderOption", parse_header_options, NULL, offsetof (LISTENER, header_options) },
-
-  { "RewriteLocation", parse_rewritelocation, NULL, offsetof (LISTENER, rewr_loc) },
-  { "RewriteDestination", assign_bool, NULL, offsetof (LISTENER, rewr_dest) },
-  { "LogLevel", parse_log_level, NULL, offsetof (LISTENER, log_level) },
-  { "ForwardedHeader", assign_string, NULL, offsetof (LISTENER, forwarded_header) },
-  { "TrustedIP", assign_acl, NULL, offsetof (LISTENER, trusted_ips) },
-  { "Service", parse_service, NULL, offsetof (LISTENER, services) },
   { "Cert", https_parse_cert },
   { "ClientCert", https_parse_client_cert },
   { "Disable", https_parse_disable },
@@ -4711,46 +4764,6 @@ static PARSER_TABLE https_parsetab[] = {
   { "CRLlist", https_parse_crlist },
   { "NoHTTPS11", https_parse_nohttps11 },
 
-  /* Backward compatibility */
-  { "HeaderAdd", SETFN_SVC_NAME (set_header), NULL,
-    offsetof (LISTENER, rewrite),
-    "SetHeader" },
-  { "AddHeader", SETFN_SVC_NAME (set_header), NULL,
-    offsetof (LISTENER, rewrite),
-    "SetHeader" },
-  { "HeaderRemove", parse_header_remove, NULL,
-    offsetof (LISTENER, rewrite),
-    "DeleteHeader" },
-  { "HeadRemove", parse_header_remove, NULL,
-    offsetof (LISTENER, rewrite),
-    "DeleteHeader" },
-  { "Err400", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
-    "ErrorFile 400" },
-  { "Err401", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
-    "ErrorFile 401" },
-  { "Err403", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
-    "ErrorFile 403" },
-  { "Err404", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
-    "ErrorFile 404" },
-  { "Err413", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
-    "ErrorFile 413" },
-  { "Err414", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
-    "ErrorFile 414" },
-  { "Err500", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
-    "ErrorFile 500" },
-  { "Err501", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
-    "ErrorFile 501" },
-  { "Err503", assign_string_from_file, NULL,
-    offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
-    "ErrorFile 503" },
   { NULL }
 };
 
@@ -5096,7 +5109,8 @@ static PARSER_TABLE top_level_parsetab[] = {
 
   /* Backward compatibility. */
   { "IgnoreCase", assign_bool, NULL, offsetof (POUND_DEFAULTS, ignore_case),
-    "use -icase flag with the matching statement instead", 1 },
+    KWT_REG, NULL, DEPRECATED,
+    "use -icase flag with the matching statement instead" },
 
   { NULL }
 };
