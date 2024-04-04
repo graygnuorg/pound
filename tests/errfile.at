@@ -20,14 +20,14 @@ m4_pushdef([ERR501],
 <head><title>Custom Bad Method Error</title></head>
 <body>
 <p>This method is not allowed.</p>
-<p>This is custom error page was supplied using the Err501 directive.</p>
+<p>This is custom error page was supplied using the ErrorFile directive.</p>
 </body>])
 
 AT_DATA([501.html],[ERR501
 ])
 
 PT_CHECK([ListenHTTP
-	Err501 "501.html"
+	ErrorFile 501 "501.html"
 	Service
 		Backend
 			Address

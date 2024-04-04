@@ -13,11 +13,21 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([AddHeader])
-AT_KEYWORDS([deprecated addheader])
+AT_SETUP([ErrNNN])
+AT_KEYWORDS([errfile err])
+m4_pushdef([ERR501],
+[<html>
+<head><title>Custom Bad Method Error</title></head>
+<body>
+<p>This method is not allowed.</p>
+<p>This is custom error page was supplied using the Err501 directive.</p>
+</body>])
+
+AT_DATA([501.html],[ERR501
+])
+
 PT_CHECK([ListenHTTP
-	AddHeader "X-Foo: bar"
-	AddHeader "X-Passed-Through: pound"
+	Err501 "501.html"
 	Service
 		Backend
 			Address
@@ -26,12 +36,15 @@ PT_CHECK([ListenHTTP
 	End
 End
 ],
-[GET /echo/X
+[PUT /echo/file
 end
 
-200
-X-Orig-Header-X-Foo: bar
-X-Orig-Header-X-Passed-Through: pound
+501
+
+ERR501
 end
 ])
+
+m4_popdef([ERR501])
+
 AT_CLEANUP

@@ -35,14 +35,14 @@ m4_pushdef([ERR404],
 <head><title>Custom Not Found Error</title></head>
 <body>
 <p>The requested resource is not found on that server.</p>
-<p>This custom error page was supplied using the Err404 directive.</p>
+<p>This custom error page was supplied using the ErrorFile directive.</p>
 </body>])
 
 AT_DATA([404.html],[ERR404
 ])
 
 PT_CHECK([ListenHTTP
-	Err404 "404.html"
+	ErrorFile 404 "404.html"
 	Service
 		Error 404
 	End

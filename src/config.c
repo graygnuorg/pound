@@ -1297,7 +1297,17 @@ assign_string_from_file (void *call_data, void *section_data)
       conf_error ("can't stat %s: %s", tok->str, strerror (errno));
       return PARSER_FAIL;
     }
-  // FIXME: Check st_size bounds.
+  if (!S_ISREG (st.st_mode))
+    {
+      conf_error ("%s: not a regular file", tok->str);
+      return PARSER_FAIL;
+    }
+  if (st.st_size == 0)
+    {
+      conf_error ("%s: empty file", tok->str);
+      return PARSER_FAIL;
+    }
+  // FIXME: Check st_size upper bound?
   s = xmalloc (st.st_size + 1);
   if (fread (s, st.st_size, 1, fp) != 1)
     {

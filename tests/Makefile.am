@@ -73,6 +73,7 @@ TESTSUITE_AT = \
  config.at\
  disable.at\
  echo.at\
+ err501.at\
  errfile.at\
  error.at\
  experr.at\
@@ -124,6 +125,7 @@ TESTSUITE_AT = \
  template.at\
  url.at\
  virthost.at\
+ warndep.at\
  xhttp.at
 
 noinst_PROGRAMS = tmplrun
