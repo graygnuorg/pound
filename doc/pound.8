@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 3, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "April 4, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2747,11 +2747,34 @@ instead.  See the section
 .BR "REQUEST MODIFICATION DIRECTIVES" ,
 for details.
 .TP
+.BR HeaderRemove " and " HeadRemove
+Use
+.B DeleteHeader
+instead. See the section
+.BR "REQUEST MODIFICATION DIRECTIVES" ,
+for details.
+.TP
 .B IgnoreCase
 Use the \fB\-icase\fR option to the \fBURL\fR directive
 instead.  See the discussion of \fIoptions\fR in the
 .B Service Matching Directives
 section.
+.TP
+.BI Err NNN
+(where \fINNN\fR is one of:
+.BR 400 ,
+.BR 401 ,
+.BR 403 ,
+.BR 404 ,
+.BR 413 ,
+.BR 414 ,
+.BR 500 ,
+.BR 501 ,
+.BR 503 )
+.IP
+Use the \fBErrorFile\fR directive, described in the section
+.BR HTTP Listener ,
+above.
 .SS Redirect request hack
 The use of the \fIredirect request\fR hack in the \fBRedirect\fR
 statement is deprecated as well.
