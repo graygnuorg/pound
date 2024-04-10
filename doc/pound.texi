@@ -446,7 +446,7 @@ Host -end ".example.com"
 @end example
 
 The set of options available for use in matching statements is uniform.
-@xref{header-option}, for a detailed discussion of available options.
+@xref{conditional-option}, for a detailed discussion of available options.
 
 The following configuration snippet illustrates the use of matching
 rules to select appropriate service (and, correspondingly, backend).
@@ -2160,7 +2160,7 @@ modification directive.  Its value can be overridden for specific services.
 
 This statement is deprecated and will be removed in future versions.
 Please, use the @option{-icase} option to the matching directive
-instead (@pxref{header-option}).
+instead (@pxref{conditional-option}).
 @end deffn
 
 @deffn {Global directive} SSLEngine "@var{name}"
@@ -2518,24 +2518,24 @@ status.
 @end deffn
 
 @deffn {ListenHTTP directive} xHTTP @var{n}
-Defines which HTTP verbs are accepted. The possible values are:
+Defines which HTTP method are accepted. The possible values are:
 
 @table @asis
 @item 0
-Accept only standard HTTP requests: @code{GET}, @code{POST}, @code{HEAD}.
+Accept only standard HTTP methods: @code{GET}, @code{POST}, @code{HEAD}.
 This is the default.
 
 @item 1
-Allow also extended HTTP requests: @code{PUT}, @code{PATCH}, @code{DELETE}.
+Allow also extended HTTP methods: @code{PUT}, @code{PATCH}, @code{DELETE}.
 
 @item 2
-Additionally allow standard WebDAV verbs: @code{LOCK}, @code{UNLOCK},
+Additionally allow standard WebDAV methods: @code{LOCK}, @code{UNLOCK},
 @code{PROPFIND}, @code{PROPPATCH}, @code{SEARCH}, @code{MKCOL},
 @code{MOVE}, @code{COPY}, @code{OPTIONS}, @code{TRACE},
 @code{MKACTIVITY}, @code{CHECKOUT}, @code{MERGE}, @code{REPORT}.
 
 @item 3
-Additionally allow MS extension WebDAV verbs: @code{SUBSCRIBE},
+Additionally allow MS extension WebDAV methods: @code{SUBSCRIBE},
 @code{UNSUBSCRIBE}, @code{NOTIFY}, @code{BPROPFIND},
 @code{BPROPPATCH}, @code{POLL}, @code{BMOVE}, @code{BCOPY},
 @code{BDELETE}, @code{CONNECT}.
@@ -2621,6 +2621,14 @@ It is either read-protected or not readable by the server.
 @*
 @quotation
 The requested URL was not found on this server.
+@end quotation
+@end defvr
+
+@defvr {HTTP status} 405
+@samp{Method Not Allowed}
+@*
+@quotation
+The request method is not supported for the requested resource.
 @end quotation
 @end defvr
 
@@ -2890,7 +2898,7 @@ Header "Host:[[:space:]]*@var{qhost}"
 where @var{qhost} is the @var{hostname} argument in quoted form, i.e. with
 all characters that have special meaning in regular expressions escaped.
 
-@xref{header-option}, for a detailed discussion of @var{options} and
+@xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
 
 This statement is provided to facilitate handling of @dfn{virtual
@@ -2912,7 +2920,7 @@ contains whitespace or other non-printable characters.
 Returns @samp{true}, if the value of the query parameter @var{name}
 matches @var{pattern}.
 
-@xref{header-option}, for a detailed discussion of @var{options} and
+@xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
 @end deffn
 
@@ -2927,12 +2935,11 @@ treated as case-sensitive extended regular expression, unless
 instructed otherwise by @var{options} (see below).
 @end deffn
 
-The @var{options} argument in the directives discussed above defines
-the comparison algorithm used.  It consists of one or more flags from
-the following table:
+In these directives, @var{options} is a whitespace-delimited list of
+zero or more flags from the following table:
 
-@float Table, header-option
-@caption{Header matching flags}
+@float Table, conditional-option
+@caption{Conditional directive flags}
 @multitable @columnfractions .30 .70
 @headitem Flag @tab Meaning
 
@@ -3088,7 +3095,7 @@ resulting value against @var{pattern}.
 
   Both conditionals treat their @var{pattern} argument as
 case-insensitive POSIX extended regular expression.
-@xref{header-option}, for a discussion of available @var{options}.
+@xref{conditional-option}, for a discussion of available @var{options}.
 
   The following @dfn{response modification} directives are defined:
 
@@ -3359,7 +3366,7 @@ Header "Host:[[:space:]]*@var{qhost}"
 where @var{qhost} is the @var{hostname} argument in quoted form, i.e. with
 all characters that have special meaning in regular expressions escaped.
 
-@xref{header-option}, for a detailed discussion of @var{options} and
+@xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
 
 This statement is provided to facilitate handling of @dfn{virtual
@@ -3381,7 +3388,7 @@ contains whitespace or other non-printable characters.
 Returns @samp{true}, if the value of the query parameter @var{name}
 matches @var{pattern}.
 
-@xref{header-option}, for a detailed discussion of @var{options} and
+@xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
 @end deffn
 
@@ -3398,7 +3405,7 @@ instructed otherwise by @var{options} (see below).
 
 The @var{options} argument in the directives discussed above defines
 the comparison algorithm used.  It consists of one or more flags
-described in @ref{header-option}.
+described in @ref{conditional-option}.
 
 @kwindex Not
 Placing the keyword @code{Not} before a header matching directive reverts its
@@ -3910,7 +3917,7 @@ modification directive.
 
 This statement is deprecated and will be removed in future versions.
 Please, use the @option{-icase} option to the matching directive
-instead (@pxref{header-option}).
+instead (@pxref{conditional-option}).
 @end deffn
 
 @node poundctl

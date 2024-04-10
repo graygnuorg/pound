@@ -118,6 +118,11 @@ static HTTP_STATUS http_status[] = {
     "Not Found",
     "The requested URL was not found on this server."
   },
+  [HTTP_STATUS_METHOD_NOT_ALLOWED] = {
+    405,
+    "Method Not Allowed",
+    "The request method is not supported for the requested resource."
+  },
   [HTTP_STATUS_PAYLOAD_TOO_LARGE] = {
     413,
     "Payload Too Large",
@@ -2860,7 +2865,7 @@ parse_http_request (struct http_request *req, int group)
     return HTTP_STATUS_BAD_REQUEST;
 
   if (md->group > group)
-    status = HTTP_STATUS_NOT_IMPLEMENTED;
+    status = HTTP_STATUS_METHOD_NOT_ALLOWED;
 
   str += len;
   str += strspn (str, " ");

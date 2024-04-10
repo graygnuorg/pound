@@ -121,7 +121,7 @@ m4_include([addheader.at])
 m4_include([headrequire.at])
 m4_include([headrem.at])
 m4_include([headdeny.at])
-m4_include([err501.at])
+m4_include([err503.at])
 
 AT_BANNER([Request routing])
 m4_include([balancing.at])

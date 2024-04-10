@@ -3909,7 +3909,7 @@ static PARSER_TABLE service_parsetab[] = {
     .name = "IgnoreCase",
     .parser = assign_dfl_ignore_case,
     .deprecated = 1,
-    .message = "use -icase flag with the matching statement instead"
+    .message = "use the -icase matching directive flag to request case-insensitive comparison"
   },
 
   { NULL }
@@ -5837,7 +5837,7 @@ static PARSER_TABLE top_level_parsetab[] = {
     .parser = assign_bool,
     .off = offsetof (POUND_DEFAULTS, ignore_case),
     .deprecated = 1,
-    .message = "use -icase flag with the matching statement instead"
+    .message = "use the -icase matching directive flag to request case-insensitive comparison"
   },
 
   { NULL }

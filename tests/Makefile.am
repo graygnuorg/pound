@@ -73,7 +73,7 @@ TESTSUITE_AT = \
  config.at\
  disable.at\
  echo.at\
- err501.at\
+ err503.at\
  errfile.at\
  error.at\
  experr.at\

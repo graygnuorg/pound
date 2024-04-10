@@ -51,7 +51,7 @@ End
 AT_CHECK([pound -Wno-dns -Wno-include-dir -c -f ./pound.cfg],
 [0],
 [],
-[pound: ./pound.cfg:1.1-10: warning: deprecated statement, use -icase flag with the matching statement instead
+[pound: ./pound.cfg:1.1-10: warning: deprecated statement, use the -icase matching directive flag to request case-insensitive comparison
 pound: ./pound.cfg:5.9-14: warning: deprecated statement, use "ErrorFile 400" instead
 pound: ./pound.cfg:6.9-14: warning: deprecated statement, use "ErrorFile 401" instead
 pound: ./pound.cfg:7.9-14: warning: deprecated statement, use "ErrorFile 403" instead
@@ -67,7 +67,7 @@ pound: ./pound.cfg:16.9-20: warning: deprecated statement, use "DeleteHeader" in
 pound: ./pound.cfg:17.9-18: warning: deprecated statement, use "DeleteHeader" instead
 pound: ./pound.cfg:19.17-27: warning: deprecated statement, use "Header" instead
 pound: ./pound.cfg:20.17-24: warning: deprecated statement, use "Not Header" instead
-pound: ./pound.cfg:21.17-26: warning: deprecated statement, use -icase flag with the matching statement instead
+pound: ./pound.cfg:21.17-26: warning: deprecated statement, use the -icase matching directive flag to request case-insensitive comparison
 ])
 
 AT_CHECK([pound -Wno-dns -Wno-include-dir -Wno-warn-deprecated -c -f ./pound.cfg])
