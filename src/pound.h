@@ -905,7 +905,7 @@ void upd_session (SERVICE *, HTTP_HEADER_LIST *, BACKEND *);
 
 /*
  * mark a backend host as dead;
- * do nothing if no resurection code is active
+ * do nothing if no resurrection code is active
  */
 void kill_be (SERVICE *, BACKEND *, const int);
 

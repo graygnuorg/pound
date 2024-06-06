@@ -6,7 +6,7 @@
 #
 #   Checks whether the pcreposix library and its headers are available.
 #   Prefers libpcre2 over libpcre.  The --enable-pcreposix option can
-#   be used to enable, disable, or force the use of libpcre verison 1
+#   be used to enable, disable, or force the use of libpcre version 1
 #   (--enable-pcreposix=pcre1).  Upon return, the status_pcreposix shell
 #   variable is set to indicate the result:
 #

@@ -1924,7 +1924,7 @@ These expansions are discussed in detail below.
 
 @node Backreference Expansion
 @subsection Backreference expansion
-Backrefence is a construct that refers to a @dfn{parenthesized
+Backreference is a construct that refers to a @dfn{parenthesized
 group} within a regular expression matched by one of service
 matching directives (@pxref{Service Selection Statements}).  During
 backreference expansion, each occurrence of such construct is replaced
@@ -3128,7 +3128,7 @@ the backend defined in that section.
 statement.
 
 @deffn {ListenHTTP statement} ACME @var{dir}
-This statement defies a special service with a build-in backend for
+This statement defines a special service with a built-in backend for
 handling @samp{ACME} challenge requests.  @xref{ACME}, for a detailed
 discussion of its use.
 
@@ -4027,7 +4027,7 @@ Enables listener, service, or backend.
 
 @deffn {poundctl} disable /@var{L}/@var{S}/@var{B}
 @deffnx {poundctl} disable /@var{L}/@var{S}
-@deffnx {poundctl} disble /@var{L}
+@deffnx {poundctl} disable /@var{L}
 @deffnx {poundctl} off /@var{L}/@var{S}/@var{B}
 @deffnx {poundctl} off /@var{L}/@var{S}
 @deffnx {poundctl} off /@var{L}

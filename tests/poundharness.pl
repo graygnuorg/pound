@@ -1454,7 +1454,7 @@ Upon startup, B<poundharness> reads B<pound> configuration file F<pound.cfi>,
 modifies the settings as described below and writes the resulting configuration
 to B<pound.cfg>.  During modification, the following statements are removed:
 B<Daemon>, B<LogFacility> and B<LogLevel>.  The settings suitable for running
-B<pound> as a subordinate process are inserted istead.  In particular,
+B<pound> as a subordinate process are inserted instead.  In particular,
 B<LogLevel> is set from the value passed with the B<--log-level> command
 line option.  For each B<ListenHTTP> and B<ListenHTTPS> section, the actual
 socket configuration (i.e. the B<Address>, B<Port>, or B<SocketFrom> statements)
@@ -1632,7 +1632,7 @@ occurs first.
 =head2 External program send/expect
 
 This type of stanza allow you to run an external program and examine its
-exit code, standard output and error streams.  It is inlcuded mainly for
+exit code, standard output and error streams.  It is included mainly for
 testing the B<poundctl> command.
 
 The stanza begins with the keyword B<run> followed by the command
@@ -1648,7 +1648,7 @@ Expect program to return exit status I<N> (a decimal number).
 
 Expect text on stdout.  Everything below this keyword and up to the
 B<end> keyword appearing on a line alone is taken to be the expected
-text.  When matching actiual program output, this text is treated as
+text.  When matching actual program output, this text is treated as
 Perl multi-line regular expression (see the B<m> and B<s> flags in
 B<perlre>).  To expect a line containing the word C<end> alone, prefix
 it with a backslash.

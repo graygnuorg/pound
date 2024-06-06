@@ -738,5 +738,5 @@ please send a mail to Sergey Poznyakoff <gray@gnu.org> (or
 <gray+pound@gnu.org.ua>), or use the
 [github issue tracker](https://github.com/graygnuorg/pound/issues).
 
-When reporing failed tests, please make an archive of the `tests/testsuite.dir`
+When reporting failed tests, please make an archive of the `tests/testsuite.dir`
 subdirectory and attach it to your report.
