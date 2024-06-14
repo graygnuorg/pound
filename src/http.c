@@ -877,7 +877,9 @@ enum
     COPY_OK,
     COPY_EOF,
     COPY_READ_ERR,
-    COPY_WRITE_ERR
+    COPY_WRITE_ERR,
+    COPY_BAD_DATA,
+    COPY_TOO_LONG
   };
 
 static char const *
@@ -896,6 +898,12 @@ copy_status_string (int rc)
 
     case COPY_WRITE_ERR:
       return "write error";
+
+    case COPY_BAD_DATA:
+      return "mailformed data";
+
+    case COPY_TOO_LONG:
+      return "line too long";
 
     default:
       return "unknown error";
@@ -986,13 +994,27 @@ acme_response (POUND_HTTP *phttp)
       phttp->response_code = 200;
       bio_http_reply_start (phttp->cl, phttp->request.version, 200, "OK", NULL,
 			    "text/html", (CONTENT_LENGTH) st.st_size);
-
-      if ((ec = copy_bin (bin, phttp->cl, st.st_size, NULL, 0)) != COPY_OK)
+      ec = copy_bin (bin, phttp->cl, st.st_size, NULL, 0);
+      switch (ec)
 	{
+	case COPY_OK:
+	  break;
+
+	case COPY_READ_ERR:
+	case COPY_WRITE_ERR:
 	  if (errno)
-	    logmsg (LOG_NOTICE, "(%"PRItid") %s copying file %s: %s",
-		    POUND_TID (), copy_status_string (ec), file_name,
-		    strerror (errno));
+	    {
+	      logmsg (LOG_NOTICE, "(%"PRItid") %s while copying file %s: %s",
+		      POUND_TID (), copy_status_string (ec), file_name,
+		      strerror (errno));
+	      rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	      break;
+	    }
+
+	default:
+	  logmsg (LOG_NOTICE, "(%"PRItid") %s while copying file %s",
+		  POUND_TID (), copy_status_string (ec), file_name);
+	  rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
       BIO_free (bin);
@@ -1066,12 +1088,25 @@ error_response (POUND_HTTP *phttp)
 			     http_status[err].reason,
 			     &req.headers,
 			     (CONTENT_LENGTH) len);
-  if ((rc = copy_bin (bin, phttp->cl, len, NULL, 0)) != COPY_OK)
+  rc = copy_bin (bin, phttp->cl, len, NULL, 0);
+  switch (rc)
     {
+    case COPY_OK:
+      break;
+
+    case COPY_READ_ERR:
+    case COPY_WRITE_ERR:
       if (errno)
-	logmsg (LOG_NOTICE, "(%"PRItid") %s sending response %d: %s",
-		POUND_TID (), copy_status_string (rc), http_status[err].code,
-		strerror (errno));
+	{
+	  logmsg (LOG_NOTICE, "(%"PRItid") %s while sending response %d: %s",
+		  POUND_TID (), copy_status_string (rc), http_status[err].code,
+		  strerror (errno));
+	  break;
+	}
+
+    default:
+      logmsg (LOG_NOTICE, "(%"PRItid") %s while sending response %d",
+	      POUND_TID (), copy_status_string (rc), http_status[err].code);
     }
 
   BIO_free (bin);
@@ -1081,10 +1116,26 @@ error_response (POUND_HTTP *phttp)
   return 0;
 }
 
+static void
+drain_eol (BIO *in)
+{
+  char c;
+  do
+    {
+      if (BIO_read (in, &c, 1) <= 0)
+	{
+	  if (BIO_should_retry (in))
+	    continue;
+	  break;
+	}
+    }
+  while (c != '\n');
+}
+
 /*
  * Get a "line" from a BIO, strip the trailing newline, skip the input
  * stream if buffer too small.
- * The result buffer is NULL terminated.
+ * The result buffer is 0-terminated.
  * Return 0 on success.
  */
 static int
@@ -1101,10 +1152,13 @@ get_line (BIO *in, char *const buf, int bufsize)
 	/*
 	 * BIO_gets not implemented
 	 */
-	return -1;
+	return COPY_READ_ERR;
       case 0:
+	if (BIO_should_retry (in))
+	  continue;
+	return COPY_EOF;
       case -1:
-	return 1;
+	return COPY_READ_ERR;
       default:
 	if (seen_cr)
 	  {
@@ -1113,13 +1167,8 @@ get_line (BIO *in, char *const buf, int bufsize)
 		/*
 		 * we have CR not followed by NL
 		 */
-		do
-		  {
-		    if (BIO_read (in, &tmp, 1) <= 0)
-		      return 1;
-		  }
-		while (tmp != '\n');
-		return 1;
+		drain_eol (in);
+		return COPY_BAD_DATA;
 	      }
 	    else
 	      {
@@ -1152,25 +1201,15 @@ get_line (BIO *in, char *const buf, int bufsize)
 	/*
 	 * all other control characters cause an error
 	 */
-	do
-	  {
-	    if (BIO_read (in, &tmp, 1) <= 0)
-	      return 1;
-	  }
-	while (tmp != '\n');
-	return 1;
+	drain_eol (in);
+	return COPY_BAD_DATA;
       }
 
   /*
    * line too long
    */
-  do
-    {
-      if (BIO_read (in, &tmp, 1) <= 0)
-	return 1;
-    }
-  while (tmp != '\n');
-  return 1;
+  drain_eol (in);
+  return COPY_TOO_LONG;
 }
 
 /*
@@ -1298,20 +1337,15 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 
   for (tot_size = 0;;)
     {
-      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
 	{
-	  logmsg (LOG_NOTICE, "(%"PRItid" chunked read error: %s",
+	  logmsg (LOG_NOTICE, "(%"PRItid") chunked read error: %s",
 		  POUND_TID (),
-		  strerror (errno));
-	  return res < 0
+		  copy_status_string (res));
+	  return res == COPY_READ_ERR
 	    ? HTTP_STATUS_INTERNAL_SERVER_ERROR
 	    : HTTP_STATUS_BAD_REQUEST;
 	}
-      else if (res > 0)
-	/*
-	 * EOF
-	 */
-	return HTTP_STATUS_OK;
 
       if ((cont = get_content_length (buf, CL_CHUNK)) == NO_CONTENT_LENGTH)
 	{
@@ -1340,16 +1374,30 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 
       if (cont > 0)
 	{
-	  int ec;
-
-	  if ((ec = copy_bin (cl, be, cont, res_bytes, no_write)) != COPY_OK)
+	  int ec = copy_bin (cl, be, cont, res_bytes, no_write);
+	  switch (ec)
 	    {
+	    case COPY_OK:
+	      break;
+
+	    case COPY_READ_ERR:
+	    case COPY_WRITE_ERR:
 	      if (errno)
 		logmsg (LOG_NOTICE,
-			"(%"PRItid") %s copying chunk of length %"PRICLEN": %s",
+			"(%"PRItid") %s while copying chunk of length %"PRICLEN": %s",
 			POUND_TID (), copy_status_string (ec), cont,
 			strerror (errno));
+	      else
+		logmsg (LOG_NOTICE,
+			"(%"PRItid") %s while copying chunk of length %"PRICLEN,
+			POUND_TID (), copy_status_string (ec), cont);
 	      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+	    default:
+	      logmsg (LOG_NOTICE,
+		      "(%"PRItid") %s while copying chunk of length %"PRICLEN,
+			  POUND_TID (), copy_status_string (ec), cont);
+	      return HTTP_STATUS_BAD_REQUEST;
 	    }
 	}
       else
@@ -1357,21 +1405,16 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
       /*
        * final CRLF
        */
-      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error after chunk: %s",
 		  POUND_TID (),
-		  strerror (errno));
-	  return res < 0
+		  copy_status_string (res));
+	  return res == COPY_READ_ERR
 	    ? HTTP_STATUS_INTERNAL_SERVER_ERROR
 	    : HTTP_STATUS_BAD_REQUEST;
 	}
-      else if (res > 0)
-	{
-	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected EOF after chunk",
-		  POUND_TID ());
-	  return HTTP_STATUS_BAD_REQUEST;
-	}
+
       if (buf[0])
 	logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
 		POUND_TID (), buf);
@@ -1388,17 +1431,16 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
    */
   for (;;)
     {
-      if ((res = get_line (cl, buf, sizeof (buf))) < 0)
+      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk: %s",
 		  POUND_TID (),
-		  strerror (errno));
-	  return res < 0
+		  copy_status_string (res));
+	  return res == COPY_READ_ERR
 	    ? HTTP_STATUS_INTERNAL_SERVER_ERROR
 	    : HTTP_STATUS_BAD_REQUEST;
 	}
-      else if (res > 0)
-	break;
+
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
@@ -2624,16 +2666,27 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
   /*
    * HTTP/1.1 allows leading CRLF
    */
-  while ((res = get_line (in, buf, sizeof (buf))) == 0)
+  while ((res = get_line (in, buf, sizeof (buf))) == COPY_OK)
     if (buf[0])
       break;
 
-  if (res < 0)
+  switch (res)
     {
-      /*
-       * this is expected to occur only on client reads
-       */
+    case COPY_OK:
+    case COPY_EOF:
+      break;
+
+    case COPY_READ_ERR:
+      logmsg (LOG_NOTICE, "(%"PRItid") %s",
+	      POUND_TID (),
+	      copy_status_string (res));
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+    default:
+      logmsg (LOG_NOTICE, "(%"PRItid") %s",
+	      POUND_TID (),
+	      copy_status_string (res));
+      return HTTP_STATUS_BAD_REQUEST;
     }
 
   if ((req->request = strdup (buf)) == NULL)
@@ -2647,7 +2700,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
     {
       struct http_header *hdr;
 
-      if (get_line (in, buf, sizeof (buf)))
+      if (get_line (in, buf, sizeof (buf)) != COPY_OK)
 	{
 	  http_request_free (req);
 	  compose_header_hash_free (chash);
@@ -3191,7 +3244,12 @@ add_ssl_headers (POUND_HTTP *phttp)
     {
       X509_NAME_print_ex (bio, X509_get_subject_name (phttp->x509), 8,
 			  XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
-      get_line (bio, buf, sizeof (buf));
+      if (get_line (bio, buf, sizeof (buf)) != COPY_OK)
+	{
+	  res = -1;
+	  goto end;
+	}
+
       stringbuf_printf (&sb, "X-SSL-Subject: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
 	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
@@ -3203,7 +3261,12 @@ add_ssl_headers (POUND_HTTP *phttp)
 
       X509_NAME_print_ex (bio, X509_get_issuer_name (phttp->x509), 8,
 			  XN_FLAG_ONELINE & ~ASN1_STRFLGS_ESC_MSB);
-      get_line (bio, buf, sizeof (buf));
+      if (get_line (bio, buf, sizeof (buf)) != COPY_OK)
+	{
+	  res = -1;
+	  goto end;
+	}
+
       stringbuf_printf (&sb, "X-SSL-Issuer: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
 	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
@@ -3214,7 +3277,12 @@ add_ssl_headers (POUND_HTTP *phttp)
       stringbuf_reset (&sb);
 
       ASN1_TIME_print (bio, X509_get_notBefore (phttp->x509));
-      get_line (bio, buf, sizeof (buf));
+      if (get_line (bio, buf, sizeof (buf)) != COPY_OK)
+	{
+	  res = -1;
+	  goto end;
+	}
+
       stringbuf_printf (&sb, "X-SSL-notBefore: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
 	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
@@ -3225,7 +3293,12 @@ add_ssl_headers (POUND_HTTP *phttp)
       stringbuf_reset (&sb);
 
       ASN1_TIME_print (bio, X509_get_notAfter (phttp->x509));
-      get_line (bio, buf, sizeof (buf));
+      if (get_line (bio, buf, sizeof (buf)) != COPY_OK)
+	{
+	  res = -1;
+	  goto end;
+	}
+
       stringbuf_printf (&sb, "X-SSL-notAfter: %s", buf);
       if ((str = stringbuf_finish (&sb)) == NULL
 	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
@@ -3247,7 +3320,7 @@ add_ssl_headers (POUND_HTTP *phttp)
 
       PEM_write_bio_X509 (bio, phttp->x509);
       stringbuf_add_string (&sb, "X-SSL-certificate: ");
-      while (get_line (bio, buf, sizeof (buf)) == 0)
+      while (get_line (bio, buf, sizeof (buf)) == COPY_OK)
 	{
 	  stringbuf_add_string (&sb, buf);
 	}
@@ -3732,20 +3805,31 @@ backend_response (POUND_HTTP *phttp)
 	    }
 	  else if (content_length >= 0)
 	    {
-	      int ec;
-
 	      /*
 	       * may have had Content-length, so do raw reads/writes
 	       * for the length
 	       */
-	      if ((ec = copy_bin (phttp->be, phttp->cl, content_length,
-				  &phttp->res_bytes, skip)) != COPY_OK)
+	      int ec = copy_bin (phttp->be, phttp->cl, content_length,
+				 &phttp->res_bytes, skip);
+	      switch (ec)
 		{
+		case COPY_OK:
+		  break;
+
+		case COPY_READ_ERR:
+		case COPY_WRITE_ERR:
 		  if (errno)
-		    logmsg (LOG_NOTICE,
-			    "(%"PRItid") %s sending backend response: %s",
-			    POUND_TID (), copy_status_string (ec),
-			    strerror (errno));
+		    {
+		      logmsg (LOG_NOTICE,
+			      "(%"PRItid") %s while sending backend response: %s",
+			      POUND_TID (), copy_status_string (ec),
+			      strerror (errno));
+		      return -1;
+		    }
+		default:
+		  logmsg (LOG_NOTICE,
+			  "(%"PRItid") %s while sending backend response",
+			      POUND_TID (), copy_status_string (ec));
 		  return -1;
 		}
 	    }
@@ -4103,23 +4187,33 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 			    phttp->lstn->max_req_size);
       if (rc != HTTP_STATUS_OK)
 	{
-	  log_error (phttp, rc, errno, "error sending chunks");
+	  log_error (phttp, rc, 0, "error sending chunks");
 	  return rc;
 	}
     }
   else if (content_length > 0)
     {
-      int rc;
-
       /*
        * had Content-length, so do raw reads/writes for the length
        */
-      if ((rc = copy_bin (phttp->cl, phttp->be, content_length, NULL,
-			  phttp->backend->be_type != BE_BACKEND)) != COPY_OK)
+      int rc = copy_bin (phttp->cl, phttp->be, content_length, NULL,
+			 phttp->backend->be_type != BE_BACKEND);
+      switch (rc)
 	{
-	  if (errno)
-	    log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, errno,
-		       "%s sending client request", copy_status_string (rc));
+	case COPY_OK:
+	  break;
+
+	case COPY_READ_ERR:
+	case COPY_WRITE_ERR:
+	  log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, errno,
+		     "%s while sending client request",
+		     copy_status_string (rc));
+	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+	default:
+	  log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
+		     "%s while sending client request",
+		     copy_status_string (rc));
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
     }
@@ -4430,7 +4524,7 @@ do_http (POUND_HTTP *phttp)
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
-      if (http_request_read (phttp->cl, phttp->lstn, &phttp->request))
+      if (http_request_read (phttp->cl, phttp->lstn, &phttp->request) != HTTP_STATUS_OK)
 	{
 	  if (!cl_11)
 	    {
