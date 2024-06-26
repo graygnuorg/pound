@@ -5727,6 +5727,11 @@ static PARSER_TABLE top_level_parsetab[] = {
     .parser = parse_log_format
   },
   {
+    .name = "LogTag",
+    .parser = assign_string,
+    .data = &syslog_tag
+  },
+  {
     .name = "Alive",
     .parser = assign_timeout,
     .data = &alive_to

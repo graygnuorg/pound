@@ -50,6 +50,9 @@ regex_t HEADER,			/* Allowed header */
 char *forwarded_header;         /* "forwarded" header name */
 ACL *trusted_ips;               /* Trusted IP addresses */
 
+char *syslog_tag;               /* Tag to mark syslog messages with.
+				   If NULL, progname will be used. */
+
 #ifndef  SOL_TCP
 /* for systems without the definition */
 int SOL_TCP;
@@ -1000,7 +1003,8 @@ main (const int argc, char **argv)
   config_parse (argc, argv);
 
   if (log_facility != -1)
-    openlog (progname, LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
+    openlog (syslog_tag ? syslog_tag : progname,
+	     LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
 
   /* set uid if necessary */
   if (user)

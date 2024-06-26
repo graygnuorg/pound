@@ -2263,6 +2263,20 @@ current working directory using the @option{-W no-include-dir} option
 
 @node Logging configuration
 @section Logging configuration
+@deffn {Global directive} LogFacility @var{name}
+@deffnx {Global directive} LogFacility -
+Sets the @command{syslog} facility to use for logging.  Allowed names
+are: @samp{auth}, @samp{authpriv}, @samp{cron}, @samp{daemon}, @samp{ftp},
+@samp{kern}, @samp{lpr}. @samp{mail}, @samp{news},
+@samp{user}. @samp{uucp}, and @samp{local0} through @samp{local7}.
+
+The second form configures @dfn{default log destination}.  If
+@command{pound} runs in foreground, log messages with priority
+@code{LOG_DEBUG} and @code{LOG_INFO} go to stdout, and messages with
+the remaining priorities are printed to stderr.  If @command{pound}
+runs as a daemon, log messages go to the syslog facility @samp{daemon}.
+@end deffn
+
 @deffn {Global directive} LogFormat "@var{name}" "@var{format_def}"
 Define request logging format.  @var{name} is a string uniquely
 identifying this format, and @var{format_def} is the format string
@@ -2280,6 +2294,12 @@ If numeric argument is used, it refers to a built-in format by its
 number (0 through 5).
 
 @xref{Logging}, for a detailed description of HTTP request logging.
+@end deffn
+
+@deffn {Global directive} LogTag "@var{string}"
+Sets the string to tag syslog messages with.  By default, it is the
+name of the program (more precisely, the name which was used to start
+it).
 @end deffn
 
 @deffn {Global directive} ForwardedHeader "@var{name}"

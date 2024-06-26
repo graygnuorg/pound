@@ -3,7 +3,7 @@
  */
 
 extern char const *progname;          /* program name */
-
+extern char *syslog_tag;        /* syslog tag */
 extern char *user,		/* user to run as */
   *group,			/* group to run as */
   *root_jail,			/* directory to chroot to */

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "June 6, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "June 26, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -519,6 +519,11 @@ or a format name defined earlier via the
 directive.  See section
 .BR "REQUEST LOGGING" ,
 for a detailed discussion.
+.TP
+\fBLogTag\fR "\fIstring\fR"
+Sets the string to tag log messages with.  This is used when log
+output goes to syslog.  Default is the name with which \fBpound\fR
+was started.
 .TP
 \fBForwardedHeader\fR \fIname\fR
 Defines the name of the HTTP header that carries the list of proxies
