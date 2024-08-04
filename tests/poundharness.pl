@@ -381,7 +381,7 @@ sub new {
 	    or croak "can't create transcript file $xscript: $!";
     }
     $self->{server} = 0;
-    $self->{http} = HTTP::Tiny->new(max_redirect => 0);
+    $self->{http} = HTTP::Tiny->new(max_redirect => 0, verify_SSL => 0);
     return $self;
 }
 
