@@ -107,24 +107,32 @@ logmsg (const int priority, const char *fmt, ...)
 }
 
 /*
+ * Log an out of memory condition and return.
+ * Take care not to use [v]logmsg as this could create infinite recursion.
+ */
+void
+lognomem (void)
+{
+  if (log_facility == -1 || print_log)
+    {
+      fprintf (stderr, "%s: out of memory\n", progname);
+    }
+
+  if (log_facility != -1)
+    {
+      syslog (LOG_CRIT, "out of memory");
+    }
+}
+
+/*
  * This is used as exit point if memory allocation failures occur at program
  * startup (e.g. when parsing config or the like).
  */
 void
 xnomem (void)
 {
-  logmsg (LOG_CRIT, "out of memory");
+  lognomem ();
   exit (1);
-}
-
-/*
- * This is used as json_memabrt hook.  The code in svc.c handles memory
- * allocation failures gracefully and returns 500 if any occurs.
- */
-void
-lognomem (void)
-{
-  logmsg (LOG_CRIT, "out of memory");
 }
 
 /*
