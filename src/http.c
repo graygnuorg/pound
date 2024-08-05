@@ -900,7 +900,7 @@ copy_status_string (int rc)
       return "write error";
 
     case COPY_BAD_DATA:
-      return "mailformed data";
+      return "malformed data";
 
     case COPY_TOO_LONG:
       return "line too long";
