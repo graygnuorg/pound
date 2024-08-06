@@ -21,6 +21,140 @@
 #include "extern.h"
 #include "json.h"
 
+static void init_rsa (void);
+static void do_RSAgen (void *, const struct timespec *);
+
+/* Periodic jobs */
+typedef void (*JOB_FUNC) (void *, const struct timespec *);
+
+typedef struct job
+{
+  struct timespec ts;
+  JOB_FUNC func;
+  void *data;
+  DLIST_ENTRY (job) link;
+} JOB;
+
+typedef DLIST_HEAD (,job) JOB_HEAD;
+static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
+static pthread_mutex_t job_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
+
+static JOB *
+job_alloc (struct timespec const *ts, JOB_FUNC func, void *data)
+{
+  JOB *job;
+
+  XZALLOC (job);
+  job->ts = *ts;
+  job->func = func;
+  job->data = data;
+  return job;
+}
+
+static void
+job_arm_unlocked (JOB *job)
+{
+  JOB *t;
+
+  DLIST_FOREACH (t, &job_head, link)
+    {
+      if (timespec_cmp (&job->ts, &t->ts) < 0)
+	break;
+    }
+
+  DLIST_INSERT_BEFORE (&job_head, t, job, link);
+
+  if (DLIST_PREV (job, link) == NULL)
+    pthread_cond_broadcast (&job_cond);
+}
+
+static void
+job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
+{
+  job_arm_unlocked (job_alloc (ts, func, data));
+}
+
+static void
+job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
+{
+  pthread_mutex_lock (&job_mutex);
+  job_enqueue_unlocked (ts, func, data);
+  pthread_mutex_unlock (&job_mutex);
+}
+
+static void
+job_enqueue_after_unlocked (unsigned t, JOB_FUNC func, void *data)
+{
+  struct timespec ts;
+  clock_gettime (CLOCK_REALTIME, &ts);
+  ts.tv_sec += t;
+  job_enqueue_unlocked (&ts, func, data);
+}
+
+static void
+job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
+{
+  pthread_mutex_lock (&job_mutex);
+  job_enqueue_after_unlocked (t, func, data);
+  pthread_mutex_unlock (&job_mutex);
+}
+
+static void
+timer_cleanup (void *ptr)
+{
+  pthread_mutex_unlock (&job_mutex);
+}
+
+/*
+ * run periodic functions:
+ */
+void *
+thr_timer (void *arg)
+{
+  /* Seed the job queue */
+#if ! SET_DH_AUTO
+  init_rsa ();
+  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
+#endif
+
+  pthread_mutex_lock (&job_mutex);
+  pthread_cleanup_push (timer_cleanup, NULL);
+
+  for (;;)
+    {
+      int rc;
+      JOB *job;
+
+      if (DLIST_EMPTY (&job_head))
+	{
+	  pthread_cond_wait (&job_cond, &job_mutex);
+	  continue;
+	}
+
+      job = DLIST_FIRST (&job_head);
+
+      rc = pthread_cond_timedwait (&job_cond, &job_mutex, &job->ts);
+      if (rc == 0)
+	continue;
+      if (rc != ETIMEDOUT)
+	abend ("unexpected error from pthread_cond_timedwait: %s",
+	       strerror (errno));
+
+      if (job != DLIST_FIRST (&job_head))
+	/* Job was removed or its time changed */
+	continue;
+
+      DLIST_SHIFT (&job_head, link);
+
+      job->func (job->data, &job->ts);
+      free (job);
+    }
+  pthread_cleanup_pop (1);
+}
+
+/* Session functions */
+
 SESSION_TABLE *
 session_table_new (void)
 {
@@ -60,42 +194,31 @@ session_free (SESSION *sess)
  * Before returning, the function rearms the periodic job if necessary.
  */
 static void
-expire_sessions (void *data)
+expire_sessions (void *data, const struct timespec *now)
 {
   SERVICE *svc = data;
-  SESSION_TABLE *tab = svc->sessions;
-  SESSION *sess = DLIST_FIRST (&tab->head);
+  SESSION_TABLE *tab;
+  SESSION *sess;
 
-  if (sess)
+  pthread_mutex_lock (&svc->mut);
+
+  tab = svc->sessions;
+  while ((sess = DLIST_FIRST (&tab->head)) != NULL &&
+	 timespec_cmp (&sess->expire, now) <= 0)
     {
-      pthread_mutex_lock (&svc->mut);
       SESSION_DELETE (tab->hash, sess);
       session_unlink (tab, sess);
       session_free (sess);
-
-      if (!DLIST_EMPTY (&tab->head))
-	job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
-      pthread_mutex_unlock (&svc->mut);
     }
-}
 
-static void
-service_rearm_expire_sessions (SERVICE *svc)
-{
-  SESSION *sess = DLIST_FIRST (&svc->sessions->head);
-  if (sess)
-    job_rearm (&sess->expire, expire_sessions, svc);
-  /*
-   * If the session list is empty, the scheduled job remains unchanged.
-   * It will eventually fire, call expire_sessions, which will do nothing
-   * and be removed from the queue.
-   */
+  if (!DLIST_EMPTY (&tab->head))
+    job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
+  pthread_mutex_unlock (&svc->mut);
 }
 
 /*
  * Promote the given session by updating its expiration time and
- * moving it to the end of the session list.  Re-schedule the expiration
- * periodic job accordingly.
+ * moving it to the end of the session list.
  *
  * The service mutex must be locked.
  */
@@ -107,7 +230,6 @@ service_session_promote (SERVICE *svc, SESSION *sess)
   clock_gettime (CLOCK_REALTIME, &sess->expire);
   sess->expire.tv_sec += svc->sess_ttl;
   session_link_at_tail (tab, sess);
-  service_rearm_expire_sessions (svc);
 }
 
 /*
@@ -180,17 +302,14 @@ service_session_remove_by_key (SERVICE *svc, char const *key)
   t.key = (char*) key;
   if ((res = SESSION_DELETE (tab->hash, &t)) != NULL)
     {
-      int first = DLIST_FIRST (&tab->head) == res;
       session_unlink (tab, res);
       session_free (res);
-      if (first)
-	service_rearm_expire_sessions (svc);
     }
   return;
 }
 
 /*
- * Remove from the service session table all sessions with the given backend
+ * Remove from the service session table all sessions with the given backend.
  *
  * The service mutex must be locked.
  */
@@ -198,9 +317,8 @@ static void
 service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 {
   SESSION_TABLE *tab = svc->sessions;
-  SESSION *sess, *tmp, *first;
+  SESSION *sess, *tmp;
 
-  first = DLIST_FIRST (&tab->head);
   DLIST_FOREACH_SAFE (sess, tmp, &tab->head, link)
     {
       if (sess->backend == be)
@@ -210,8 +328,6 @@ service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 	  session_free (sess);
 	}
     }
-  if (first != DLIST_FIRST (&tab->head))
-    service_rearm_expire_sessions (svc);
 }
 
 /*
@@ -506,7 +622,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
  * Find backend by session key.  If no session with the given key is found,
  * create one and associate it with a randomly selected backend.
  */
-BACKEND *
+static BACKEND *
 find_backend_by_key (SERVICE *svc, char const *key, int no_be)
 {
   BACKEND *res;
@@ -580,7 +696,7 @@ find_key_by_header (HTTP_HEADER_LIST *headers, char const *hname,
  * extraction function and session ID.  See the two functions above
  * for details.
  */
-BACKEND *
+static BACKEND *
 find_backend_by_header (SERVICE *svc, int no_be,
 			struct http_request *req, char const *hname,
 			int (*keyfun) (char const *, char const *, char *),
@@ -757,7 +873,7 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
   pthread_mutex_unlock (&svc->mut);
 }
 
-static void touch_be (void *data);
+static void touch_be (void *data, const struct timespec *ts);
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
@@ -1199,7 +1315,7 @@ backend_probe (BACKEND *be)
  * itself for alive_to seconds later.
  */
 static void
-touch_be (void *data)
+touch_be (void *data, const struct timespec *ts)
 {
   BACKEND *be = data;
   char buf[MAXBUF];
@@ -1279,7 +1395,7 @@ generate_key (RSA ** ret_rsa, unsigned long bits)
  * runs every T_RSA_KEYS seconds
  */
 static void
-do_RSAgen (void *unused)
+do_RSAgen (void *unused1, const struct timespec *unused2)
 {
   int n, ret_val;
   RSA *t_RSA512_keys[N_RSA_KEYS];
@@ -1391,159 +1507,6 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
   SSL_CTX_set_dh_auto (ctx, 1);
 }
 #endif
-
-/* Periodic jobs */
-typedef struct job
-{
-  struct timespec ts;
-  void (*func) (void *);
-  void *data;
-  DLIST_ENTRY (job) link;
-} JOB;
-
-typedef DLIST_HEAD (,job) JOB_HEAD;
-static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
-static pthread_mutex_t job_mutex = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
-
-static JOB *
-job_alloc (struct timespec const *ts, void (*func) (void *), void *data)
-{
-  JOB *job;
-
-  XZALLOC (job);
-  job->ts = *ts;
-  job->func = func;
-  job->data = data;
-  return job;
-}
-
-static void
-job_arm_unlocked (JOB *job)
-{
-  JOB *t;
-
-  DLIST_FOREACH (t, &job_head, link)
-    {
-      if (timespec_cmp (&job->ts, &t->ts) < 0)
-	break;
-    }
-
-  DLIST_INSERT_BEFORE (&job_head, t, job, link);
-
-  if (DLIST_PREV (job, link) == NULL)
-    pthread_cond_broadcast (&job_cond);
-}
-
-void
-job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data)
-{
-  job_arm_unlocked (job_alloc (ts, func, data));
-}
-
-void
-job_enqueue (struct timespec const *ts, void (*func) (void *), void *data)
-{
-  pthread_mutex_lock (&job_mutex);
-  job_enqueue_unlocked (ts, func, data);
-  pthread_mutex_unlock (&job_mutex);
-}
-
-void
-job_enqueue_after_unlocked (unsigned t, void (*func) (void *), void *data)
-{
-  struct timespec ts;
-  clock_gettime (CLOCK_REALTIME, &ts);
-  ts.tv_sec += t;
-  job_enqueue_unlocked (&ts, func, data);
-}
-
-void
-job_enqueue_after (unsigned t, void (*func) (void *), void *data)
-{
-  pthread_mutex_lock (&job_mutex);
-  job_enqueue_after_unlocked (t, func, data);
-  pthread_mutex_unlock (&job_mutex);
-}
-
-void
-job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data)
-{
-  JOB *job, *tmp;
-
-  DLIST_FOREACH_SAFE (job, tmp, &job_head, link)
-    {
-      if (job->func == func && job->data == data)
-	{
-	  DLIST_REMOVE (&job_head, job, link);
-	  job->ts = *ts;
-	  job_arm_unlocked (job);
-	  return;
-	}
-    }
-  job_arm_unlocked (job_alloc (ts, func, data));
-}
-
-void
-job_rearm (struct timespec *ts, void (*func) (void *), void *data)
-{
-  pthread_mutex_lock (&job_mutex);
-  job_rearm_unlocked (ts, func, data);
-  pthread_mutex_unlock (&job_mutex);
-}
-
-static void
-timer_cleanup (void *ptr)
-{
-  pthread_mutex_unlock (&job_mutex);
-}
-
-/*
- * run periodic functions:
- */
-void *
-thr_timer (void *arg)
-{
-  /* Seed the job queue */
-#if ! SET_DH_AUTO
-  init_rsa ();
-  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
-#endif
-
-  pthread_mutex_lock (&job_mutex);
-  pthread_cleanup_push (timer_cleanup, NULL);
-
-  for (;;)
-    {
-      int rc;
-      JOB *job;
-
-      if (DLIST_EMPTY (&job_head))
-	{
-	  pthread_cond_wait (&job_cond, &job_mutex);
-	  continue;
-	}
-
-      job = DLIST_FIRST (&job_head);
-
-      rc = pthread_cond_timedwait (&job_cond, &job_mutex, &job->ts);
-      if (rc == 0)
-	continue;
-      if (rc != ETIMEDOUT)
-	abend ("unexpected error from pthread_cond_timedwait: %s",
-	       strerror (errno));
-
-      if (job != DLIST_FIRST (&job_head))
-	/* Job was removed or its time changed */
-	continue;
-
-      DLIST_SHIFT (&job_head, link);
-
-      job->func (job->data);
-      free (job);
-    }
-  pthread_cleanup_pop (1);
-}
 
 static char *
 get_param (char const *url, char const *param, size_t *ret_len)

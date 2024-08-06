@@ -1014,15 +1014,6 @@ static inline void stringbuf_init_log (struct stringbuf *sb)
   stringbuf_init (sb, lognomem);
 }
 
-void job_enqueue_unlocked (struct timespec const *ts, void (*func) (void *), void *data);
-void job_enqueue_after_unlocked (unsigned t, void (*func) (void *), void *data);
-
-void job_enqueue (struct timespec const *ts, void (*func) (void *), void *data);
-void job_enqueue_after (unsigned t, void (*func) (void *), void *data);
-
-void job_rearm_unlocked (struct timespec *ts, void (*func) (void *), void *data);
-void job_rearm (struct timespec *ts, void (*func) (void *), void *data);
-
 char const *sess_type_to_str (int type);
 int control_response (POUND_HTTP *arg);
 void pound_atexit (void (*func) (void *), void *arg);
