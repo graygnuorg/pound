@@ -26,6 +26,7 @@ autom4te.cache
 *.tar.gz
 *.patch
 *.diff
+*.sig
 TAGS
 \#*
 /tmp
