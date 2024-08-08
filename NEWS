@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-06-26
+Pound -- history of user-visible changes. 2024-08-08
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -13,6 +13,11 @@ Version 4.12.90 (git)
 
 Sets a string to tag syslog messages with.  By default, same as the
 name used to start the program.
+
+* Bugfixes
+
+** Fix infinite recursion on reporting an out of memory condition.
+** Fix deadlock in session expiration handling.
 
 
 Version 4.12, 2024-04-26
