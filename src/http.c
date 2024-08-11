@@ -236,6 +236,12 @@ http_err_reply (POUND_HTTP *phttp, int err)
   phttp->conn_closed = 1;
 }
 
+static inline int
+isws (int c)
+{
+  return c == ' ' || c == '\t';
+}
+
 static int
 submatch_realloc (struct submatch *sm, regex_t const *re)
 {
@@ -462,7 +468,7 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
   size_t arglen = 0;
   size_t i;
 
-  while (len && (*input == ' ' || *input == '\t'))
+  while (len && isws (*input))
     {
       input++;
       len--;
@@ -471,7 +477,7 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
     return NULL;
 
   for (i = 0; i < len; i++)
-    if (input[i] == ' ' || input[i] == '\t')
+    if (isws (input[i]))
       break;
 
   for (ap = accessors; ; ap++)
@@ -1307,13 +1313,13 @@ get_content_length (char const *arg, int mode)
 
   if (mode == CL_HEADER)
     {
-      while (*arg == ' ' || *arg == '\t')
+      while (isws (*arg))
 	arg++;
     }
 
   if (strtoclen (arg, mode == CL_HEADER ? 10 : 16, &n, &p))
     return NO_CONTENT_LENGTH;
-  while (*p == ' ' || *p == '\t')
+  while (isws (*p))
     p++;
   if (*p)
     {
@@ -3571,6 +3577,36 @@ log_error (POUND_HTTP *phttp, int code, int en, char const *fmt, ...)
   stringbuf_free (&sb);
 }
 
+static int
+http_response_validate (struct http_request *req)
+{
+  char *str = req->request;
+  int http_ver;
+
+  if (!(strncmp (str, "HTTP/1.", 7) == 0 &&
+	((http_ver = str[7]) == '0' || http_ver == '1') &&
+	isws (str[8])))
+    return 0;
+  req->version = http_ver - '0';
+
+  for (str += 8; isws (*str); str++)
+    if (!*str)
+      return 0;
+
+  switch (str[0])
+    {
+    case '1':
+    case '2':
+    case '3':
+    case '4':
+    case '5':
+      if (isdigit (str[1]) && isdigit (str[2]) && (str[3] == 0 || isws (str[3])))
+	return (int) strtol (str, NULL, 10);
+    }
+
+  return 0;
+}
+
 /*
  * get the response
  */
@@ -3590,6 +3626,7 @@ backend_response (POUND_HTTP *phttp)
   do
     {
       int chunked; /* True if request contains Transfer-Encoding: chunked */
+      int code;
 
       /* Free previous response, if any */
       http_request_free (&phttp->response);
@@ -3597,6 +3634,12 @@ backend_response (POUND_HTTP *phttp)
       if (res != HTTP_STATUS_OK)
 	{
 	  log_error (phttp, res, errno, "response read error");
+	  return res;
+	}
+      if ((code = http_response_validate (&phttp->response)) == 0)
+	{
+	  res = HTTP_STATUS_SERVICE_UNAVAILABLE;
+	  log_error (phttp, res, 0, "malformed response");
 	  return res;
 	}
 
@@ -3608,8 +3651,8 @@ backend_response (POUND_HTTP *phttp)
 			 phttp))
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-      be_11 = (phttp->response.request[7] == '1');
-      phttp->response_code = strtol (phttp->response.request+9, NULL, 10);
+      be_11 = (phttp->response.version == 1);
+      phttp->response_code = code;
 
       switch (phttp->response_code)
 	{
