@@ -805,7 +805,7 @@ sub runcom {
     my @ready;
     my %data = ( $child_stdout => '', $child_stderr => '' );
 
-    while (!defined($status_codes{$pid}) && (@ready = $sel->can_read)) {
+    while (@ready = $sel->can_read) {
 	foreach my $fh (@ready) {
 	    my $data;
 	    while (1) {
