@@ -25,7 +25,7 @@ extern int print_log;           /* print log messages to stdout/stderr during
 				   startup */
 extern int enable_backend_stats;
 
-extern regex_t HEADER,		/* Allowed header */
+extern POUND_REGEX HEADER,	/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
   LOCATION;			/* the host we are redirected to */
 

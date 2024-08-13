@@ -91,19 +91,22 @@
 # include <openssl/engine.h>
 #endif
 
-#if HAVE_LIBPCREPOSIX == 2
-# include <pcre2posix.h>
-#elif HAVE_LIBPCREPOSIX == 1
-# if HAVE_PCREPOSIX_H
-#  include <pcreposix.h>
-# elif HAVE_PCRE_PCREPOSIX_H
-#  include <pcre/pcreposix.h>
-# else
-#  error "You have libpcreposix, but the header files are missing. Use --disable-pcreposix"
-# endif
-#else
-# include <regex.h>
-#endif
+typedef struct pound_regex *POUND_REGEX;
+
+typedef struct {
+  int rm_so;
+  int rm_eo;
+} POUND_REGMATCH;
+
+#define POUND_REGEX_DEFAULT   0
+#define POUND_REGEX_ICASE     0x1
+#define POUND_REGEX_MULTILINE 0x2
+
+int regex_compile (POUND_REGEX *, const char *, int);
+int regex_exec (POUND_REGEX, const char *, size_t, POUND_REGMATCH *);
+void regex_free (POUND_REGEX);
+char const *regex_error (POUND_REGEX pre, size_t *off);
+size_t regex_num_submatch (POUND_REGEX pre);
 
 #ifdef  HAVE_LONG_LONG_INT
 typedef long long CONTENT_LENGTH;
@@ -391,7 +394,7 @@ int acl_match (ACL *acl, struct sockaddr *sa);
 /* matcher chain */
 typedef struct _matcher
 {
-  regex_t pat;		/* pattern to match the request/header against */
+  POUND_REGEX pat;		/* pattern to match the request/header against */
   SLIST_ENTRY (_matcher) next;
 } MATCHER;
 
@@ -553,7 +556,7 @@ typedef struct string_ref
 struct string_match
 {
   STRING_REF *string;
-  regex_t re;
+  POUND_REGEX re;
 };
 
 struct user_pass
@@ -580,7 +583,7 @@ typedef struct _service_cond
   union
   {
     ACL *acl;
-    regex_t re;
+    POUND_REGEX re;
     struct bool_service_cond bool;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
@@ -733,7 +736,7 @@ typedef struct _listener
   REWRITE_RULE_HEAD rewrite[2];
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
-  regex_t *url_pat;		/* pattern to match the request URL against */
+  POUND_REGEX url_pat;		/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */
@@ -758,7 +761,7 @@ struct submatch
 {
   size_t matchn;
   size_t matchmax;
-  regmatch_t *matchv;
+  POUND_REGMATCH *matchv;
   char *subject;
 };
 

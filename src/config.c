@@ -309,12 +309,16 @@ conf_error_at_locus_point (struct locus_point const *loc, char const *fmt, ...)
 }
 
 static void
-regcomp_error_at_locus_range (struct locus_range const *loc, int rc, regex_t *rx,
+regcomp_error_at_locus_range (struct locus_range const *loc, POUND_REGEX rx,
 			      char const *expr)
 {
-  char errbuf[512];
-  regerror (rc, rx, errbuf, sizeof (errbuf));
-  conf_error_at_locus_range (loc, "%s", errbuf);
+  size_t off;
+  char const *errmsg = regex_error (rx, &off);
+
+  if (off)
+    conf_error_at_locus_range (loc, "%s at byte %zu", errmsg, off);
+  else
+    conf_error_at_locus_range (loc, "%s", errmsg);
   if (expr)
     conf_error_at_locus_range (loc, "regular expression: %s", expr);
 }
@@ -825,7 +829,7 @@ last_token_locus_range (void)
   conf_error_at_locus_range (last_token_locus_range (), fmt, __VA_ARGS__)
 
 #define conf_regcomp_error(rc, rx, expr) \
-  regcomp_error_at_locus_range (last_token_locus_range (), rc, rx, expr)
+  regcomp_error_at_locus_range (last_token_locus_range (), rx, expr)
 
 #define conf_openssl_error(file, msg)				\
   openssl_error_at_locus_range (last_token_locus_range (), file, msg)
@@ -2563,11 +2567,11 @@ parse_match_mode (int *mode, int *re_flags, int *from_file)
       switch (n)
 	{
 	case MATCH_CASE:
-	  *re_flags &= ~REG_ICASE;
+	  *re_flags &= ~POUND_REGEX_ICASE;
 	  break;
 
 	case MATCH_ICASE:
-	  *re_flags |= REG_ICASE;
+	  *re_flags |= POUND_REGEX_ICASE;
 	  break;
 
 	case MATCH_FILE:
@@ -2634,7 +2638,7 @@ build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
 }
 
 static int
-parse_regex_compat (regex_t *regex, int flags)
+parse_regex_compat (POUND_REGEX *regex, int flags)
 {
   struct token *tok;
   int mode = MATCH_RE;
@@ -2650,11 +2654,12 @@ parse_regex_compat (regex_t *regex, int flags)
 
   xstringbuf_init (&sb);
   p = build_regex (&sb, mode, tok->str, NULL);
-  rc = regcomp (regex, p, flags);
+  rc = regex_compile (regex, p, flags);
   stringbuf_free (&sb);
   if (rc)
     {
-      conf_regcomp_error (rc, regex, NULL);
+      conf_regcomp_error (rc, *regex, NULL);
+      regex_free (*regex);
       return PARSER_FAIL;
     }
 
@@ -2747,10 +2752,11 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
 	  stringbuf_reset (&sb);
 	  expr = build_regex (&sb, mode, p, type == COND_HOST ? host_pfx : NULL);
 	  hc = service_cond_append (cond, type);
-	  rc = regcomp (&hc->re, expr, flags);
+	  rc = regex_compile (&hc->re, expr, flags);
 	  if (rc)
 	    {
-	      conf_regcomp_error (rc, &hc->re, NULL);
+	      conf_regcomp_error (rc, hc->re, NULL);
+	      // FIXME: regex_free (hc->re);
 	      return PARSER_FAIL;
 	    }
 	  switch (type)
@@ -2772,10 +2778,11 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
     {
       cond = service_cond_append (top_cond, type);
       expr = build_regex (&sb, mode, tok->str, type == COND_HOST ? host_pfx : NULL);
-      rc = regcomp (&cond->re, expr, flags);
+      rc = regex_compile (&cond->re, expr, flags);
       if (rc)
 	{
-	  conf_regcomp_error (rc, &cond->re, NULL);
+	  conf_regcomp_error (rc, cond->re, NULL);
+	  // FIXME: regex_free (cond->re);
 	  return PARSER_FAIL;
 	}
       switch (type)
@@ -2822,7 +2829,7 @@ parse_cond_url_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
   return parse_cond_matcher (call_data, COND_URL, MATCH_RE,
-			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
 			     NULL);
 }
 
@@ -2831,7 +2838,7 @@ parse_cond_path_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
   return parse_cond_matcher (call_data, COND_PATH, MATCH_RE,
-			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
 			     NULL);
 }
 
@@ -2840,7 +2847,7 @@ parse_cond_query_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
   return parse_cond_matcher (call_data, COND_QUERY, MATCH_RE,
-			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0),
+			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
 			     NULL);
 }
 
@@ -2849,7 +2856,7 @@ parse_cond_query_param_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *top_cond = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  int flags = (dfl->ignore_case ? POUND_REGEX_ICASE : 0);
   struct token *tok;
   char *string;
   int rc;
@@ -2868,7 +2875,7 @@ parse_cond_string_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *top_cond = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  int flags = REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0);
+  int flags = (dfl->ignore_case ? POUND_REGEX_ICASE : 0);
   struct token *tok;
   char *string;
   int rc;
@@ -2886,7 +2893,7 @@ static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   return parse_cond_matcher (call_data, COND_HDR, MATCH_RE,
-			     REG_NEWLINE | REG_EXTENDED | REG_ICASE,
+			     POUND_REGEX_MULTILINE | POUND_REGEX_ICASE,
 			     NULL);
 }
 
@@ -2896,7 +2903,7 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
   cond->bool.op = BOOL_NOT;
   return parse_cond_matcher (cond, COND_HDR, MATCH_RE,
-			     REG_NEWLINE | REG_EXTENDED | REG_ICASE,
+			     POUND_REGEX_MULTILINE | POUND_REGEX_ICASE,
 			     NULL);
 }
 
@@ -2904,7 +2911,7 @@ static int
 parse_cond_host (void *call_data, void *section_data)
 {
   return parse_cond_matcher (call_data, COND_HOST, MATCH_EXACT,
-			     REG_EXTENDED | REG_ICASE, NULL);
+			     POUND_REGEX_ICASE, NULL);
 }
 
 static int
@@ -2927,7 +2934,7 @@ parse_redirect_backend (void *call_data, void *section_data)
   struct token *tok;
   int code = 302;
   BACKEND *be;
-  regmatch_t matches[5];
+  POUND_REGMATCH matches[5];
   struct locus_range range;
 
   range.beg = last_token_locus_range ()->beg;
@@ -2974,7 +2981,7 @@ parse_redirect_backend (void *call_data, void *section_data)
   be->v.redirect.status = code;
   be->v.redirect.url = xstrdup (tok->str);
 
-  if (regexec (&LOCATION, be->v.redirect.url, 4, matches, 0))
+  if (regex_exec (LOCATION, be->v.redirect.url, 4, matches))
     {
       conf_error ("%s", "Redirect bad URL");
       return PARSER_FAIL;
@@ -3446,7 +3453,7 @@ parse_delete_header (void *call_data, void *section_data)
 
   XZALLOC (op->v.hdrdel);
   return parse_regex_compat (&op->v.hdrdel->pat,
-			     REG_EXTENDED | (dfl->ignore_case ? REG_ICASE : 0));
+			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0));
 }
 
 static int
@@ -3713,7 +3720,7 @@ parse_header_remove (void *call_data, void *section_data)
   REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
   XZALLOC (op->v.hdrdel);
   return parse_regex_compat (&op->v.hdrdel->pat,
-			     REG_EXTENDED | REG_ICASE | REG_NEWLINE);
+			     POUND_REGEX_ICASE | POUND_REGEX_MULTILINE);
 }
 
 static int
@@ -4076,10 +4083,10 @@ parse_acme (void *call_data, void *section_data)
 
   /* Create a URL matcher */
   cond = service_cond_append (&svc->cond, COND_URL);
-  rc = regcomp (&cond->re, re_acme, REG_EXTENDED);
+  rc = regex_compile (&cond->re, re_acme, 0);
   if (rc)
     {
-      conf_regcomp_error (rc, &cond->re, NULL);
+      conf_regcomp_error (rc, cond->re, NULL);
       return PARSER_FAIL;
     }
 
@@ -4134,11 +4141,8 @@ listener_parse_checkurl (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  XZALLOC (lst->url_pat);
-
-  rc = regcomp (lst->url_pat, tok->str,
-		REG_NEWLINE | REG_EXTENDED |
-		(dfl->ignore_case ? REG_ICASE : 0));
+  rc = regex_compile (&lst->url_pat, tok->str,
+		      (dfl->ignore_case ? POUND_REGEX_ICASE : 0));
   if (rc)
     {
       conf_regcomp_error (rc, lst->url_pat, NULL);
@@ -6153,6 +6157,16 @@ struct string_value pound_settings[] = {
   { "Include directory",   STRING_CONSTANT, { .s_const = SYSCONFDIR } },
   { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
   { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
+  { "Regex flavor", STRING_CONSTANT, { .s_const =
+#if !defined(HAVE_LIBPCRE)
+				       "POSIX"
+#elif HAVE_LIBPCRE == 1
+				       "pcre"
+#elif HAVE_LIBPCRE == 2
+				       "pcre2"
+#endif
+    }
+  },
 #if ! SET_DH_AUTO
   { "DH bits",         STRING_INT, { .s_int = DH_LEN } },
   { "RSA regeneration interval", STRING_INT, { .s_int = T_RSA_KEYS } },

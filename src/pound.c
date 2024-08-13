@@ -43,7 +43,7 @@ LISTENER_HEAD listeners = SLIST_HEAD_INITIALIZER (listeners);
 				/* all available listeners */
 int n_listeners;                /* Number of listeners */
 
-regex_t HEADER,			/* Allowed header */
+POUND_REGEX HEADER, 	        /* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
   LOCATION;			/* the host we are redirected to */
 
@@ -987,12 +987,12 @@ main (const int argc, char **argv)
   CRYPTO_set_locking_callback (l_lock);
 
   /* prepare regular expressions */
-  if (regcomp (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",
-	       REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&CONN_UPGRD, "(^|[ \t,])upgrade([ \t,]|$)",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED)
-      || regcomp (&LOCATION, "(http|https)://([^/]+)(.*)",
-		  REG_ICASE | REG_NEWLINE | REG_EXTENDED))
+  if (regex_compile (&HEADER, "^([a-z0-9!#$%&'*+.^_`|~-]+):[ \t]*(.*)[ \t]*$",
+		     POUND_REGEX_ICASE | POUND_REGEX_MULTILINE)
+      || regex_compile (&CONN_UPGRD, "(^|[ \t,])upgrade([ \t,]|$)",
+		  POUND_REGEX_ICASE | POUND_REGEX_MULTILINE)
+      || regex_compile (&LOCATION, "(http|https)://([^/]+)(.*)",
+		  POUND_REGEX_ICASE | POUND_REGEX_MULTILINE))
     abend ("bad essential Regex");
 
 #ifndef SOL_TCP

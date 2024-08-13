@@ -994,7 +994,7 @@ need_rewrite (const char *location, const char *v_host,
   struct addrinfo addr;
   struct sockaddr_in in_addr, be_addr;
   struct sockaddr_in6 in6_addr, be6_addr;
-  regmatch_t matches[4];
+  POUND_REGMATCH matches[4];
   char const *proto;
   char const *path;
   char *host, *vhost, *port, *cp;
@@ -1008,7 +1008,7 @@ need_rewrite (const char *location, const char *v_host,
     return 0;
 
   /* split the location into its fields */
-  if (regexec (&LOCATION, location, 4, matches, 0))
+  if (regex_exec (LOCATION, location, 4, matches))
     return 0;
   proto = location + matches[1].rm_so;
 

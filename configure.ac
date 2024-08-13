@@ -160,7 +160,11 @@ AM_CONDITIONAL([SET_DH_AUTO],[test "$SET_DH_AUTO" = 1])
 AC_DEFINE_UNQUOTED([SET_DH_AUTO],[$SET_DH_AUTO],
   [Define to 1 of *set_dh_auto macros are available])
 
-PND_PCREPOSIX
+PND_PCRE
+AM_CONDITIONAL([COND_REGEX], [test $status_pcre = no])
+AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
+AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
+
 
 AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
 
@@ -220,7 +224,7 @@ Pound configuration parameters:
 Buffer size ................................... $bufsize
 Owner user .................................... $owner_user
 Owner group ................................... $owner_group
-PCRE POSIX library ............................ $status_pcreposix
+Regular expressions ........................... $status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 *******************************************************************
@@ -230,10 +234,10 @@ EOF
 [bufsize=$MAXBUF
 owner_user=$I_OWNER
 owner_group=$I_GRP
-if test $status_pcreposix != no; then
-  status_pcreposix=pcre$status_pcreposix
+if test $status_pcre != no; then
+  status_pcre=pcre$status_pcre
 else
-  status_pcreposix=$status_pcreposix
+  status_pcre="POSIX"
 fi
 memory_allocator=$memory_allocator
 if test "$early_pthread_cancel_probe" = 1; then

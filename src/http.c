@@ -243,12 +243,12 @@ isws (int c)
 }
 
 static int
-submatch_realloc (struct submatch *sm, regex_t const *re)
+submatch_realloc (struct submatch *sm, POUND_REGEX re)
 {
-  size_t n = re->re_nsub + 1;
+  size_t n = regex_num_submatch (re);
   if (n > sm->matchmax)
     {
-      regmatch_t *p = realloc (sm->matchv, n * sizeof (p[0]));
+      POUND_REGMATCH *p = realloc (sm->matchv, n * sizeof (p[0]));
       if (!p)
 	return -1;
       sm->matchmax = n;
@@ -302,7 +302,7 @@ submatch_queue_push (struct submatch_queue *smq)
 }
 
 static int
-submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
+submatch_exec (POUND_REGEX re, char const *subject, struct submatch *sm)
 {
   int res;
 
@@ -312,7 +312,7 @@ submatch_exec (regex_t const *re, char const *subject, struct submatch *sm)
       lognomem ();
       return 0;
     }
-  res = regexec (re, subject, sm->matchn, sm->matchv, 0) == 0;
+  res = regex_exec (re, subject, sm->matchn, sm->matchv) == 0;
   if (res)
     {
       if ((sm->subject = strdup (subject)) == NULL)
@@ -1864,7 +1864,7 @@ cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
 static int
 qualify_header (struct http_header *hdr)
 {
-  regmatch_t matches[4];
+  POUND_REGMATCH matches[4];
   static struct
   {
     char const *header;
@@ -1889,7 +1889,7 @@ qualify_header (struct http_header *hdr)
   };
   int i;
 
-  if (regexec (&HEADER, hdr->header, 4, matches, 0) == 0)
+  if (regex_exec (HEADER, hdr->header, 4, matches) == 0)
     {
       hdr->name_start = matches[1].rm_so;
       hdr->name_end = matches[1].rm_eo;
@@ -2139,7 +2139,7 @@ http_header_list_filter (HTTP_HEADER_LIST *head, MATCHER *m)
 
   DLIST_FOREACH_SAFE (hdr, tmp, head, link)
     {
-      if (regexec (&m->pat, hdr->header, 0, NULL, 0) == 0)
+      if (regex_exec (m->pat, hdr->header, 0, NULL) == 0)
 	{
 	  http_header_list_remove (head, hdr);
 	}
@@ -2961,7 +2961,7 @@ parse_http_request (struct http_request *req, int group)
 }
 
 static int
-match_headers (HTTP_HEADER_LIST *headers, regex_t const *re,
+match_headers (HTTP_HEADER_LIST *headers, POUND_REGEX re,
 	       struct submatch *sm)
 {
   struct http_header *hdr;
@@ -2992,21 +2992,21 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (http_request_get_url (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_PATH:
       if (http_request_get_path (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_QUERY:
       if (http_request_get_query (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (&cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
       break;
 
     case COND_QUERY_PARAM:
@@ -3025,18 +3025,18 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  if (str == NULL)
 	    res = 0;
 	  else
-	    res = submatch_exec (&cond->sm.re, str,
+	    res = submatch_exec (cond->sm.re, str,
 				 submatch_queue_push (&phttp->smq));
 	}
       break;
 
     case COND_HDR:
-      res = match_headers (&req->headers, &cond->re,
+      res = match_headers (&req->headers, cond->re,
 			   submatch_queue_push (&phttp->smq));
       break;
 
     case COND_HOST:
-      res = match_headers (&req->headers, &cond->re,
+      res = match_headers (&req->headers, cond->re,
 			   submatch_queue_push (&phttp->smq));
       if (res)
 	{
@@ -3047,7 +3047,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  struct submatch *sm = submatch_queue_get (&phttp->smq, 0);
 	  int n, i;
 	  char const *s = sm->subject;
-	  regmatch_t *mv = sm->matchv;
+	  POUND_REGMATCH *mv = sm->matchv;
 	  int mc = sm->matchn;
 	  char *p;
 
@@ -3091,7 +3091,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 			      "string_match");
 	if (subj)
 	  {
-	    res = submatch_exec (&cond->sm.re, subj,
+	    res = submatch_exec (cond->sm.re, subj,
 				 submatch_queue_push (&phttp->smq));
 	    free (subj);
 	  }
@@ -3695,7 +3695,7 @@ backend_response (POUND_HTTP *phttp)
 	      /*
 	       * Connection: upgrade
 	       */
-	      else if (!regexec (&CONN_UPGRD, val, 0, NULL, 0))
+	      else if (regex_exec (CONN_UPGRD, val, 0, NULL) == 0)
 		phttp->ws_state |= WSS_RESP_HEADER_CONNECTION_UPGRADE;
 	      break;
 
@@ -4129,12 +4129,12 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       (hdr = http_header_list_locate (&phttp->request.headers,
 				      HEADER_DESTINATION)) != NULL)
     {
-      regmatch_t matches[4];
+      POUND_REGMATCH matches[4];
 
       if ((val = http_header_get_value (hdr)) == NULL)
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-      if (regexec (&LOCATION, val, 4, matches, 0))
+      if (regex_exec (LOCATION, val, 4, matches))
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") can't parse Destination %s",
 		  POUND_TID (), val);
@@ -4600,7 +4600,7 @@ do_http (POUND_HTTP *phttp)
 	phttp->ws_state |= WSS_REQ_GET;
 
       if (phttp->lstn->url_pat &&
-	  regexec (phttp->lstn->url_pat, phttp->request.url, 0, NULL, 0))
+	  regex_exec (phttp->lstn->url_pat, phttp->request.url, 0, NULL))
 	{
 	  log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
 		     "bad URL \"%s\"", phttp->request.url);
@@ -4625,7 +4625,7 @@ do_http (POUND_HTTP *phttp)
 	      /*
 	       * Connection: upgrade
 	       */
-	      else if (!regexec (&CONN_UPGRD, val, 0, NULL, 0))
+	      else if (regex_exec (CONN_UPGRD, val, 0, NULL) == 0)
 		phttp->ws_state |= WSS_REQ_HEADER_CONNECTION_UPGRADE;
 	      break;
 

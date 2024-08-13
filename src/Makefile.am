@@ -17,12 +17,12 @@
 
 AM_CFLAGS = @PTHREAD_CFLAGS@
 
-AM_CPPFLAGS = @SSL_CPPFLAGS@ @PCREPOSIX_CFLAGS@ \
+AM_CPPFLAGS = @SSL_CPPFLAGS@ @PCRE_CFLAGS@ \
  -DSYSCONFDIR=\"$(sysconfdir)\"\
  -DLOCALSTATEDIR=\"$(localstatedir)\"\
  -DPKGDATADIR=\"$(pkgdatadir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD = libpound.a @PCREPOSIX_LIBS@ @PTHREAD_LIBS@
+LDADD = libpound.a @PCRE_LIBS@ @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
@@ -33,6 +33,16 @@ pound_SOURCES=\
  metrics.c\
  pound.c\
  svc.c
+
+if COND_REGEX
+  pound_SOURCES += regex_std.c
+endif
+if COND_PCRE
+  pound_SOURCES += regex_pcre.c
+endif
+if COND_PCRE2
+  pound_SOURCES += regex_pcre2.c
+endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
