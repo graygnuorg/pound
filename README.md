@@ -116,16 +116,16 @@ generic configure options, refer to [Autoconf documentation](https://www.gnu.org
 Apart from the generic ones, there are also several *pound-specific*
 configuration options:
 
-* `--enable-pcreposix` or `--disable-pcreposix`
+* `--enable-pcre` or `--disable-pcre`
 
-  Enable or disable the use of the `libpcreposix2` or `libpcreposix`
-  library.  This is a library that makes it possible to use both POSIX
-  extended and Perl-compatible regular expressions in __pound__ configuration
-  file.
+  Enable or disable use of the `libpcre2` or `libpcre`
+  library.  This library allows you to use Perl-compatible regular
+  expressions in __pound__ configuration file.
 
-  By default, its presence is determined automatically; `libpcreposix2`
-  is preferred over `libpcreposix`.  To force compiling with the older
-  `libpcreposix`, use `--enable-pcreposix=pcre1`.
+  By default, its presence is determined automatically; `libpcre2`
+  is preferred over `libpcre`.  To force compiling with the older
+  `libpcre`, use `--enable-pcre=1`.  To disable the use of `pcre`
+  and stick with POSIX regular expressions, use `--disable-pcre`.
 
 * `--enable-pthread-cancel-probe` or `--disable-pthread-cancel-probe`
 

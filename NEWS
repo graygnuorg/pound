@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-08-08
+Pound -- history of user-visible changes. 2024-08-14
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -13,6 +13,13 @@ Version 4.12.90 (git)
 
 Sets a string to tag syslog messages with.  By default, same as the
 name used to start the program.
+
+* Support for pcre and pcre2 rewritten
+
+The pcre2posix (or pcreposix) layer is no longer used.  Instead, pound
+uses the native API of the corresponding library.  This provides for
+additional speed-up and (in case of pcre2) avoids coredumps under high
+load.
 
 * Bugfixes
 
