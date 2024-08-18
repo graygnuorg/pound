@@ -24,7 +24,7 @@
 #  error "You have libpcre, but the header files are missing. Use --disable-pcre"
 #endif
 
-struct pound_regex
+struct pcre_pattern
 {
   pcre *pcre;
   size_t nsub;
@@ -32,20 +32,25 @@ struct pound_regex
   int erroff;
 };
 
-int
-regex_compile (POUND_REGEX *retval, const char *pattern, int pflags)
+static int
+pcre_pattern_init (GENPAT strpat)
 {
-  struct pound_regex *pre;
+  strpat->data = xzalloc (sizeof (struct pcre_pattern));
+  return 0;
+}
+
+static int
+pcre_pattern_compile (void *gp_data, const char *pattern, int pflags)
+{
+  struct pcre_pattern *pre = gp_data;
   int flags = 0;
   int nsub;
 
-  if (pflags & POUND_REGEX_ICASE)
+  if (pflags & GENPAT_ICASE)
     flags |= PCRE_CASELESS;
-  if (pflags & POUND_REGEX_MULTILINE)
+  if (pflags & GENPAT_MULTILINE)
     flags |= PCRE_MULTILINE;
 
-  XZALLOC (pre);
-  *retval = pre;
   pre->pcre = pcre_compile (pattern, flags, &pre->errmsg, &pre->erroff, 0);
 
   if (pre->pcre == NULL)
@@ -60,16 +65,18 @@ regex_compile (POUND_REGEX *retval, const char *pattern, int pflags)
   return 0;
 }
 
-char const *
-regex_error (POUND_REGEX pre, size_t *off)
+static char const *
+pcre_pattern_error (void *gp_data, size_t *off)
 {
+  struct pcre_pattern *pre = gp_data;
   *off = pre->erroff;
   return pre->errmsg;
 }
 
-int
-regex_exec (POUND_REGEX pre, const char *subj, size_t n, POUND_REGMATCH *prm)
+static int
+pcre_pattern_exec (void *gp_data, const char *subj, size_t n, POUND_REGMATCH *prm)
 {
+  struct pcre_pattern *pre = gp_data;
   int rc;
   int ovsize;
   int *ovector;
@@ -99,18 +106,30 @@ regex_exec (POUND_REGEX pre, const char *subj, size_t n, POUND_REGMATCH *prm)
   return rc < 0;
 }
 
-size_t
-regex_num_submatch (POUND_REGEX pre)
+static size_t
+pcre_pattern_nsub (void *gp_data)
 {
+  struct pcre_pattern *pre = gp_data;
   return pre->nsub;
 }
 
-void
-regex_free (POUND_REGEX pre)
+static void
+pcre_pattern_free (void *gp_data)
 {
-  if (pre)
+  if (gp_data)
     {
+      struct pcre_pattern *pre = gp_data;
       pcre_free (pre->pcre);
       free (pre);
     }
 }
+
+struct genpat_defn pcre_genpat_defn =
+  {
+    .gp_init = pcre_pattern_init,
+    .gp_compile = pcre_pattern_compile,
+    .gp_error = pcre_pattern_error,
+    .gp_exec = pcre_pattern_exec,
+    .gp_nsub = pcre_pattern_nsub,
+    .gp_free = pcre_pattern_free
+  };

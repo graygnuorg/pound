@@ -91,22 +91,61 @@
 # include <openssl/engine.h>
 #endif
 
-typedef struct pound_regex *POUND_REGEX;
+struct genpat
+{
+  struct genpat_defn const *vtab;
+  void *data;
+};
+
+typedef struct genpat *GENPAT;
 
 typedef struct {
   int rm_so;
   int rm_eo;
 } POUND_REGMATCH;
 
-#define POUND_REGEX_DEFAULT   0
-#define POUND_REGEX_ICASE     0x1
-#define POUND_REGEX_MULTILINE 0x2
+#define GENPAT_DEFAULT   0
+#define GENPAT_ICASE     0x1
+#define GENPAT_MULTILINE 0x2
 
-int regex_compile (POUND_REGEX *, const char *, int);
-int regex_exec (POUND_REGEX, const char *, size_t, POUND_REGMATCH *);
-void regex_free (POUND_REGEX);
-char const *regex_error (POUND_REGEX pre, size_t *off);
-size_t regex_num_submatch (POUND_REGEX pre);
+int genpat_compile (GENPAT *, int, const char *, int);
+int genpat_match (GENPAT, const char *, size_t, POUND_REGMATCH *);
+void genpat_free (GENPAT);
+char const *genpat_error (GENPAT, size_t *);
+size_t genpat_nsub (GENPAT);
+
+enum
+  {
+    GENPAT_POSIX,
+    GENPAT_PCRE,
+    GENPAT_PREFIX,
+    GENPAT_SUFFIX,
+    GENPAT_CONTAIN,
+    GENPAT_EXACT,
+  };
+
+struct genpat_defn
+{
+  int (*gp_init) (GENPAT);
+  int (*gp_compile) (void *, const char *, int);
+  char const *(*gp_error) (void *, size_t *);
+  int (*gp_exec) (void *, const char *, size_t, POUND_REGMATCH *);
+  size_t (*gp_nsub) (void *);
+  void (*gp_free) (void *);
+};
+
+extern struct genpat_defn posix_genpat_defn;
+extern struct genpat_defn prefix_genpat_defn;
+extern struct genpat_defn suffix_genpat_defn;
+extern struct genpat_defn contain_genpat_defn;
+extern struct genpat_defn exact_genpat_defn;
+
+#ifdef HAVE_LIBPCRE
+extern struct genpat_defn pcre_genpat_defn;
+# define PCRE_REGEX_DEFN &pcre_genpat_defn
+#else
+# define PCRE_REGEX_DEFN NULL
+#endif
 
 #ifdef  HAVE_LONG_LONG_INT
 typedef long long CONTENT_LENGTH;
@@ -394,7 +433,7 @@ int acl_match (ACL *acl, struct sockaddr *sa);
 /* matcher chain */
 typedef struct _matcher
 {
-  POUND_REGEX pat;		/* pattern to match the request/header against */
+  GENPAT pat;		/* pattern to match the request/header against */
   SLIST_ENTRY (_matcher) next;
 } MATCHER;
 
@@ -556,7 +595,7 @@ typedef struct string_ref
 struct string_match
 {
   STRING_REF *string;
-  POUND_REGEX re;
+  GENPAT re;
 };
 
 struct user_pass
@@ -583,7 +622,7 @@ typedef struct _service_cond
   union
   {
     ACL *acl;
-    POUND_REGEX re;
+    GENPAT re;
     struct bool_service_cond bool;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
@@ -736,7 +775,7 @@ typedef struct _listener
   REWRITE_RULE_HEAD rewrite[2];
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
-  POUND_REGEX url_pat;		/* pattern to match the request URL against */
+  GENPAT url_pat;	/* pattern to match the request URL against */
   char *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */

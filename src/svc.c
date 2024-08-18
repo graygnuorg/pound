@@ -1008,7 +1008,7 @@ need_rewrite (const char *location, const char *v_host,
     return 0;
 
   /* split the location into its fields */
-  if (regex_exec (LOCATION, location, 4, matches))
+  if (genpat_match (LOCATION, location, 4, matches))
     return 0;
   proto = location + matches[1].rm_so;
 

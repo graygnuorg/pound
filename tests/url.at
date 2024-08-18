@@ -66,6 +66,20 @@ PT_CHECK([ListenHTTP
 		End
 	End
 	Service "7"
+		Url -contain "substr"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service "8"
+		Url -contain -icase "substr"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service "9"
 		Backend
 			Address
 			Port
@@ -127,6 +141,20 @@ end
 
 200
 x-backend-number: 6
+end
+
+GET /echo/match_substring
+end
+
+200
+x-backend-number: 7
+end
+
+GET /echo/match_sUBString
+end
+
+200
+x-backend-number: 8
 end
 ])
 

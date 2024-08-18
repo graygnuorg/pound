@@ -426,10 +426,13 @@ option, as in:
 Host -re ".*\\.example\\.com"
 @end example
 
-Whenever we speak about regular expression we mean POSIX extended
+@cindex regular expressions, POSIX
+@cindex POSIX regular expressions
+Whenever we speak about regular expression we usually mean POSIX extended
 regular expressions (@pxref{Extended
 regexps, POSIX extended regular expressions, POSIX extended regular expressions,
-sed, GNU sed}).
+sed, GNU sed}).  However, other regex types can also be used.  This is
+covered in @ref{Regular Expressions}.
 
 Notice the use of double backslashes in the above example.  The
 backslash before each dot is needed to match it literally, while another one
@@ -584,6 +587,45 @@ Service
         Port 8080
     End
 End
+@end example
+
+@node Regular Expressions
+@subsection Regular Expressions
+
+@cindex regular expressions, PCRE
+@cindex regular expressions, Perl-compatible
+@cindex Perl-compatible regular expressions
+Request matching directives use POSIX extended regular expressions by
+default.  If @command{pound} was compiled with @code{PCRE} or
+@code{PCRE2} library, @dfn{Perl-compatible regular expressions} can be
+used instead.  This can be done either globally or individually for a
+given directive.
+
+@kwindex RegexType
+To change regular expression type globally, use the following
+directive:
+
+@example
+RegexType pcre
+@end example
+
+It affects all request matching directives that appear after it in the
+configuration file, until next @code{RegexType} directive or end of
+file, whichever occurs first.  To change back to POSIX regular
+expressions, use @code{posix} argument:
+
+@example
+RegexType posix
+@end example
+
+Argument to the @code{RegexType} directive is case-insensitive.
+
+Regular expression type can also be selected individually for a
+directive, using @option{-posix} or @option{-pcre} flags.  For
+example:
+
+@example
+Host -pcre -icase "(?<!www\\.)example.org"
 @end example
 
 @node ACL
@@ -2015,14 +2057,8 @@ character.  Otherwise, it expands to empty string.
 may appear anywhere at the global scope of the configuration file,
 although it is customary for them to be at its start.
 
-@deffn {Global directive} User "@var{user_name}"
-Configures the user @command{pound} will run as.
-@end deffn
-
-@deffn {Global directive} Group "@var{group_name}"
-Sets the group @command{pound} will run as.  If not set, the primary
-group of the user (as set by the @code{User} directive) will be used.
-@end deffn
+@node Runtime directives
+@subsection Runtime directives
 
 @deffn {Global directive} Daemon @var{bool}
 @anchor{Daemon}
@@ -2035,6 +2071,35 @@ the foreground.
 
 This setting can be overridden by the @option{-F} and @option{-e}
 command line options.
+@end deffn
+
+@deffn {Global directive} Group "@var{group_name}"
+Sets the group @command{pound} will run as.  If not set, the primary
+group of the user (as set by the @code{User} directive) will be used.
+@end deffn
+
+@deffn {Global directive} PIDFile "@var{filename}"
+@anchor{PIDFile}
+Sets the name of the file where to store program PID.  This can be
+also be set from command line, using @option{-p} command line option
+(@pxref{Usage}).
+
+Notice the following:
+
+@enumerate 1
+@item
+When running with a supervisor, this file holds PID of the supervisor
+process.  Otherwise, it holds PID of the main @comment{pound} process.
+This means it is always suitable for signalling the program using the
+traditional @command{kill `cat filename`} technique.
+
+@item
+Before shutting down, @command{pound} removes this file.  However,
+it may fail to do so if it switches to privileges of another user
+after startup (at least one of @code{User} or @code{Group} are set in
+the configuration file) and the file is stored in a directory whose
+permissions forbid write access for that user.
+@end enumerate
 @end deffn
 
 @deffn {Global directive} Supervisor @var{bool}
@@ -2055,6 +2120,75 @@ Before chrooting, @command{pound} makes the necessary preparations to
 be able to access the files it needs during operation, in particular
 user databases supplied with the @code{BasicAuth} statements
 (@pxref{Authentication}).
+@end deffn
+
+@deffn {Global directive} User "@var{user_name}"
+Configures the user @command{pound} will run as.
+@end deffn
+
+@node Worker Settings
+@subsection Worker Settings
+
+@deffn {Global directive} WorkerMinCount @var{n}
+Sets minimum number of worker threads that must always be running.
+The default is 5.  @xref{Worker model}.
+@end deffn
+
+@deffn {Global directive} WorkerMaxCount @var{n}
+Sets maximum number of worker threads.  The default is 128.
+@xref{Worker model}.
+@end deffn
+
+@deffn {Global directive} WorkerIdleTimeout @var{n}
+Sets idle timeout for a worker thread, in seconds.  Default is 30 seconds.
+@xref{Worker model}.
+@end deffn
+
+@deffn {Global directive} Threads @var{n}
+This statement, retained for backward compatibility with previous
+versions of pound, is equivalent to:
+
+@example
+WorkerMinCount @var{n}
+WorkerMaxCount @var{n}
+@end example
+@end deffn
+
+@node Proxy Tuning
+@subsection Proxy Tuning Directives
+
+@deffn {Global directive} BackendStats @var{bool}
+@anchor{BackendStats}
+Whether to enable backend statistics collection.  Backend statistics
+consists of the following values:
+
+@enumerate 1
+@item Total number of requests processed by this backend.
+@item Average time per request.
+@item Standard deviation of the average time per request.
+@end enumerate
+
+If enabled, these values are made available via @command{poundctl}
+(@pxref{poundctl list}) and telemetry output (@pxref{Metrics}).
+@end deffn
+
+@deffn {Global directive} Balancer @var{algo}
+Sets the request balancing algorithm to use.  Allowed values for
+@var{algo} are:
+
+@table @asis
+@item random
+Use weighted random balancing algorithm.
+
+@item iwrr
+Use interleaved weighted round robin balancing.
+@end table
+
+@xref{Balancer}, for a detailed discussion of these algorithms.
+
+The @code{Balancer} statement in global scope applies to all @code{Service}
+definitions in the file that don't contain @code{Balancer} definitions
+of their own.
 @end deffn
 
 @deffn {Global directive} HeaderOption @var{opt} ...
@@ -2107,48 +2241,36 @@ This setting can be overridden for a particular listener using the
 @code{HeadOption} within it.
 @end deffn
 
-@deffn {Global directive} Balancer @var{algo}
-Sets the request balancing algorithm to use.  Allowed values for
-@var{algo} are:
+@node SSL Settings
+@subsection SSL Settings
 
-@table @asis
-@item random
-Use weighted random balancing algorithm.
-
-@item iwrr
-Use interleaved weighted round robin balancing.
-@end table
-
-@xref{Balancer}, for a detailed discussion of these algorithms.
-
-The @code{Balancer} statement in global scope applies to all @code{Service}
-definitions in the file that don't contain @code{Balancer} definitions
-of their own.
+@deffn {Global directive} SSLEngine "@var{name}"
+Use an OpenSSL hardware acceleration card called @var{name}.  Available
+only if OpenSSL-engine is installed on your system.
 @end deffn
 
-@deffn {Global directive} WorkerMinCount @var{n}
-Sets minimum number of worker threads that must always be running.
-The default is 5.  @xref{Worker model}.
+@deffn {Global directive} ECDHcurve "@var{name}"
+Use the named curve for elliptical curve encryption.
 @end deffn
 
-@deffn {Global directive} WorkerMaxCount @var{n}
-Sets maximum number of worker threads.  The default is 128.
-@xref{Worker model}.
-@end deffn
+@node Regexp Settings
+@subsection Regular Expression Settings
 
-@deffn {Global directive} WorkerIdleTimeout @var{n}
-Sets idle timeout for a worker thread, in seconds.  Default is 30 seconds.
-@xref{Worker model}.
-@end deffn
+@deffn {Global directive} RegexType @var{type}
+Sets the type of regular expressions to use in request matching
+statements.  Allowed values for @var{type} are: @code{posix} and
+@code{pcre} (or @code{perl}), case-insensitive.  The latter requires
+compilation time support.
 
-@deffn {Global directive} Threads @var{n}
-This statement, retained for backward compatibility with previous
-versions of pound, is equivalent to:
+The selected regular expression type remains in effect for all request
+matching directives that follow this statement, until next
+@code{RegexType} statement or end of the configuration file, whichever
+occurs first.
 
-@example
-WorkerMinCount @var{n}
-WorkerMaxCount @var{n}
-@end example
+Regular expression type can be set individually for a directive, using
+the @code{-pcre} or @code{-posix} option (@pxref{conditional-option}).
+
+@xref{Regular Expressions}, for a detailed discussion.
 @end deffn
 
 @deffn {Global directive} IgnoreCase @var{bool}
@@ -2163,16 +2285,9 @@ Please, use the @option{-icase} option to the matching directive
 instead (@pxref{conditional-option}).
 @end deffn
 
-@deffn {Global directive} SSLEngine "@var{name}"
-Use an OpenSSL hardware acceleration card called @var{name}.  Available
-only if OpenSSL-engine is installed on your system.
-@end deffn
+@node ACL definition
+@subsection ACL Definition
 
-@deffn {Global directive} ECDHcurve "@var{name}"
-Use the named curve for elliptical curve encryption.
-@end deffn
-
-@anchor{ACL definition}
 @deffn {Global directive} ACL "@var{name}"
 Define a @dfn{named access control list}.  An @dfn{ACL} is a
 list of network addresses in CIDR notation, one address per line,
@@ -2191,45 +2306,6 @@ The @code{Include} directive is allowed within the ACL section.
 Named ACLs can be used in @code{Service} definitions to limit access
 to services from certain IP addresses only.  @xref{ACL}, for a
 detailed discussion of this.
-@end deffn
-
-@deffn {Global directive} PIDFile "@var{filename}"
-@anchor{PIDFile}
-Sets the name of the file where to store program PID.  This can be
-also be set from command line, using @option{-p} command line option
-(@pxref{Usage}).
-
-Notice the following:
-
-@enumerate 1
-@item
-When running with a supervisor, this file holds PID of the supervisor
-process.  Otherwise, it holds PID of the main @comment{pound} process.
-This means it is always suitable for signalling the program using the
-traditional @command{kill `cat filename`} technique.
-
-@item
-Before shutting down, @command{pound} removes this file.  However,
-it may fail to do so if it switches to privileges of another user
-after startup (at least one of @code{User} or @code{Group} are set in
-the configuration file) and the file is stored in a directory whose
-permissions forbid write access for that user.
-@end enumerate
-@end deffn
-
-@deffn {Global directive} BackendStats @var{bool}
-@anchor{BackendStats}
-Whether to enable backend statistics collection.  Backend statistics
-consists of the following values:
-
-@enumerate 1
-@item Total number of requests processed by this backend.
-@item Average time per request.
-@item Standard deviation of the average time per request.
-@end enumerate
-
-If enabled, these values are made available via @command{poundctl}
-(@pxref{poundctl list}) and telemetry output (@pxref{Metrics}).
 @end deffn
 
 @node File inclusion
@@ -2788,31 +2864,59 @@ of zero or more option flags from the following list:
 @multitable @columnfractions .30 .70
 @headitem Flag @tab Meaning
 
-@kwindex -re, DeleteHeader option
-@cindex regular expression match, @code{DeleteHeader}
-@item @code{-re} @tab Use regular expression match.
-
-@kwindex -exact, DeleteHeader option
-@cindex exact match, @code{DeleteHeader}
-@item @code{-exact} @tab Use exact string match.
-
 @kwindex -beg, DeleteHeader option
 @cindex prefix match, @code{DeleteHeader}
 @item @code{-beg} @tab Exact match at the beginning of string (prefix match).
-
-@kwindex -end, DeleteHeader option
-@cindex suffix match, @code{DeleteHeader}
-@item @code{-end} @tab Exact match at the end of string (suffix match).
 
 @kwindex -case, DeleteHeader option
 @cindex case insensitive match, @code{DeleteHeader}
 @item @code{-case} @tab Case-sensitive comparison.
 
+@kwindex -contain, DeleteHeader option
+@cindex substring match, @code{DeleteHeader}
+@item @code{-contain} @tab Delete each header where "@var{pattern}" is
+a substring.
+
+@kwindex -end, DeleteHeader option
+@cindex suffix match, @code{DeleteHeader}
+@item @code{-end} @tab Exact match at the end of string (suffix match).
+
+@kwindex -exact, DeleteHeader option
+@cindex exact match, @code{DeleteHeader}
+@item @code{-exact} @tab Use exact string match.
+
 @kwindex -icase, DeleteHeader option
 @cindex case sensitive match, @code{DeleteHeader}
 @item @code{-icase} @tab Case-insensitive comparison.
+
+@kwindex -pcre, DeleteHeader option
+@cindex Perl-compatible regular expression match, @code{DeleteHeader}
+@cindex PCRE match, @code{DeleteHeader}
+@item @code{-pcre} @tab Use Perl-compatible regular expression.
+@pxref{Regular Expressions}.
+
+@kwindex -perl, DeleteHeader option
+@cindex Perl-compatible regular expression match, @code{DeleteHeader}
+@cindex PCRE match, @code{DeleteHeader}
+@item @code{-perl} @tab Same as @code{-pcre}.
+
+@kwindex -posix, DeleteHeader option
+@cindex posix regular expression match, @code{DeleteHeader}
+@item @code{-posix} @tab Use POSIX extended regular expression.
+@pxref{Regular Expressions}.
+
+@kwindex -re, DeleteHeader option
+@cindex regular expression match, @code{DeleteHeader}
+@item @code{-re} @tab Use regular expression match.  This assumes the
+default regular expression type, as set by the @code{RegexType}
+directive (@pxref{Regular Expressions}).
 @end multitable
 @end float
+
+The following options are mutually exclusive: @code{-beg},
+@code{-contain}, @code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),
+@code{-posix}, @code{-re}.  If more than one of these are used, the
+last one takes effect.
 @end deffn
 
 @deffn {ListenerHTTP directive} HeaderRemove "@var{pattern}"
@@ -2963,29 +3067,26 @@ zero or more flags from the following table:
 @multitable @columnfractions .30 .70
 @headitem Flag @tab Meaning
 
-@kwindex -re, header matching flag
-@cindex regular expression match, headers
-@item @code{-re} @tab Use regular expression match.
-
-@kwindex -exact, header matching flag
-@cindex exact match, headers
-@item @code{-exact} @tab Use exact string match.
-
 @kwindex -beg, header matching flag
 @cindex prefix match, headers
 @item @code{-beg} @tab Exact match at the beginning of string (prefix match).
-
-@kwindex -end, header matching flag
-@cindex suffix match, headers
-@item @code{-end} @tab Exact match at the end of string (suffix match).
 
 @kwindex -case, header matching flag
 @cindex case insensitive match, headers
 @item @code{-case} @tab Case-sensitive comparison.
 
-@kwindex -icase, header matching flag
-@cindex case sensitive match, headers
-@item @code{-icase} @tab Case-insensitive comparison.
+@kwindex -contain, header matching flag
+@cindex substring match, headers
+@item @code{-contain} @tab Match if @var{pattern} is a substring of
+the original value.
+
+@kwindex -end, header matching flag
+@cindex suffix match, headers
+@item @code{-end} @tab Exact match at the end of string (suffix match).
+
+@kwindex -exact, header matching flag
+@cindex exact match, headers
+@item @code{-exact} @tab Use exact string match.
 
 @kwindex -file, header matching flag
 @cindex file lookup, headers
@@ -2996,8 +3097,39 @@ will be looked up in the @ref{include directory}.  Patterns are read
 from the file line by line.  Leading and trailing whitespace is
 removed.  Empty lines and comments (lines starting with @code{#}) are
 ignored.
+
+@kwindex -icase, header matching flag
+@cindex case sensitive match, headers
+@item @code{-icase} @tab Case-insensitive comparison.
+
+@kwindex -pcre, header matching flag
+@cindex Perl-compatible regular expression match, headers
+@cindex PCRE match, headers
+@item @code{-pcre} @tab Use Perl-compatible regular expression.
+@pxref{Regular Expressions}.
+
+@kwindex -perl, header matching flag
+@cindex Perl-compatible regular expression match, headers
+@cindex PCRE match, headers
+@item @code{-perl} @tab Same as @code{-pcre}.
+
+@kwindex -posix, header matching flag
+@cindex posix regular expression match, headers
+@item @code{-posix} @tab Use POSIX extended regular expression.
+@pxref{Regular Expressions}.
+
+@kwindex -re, header matching flag
+@cindex regular expression match, headers
+@item @code{-re} @tab Use regular expression match.  This assumes the
+default regular expression type, as set by the @code{RegexType}
+directive (@pxref{Regular Expressions}).
 @end multitable
 @end float
+
+The following options are mutually exclusive: @code{-beg}, @code{-contain},
+@code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),
+@code{-posix}, @code{-re}.  If more than one of these are used, the
+last one takes effect.
 
 @kwindex Not
 Placing the keyword @code{Not} before a header matching directive reverts its

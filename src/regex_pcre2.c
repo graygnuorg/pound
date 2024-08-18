@@ -1,8 +1,25 @@
+/*
+ * Pound - the reverse-proxy load-balancer
+ * Copyright (C) 2023-2024 Sergey Poznyakoff
+ *
+ * Pound is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Pound is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "pound.h"
 #define PCRE2_CODE_UNIT_WIDTH 8
 #include <pcre2.h>
 
-struct pound_regex
+struct pcre2_pattern
 {
   pcre2_code *code;
   size_t nsub;
@@ -10,20 +27,25 @@ struct pound_regex
   size_t erroff;
 };
 
-int
-regex_compile (POUND_REGEX *retval, const char *pattern, int pflags)
+static int
+pcre2_pattern_init (GENPAT pat)
 {
-  struct pound_regex *pre;
+  pat->data = xzalloc (sizeof (struct pcre2_pattern));
+  return 0;
+}
+
+static int
+pcre2_pattern_compile (void *sp_data, const char *pattern, int pflags)
+{
+  struct pcre2_pattern *pre = sp_data;
   int flags = 0;
   int error_code;
 
-  if (pflags & POUND_REGEX_ICASE)
+  if (pflags & GENPAT_ICASE)
     flags |= PCRE2_CASELESS;
-  if (pflags & POUND_REGEX_MULTILINE)
+  if (pflags & GENPAT_MULTILINE)
     flags |= PCRE2_MULTILINE;
 
-  XZALLOC (pre);
-  *retval = pre;
   pre->code = pcre2_compile ((PCRE2_SPTR8) pattern, strlen (pattern), flags,
 			     &error_code, &pre->erroff, NULL);
   if (pre->code == NULL)
@@ -59,33 +81,37 @@ regex_compile (POUND_REGEX *retval, const char *pattern, int pflags)
   return 0;
 }
 
-void
-regex_free (POUND_REGEX pre)
+static void
+pcre2_pattern_free (void *sp_data)
 {
-  if (pre)
+  if (sp_data)
     {
+      struct pcre2_pattern *pre = sp_data;
       pcre2_code_free (pre->code);
       free (pre->errmsg);
       free (pre);
     }
 }
 
-char const *
-regex_error (POUND_REGEX pre, size_t *off)
+static char const *
+pcre2_pattern_error (void *sp_data, size_t *off)
 {
+  struct pcre2_pattern *pre = sp_data;
   *off = pre->erroff;
   return pre->errmsg;
 }
 
-size_t
-regex_num_submatch (POUND_REGEX pre)
+static size_t
+pcre2_pattern_nsub (void *sp_data)
 {
+  struct pcre2_pattern *pre = sp_data;
   return pre->nsub;
 }
 
-int
-regex_exec (POUND_REGEX pre, const char *subj, size_t n, POUND_REGMATCH *prm)
+static int
+pcre2_pattern_exec (void *sp_data, const char *subj, size_t n, POUND_REGMATCH *prm)
 {
+  struct pcre2_pattern *pre = sp_data;
   int rc;
   PCRE2_SIZE *ovector;
   size_t i, j;
@@ -115,3 +141,13 @@ regex_exec (POUND_REGEX pre, const char *subj, size_t n, POUND_REGMATCH *prm)
   pcre2_match_data_free (md);
   return 0;
 }
+
+struct genpat_defn pcre_genpat_defn =
+  {
+    .gp_init = pcre2_pattern_init,
+    .gp_compile = pcre2_pattern_compile,
+    .gp_error = pcre2_pattern_error,
+    .gp_exec = pcre2_pattern_exec,
+    .gp_nsub = pcre2_pattern_nsub,
+    .gp_free = pcre2_pattern_free
+  };

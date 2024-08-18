@@ -124,8 +124,8 @@ configuration options:
 
   By default, its presence is determined automatically; `libpcre2`
   is preferred over `libpcre`.  To force compiling with the older
-  `libpcre`, use `--enable-pcre=1`.  To disable the use of `pcre`
-  and stick with POSIX regular expressions, use `--disable-pcre`.
+  `libpcre`, use `--enable-pcre=1`.  To disable `pcre` support,
+  use `--disable-pcre`.
 
 * `--enable-pthread-cancel-probe` or `--disable-pthread-cancel-probe`
 

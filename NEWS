@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-08-14
+Pound -- history of user-visible changes. 2024-08-18
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -9,17 +9,41 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.12.90 (git)
 
-* New configuration statement: LogTag
-
-Sets a string to tag syslog messages with.  By default, same as the
-name used to start the program.
-
 * Support for pcre and pcre2 rewritten
 
 The pcre2posix (or pcreposix) layer is no longer used.  Instead, pound
 uses the native API of the corresponding library.  This provides for
 additional speed-up and (in case of pcre2) avoids coredumps under high
 load.
+
+In contrast to previous versions, PCRE is not used by default.  You
+need to explicitly enable its use by adding the following statement
+somewhere near the beginning of your pound.cfg file:
+
+  RegexType pcre
+
+This statement sets the default regex flavour to use in all header
+matching statements below it.  It remains in effect until next
+RegexType statement or end of file is enountered, whichever occurs
+first.
+
+You can also request the use of PCRE in each such statement
+individually, even if POSIX regex is used by default.  For that, use
+the -pcre option, e.g.:
+
+  Host -pcre -icase "(?<!www\\.)example.org"
+
+* New matching option: -contain
+
+The -contain option enables substring match. E.g. the following will
+match if URL contains the word "user" (case-insensitive):
+
+  URL -contain -icase "user"
+
+* New configuration statement: LogTag
+
+Sets a string to tag syslog messages with.  By default, same as the
+name used to start the program.
 
 * Bugfixes
 

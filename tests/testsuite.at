@@ -23,6 +23,7 @@ _CONF
 AT_CHECK([pound -c -Wno-dns -Wno-include-dir -f pound.cfg],m4_shift($@))])
 
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
+m4_define([PT_PREREQ_PCRE],[test "$PCRE_AVAILABLE" = "1" || exit 77])
 
 m4_pushdef([HARNESS_OPTIONS])
 
@@ -106,6 +107,10 @@ m4_include([rwchain.at])
 
 AT_BANNER([Response Rewriting])
 m4_include([resprw.at])
+
+AT_BANNER([Regexp Types])
+m4_include([regextype.at])
+m4_include([pcre.at])
 
 AT_BANNER([Sessions])
 m4_include([sessip.at])

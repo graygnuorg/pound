@@ -243,9 +243,9 @@ isws (int c)
 }
 
 static int
-submatch_realloc (struct submatch *sm, POUND_REGEX re)
+submatch_realloc (struct submatch *sm, GENPAT re)
 {
-  size_t n = regex_num_submatch (re);
+  size_t n = genpat_nsub (re);
   if (n > sm->matchmax)
     {
       POUND_REGMATCH *p = realloc (sm->matchv, n * sizeof (p[0]));
@@ -302,7 +302,7 @@ submatch_queue_push (struct submatch_queue *smq)
 }
 
 static int
-submatch_exec (POUND_REGEX re, char const *subject, struct submatch *sm)
+submatch_exec (GENPAT re, char const *subject, struct submatch *sm)
 {
   int res;
 
@@ -312,7 +312,7 @@ submatch_exec (POUND_REGEX re, char const *subject, struct submatch *sm)
       lognomem ();
       return 0;
     }
-  res = regex_exec (re, subject, sm->matchn, sm->matchv) == 0;
+  res = genpat_match (re, subject, sm->matchn, sm->matchv) == 0;
   if (res)
     {
       if ((sm->subject = strdup (subject)) == NULL)
@@ -1889,7 +1889,7 @@ qualify_header (struct http_header *hdr)
   };
   int i;
 
-  if (regex_exec (HEADER, hdr->header, 4, matches) == 0)
+  if (genpat_match (HEADER, hdr->header, 4, matches) == 0)
     {
       hdr->name_start = matches[1].rm_so;
       hdr->name_end = matches[1].rm_eo;
@@ -2139,7 +2139,7 @@ http_header_list_filter (HTTP_HEADER_LIST *head, MATCHER *m)
 
   DLIST_FOREACH_SAFE (hdr, tmp, head, link)
     {
-      if (regex_exec (m->pat, hdr->header, 0, NULL) == 0)
+      if (genpat_match (m->pat, hdr->header, 0, NULL) == 0)
 	{
 	  http_header_list_remove (head, hdr);
 	}
@@ -2961,7 +2961,7 @@ parse_http_request (struct http_request *req, int group)
 }
 
 static int
-match_headers (HTTP_HEADER_LIST *headers, POUND_REGEX re,
+match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
 	       struct submatch *sm)
 {
   struct http_header *hdr;
@@ -3695,7 +3695,7 @@ backend_response (POUND_HTTP *phttp)
 	      /*
 	       * Connection: upgrade
 	       */
-	      else if (regex_exec (CONN_UPGRD, val, 0, NULL) == 0)
+	      else if (genpat_match (CONN_UPGRD, val, 0, NULL) == 0)
 		phttp->ws_state |= WSS_RESP_HEADER_CONNECTION_UPGRADE;
 	      break;
 
@@ -4134,7 +4134,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       if ((val = http_header_get_value (hdr)) == NULL)
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-      if (regex_exec (LOCATION, val, 4, matches))
+      if (genpat_match (LOCATION, val, 4, matches))
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") can't parse Destination %s",
 		  POUND_TID (), val);
@@ -4600,7 +4600,7 @@ do_http (POUND_HTTP *phttp)
 	phttp->ws_state |= WSS_REQ_GET;
 
       if (phttp->lstn->url_pat &&
-	  regex_exec (phttp->lstn->url_pat, phttp->request.url, 0, NULL))
+	  genpat_match (phttp->lstn->url_pat, phttp->request.url, 0, NULL))
 	{
 	  log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
 		     "bad URL \"%s\"", phttp->request.url);
@@ -4625,7 +4625,7 @@ do_http (POUND_HTTP *phttp)
 	      /*
 	       * Connection: upgrade
 	       */
-	      else if (regex_exec (CONN_UPGRD, val, 0, NULL) == 0)
+	      else if (genpat_match (CONN_UPGRD, val, 0, NULL) == 0)
 		phttp->ws_state |= WSS_REQ_HEADER_CONNECTION_UPGRADE;
 	      break;
 

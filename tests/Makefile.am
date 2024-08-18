@@ -105,9 +105,11 @@ TESTSUITE_AT = \
  optssl.at\
  or.at\
  path.at\
+ pcre.at\
  prio.at\
  query.at\
  queryparam.at\
+ regextype.at\
  reqacc.at\
  redirect.at\
  resprw.at\

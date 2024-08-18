@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "June 26, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "August 18, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -732,6 +732,20 @@ privileges of another user after startup (at least one of \fBUser\fR or
 \fBGroup\fR are set in the configuration file) and the file is stored in
 a directory whose permissions forbid write access for that user.
 .RE
+.TP
+\fBRegexType posix\fR | \fBpcre\fR | \fBperl\fR
+Sets the type of regular expressions to use in request matching
+statements.
+.B posix
+selects POSIX extended regular expressions and
+.B pcre
+or
+.B perl
+select Perl-compatible regular expressions.  The latter requires
+compile-time support.  The selected regular expression type remains in
+effect until next 
+.B RegexType
+statement or end of the configuration file, whichever occurs first.
 .SS Control socket
 .B Pound
 can be instructed to listen on a UNIX socket for management requests,
@@ -1395,23 +1409,20 @@ The \fIoptions\fR argument in the above directives can be used to
 select the comparison method.  It consists of zero or more option
 flags from the following list:
 .TP
-.B \-re
-Use regular expression matching.
-.TP
-.B \-exact
-Use exact string matching.
-.TP
 .B \-beg
 Exact match at the beginning of string (prefix match).
-.TP
-.B \-end
-Exact match at the end of string (suffix match).
 .TP
 .B \-case
 Case-sensitive comparison.
 .TP
-.B \-icase
-Case-insensitive comparison.
+.B \-contain
+Match substring.
+.TP
+.B \-end
+Exact match at the end of string (suffix match).
+.TP
+.B \-exact
+Exact string match.
 .TP
 .B \-file
 Treat \fIpattern\fR as the name of a file to read patterns from.  If
@@ -1420,6 +1431,25 @@ directory\fR (see the discussion of the \fBIncludeDir\fR directory
 above).  Patterns are read from the file line by line.  Leading and
 trailing whitespace is removed.  Empty
 lines and comments (lines starting with \fB#\fR) are ignored.
+.TP
+.B \-icase
+Case-insensitive comparison.
+.TP
+.BR \-pcre " or " \-perl
+Use Perl-compatible regular expression (requires compilation-time
+support).  This overrides global
+.B RegexType
+settings.
+.TP
+.B \-posix
+Use POSIX extended regular expression.  This overrides global
+.B RegexType
+settings.
+.TP
+.B \-re
+Use regular expression matching, as set by the
+.B RegexType
+statement.
 .PP
 For example, the following will match any request whose \fBHost\fR
 header begins with "www." (case-insensitive):
@@ -2096,23 +2126,39 @@ expression.  The \fIoptions\fR argument can be used to change this
 behavior.  It consists of zero or more option flags from the following list:
 .RS
 .TP
-.B \-re
-Use regular expression matching.
-.TP
-.B \-exact
-Use exact string matching.
-.TP
 .B \-beg
 Exact match at the beginning of string (prefix match).
-.TP
-.B \-end
-Exact match at the end of string (suffix match).
 .TP
 .B \-case
 Case-sensitive comparison.
 .TP
+.B \-contain
+Match substring.
+.TP
+.B \-end
+Exact match at the end of string (suffix match).
+.TP
+.B \-exact
+Use exact string matching.
+.TP
 .B \-icase
 Case-insensitive comparison.
+.TP
+.BR \-pcre " or " \-perl
+Use Perl-compatible regular expression (requires compilation-time
+support).  This overrides global
+.B RegexType
+settings.
+.TP
+.B \-posix
+Use POSIX extended regular expression.  This overrides global
+.B RegexType
+settings.
+.TP
+.B \-re
+Use regular expression matching, as set by the
+.B RegexType
+statement.
 .RE
 .PP
 The \fIvalue\fR argument in the above directives is subject to

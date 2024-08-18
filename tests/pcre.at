@@ -1,0 +1,103 @@
+AT_SETUP([PCRE support])
+AT_KEYWORDS([config cfg regexptype regexp pcre])
+AT_CHECK([PT_PREREQ_PCRE])
+PT_CHECK([RegexType pcre
+ListenHTTP
+	Service
+		Header "Host:\\s*(?<!www\\.)example.org"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-backend-number: 0
+end
+
+GET /echo/foo
+Host: www.example.org
+end
+
+200
+x-backend-number: 1
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Header -pcre "Host:\\s*(?<!www\\.)example.org"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-backend-number: 0
+end
+
+GET /echo/foo
+Host: www.example.org
+end
+
+200
+x-backend-number: 1
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Header -pcre -icase "Host:\\s*(?<!www\\.)example.org"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: EXAMPLE.ORG
+end
+
+200
+x-backend-number: 0
+end
+
+GET /echo/foo
+Host: WWW.EXAMPLE.ORG
+end
+
+200
+x-backend-number: 1
+end
+])
+AT_CLEANUP

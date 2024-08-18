@@ -309,11 +309,11 @@ conf_error_at_locus_point (struct locus_point const *loc, char const *fmt, ...)
 }
 
 static void
-regcomp_error_at_locus_range (struct locus_range const *loc, POUND_REGEX rx,
+regcomp_error_at_locus_range (struct locus_range const *loc, GENPAT rx,
 			      char const *expr)
 {
   size_t off;
-  char const *errmsg = regex_error (rx, &off);
+  char const *errmsg = genpat_error (rx, &off);
 
   if (off)
     conf_error_at_locus_range (loc, "%s at byte %zu", errmsg, off);
@@ -1224,6 +1224,7 @@ typedef struct
   unsigned ws_to;
   unsigned be_connto;
   unsigned ignore_case;
+  int re_type;
   int header_options;
   BALANCER balancer;
   NAMED_BACKEND_TABLE named_backend_table;
@@ -2513,35 +2514,37 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
     }
 }
 
-enum match_mode
-  {
-    MATCH_EXACT,
-    MATCH_RE,
-    MATCH_BEG,
-    MATCH_END,
-    MATCH__MAX
-  };
-
 static int
-parse_match_mode (int *mode, int *re_flags, int *from_file)
+parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
 {
   struct token *tok;
 
   enum
   {
-    MATCH_ICASE = MATCH__MAX,
+    MATCH_RE,
+    MATCH_EXACT,
+    MATCH_BEG,
+    MATCH_END,
+    MATCH_CONTAIN,
+    MATCH_ICASE,
     MATCH_CASE,
-    MATCH_FILE
+    MATCH_FILE,
+    MATCH_POSIX,
+    MATCH_PCRE,
   };
 
   static struct kwtab optab[] = {
-    { "-re",    MATCH_RE },
-    { "-exact", MATCH_EXACT },
-    { "-beg",   MATCH_BEG },
-    { "-end",   MATCH_END },
-    { "-icase", MATCH_ICASE },
-    { "-case",  MATCH_CASE },
-    { "-file",  MATCH_FILE },
+    { "-re",      MATCH_RE },
+    { "-exact",   MATCH_EXACT },
+    { "-beg",     MATCH_BEG },
+    { "-end",     MATCH_END },
+    { "-contain", MATCH_CONTAIN },
+    { "-icase",   MATCH_ICASE },
+    { "-case",    MATCH_CASE },
+    { "-file",    MATCH_FILE },
+    { "-posix",   MATCH_POSIX },
+    { "-pcre",    MATCH_PCRE },
+    { "-perl",    MATCH_PCRE },
     { NULL }
   };
 
@@ -2567,11 +2570,11 @@ parse_match_mode (int *mode, int *re_flags, int *from_file)
       switch (n)
 	{
 	case MATCH_CASE:
-	  *re_flags &= ~POUND_REGEX_ICASE;
+	  *sp_flags &= ~GENPAT_ICASE;
 	  break;
 
 	case MATCH_ICASE:
-	  *re_flags |= POUND_REGEX_ICASE;
+	  *sp_flags |= GENPAT_ICASE;
 	  break;
 
 	case MATCH_FILE:
@@ -2584,8 +2587,38 @@ parse_match_mode (int *mode, int *re_flags, int *from_file)
 	    }
 	  break;
 
-	default:
-	  *mode = n;
+	case MATCH_RE:
+	  *gp_type = dfl_re_type;
+	  break;
+
+	case MATCH_POSIX:
+	  *gp_type = GENPAT_POSIX;
+	  break;
+
+	case MATCH_EXACT:
+	  *gp_type = GENPAT_EXACT;
+	  break;
+
+	case MATCH_BEG:
+	  *gp_type = GENPAT_PREFIX;
+	  break;
+
+	case MATCH_END:
+	  *gp_type = GENPAT_SUFFIX;
+	  break;
+
+	case MATCH_CONTAIN:
+	  *gp_type = GENPAT_CONTAIN;
+	  break;
+
+	case MATCH_PCRE:
+#ifdef HAVE_LIBPCRE
+	  *gp_type = GENPAT_PCRE;
+#else
+	  conf_error ("%s", "pound compiled without PCRE");
+	  return PARSER_FAIL;
+#endif
+	  break;
 	}
     }
   putback_tkn (tok);
@@ -2593,42 +2626,46 @@ parse_match_mode (int *mode, int *re_flags, int *from_file)
 }
 
 static char *
-build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
+host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
 {
-  switch (mode)
+  stringbuf_add_char (sb, '^');
+  stringbuf_add_string (sb, "Host:");
+  switch (*gp_type)
     {
-    case MATCH_EXACT:
-      stringbuf_add_char (sb, '^');
-      if (pfx)
-	stringbuf_add_string (sb, pfx);
-      stringbuf_escape_regex (sb, expr);
-      stringbuf_add_char (sb, '$');
-      break;
-
-    case MATCH_RE:
-      if (pfx)
-	{
-	  stringbuf_add_string (sb, pfx);
-	  if (expr[0] == '^')
-	    expr++;
-	}
+    case GENPAT_POSIX:
+      stringbuf_add_string (sb, "[[:space:]]*");
+      if (expr[0] == '^')
+	expr++;
       stringbuf_add_string (sb, expr);
       break;
 
-    case MATCH_BEG:
-      stringbuf_add_char (sb, '^');
-      if (pfx)
-	stringbuf_add_string (sb, pfx);
-      stringbuf_escape_regex (sb, expr);
-      stringbuf_add_string (sb, ".*");
+    case GENPAT_PCRE:
+      stringbuf_add_string (sb, "\\s*");
+      if (expr[0] == '^')
+	expr++;
+      stringbuf_add_string (sb, expr);
       break;
 
-    case MATCH_END:
+    case GENPAT_EXACT:
+    case GENPAT_PREFIX:
+      stringbuf_add_string (sb, "[[:space:]]*");
+      stringbuf_escape_regex (sb, expr);
+      *gp_type = GENPAT_POSIX;
+      break;
+
+    case GENPAT_SUFFIX:
+      stringbuf_add_string (sb, "[[:space:]]*");
       stringbuf_add_string (sb, ".*");
-      if (pfx)
-	stringbuf_add_string (sb, pfx);
       stringbuf_escape_regex (sb, expr);
       stringbuf_add_char (sb, '$');
+      *gp_type = GENPAT_POSIX;
+      break;
+
+    case GENPAT_CONTAIN:
+      stringbuf_add_string (sb, "[[:space:]]*");
+      stringbuf_add_string (sb, ".*");
+      stringbuf_escape_regex (sb, expr);
+      *gp_type = GENPAT_POSIX;
       break;
 
     default:
@@ -2638,28 +2675,22 @@ build_regex (struct stringbuf *sb, int mode, char const *expr, char const *pfx)
 }
 
 static int
-parse_regex_compat (POUND_REGEX *regex, int flags)
+parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
 {
   struct token *tok;
-  int mode = MATCH_RE;
-  char *p;
   int rc;
-  struct stringbuf sb;
 
-  if (parse_match_mode (&mode, &flags, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL))
     return PARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  xstringbuf_init (&sb);
-  p = build_regex (&sb, mode, tok->str, NULL);
-  rc = regex_compile (regex, p, flags);
-  stringbuf_free (&sb);
+  rc = genpat_compile (regex, gp_type, tok->str, flags);
   if (rc)
     {
       conf_regcomp_error (rc, *regex, NULL);
-      regex_free (*regex);
+      genpat_free (*regex);
       return PARSER_FAIL;
     }
 
@@ -2691,18 +2722,19 @@ string_ref_free (STRING_REF *ref)
 }
 
 static int
-parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
-		      int mode, int flags, char const *string)
+parse_cond_matcher_0 (SERVICE_COND *top_cond,
+		      enum service_cond_type type,
+		      int dfl_re_type,
+		      int gp_type, int flags, char const *string)
 {
   struct token *tok;
   int rc;
   struct stringbuf sb;
   SERVICE_COND *cond;
-  static char const host_pfx[] = "Host:[[:space:]]*";
   int from_file;
   char *expr;
 
-  if (parse_match_mode (&mode, &flags, &from_file))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file))
     return PARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -2749,14 +2781,20 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
 	    continue;
 	  p[len] = 0;
 
-	  stringbuf_reset (&sb);
-	  expr = build_regex (&sb, mode, p, type == COND_HOST ? host_pfx : NULL);
+	  if (type == COND_HOST)
+	    {
+	      stringbuf_reset (&sb);
+	      expr = host_prefix_regex (&sb, &gp_type, p);
+	    }
+	  else
+	    expr = p;
+
 	  hc = service_cond_append (cond, type);
-	  rc = regex_compile (&hc->re, expr, flags);
+	  rc = genpat_compile (&hc->re, gp_type, expr, flags);
 	  if (rc)
 	    {
 	      conf_regcomp_error (rc, hc->re, NULL);
-	      // FIXME: regex_free (hc->re);
+	      // FIXME: genpat_free (hc->re);
 	      return PARSER_FAIL;
 	    }
 	  switch (type)
@@ -2777,12 +2815,15 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
   else
     {
       cond = service_cond_append (top_cond, type);
-      expr = build_regex (&sb, mode, tok->str, type == COND_HOST ? host_pfx : NULL);
-      rc = regex_compile (&cond->re, expr, flags);
+      if (type == COND_HOST)
+	expr = host_prefix_regex (&sb, &gp_type, tok->str);
+      else
+	expr = tok->str;
+      rc = genpat_compile (&cond->re, gp_type, expr, flags);
       if (rc)
 	{
 	  conf_regcomp_error (rc, cond->re, NULL);
-	  // FIXME: regex_free (cond->re);
+	  // FIXME: genpat_free (cond->re);
 	  return PARSER_FAIL;
 	}
       switch (type)
@@ -2803,8 +2844,10 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond, enum service_cond_type type,
 }
 
 static int
-parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
-		    int mode, int flags, char const *string)
+parse_cond_matcher (SERVICE_COND *top_cond,
+		    enum service_cond_type type,
+		    int dfl_re_type,
+		    int gp_type, int flags, char const *string)
 {
   int rc;
   char *string_copy;
@@ -2812,7 +2855,8 @@ parse_cond_matcher (SERVICE_COND *top_cond, enum service_cond_type type,
     string_copy = xstrdup (string);
   else
     string_copy = NULL;
-  rc = parse_cond_matcher_0 (top_cond, type, mode, flags, string_copy);
+  rc = parse_cond_matcher_0 (top_cond, type, dfl_re_type, gp_type, flags,
+			     string_copy);
   free (string_copy);
   return rc;
 }
@@ -2828,8 +2872,9 @@ static int
 parse_cond_url_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_URL, MATCH_RE,
-			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
+  return parse_cond_matcher (call_data, COND_URL, dfl->re_type,
+			     dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0),
 			     NULL);
 }
 
@@ -2837,8 +2882,9 @@ static int
 parse_cond_path_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_PATH, MATCH_RE,
-			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
+  return parse_cond_matcher (call_data, COND_PATH, dfl->re_type,
+			     dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0),
 			     NULL);
 }
 
@@ -2846,8 +2892,9 @@ static int
 parse_cond_query_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_QUERY, MATCH_RE,
-			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0),
+  return parse_cond_matcher (call_data, COND_QUERY, dfl->re_type,
+			     dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0),
 			     NULL);
 }
 
@@ -2856,7 +2903,7 @@ parse_cond_query_param_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *top_cond = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  int flags = (dfl->ignore_case ? POUND_REGEX_ICASE : 0);
+  int flags = (dfl->ignore_case ? GENPAT_ICASE : 0);
   struct token *tok;
   char *string;
   int rc;
@@ -2864,8 +2911,9 @@ parse_cond_query_param_matcher (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
   string = xstrdup (tok->str);
-  rc = parse_cond_matcher (top_cond, COND_QUERY_PARAM, MATCH_RE, flags,
-			   string);
+  rc = parse_cond_matcher (top_cond,
+			   COND_QUERY_PARAM, dfl->re_type,
+			   dfl->re_type, flags, string);
   free (string);
   return rc;
 }
@@ -2875,7 +2923,7 @@ parse_cond_string_matcher (void *call_data, void *section_data)
 {
   SERVICE_COND *top_cond = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  int flags = (dfl->ignore_case ? POUND_REGEX_ICASE : 0);
+  int flags = (dfl->ignore_case ? GENPAT_ICASE : 0);
   struct token *tok;
   char *string;
   int rc;
@@ -2883,7 +2931,8 @@ parse_cond_string_matcher (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
   string = xstrdup (tok->str);
-  rc = parse_cond_matcher (top_cond, COND_STRING_MATCH, MATCH_RE, flags,
+  rc = parse_cond_matcher (top_cond,
+			   COND_STRING_MATCH, dfl->re_type, dfl->re_type, flags,
 			   string);
   free (string);
   return rc;
@@ -2892,26 +2941,29 @@ parse_cond_string_matcher (void *call_data, void *section_data)
 static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
-  return parse_cond_matcher (call_data, COND_HDR, MATCH_RE,
-			     POUND_REGEX_MULTILINE | POUND_REGEX_ICASE,
+  POUND_DEFAULTS *dfl = section_data;
+  return parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
+			     GENPAT_MULTILINE | GENPAT_ICASE,
 			     NULL);
 }
 
 static int
 parse_cond_head_deny_matcher (void *call_data, void *section_data)
 {
+  POUND_DEFAULTS *dfl = section_data;
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
   cond->bool.op = BOOL_NOT;
-  return parse_cond_matcher (cond, COND_HDR, MATCH_RE,
-			     POUND_REGEX_MULTILINE | POUND_REGEX_ICASE,
+  return parse_cond_matcher (cond, COND_HDR, dfl->re_type, dfl->re_type,
+			     GENPAT_MULTILINE | GENPAT_ICASE,
 			     NULL);
 }
 
 static int
 parse_cond_host (void *call_data, void *section_data)
 {
-  return parse_cond_matcher (call_data, COND_HOST, MATCH_EXACT,
-			     POUND_REGEX_ICASE, NULL);
+  POUND_DEFAULTS *dfl = section_data;
+  return parse_cond_matcher (call_data, COND_HOST, dfl->re_type,
+			     GENPAT_EXACT, GENPAT_ICASE, NULL);
 }
 
 static int
@@ -2981,7 +3033,7 @@ parse_redirect_backend (void *call_data, void *section_data)
   be->v.redirect.status = code;
   be->v.redirect.url = xstrdup (tok->str);
 
-  if (regex_exec (LOCATION, be->v.redirect.url, 4, matches))
+  if (genpat_match (LOCATION, be->v.redirect.url, 4, matches))
     {
       conf_error ("%s", "Redirect bad URL");
       return PARSER_FAIL;
@@ -3452,8 +3504,8 @@ parse_delete_header (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = section_data;
 
   XZALLOC (op->v.hdrdel);
-  return parse_regex_compat (&op->v.hdrdel->pat,
-			     (dfl->ignore_case ? POUND_REGEX_ICASE : 0));
+  return parse_regex_compat (&op->v.hdrdel->pat, dfl->re_type, dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0));
 }
 
 static int
@@ -3716,11 +3768,12 @@ SETFN_SVC_DECL (delete_header)
 static int
 parse_header_remove (void *call_data, void *section_data)
 {
+  POUND_DEFAULTS *dfl = section_data;
   REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);
   REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
   XZALLOC (op->v.hdrdel);
-  return parse_regex_compat (&op->v.hdrdel->pat,
-			     POUND_REGEX_ICASE | POUND_REGEX_MULTILINE);
+  return parse_regex_compat (&op->v.hdrdel->pat, dfl->re_type, dfl->re_type,
+			     GENPAT_ICASE | GENPAT_MULTILINE);
 }
 
 static int
@@ -4051,7 +4104,7 @@ parse_acme (void *call_data, void *section_data)
   struct token *tok;
   struct stat st;
   int rc;
-  static char re_acme[] = "^/\\.well-known/acme-challenge/(.+)";
+  static char sp_acme[] = "^/\\.well-known/acme-challenge/(.+)";
   int fd;
   struct locus_range range;
 
@@ -4083,7 +4136,7 @@ parse_acme (void *call_data, void *section_data)
 
   /* Create a URL matcher */
   cond = service_cond_append (&svc->cond, COND_URL);
-  rc = regex_compile (&cond->re, re_acme, 0);
+  rc = genpat_compile (&cond->re, GENPAT_POSIX, sp_acme, 0);
   if (rc)
     {
       conf_regcomp_error (rc, cond->re, NULL);
@@ -4129,8 +4182,6 @@ listener_parse_checkurl (void *call_data, void *section_data)
 {
   LISTENER *lst = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  struct token *tok;
-  int rc;
 
   if (lst->url_pat)
     {
@@ -4138,18 +4189,8 @@ listener_parse_checkurl (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
-
-  rc = regex_compile (&lst->url_pat, tok->str,
-		      (dfl->ignore_case ? POUND_REGEX_ICASE : 0));
-  if (rc)
-    {
-      conf_regcomp_error (rc, lst->url_pat, NULL);
-      return PARSER_FAIL;
-    }
-
-  return PARSER_OK;
+  return parse_regex_compat (&lst->url_pat, dfl->re_type, dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0));
 }
 
 static int
@@ -5661,6 +5702,33 @@ parse_combine_headers (void *call_data, void *section_data)
     }
   return PARSER_OK;
 }
+
+static struct kwtab regex_type_table[] = {
+  { "posix", GENPAT_POSIX },
+#ifdef HAVE_LIBPCRE
+  { "pcre",  GENPAT_PCRE },
+  { "perl",  GENPAT_PCRE },
+#endif
+  { NULL }
+};
+
+static int
+assign_regex_type (void *call_data, void *section_data)
+{
+  int *gp_type = call_data;
+  struct token *tok;
+  int n;
+
+  if ((tok = gettkn_expect (T_IDENT)) == NULL)
+    return PARSER_FAIL;
+  if (kw_to_tok (regex_type_table, tok->str, 1, &n) != 0)
+    {
+      conf_error ("%s", "unsupported regex type");
+      return PARSER_FAIL;
+    }
+  *gp_type = n;
+  return PARSER_OK;
+}
 
 static PARSER_TABLE top_level_parsetab[] = {
   {
@@ -5839,6 +5907,11 @@ static PARSER_TABLE top_level_parsetab[] = {
     .name = "CombineHeaders",
     .parser = parse_combine_headers
   },
+  {
+    .name = "RegexType",
+    .parser = assign_regex_type,
+    .off = offsetof (POUND_DEFAULTS, re_type),
+  },
 
   /* Backward compatibility. */
   {
@@ -5997,6 +6070,7 @@ parse_config_file (char const *file, int nosyslog)
     .ws_to = 600,
     .be_connto = 15,
     .ignore_case = 0,
+    .re_type = GENPAT_POSIX,
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
     .balancer = BALANCER_RANDOM
   };
@@ -6157,13 +6231,11 @@ struct string_value pound_settings[] = {
   { "Include directory",   STRING_CONSTANT, { .s_const = SYSCONFDIR } },
   { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
   { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
-  { "Regex flavor", STRING_CONSTANT, { .s_const =
-#if !defined(HAVE_LIBPCRE)
-				       "POSIX"
-#elif HAVE_LIBPCRE == 1
-				       "pcre"
+  { "Regex types", STRING_CONSTANT, { .s_const = "POSIX"
+#if HAVE_LIBPCRE == 1
+				       ", PCRE"
 #elif HAVE_LIBPCRE == 2
-				       "pcre2"
+				       ", PCRE2"
 #endif
     }
   },

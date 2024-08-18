@@ -293,7 +293,7 @@ EOT
 		    my $file;
 		    while ($hostline =~ m/^\s*(-\S+)(.*)/) {
 			push @opts, $1;
-			if ($1 eq '-re' || $1 eq '-beg' || $1 eq '-end') {
+			if ($1 eq '-re' || $1 eq '-beg') {
 			    $exact = 0;
 			} elsif ($1 eq '-file') {
 			    $file = 1;

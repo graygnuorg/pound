@@ -161,7 +161,6 @@ AC_DEFINE_UNQUOTED([SET_DH_AUTO],[$SET_DH_AUTO],
   [Define to 1 of *set_dh_auto macros are available])
 
 PND_PCRE
-AM_CONDITIONAL([COND_REGEX], [test $status_pcre = no])
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
@@ -224,7 +223,7 @@ Pound configuration parameters:
 Buffer size ................................... $bufsize
 Owner user .................................... $owner_user
 Owner group ................................... $owner_group
-Regular expressions ........................... $status_pcre
+Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 *******************************************************************
@@ -235,9 +234,9 @@ EOF
 owner_user=$I_OWNER
 owner_group=$I_GRP
 if test $status_pcre != no; then
-  status_pcre=pcre$status_pcre
+  status_pcre=", PCRE$status_pcre"
 else
-  status_pcre="POSIX"
+  status_pcre=""
 fi
 memory_allocator=$memory_allocator
 if test "$early_pthread_cancel_probe" = 1; then
