@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-08-18
+Pound -- history of user-visible changes. 2024-08-20
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -16,22 +16,34 @@ uses the native API of the corresponding library.  This provides for
 additional speed-up and (in case of pcre2) avoids coredumps under high
 load.
 
-In contrast to previous versions, PCRE is not used by default.  You
-need to explicitly enable its use by adding the following statement
-somewhere near the beginning of your pound.cfg file:
+* Use of POSIX and Perl-compatible regular expressions
+
+In contrast to previous versions, you can use both types of regular
+expressions in your configuration file.  To use PCRE by default, add
+the following statement somewhere near the beginning of your pound.cfg
+file:
 
   RegexType pcre
 
 This statement sets the default regex flavour to use in all header
-matching statements below it.  It remains in effect until next
-RegexType statement or end of file is enountered, whichever occurs
-first.
+matching statements that appear below it.  It remains in effect until
+next  RegexType statement or end of file is encountered, whichever occurs
+first.  To request use of the POSIX regexps, do
 
-You can also request the use of PCRE in each such statement
-individually, even if POSIX regex is used by default.  For that, use
-the -pcre option, e.g.:
+  RegexType posix
+
+(this is the default).
+
+Regular expression type to use can also be specified with each
+matching statement individually.  For example, the -pcre option
+indicates that Perl-compatible regular expression is given as
+argument, e.g.:
 
   Host -pcre -icase "(?<!www\\.)example.org"
+
+Similarly, -posix option indicates that POSIX extended regular
+expression is used.  Use these options to override the default for a
+single statement.
 
 * New matching option: -contain
 
@@ -49,7 +61,7 @@ name used to start the program.
 
 ** Fix infinite recursion on reporting an out of memory condition.
 ** Fix deadlock in session expiration handling.
-
+** Fix RewriteLocation functionality.
 
 Version 4.12, 2024-04-26
 
