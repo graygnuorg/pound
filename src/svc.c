@@ -1154,9 +1154,9 @@ need_rewrite (const char *location, const char *v_host,
 	   || strcasecmp (host, vhost) == 0)
 	  && (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
 		      sizeof (in6_addr.sin6_port)) != 0
-	      || strncasecmp (proto,
-			      !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
-			      matches[1].rm_eo - matches[1].rm_so)))
+	      || is_proto (!SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
+			   proto,
+			   matches[1].rm_eo - matches[1].rm_so)))
 	{
 	  free (addr.ai_addr);
 	  free (host);
