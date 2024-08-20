@@ -43,11 +43,11 @@ location: http://${BACKEND}/echo/foo
 end
 
 GET /redirect/foo
-x-redirect: https://${LISTENER}
+x-redirect: http://${LISTENER}
 end
 
 301
-location: https://${LISTENER}/echo/foo
+location: http://${LISTENER}/echo/foo
 end
 ])
 
@@ -77,7 +77,7 @@ location: http://${LISTENER}/echo/foo
 end
 
 GET /redirect/foo
-x-redirect: https://${LISTENER}
+x-redirect: http://${LISTENER}
 end
 
 301
@@ -110,7 +110,7 @@ location: http://${LISTENER}/echo/foo
 end
 
 GET /redirect/foo
-x-redirect: https://${LISTENER}
+x-redirect: http://${LISTENER}
 end
 
 301
@@ -144,11 +144,11 @@ location: http://${LISTENER}/echo/foo
 end
 
 GET /redirect/foo
-x-redirect: https://${LISTENER}
+x-redirect: http://${LISTENER}
 end
 
 301
-location: https://${LISTENER}/echo/foo
+location: http://${LISTENER}/echo/foo
 end
 ])
 
