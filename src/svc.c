@@ -981,6 +981,12 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
   return ret_val;
 }
 
+static inline int
+is_proto (char const *pat, char const *proto, size_t len)
+{
+  return len == strlen (pat) && strncasecmp (proto, pat, len) == 0;
+}
+
 /*
  * Find if a redirect needs rewriting
  * In general we have two possibilities that require it:
@@ -1050,7 +1056,7 @@ need_rewrite (const char *location, const char *v_host,
       memcpy (&be_addr, be->v.reg.addr.ai_addr, sizeof (be_addr));
       if (port)
 	in_addr.sin_port = (in_port_t) htons (atoi (port));
-      else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
+      else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
 	in_addr.sin_port = (in_port_t) htons (443);
       else
 	in_addr.sin_port = (in_port_t) htons (80);
@@ -1074,7 +1080,7 @@ need_rewrite (const char *location, const char *v_host,
       memcpy (&be6_addr, be->v.reg.addr.ai_addr, sizeof (be6_addr));
       if (port)
 	in6_addr.sin6_port = (in_port_t) htons (atoi (port));
-      else if (!strncasecmp (proto, "https", matches[1].rm_eo - matches[1].rm_so))
+      else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
 	in6_addr.sin6_port = (in_port_t) htons (443);
       else
 	in6_addr.sin6_port = (in_port_t) htons (80);
@@ -1125,9 +1131,9 @@ need_rewrite (const char *location, const char *v_host,
 	   || strcasecmp (host, vhost) == 0)
 	  && (memcmp (&be_addr.sin_port, &in_addr.sin_port,
 		      sizeof (in_addr.sin_port)) != 0
-	      || strncasecmp (proto,
-			      !SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
-			      matches[1].rm_eo - matches[1].rm_so)))
+	      || is_proto (!SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
+			   proto,
+			   matches[1].rm_eo - matches[1].rm_so)))
 	{
 	  free (addr.ai_addr);
 	  free (host);
