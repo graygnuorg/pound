@@ -2114,12 +2114,6 @@ backend_parse_servername (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
 
-  if (be->v.reg.ctx == NULL)
-    {
-      conf_error ("%s", "HTTPS must be used before this statement");
-      return PARSER_FAIL;
-    }
-
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
   be->v.reg.servername = xstrdup (tok->str);

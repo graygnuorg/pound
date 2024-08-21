@@ -326,12 +326,18 @@ statements.  This is the default.  To suppress deprecation
 messages, use @option{-W no-warn-deprecated}.
 @end defvr
 
+@anchor{dns}
 @defvr Feature dns
-Resolve host names found in configuration file.  This is the default.
+Resolve host names found in configuration file and returned in the
+@code{Location:} header.  This is the default.
+
 You can use @option{-W no-dns} to disable it, in order to
 suppress potentially lengthy network host address lookups.  Make sure
 if your configuration file refers to backends only by their IP
 addresses in this case.
+
+This setting affects also redirection location rewriting:
+@xref{Response Modification, RewriteLocation}.
 @end defvr
 
 @defvr Feature include-dir=@var{dir}
@@ -3211,6 +3217,17 @@ the request host name will be used instead.  This is the default.
 If @var{n} is 2, do the same, but compare only the backend address;
 this is useful for redirecting a request to an HTTPS listener on
 the same server as the HTTP listener.
+
+To check whether the location points to the listener or to the
+backend, its hostname part is resolved and the obtained IP address (or
+addresses) are compared with that of listener or backend.  This
+process is affected by the @option{dns} feature setting
+(@pxref{dns}).  If it is disabled (@option{-W no-dns} option is
+given), no resolving takes place.  In this case the location is deemed
+to point to the listener if its hostname part matches that of the
+incoming request.  For backends, the hostname is compared with the
+value of the @code{ServerName} setting of that backend
+(@pxref{ServerName}), if any.
 @end deffn
 
 @node rewrite response
@@ -3821,6 +3838,7 @@ following directives configure HTTPS backends:
 This directive indicates that the remote server speaks HTTPS.
 @end deffn
 
+@anchor{ServerName}
 @deffn {Backend directive} ServerName "@var{name}"
 This directive specifies the name to use for server name
 identification (@dfn{SNI}).  It also rewrites the @code{Host:} header

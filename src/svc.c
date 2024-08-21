@@ -981,30 +981,134 @@ get_host (char *const name, struct addrinfo *res, int ai_family)
   return ret_val;
 }
 
+/* Return 1 if the protocol designation PROTO of length LEN equals PAT. */
 static inline int
 is_proto (char const *pat, char const *proto, size_t len)
 {
   return len == strlen (pat) && strncasecmp (proto, pat, len) == 0;
 }
 
+union sockaddr_union
+{
+  struct sockaddr_in i;
+  struct sockaddr_in6 i6;
+  struct sockaddr_storage s;
+};
+
+/* Set port value in the sockaddr_union. */
+static void
+sun_set_port (union sockaddr_union *sun, int port)
+{
+  switch (sun->s.ss_family)
+    {
+    case AF_INET:
+      sun->i.sin_port = port;
+      break;
+
+    case AF_INET6:
+      sun->i6.sin6_port = port;
+      break;
+    }
+}
+
 /*
- * Find if a redirect needs rewriting
- * In general we have two possibilities that require it:
- * (1) if the redirect was done to the correct location with the wrong port
- * (2) if the redirect was done to the back-end rather than the listener
+ * Return 1 if any of the addresses from ADDR with port changed to PORT
+ * coincides with the address of the backend BE.
+ */
+static int
+is_backend_address (struct addrinfo const *addr, int port, const BACKEND *be)
+{
+  union sockaddr_union sun_be, sun;
+
+  memcpy (&sun_be, be->v.reg.addr.ai_addr, be->v.reg.addr.ai_addrlen);
+
+  for (; addr; addr = addr->ai_next)
+    {
+      if (addr->ai_family == sun_be.s.ss_family)
+	{
+	  memcpy (&sun, addr->ai_addr, addr->ai_addrlen);
+	  sun_set_port (&sun, port);
+	  if (memcmp (&sun_be, &sun, addr->ai_addrlen) == 0)
+	    return 1;
+	}
+    }
+  return 0;
+}
+
+/*
+ * Return 1 if any of the ADDR addresses matches the address of the given
+ * listener.  Ignore port number in comparisons.
+ */
+static int
+is_listener_address (struct addrinfo const *addr, const LISTENER *lstn)
+{
+  union sockaddr_union sun_lstn, sun;
+
+  if (!addr)
+    return 0;
+
+  memcpy (&sun_lstn, lstn->addr.ai_addr, lstn->addr.ai_addrlen);
+  sun_set_port (&sun_lstn, 0);
+
+  for (; addr; addr = addr->ai_next)
+    {
+      if (addr->ai_family != sun_lstn.s.ss_family)
+	{
+	  memcpy (&sun, addr->ai_addr, addr->ai_addrlen);
+	  sun_set_port (&sun, 0);
+	  if (memcmp (&sun_lstn, &sun, addr->ai_addrlen) == 0)
+	    return 1;
+	}
+    }
+  return 0;
+}
+
+/* Return port number of the listener LSTN. */
+static int
+listener_port (const LISTENER *lstn)
+{
+  union sockaddr_union *p = (union sockaddr_union *)&lstn->addr.ai_addr;
+  switch (p->s.ss_family)
+    {
+    case AF_INET:
+      return p->i.sin_port;
+
+    case AF_INET6:
+      return p->i6.sin6_port;
+    }
+  return 0;
+}
+
+/*
+ * Test if the redirection location value needs rewriting.  Return 1 if so.
+ * Depending on the value of the RewriteLocation setting (lstn->rewr_loc):
+ *
+ *   when 0       - no rewrite occurs; the function returns 0;
+ *   when 1       - rewrite is needed if the location points to the backend
+ *                  or to the listener with wrong port number of protocol;
+ *   when 2       - rewrite is needed if the location points to the backend.
+ *
+ * Input arguments:
+ *   location     -  value of the Location: header;
+ *   v_host       -  host part of the incoming request;
+ *   lstn         -  selected listener;
+ *   be           -  backend the response came from;
+ * Output argument:
+ *   ppath        -  return path part of the location.
  */
 int
 need_rewrite (const char *location, const char *v_host,
 	      const LISTENER *lstn, const BACKEND *be, const char **ppath)
 {
-  struct addrinfo addr;
-  struct sockaddr_in in_addr, be_addr;
-  struct sockaddr_in6 in6_addr, be6_addr;
   POUND_REGMATCH matches[4];
   char const *proto;
   char const *path;
-  char *host, *vhost, *port, *cp;
+  int port;
+  char *cp;
   size_t len;
+  char *host, *vhost;
+  int result = 0;
+  struct addrinfo hints, *addr = NULL;
 
   if (lstn->rewr_loc == 0)
     return 0;
@@ -1031,145 +1135,60 @@ need_rewrite (const char *location, const char *v_host,
   memcpy (host, location + matches[2].rm_so, len);
   host[len] = 0;
 
-  if ((port = strchr (host, ':')) != NULL)
-    *port++ = '\0';
-
-  /*
-   * Check if the location has the same address as the listener or the back-end
-   */
-  memset (&addr, 0, sizeof (addr));
-  if (get_host (host, &addr, be->v.reg.addr.ai_family))
-    return 0;
-
-  /*
-   * compare the back-end
-   */
-  if (addr.ai_family != be->v.reg.addr.ai_family)
+  if ((cp = strchr (host, ':')) != NULL)
     {
-      free (addr.ai_addr);
-      free (host);
-      return 0;
+      *cp++ = '\0';
+      port = htons (atoi (cp));
     }
-  if (addr.ai_family == AF_INET)
-    {
-      memcpy (&in_addr, addr.ai_addr, sizeof (in_addr));
-      memcpy (&be_addr, be->v.reg.addr.ai_addr, sizeof (be_addr));
-      if (port)
-	in_addr.sin_port = (in_port_t) htons (atoi (port));
-      else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
-	in_addr.sin_port = (in_port_t) htons (443);
-      else
-	in_addr.sin_port = (in_port_t) htons (80);
-      /*
-       * check if the Location points to the back-end
-       */
-      if (memcmp (&be_addr.sin_addr.s_addr, &in_addr.sin_addr.s_addr,
-		  sizeof (in_addr.sin_addr.s_addr)) == 0
-	  && memcmp (&be_addr.sin_port, &in_addr.sin_port,
-		     sizeof (in_addr.sin_port)) == 0)
-	{
-	  free (addr.ai_addr);
-	  free (host);
-	  *ppath = path;
-	  return 1;
-	}
-    }
-  else				/* AF_INET6 */
-    {
-      memcpy (&in6_addr, addr.ai_addr, sizeof (in6_addr));
-      memcpy (&be6_addr, be->v.reg.addr.ai_addr, sizeof (be6_addr));
-      if (port)
-	in6_addr.sin6_port = (in_port_t) htons (atoi (port));
-      else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
-	in6_addr.sin6_port = (in_port_t) htons (443);
-      else
-	in6_addr.sin6_port = (in_port_t) htons (80);
-      /*
-       * check if the Location points to the back-end
-       */
-      if (memcmp (&be6_addr.sin6_addr.s6_addr, &in6_addr.sin6_addr.s6_addr,
-		  sizeof (in6_addr.sin6_addr.s6_addr)) == 0
-	  && memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
-		     sizeof (in6_addr.sin6_port)) == 0)
-	{
-	  free (addr.ai_addr);
-	  free (host);
-	  *ppath = path;
-	  return 1;
-	}
-    }
-
-  /*
-   * compare the listener
-   */
-  if (lstn->rewr_loc != 1 || addr.ai_family != lstn->addr.ai_family)
-    {
-      free (addr.ai_addr);
-      free (host);
-      return 0;
-    }
+  else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
+    port = htons (443);
+  else
+    port = htons (80);
 
   if ((vhost = strdup (v_host)) == NULL)
     {
       lognomem ();
-      free (addr.ai_addr);
       free (host);
       return 0;
     }
 
   if ((cp = strchr (vhost, ':')) != NULL)
     *cp = '\0';
-  if (addr.ai_family == AF_INET)
+
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_socktype = SOCK_STREAM;
+  hints.ai_flags = AI_CANONNAME |
+		    (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
+  if (getaddrinfo (host, NULL, &hints, &addr) == 0)
     {
-      memcpy (&be_addr, lstn->addr.ai_addr, sizeof (be_addr));
-      /*
-       * check if the Location points to the Listener but with the wrong
-       * port or protocol
-       */
-      if ((memcmp (&be_addr.sin_addr.s_addr, &in_addr.sin_addr.s_addr,
-		   sizeof (in_addr.sin_addr.s_addr)) == 0
-	   || strcasecmp (host, vhost) == 0)
-	  && (memcmp (&be_addr.sin_port, &in_addr.sin_port,
-		      sizeof (in_addr.sin_port)) != 0
-	      || is_proto (!SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
-			   proto,
-			   matches[1].rm_eo - matches[1].rm_so)))
-	{
-	  free (addr.ai_addr);
-	  free (host);
-	  free (vhost);
-	  *ppath = path;
-	  return 1;
-	}
+      result = is_backend_address (addr, port, be);
     }
   else
+    result = (be->v.reg.servername &&
+	      strcasecmp (host, be->v.reg.servername) == 0 &&
+	      is_proto (be->v.reg.ctx ? "https" : "http",
+			proto,
+			matches[1].rm_eo - matches[1].rm_so));
+
+  if (result == 0 && lstn->rewr_loc == 1)
     {
-      memcpy (&be6_addr, lstn->addr.ai_addr, sizeof (be6_addr));
-      /*
-       * check if the Location points to the Listener but with the wrong
-       * port or protocol
-       */
-      if ((memcmp (&be6_addr.sin6_addr.s6_addr, &in6_addr.sin6_addr.s6_addr,
-		   sizeof (in6_addr.sin6_addr.s6_addr)) == 0
-	   || strcasecmp (host, vhost) == 0)
-	  && (memcmp (&be6_addr.sin6_port, &in6_addr.sin6_port,
-		      sizeof (in6_addr.sin6_port)) != 0
-	      || is_proto (!SLIST_EMPTY (&lstn->ctx_head) ? "https" : "http",
-			   proto,
-			   matches[1].rm_eo - matches[1].rm_so)))
-	{
-	  free (addr.ai_addr);
-	  free (host);
-	  free (vhost);
-	  *ppath = path;
-	  return 1;
-	}
+      result = ((is_listener_address (addr, lstn) ||
+		 strcasecmp (host, vhost) == 0) ||
+		((port != listener_port (lstn) ||
+		  !is_proto (SLIST_EMPTY (&lstn->ctx_head) ? "http" : "https",
+			     proto,
+			     matches[1].rm_eo - matches[1].rm_so))));
     }
 
-  free (addr.ai_addr);
-  free (host);
+  if (addr)
+    freeaddrinfo (addr);
   free (vhost);
-  return 0;
+  free (host);
+
+  if (result)
+    *ppath = path;
+  return result;
 }
 
 /*

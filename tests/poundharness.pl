@@ -1282,8 +1282,9 @@ sub http_redirect {
     my ($http, $rest) = @_;
     my $redir = $http->header('x-redirect')//'';
     $http->reply(301, "Moved Permanently", headers => {
-			'location' => $redir . '/echo' . $rest
-		 });
+	'location' => $redir . '/echo' . $rest,
+	'x-orig-location' => $redir . '/echo' . $rest
+    });
 }
 
 sub process_http_request {
