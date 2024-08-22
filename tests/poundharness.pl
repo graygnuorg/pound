@@ -44,7 +44,8 @@ use constant {
     EX_FAILURE => 1,
     EX_ERROR => 2,
     EX_USAGE => 3,
-    EX_SKIP => 77
+    EX_SKIP => 77,
+    EX_EXEC => 127
 };
 
 ## Early checks
@@ -79,6 +80,26 @@ sub cleanup {
 my %status_codes;
 
 $SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
+
+sub handle_pound_status {
+    if (WIFEXITED($?)) {
+	if (WEXITSTATUS($?)) {
+	    print STDERR "pound terminated with code " . WEXITSTATUS($?) . "\n";
+	} else {
+	    if ($verbose) {
+		print "pound finished\n";
+	    }
+	    return 1;
+	}
+    } elsif (WIFSIGNALED($?)) {
+	print STDERR "pound terminated on signal " . WTERMSIG($?) . "\n";
+    } else {
+	print STDERR "pound terminated with unrecognized status " . $? . "\n";
+    }
+
+    return 0;
+}
+
 sub sigchild {
     my $pid = waitpid(-1, 0);
     if ($pid != $pound_pid) {
@@ -87,27 +108,23 @@ sub sigchild {
 	return;
     }
     $pound_pid = 0;
-    if (WIFEXITED($?)) {
-	if (WEXITSTATUS($?)) {
-	    print STDERR "pound terminated with code " . WEXITSTATUS($?) . "\n";
-	} else {
-	    if ($verbose) {
-		print "pound finished\n";
-	    }
-	    $SIG{CHLD} = \&sigchild;
-	    return;
-	}
-    } elsif (WIFSIGNALED($?)) {
-	print STDERR "pound terminated on signal " . WTERMSIG($?) . "\n";
-    } else {
-	print STDERR "pound terminated with unrecognized status " . $? . "\n";
+    if (handle_pound_status()) {
+	$SIG{CHLD} = \&sigchild;
+	return;
     }
     exit(EX_ERROR);
 };
 $SIG{CHLD} = \&sigchild;
 
 END {
-    cleanup;
+    if ($pound_pid > 0) {
+	cleanup;
+	if (waitpid($pound_pid, 0) == $pound_pid) {
+	    if (handle_pound_status() == 0) {
+		$? = EX_ERROR;
+	    }
+	}
+    }
 }
 
 ## Start the program
@@ -351,7 +368,8 @@ sub runner {
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
     exec 'pound', '-p', $pid_file, '-f', $config, '-v', '-W', 'no-dns', '-W',
-	  $include_dir ? "include-dir=$include_dir" : 'no-include-dir';
+	  $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
+	or exit(EX_EXEC);
 }
 
 package PoundScript;
