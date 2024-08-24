@@ -2,10 +2,6 @@ Pound THANKS file
 
 Please see the AUTHORS file for the list of principal authors.
 
-Many people further contributed to pound by reporting problems,
-suggesting various improvements or submitting actual code.  Here is a
-list of these people.  Help me keep it complete and exempt of errors.
-
 Abner G. Jacobsen did a lot of testing in a production environment and
 contributed some very nice ideas.
 
@@ -58,8 +54,11 @@ files. This is available at http://www.hatena-inc.co.jp/~stanaka/pound/
 
 Simon Matter packages and makes available RPMs for various Pound versions.
 
-The rest of this file lists names and email addresses of bug reporters and
-contributors in alphabetical order.
+  Many people further contributed to pound by reporting problems,
+suggesting various improvements or submitting actual code.  Here is a
+list of these people.  Help me keep it complete and exempt of errors.
 
-Ben Kallus
-Michael Toth <mtoth@queldor.net>
+Ben Kallus		(https://github.com/kenballus)
+Carsten Leonhardt	<leo@debian.org>
+Jakob Bohm		<jb-gnumlists@wisemo.com>
+Michael Toth		<mtoth@queldor.net>

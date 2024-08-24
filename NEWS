@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-08-20
+Pound -- history of user-visible changes. 2024-08-24
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.12.90 (git)
+Version 4.13, 2024-08-24
 
 * Support for pcre and pcre2 rewritten
 
@@ -18,30 +18,32 @@ load.
 
 * Use of POSIX and Perl-compatible regular expressions
 
-In contrast to previous versions, you can use both types of regular
-expressions in your configuration file.  To use PCRE by default, add
-the following statement somewhere near the beginning of your pound.cfg
-file:
+In contrast to previous versions, both types of regular expressions
+can be used simultaneously in the configuration file.  The flavour
+of the regex to use can be specified either individually with each
+request matching statement (such as URL, Header, etc.), or globally.
+
+To set it globally, use the RegexType statement.  The type of regular
+expression set by it will be used in all matching statements that
+appear below that statement, unless they declare regex type
+explicitly.  It remains in effect until next RegexType statement or
+end of file is encountered, whichever occurs first.  For example, to
+use PCRE by default, add the following statement somewhere near the
+beginning of your pound.cfg file:
 
   RegexType pcre
 
-This statement sets the default regex flavour to use in all header
-matching statements that appear below it.  It remains in effect until
-next  RegexType statement or end of file is encountered, whichever occurs
-first.  To request use of the POSIX regexps, do
+To change the default back to POSIX regexps, do
 
   RegexType posix
 
-(this is the default).
-
-Regular expression type to use can also be specified with each
-matching statement individually.  For example, the -pcre option
-indicates that Perl-compatible regular expression is given as
-argument, e.g.:
+Regular expression type can also be specified with each matching
+statement individually.  For example, the -pcre option indicates that
+Perl-compatible regular expression is given as argument, e.g.:
 
   Host -pcre -icase "(?<!www\\.)example.org"
 
-Similarly, -posix option indicates that POSIX extended regular
+Similarly, the -posix option indicates that POSIX extended regular
 expression is used.  Use these options to override the default for a
 single statement.
 
@@ -54,8 +56,8 @@ match if URL contains the word "user" (case-insensitive):
 
 * New configuration statement: LogTag
 
-Sets a string to tag syslog messages with.  By default, same as the
-name used to start the program.
+Sets a string to tag syslog messages with.  By default, the name used
+to start the program is assumed.
 
 * Bugfixes
 
