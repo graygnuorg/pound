@@ -3326,7 +3326,7 @@ add_ssl_headers (POUND_HTTP *phttp)
       while (get_line (bio, buf, sizeof (buf)) == COPY_OK)
 	{
 	  if (i > 0)
-	    stringbuf_add_string (&sb, "\n\t");
+	    stringbuf_add_string (&sb, "\r\n\t");
 	  stringbuf_add_string (&sb, buf);
 	  i++;
 	}
