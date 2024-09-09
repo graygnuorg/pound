@@ -41,6 +41,9 @@ endif
 if COND_PCRE2
   pound_SOURCES += regex_pcre2.c
 endif
+if COND_RESOLVER
+  pound_SOURCES += resolver.c
+endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
@@ -58,7 +61,7 @@ install-exec-hook:
 		done; \
 	fi
 
-noinst_HEADERS=pound.h extern.h list.h ht.h
+noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h
 
 if SET_DH_AUTO
 DHSRC =

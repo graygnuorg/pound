@@ -401,8 +401,12 @@ str_be (char *buf, size_t size, BACKEND *be)
 {
   switch (be->be_type)
     {
-    case BE_BACKEND:
+    case BE_REGULAR:
       addr2str (buf, size, &be->v.reg.addr, 0);
+      break;
+
+    case BE_MATRIX:
+      snprintf (buf, size, "matrix:%s", be->v.mtx.hostname);
       break;
 
     case BE_REDIRECT:
@@ -889,7 +893,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
   char buf[MAXBUF];
 
   /* This function operates on regular backends only. */
-  if (be->be_type != BE_BACKEND)
+  if (be->be_type != BE_REGULAR)
     return;
 
   if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
@@ -948,7 +952,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
  * Search for a host name, return the addrinfo for it
  */
 int
-get_host (char *const name, struct addrinfo *res, int ai_family)
+get_host (char const *name, struct addrinfo *res, int ai_family)
 {
   struct addrinfo *chain, *ap;
   struct addrinfo hints;
@@ -1346,7 +1350,7 @@ touch_be (void *data, const struct timespec *ts)
   char buf[MAXBUF];
 
   /* This function operates on regular backends only. */
-  if (be->be_type != BE_BACKEND)
+  if (be->be_type != BE_REGULAR)
     return;
 
   if (!be->v.reg.alive)
@@ -1634,7 +1638,7 @@ backend_type_str (BACKEND_TYPE t)
 {
   switch (t)
     {
-    case BE_BACKEND:
+    case BE_REGULAR:
       return "backend";
 
     case BE_REDIRECT:
@@ -1652,7 +1656,7 @@ backend_type_str (BACKEND_TYPE t)
     case BE_METRICS:
       return "metrics";
 
-    default: /* BE_BACKEND_REF can't happen at this stage. */
+    default: /* BE_REGULAR_REF can't happen at this stage. */
       break;
     }
 
@@ -1743,7 +1747,7 @@ backend_serialize (BACKEND *be)
 	  else
 	    switch (be->be_type)
 	      {
-	      case BE_BACKEND:
+	      case BE_REGULAR:
 		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
 		  || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
 		  || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))

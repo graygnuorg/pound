@@ -32,6 +32,34 @@ AX_PTHREAD([CC="$PTHREAD_CC"],
 	   [AC_MSG_ERROR([No suitable pthread library found])])
 AC_CHECK_LIB(crypt, crypt)
 
+# Checks for headers
+AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
+
+AC_TYPE_UID_T
+AC_TYPE_PID_T
+AC_TYPE_UNSIGNED_LONG_LONG_INT
+AC_TYPE_LONG_LONG_INT
+
+# Check for adns library
+AC_ARG_ENABLE([resolver],
+ [AS_HELP_STRING([enable resolver support (default)])],
+ [status_resolver=${enableval}],
+ [status_resolver=probe])
+
+if test $status_resolver != no; then
+  AC_CHECK_HEADERS([adns.h])
+  AC_CHECK_LIB([adns], [adns_init])
+  if test "$ac_cv_lib_adns_adns_init$ac_cv_header_adns_h" = yesyes; then
+    AC_DEFINE([ENABLE_RESOLVER], [1], [Define if libadns is available])
+    status_resolver=yes
+  elif $status_resolver = yes; then
+    AC_MSG_FAILURE([required library adns not found; install it or use --disable-resolver to disable])
+  else
+    status_resolver=no
+  fi
+fi
+AM_CONDITIONAL([COND_RESOLVER], [test $status_resolver = yes])
+
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
 AC_ARG_WITH([ssl],
@@ -164,14 +192,6 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
-
-AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
-
-AC_TYPE_UID_T
-AC_TYPE_PID_T
-AC_TYPE_UNSIGNED_LONG_LONG_INT
-AC_TYPE_LONG_LONG_INT
-
 AC_MSG_CHECKING([for default pound owner user name])
 if test -z "${I_OWNER}"; then
     for u in proxy www daemon bin sys root
@@ -226,6 +246,7 @@ Owner group ................................... $owner_group
 Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
+GNU adns ...................................... $status_resolver
 *******************************************************************
 
 EOF
@@ -244,6 +265,7 @@ if test "$early_pthread_cancel_probe" = 1; then
 else
   status_pthread_cancel_probe=no
 fi
+status_resolver=$status_resolver
 ])
 
 AC_CONFIG_TESTDIR(tests)

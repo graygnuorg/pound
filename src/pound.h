@@ -454,7 +454,8 @@ typedef enum
 
 typedef enum
   {
-    BE_BACKEND,
+    BE_REGULAR,
+    BE_MATRIX,
     BE_REDIRECT,
     BE_ACME,
     BE_CONTROL,
@@ -463,6 +464,29 @@ typedef enum
     BE_BACKEND_REF,     /* See be_name in BACKEND */
   }
   BACKEND_TYPE;
+
+enum backed_resolve_mode
+  {
+    bres_immediate,
+    bres_first,
+    bres_all
+  };
+
+struct be_matrix
+{
+  char *hostname;       /* Hostname or IP address. */
+  int port;             /* Port number (network order). */
+  int family;           /* Address family for resolving hostname. */
+  int resolve_mode;     /* Mode for resolving hostname. */
+
+  unsigned to;		/* read/write time-out */
+  unsigned conn_to;	/* connection time-out */
+  unsigned ws_to;	/* websocket time-out */
+  SSL_CTX *ctx;		/* CTX for SSL connections */
+  char *servername;     /* SNI */
+
+  DLIST_HEAD (,_backend) be_head; /* List of produced backends. */
+};
 
 struct be_regular
 {
@@ -473,6 +497,11 @@ struct be_regular
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
+
+  DLIST_ENTRY (_backend) link; /* For backends produced by be_matrix: link to
+				  next and previous generated backends.
+				  Empty for regular backends.
+				*/
 };
 
 struct be_redirect
@@ -497,7 +526,8 @@ struct be_error
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
-  char *locus;                  /* Location in the config file */
+  struct locus_range locus;     /* Location in the config file */
+  char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
@@ -513,6 +543,7 @@ typedef struct _backend
   union
   {
     struct be_regular reg;
+    struct be_matrix mtx;
     struct be_acme acme;
     struct be_redirect redirect;
     struct be_error error;
@@ -525,13 +556,13 @@ typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
 
 static inline int backend_is_https (BACKEND *be)
 {
-  return be->be_type == BE_BACKEND && be->v.reg.ctx != NULL;
+  return be->be_type == BE_REGULAR && be->v.reg.ctx != NULL;
 }
 
 static inline int backend_is_alive (BACKEND *be)
 {
   /* Redirects, ACME, and control backends are always alive */
-  return be->be_type != BE_BACKEND || be->v.reg.alive;
+  return be->be_type != BE_REGULAR || be->v.reg.alive;
 }
 
 typedef struct session
@@ -704,7 +735,7 @@ enum
 typedef struct _service
 {
   char *name;			/* symbolic name */
-  char *locus;                  /* Location in the config file */
+  char *locus_str;              /* Location in the config file, as string. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
   BACKEND_HEAD backends;
@@ -763,7 +794,7 @@ int http_log_format_check (int n);
 typedef struct _listener
 {
   char *name;			/* symbolic name */
-  char *locus;                  /* Location in the config file */
+  char *locus_str;              /* Location in the config file, as string. */
   struct addrinfo addr;		/* Socket address */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
@@ -926,7 +957,7 @@ SERVICE *get_service (POUND_HTTP *);
 BACKEND *get_backend (POUND_HTTP *phttp);
 
 /* Search for a host name, return the addrinfo for it */
-int get_host (char *const, struct addrinfo *, int);
+int get_host (char const *, struct addrinfo *, int);
 
 /*
  * Find if a redirect needs rewriting
@@ -1041,6 +1072,17 @@ static inline char *stringbuf_value (struct stringbuf *sb)
 static inline size_t stringbuf_len (struct stringbuf *sb)
 {
   return sb->len;
+}
+
+static inline void stringbuf_consume (struct stringbuf *sb, size_t len)
+{
+  if (len < sb->len)
+    {
+      memmove (sb->base, sb->base + len, sb->len - len);
+      sb->len -= len;
+    }
+  else
+    sb->len = 0;
 }
 
 extern void xnomem (void);

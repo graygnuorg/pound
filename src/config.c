@@ -19,6 +19,7 @@
 
 #include "pound.h"
 #include "extern.h"
+#include "resolver.h"
 #include <openssl/x509v3.h>
 #include <assert.h>
 #include <dirent.h>
@@ -1151,7 +1152,7 @@ typedef struct named_backend
   struct locus_range locus;
   int priority;
   int disabled;
-  struct be_regular bereg;
+  struct be_matrix bemtx;
   SLIST_ENTRY (named_backend) link;
 } NAMED_BACKEND;
 
@@ -1196,7 +1197,7 @@ named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name,
   bp->locus = *locus;
   bp->priority = be->priority;
   bp->disabled = be->disabled;
-  bp->bereg = be->v.reg;
+  bp->bemtx = be->v.mtx;
   if ((old = NAMED_BACKEND_INSERT (tab->hash, bp)) != NULL)
     {
       free (bp);
@@ -1228,6 +1229,7 @@ typedef struct
   int header_options;
   BALANCER balancer;
   NAMED_BACKEND_TABLE named_backend_table;
+  struct resolver_config resolver;
 } POUND_DEFAULTS;
 
 static int
@@ -1512,8 +1514,39 @@ assign_log_facility (void *call_data, void *section_data)
 #define ADDRINFO_HAS_PORT(addr) ((addr)->ai_flags & AI_NUMERICSERV)
 
 static int
+resolve_address (char const *node, struct locus_range *locus, int family,
+		 struct addrinfo *addr)
+{
+  if (get_host (node, addr, family))
+    {
+      /* if we can't resolve it assume this is a UNIX domain socket */
+      struct sockaddr_un *sun;
+      size_t len = strlen (node);
+      if (len > UNIX_PATH_MAX)
+	{
+	  conf_error_at_locus_range (locus, "%s", "UNIX path name too long");
+	  return PARSER_FAIL;
+	}
+
+      len += offsetof (struct sockaddr_un, sun_path) + 1;
+      sun = xmalloc (len);
+      sun->sun_family = AF_UNIX;
+      strcpy (sun->sun_path, node);
+
+      addr->ai_socktype = SOCK_STREAM;
+      addr->ai_family = AF_UNIX;
+      addr->ai_protocol = 0;
+      addr->ai_addr = (struct sockaddr *) sun;
+      addr->ai_addrlen = len;
+    }
+  return PARSER_OK;
+}
+
+static int
 assign_address_internal (struct addrinfo *addr, struct token *tok)
 {
+  int res;
+
   if (!tok)
     return PARSER_FAIL;
 
@@ -1524,30 +1557,23 @@ assign_address_internal (struct addrinfo *addr, struct token *tok)
 				 token_type_str (tok->type));
       return PARSER_FAIL;
     }
-  if (get_host (tok->str, addr, PF_UNSPEC))
-    {
-      /* if we can't resolve it assume this is a UNIX domain socket */
-      struct sockaddr_un *sun;
-      size_t len = strlen (tok->str);
-      if (len > UNIX_PATH_MAX)
-	{
-	  conf_error_at_locus_range (&tok->locus,
-				     "%s", "UNIX path name too long");
-	  return PARSER_FAIL;
-	}
 
-      len += offsetof (struct sockaddr_un, sun_path) + 1;
-      sun = xmalloc (len);
-      sun->sun_family = AF_UNIX;
-      strcpy (sun->sun_path, tok->str);
+  res = resolve_address (tok->str, &tok->locus, AF_UNSPEC, addr);
+  if (res == PARSER_OK)
+    ADDRINFO_SET_ADDRESS (addr);
+  return res;
+}
 
-      addr->ai_socktype = SOCK_STREAM;
-      addr->ai_family = AF_UNIX;
-      addr->ai_protocol = 0;
-      addr->ai_addr = (struct sockaddr *) sun;
-      addr->ai_addrlen = len;
-    }
-  ADDRINFO_SET_ADDRESS (addr);
+static int
+assign_address_string (void *call_data, void *section_data)
+{
+  char *s;
+  struct token *tok = gettkn_expect_mask (T_BIT (T_IDENT) |
+					  T_BIT (T_STRING) |
+					  T_BIT (T_LITERAL));
+  if (!tok)
+    return PARSER_FAIL;
+  *(char**)call_data = xstrdup (tok->str);
   return PARSER_OK;
 }
 
@@ -1565,8 +1591,9 @@ assign_address (void *call_data, void *section_data)
   return assign_address_internal (call_data, gettkn_any ());
 }
 
+
 static int
-assign_port_internal (struct addrinfo *addr, struct token *tok)
+assign_port_generic (struct token *tok, int family, int *port)
 {
   struct addrinfo hints, *res;
   int rc;
@@ -1582,17 +1609,10 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
       return PARSER_FAIL;
     }
 
-  if (!(addr->ai_family == AF_INET || addr->ai_family == AF_INET6))
-    {
-      conf_error_at_locus_range (&tok->locus, "Port is not applicable to this address family");
-      return PARSER_FAIL;
-    }
-
   memset (&hints, 0, sizeof(hints));
-  hints.ai_flags = feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST;
-  hints.ai_family = addr->ai_family;
-  hints.ai_socktype = addr->ai_socktype;
-  hints.ai_protocol = addr->ai_protocol;
+  hints.ai_flags = 0;
+  hints.ai_family = family;
+  hints.ai_socktype = SOCK_STREAM;
   rc = getaddrinfo (NULL, tok->str, &hints, &res);
   if (rc != 0)
     {
@@ -1601,16 +1621,14 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
       return PARSER_FAIL;
     }
 
-  switch (addr->ai_family)
+  switch (res->ai_family)
     {
     case AF_INET:
-      ((struct sockaddr_in *)addr->ai_addr)->sin_port =
-	((struct sockaddr_in *)res->ai_addr)->sin_port;
+      *port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
       break;
 
     case AF_INET6:
-      ((struct sockaddr_in6 *)addr->ai_addr)->sin6_port =
-	((struct sockaddr_in6 *)res->ai_addr)->sin6_port;
+      *port = ((struct sockaddr_in6 *)res->ai_addr)->sin6_port;
       break;
 
     default:
@@ -1619,13 +1637,38 @@ assign_port_internal (struct addrinfo *addr, struct token *tok)
       return PARSER_FAIL;
     }
   freeaddrinfo (res);
-  ADDRINFO_SET_PORT (addr);
-
   return PARSER_OK;
 }
 
 static int
-assign_port (void *call_data, void *section_data)
+assign_port_internal (struct addrinfo *addr, struct token *tok)
+{
+  int port;
+  int res = assign_port_generic (tok, addr->ai_family, &port);
+
+  if (res == PARSER_OK)
+    {
+      switch (addr->ai_family)
+	{
+	case AF_INET:
+	  ((struct sockaddr_in *)addr->ai_addr)->sin_port = port;
+	  break;
+
+	case AF_INET6:
+	  ((struct sockaddr_in6 *)addr->ai_addr)->sin6_port = port;
+	  break;
+
+	default:
+	  // should not happen: handled by assign_port_generic
+	  abort ();
+	}
+      ADDRINFO_SET_PORT (addr);
+    }
+  return PARSER_OK;
+}
+
+static int
+assign_port_addrinfo (void *call_data, void *section_data)
 {
   struct addrinfo *addr = call_data;
 
@@ -1641,6 +1684,12 @@ assign_port (void *call_data, void *section_data)
     }
 
   return assign_port_internal (call_data, gettkn_any ());
+}
+
+static int
+assign_port_int (void *call_data, void *section_data)
+{
+  return assign_port_generic (gettkn_any (), AF_UNSPEC, call_data);
 }
 
 /*
@@ -2021,34 +2070,34 @@ backend_parse_https (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct stringbuf sb;
 
-  if ((be->v.reg.ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
+  if ((be->v.mtx.ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
     {
       conf_openssl_error (NULL, "SSL_CTX_new");
       return PARSER_FAIL;
     }
 
-  SSL_CTX_set_app_data (be->v.reg.ctx, be);
-  SSL_CTX_set_verify (be->v.reg.ctx, SSL_VERIFY_NONE, NULL);
-  SSL_CTX_set_mode (be->v.reg.ctx, SSL_MODE_AUTO_RETRY);
+  SSL_CTX_set_app_data (be->v.mtx.ctx, be);
+  SSL_CTX_set_verify (be->v.mtx.ctx, SSL_VERIFY_NONE, NULL);
+  SSL_CTX_set_mode (be->v.mtx.ctx, SSL_MODE_AUTO_RETRY);
 #ifdef SSL_MODE_SEND_FALLBACK_SCSV
-  SSL_CTX_set_mode (be->v.reg.ctx, SSL_MODE_SEND_FALLBACK_SCSV);
+  SSL_CTX_set_mode (be->v.mtx.ctx, SSL_MODE_SEND_FALLBACK_SCSV);
 #endif
-  SSL_CTX_set_options (be->v.reg.ctx, SSL_OP_ALL);
+  SSL_CTX_set_options (be->v.mtx.ctx, SSL_OP_ALL);
 #ifdef  SSL_OP_NO_COMPRESSION
-  SSL_CTX_set_options (be->v.reg.ctx, SSL_OP_NO_COMPRESSION);
+  SSL_CTX_set_options (be->v.mtx.ctx, SSL_OP_NO_COMPRESSION);
 #endif
-  SSL_CTX_clear_options (be->v.reg.ctx,
+  SSL_CTX_clear_options (be->v.mtx.ctx,
 			 SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION);
-  SSL_CTX_clear_options (be->v.reg.ctx, SSL_OP_LEGACY_SERVER_CONNECT);
+  SSL_CTX_clear_options (be->v.mtx.ctx, SSL_OP_LEGACY_SERVER_CONNECT);
 
   xstringbuf_init (&sb);
   stringbuf_printf (&sb, "%d-Pound-%ld", getpid (), random ());
-  SSL_CTX_set_session_id_context (be->v.reg.ctx,
+  SSL_CTX_set_session_id_context (be->v.mtx.ctx,
 				  (unsigned char *) stringbuf_value (&sb),
 				  stringbuf_len (&sb));
   stringbuf_free (&sb);
 
-  POUND_SSL_CTX_init (be->v.reg.ctx);
+  POUND_SSL_CTX_init (be->v.mtx.ctx);
 
   return PARSER_OK;
 }
@@ -2059,7 +2108,7 @@ backend_parse_cert (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
 
-  if (be->v.reg.ctx == NULL)
+  if (be->v.mtx.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
       return PARSER_FAIL;
@@ -2068,19 +2117,19 @@ backend_parse_cert (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  if (SSL_CTX_use_certificate_chain_file (be->v.reg.ctx, tok->str) != 1)
+  if (SSL_CTX_use_certificate_chain_file (be->v.mtx.ctx, tok->str) != 1)
     {
       conf_openssl_error (tok->str, "SSL_CTX_use_certificate_chain_file");
       return PARSER_FAIL;
     }
 
-  if (SSL_CTX_use_PrivateKey_file (be->v.reg.ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+  if (SSL_CTX_use_PrivateKey_file (be->v.mtx.ctx, tok->str, SSL_FILETYPE_PEM) != 1)
     {
       conf_openssl_error (tok->str, "SSL_CTX_use_PrivateKey_file");
       return PARSER_FAIL;
     }
 
-  if (SSL_CTX_check_private_key (be->v.reg.ctx) != 1)
+  if (SSL_CTX_check_private_key (be->v.mtx.ctx) != 1)
     {
       conf_openssl_error (tok->str, "SSL_CTX_check_private_key failed");
       return PARSER_FAIL;
@@ -2095,7 +2144,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
 
-  if (be->v.reg.ctx == NULL)
+  if (be->v.mtx.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
       return PARSER_FAIL;
@@ -2104,20 +2153,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return PARSER_FAIL;
 
-  SSL_CTX_set_cipher_list (be->v.reg.ctx, tok->str);
-  return PARSER_OK;
-}
-
-static int
-backend_parse_servername (void *call_data, void *section_data)
-{
-  BACKEND *be = call_data;
-  struct token *tok;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return PARSER_FAIL;
-  be->v.reg.servername = xstrdup (tok->str);
-
+  SSL_CTX_set_cipher_list (be->v.mtx.ctx, tok->str);
   return PARSER_OK;
 }
 
@@ -2185,21 +2221,22 @@ disable_proto (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
-static PARSER_TABLE backend_parsetab[] = {
+static PARSER_TABLE generic_backend_parsetab[] = {
   {
     .name = "End",
     .parser = parse_end
   },
   {
     .name = "Address",
-    .parser = assign_address,
-    .off = offsetof (BACKEND, v.reg.addr)
+    .parser = assign_address_string,
+    .off = offsetof (BACKEND, v.mtx.hostname)
   },
   {
     .name = "Port",
-    .parser = assign_port,
-    .off = offsetof (BACKEND, v.reg.addr)
+    .parser = assign_port_int,
+    .off = offsetof (BACKEND, v.mtx.port)
   },
+  // FIXME: family, resolve_mode
   {
     .name = "Priority",
     .parser = backend_assign_priority,
@@ -2208,17 +2245,17 @@ static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "TimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.to)
+    .off = offsetof (BACKEND, v.mtx.to)
   },
   {
     .name = "WSTimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.ws_to)
+    .off = offsetof (BACKEND, v.mtx.ws_to)
   },
   {
     .name = "ConnTO",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.conn_to)
+    .off = offsetof (BACKEND, v.mtx.conn_to)
   },
   {
     .name = "HTTPS",
@@ -2235,7 +2272,7 @@ static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "Disable",
     .parser = disable_proto,
-    .off = offsetof (BACKEND, v.reg.ctx)
+    .off = offsetof (BACKEND, v.mtx.ctx)
   },
   {
     .name = "Disabled",
@@ -2244,7 +2281,8 @@ static PARSER_TABLE backend_parsetab[] = {
   },
   {
     .name = "ServerName",
-    .parser = backend_parse_servername
+    .parser = assign_string,
+    .off = offsetof (BACKEND, v.mtx.servername)
   },
   { NULL }
 };
@@ -2274,28 +2312,28 @@ static PARSER_TABLE emergency_parsetab[] = {
   },
   {
     .name = "Address",
-    .parser = assign_address,
-    .off = offsetof (BACKEND, v.reg.addr)
+    .parser = assign_address_string,
+    .off = offsetof (BACKEND, v.mtx.hostname)
   },
   {
     .name = "Port",
-    .parser = assign_port,
-    .off = offsetof (BACKEND, v.reg.addr)
+    .parser = assign_port_int,
+    .off = offsetof (BACKEND, v.mtx.port)
   },
   {
     .name = "TimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.to)
+    .off = offsetof (BACKEND, v.mtx.to)
   },
   {
     .name = "WSTimeOut",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.ws_to)
+    .off = offsetof (BACKEND, v.mtx.ws_to)
   },
   {
     .name = "ConnTO",
     .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.reg.conn_to)
+    .off = offsetof (BACKEND, v.mtx.conn_to)
   },
   {
     .name = "HTTPS",
@@ -2312,11 +2350,12 @@ static PARSER_TABLE emergency_parsetab[] = {
   {
     .name = "Disable",
     .parser = disable_proto,
-    .off = offsetof (BACKEND, v.reg.ctx)
+    .off = offsetof (BACKEND, v.mtx.ctx)
   },
   {
     .name = "ServerName",
-    .parser = backend_parse_servername
+    .parser = assign_string,
+    .off = offsetof (BACKEND, v.mtx.servername)
   },
   { NULL }
 };
@@ -2359,13 +2398,10 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl,
   struct locus_range range;
 
   XZALLOC (be);
-  be->be_type = BE_BACKEND;
-  be->v.reg.addr.ai_socktype = SOCK_STREAM;
-  be->v.reg.to = dfl->be_to;
-  be->v.reg.conn_to = dfl->be_connto;
-  be->v.reg.ws_to = dfl->ws_to;
-  be->v.reg.alive = 1;
-  memset (&be->v.reg.addr, 0, sizeof (be->v.reg.addr));
+  be->be_type = BE_MATRIX;
+  be->v.mtx.to = dfl->be_to;
+  be->v.mtx.conn_to = dfl->be_connto;
+  be->v.mtx.ws_to = dfl->ws_to;
   be->priority = 5;
   pthread_mutex_init (&be->mut, NULL);
 
@@ -2373,9 +2409,8 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl,
     return NULL;
   if (beg)
     range.beg = *beg;
-  if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
-    return NULL;
-  be->locus = format_locus_str (&range);
+  be->locus = range;
+  be->locus_str = format_locus_str (&range);
 
   return be;
 }
@@ -2406,12 +2441,12 @@ parse_backend (void *call_data, void *section_data)
 
       if (parser_loop (use_backend_parsetab, be, section_data, &range))
 	return PARSER_FAIL;
-      be->locus = format_locus_str (&tok->locus);
+      be->locus_str = format_locus_str (&tok->locus);
     }
   else
     {
       putback_tkn (tok);
-      be = parse_backend_internal (backend_parsetab, section_data, &beg);
+      be = parse_backend_internal (generic_backend_parsetab, section_data, &beg);
       if (!be)
 	return PARSER_FAIL;
     }
@@ -2434,7 +2469,8 @@ parse_use_backend (void *call_data, void *section_data)
   XZALLOC (be);
   be->be_type = BE_BACKEND_REF;
   be->v.be_name = xstrdup (tok->str);
-  be->locus = format_locus_str (&tok->locus);
+  be->locus = tok->locus;
+  be->locus_str = format_locus_str (&tok->locus);
   be->priority = 5;
   pthread_mutex_init (&be->mut, NULL);
 
@@ -3019,7 +3055,7 @@ parse_redirect_backend (void *call_data, void *section_data)
     }
 
   XZALLOC (be);
-  be->locus = format_locus_str (&range);
+  be->locus_str = format_locus_str (&range);
   be->be_type = BE_REDIRECT;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -3085,7 +3121,8 @@ parse_error_backend (void *call_data, void *section_data)
   range.end = last_token_locus_range ()->end;
 
   XZALLOC (be);
-  be->locus = format_locus_str (&range);
+  be->locus = range;
+  be->locus_str = format_locus_str (&range);
   be->be_type = BE_ERROR;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -4057,7 +4094,9 @@ parse_service (void *call_data, void *section_data)
 
 	  if (n > 1)
 	    {
-	      if (be_class & ~(BE_MASK (BE_BACKEND) | BE_MASK (BE_REDIRECT)))
+	      if (be_class & ~(BE_MASK (BE_REGULAR) |
+			       BE_MASK (BE_MATRIX) |
+			       BE_MASK (BE_REDIRECT)))
 		{
 		  conf_error_at_locus_range (&range,
 			  "%s",
@@ -4071,7 +4110,8 @@ parse_service (void *call_data, void *section_data)
 		{
 		  conf_error_at_locus_range (&range,
 			  "warning: %s",
-			  (be_class & BE_MASK (BE_BACKEND))
+			  (be_class & (BE_MASK (BE_REGULAR) |
+				       BE_MASK (BE_MATRIX)))
 			     ? "service mixes regular and redirect backends"
 			     : "service uses multiple redirect backends");
 		  conf_error_at_locus_range (&range,
@@ -4084,7 +4124,7 @@ parse_service (void *call_data, void *section_data)
 
       SLIST_PUSH (head, svc, next);
     }
-  svc->locus = format_locus_str (&range);
+  svc->locus_str = format_locus_str (&range);
   return PARSER_OK;
 }
 
@@ -4141,7 +4181,7 @@ parse_acme (void *call_data, void *section_data)
   pthread_mutex_init (&svc->mut, NULL);
 
   range.end = last_token_locus_range ()->beg;
-  svc->locus = format_locus_str (&range);
+  svc->locus_str = format_locus_str (&range);
 
   svc->tot_pri = 1;
   svc->abs_pri = 1;
@@ -4509,7 +4549,7 @@ static PARSER_TABLE http_common[] = {
   },
   {
     .name = "Port",
-    .parser = assign_port,
+    .parser = assign_port_addrinfo,
     .off = offsetof (LISTENER, addr)
   },
   {
@@ -4802,7 +4842,7 @@ parse_listen_http (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != PARSER_OK)
     return PARSER_FAIL;
 
-  lst->locus = format_locus_str (&range);
+  lst->locus_str = format_locus_str (&range);
 
   SLIST_PUSH (list_head, lst, next);
   return PARSER_OK;
@@ -5422,7 +5462,7 @@ parse_listen_https (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != PARSER_OK)
     return PARSER_FAIL;
 
-  lst->locus = format_locus_str (&range);
+  lst->locus_str = format_locus_str (&range);
 
   if (SLIST_EMPTY (&lst->ctx_head))
     {
@@ -5579,13 +5619,13 @@ parse_control (void *call_data, void *section_data)
     return PARSER_FAIL;
 
   lst->verb = 1; /* Need PUT and DELETE methods */
-  lst->locus = format_locus_str (&range);
+  lst->locus_str = format_locus_str (&range);
   /* Register listener in the global listener list */
   SLIST_PUSH (&listeners, lst, next);
 
   /* Create service */
   XZALLOC (svc);
-  lst->locus = format_locus_str (&range);
+  lst->locus_str = format_locus_str (&range);
   SLIST_INIT (&svc->backends);
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
@@ -5597,7 +5637,8 @@ parse_control (void *call_data, void *section_data)
 
   /* Create backend */
   XZALLOC (be);
-  be->locus = format_locus_str (&range);
+  be->locus = range;
+  be->locus_str = format_locus_str (&range);
   be->be_type = BE_CONTROL;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
@@ -5624,17 +5665,15 @@ parse_named_backend (void *call_data, void *section_data)
 
   name = xstrdup (tok->str);
 
-  be = parse_backend_internal (backend_parsetab, section_data, NULL);
+  be = parse_backend_internal (generic_backend_parsetab, section_data, NULL);
   if (!be)
     return PARSER_FAIL;
   range.end = last_token_locus_range ()->end;
-  if (check_addrinfo (&be->v.reg.addr, &range, "Backend") != PARSER_OK)
-    return PARSER_FAIL;
 
   olddef = named_backend_insert (tab, name, &range, be);
   free (name);
   pthread_mutex_destroy (&be->mut);
-  free (be->locus);
+  free (be->locus_str);
   free (be);
   // FIXME: free address on failure only.
 
@@ -5722,6 +5761,38 @@ assign_regex_type (void *call_data, void *section_data)
     }
   *gp_type = n;
   return PARSER_OK;
+}
+
+static PARSER_TABLE resolver_parsetab[] = {
+  {
+    .name = "ConfigFile",
+    .parser = assign_string,
+    .off = offsetof (struct resolver_config, config_file)
+  },
+  {
+    .name = "Debug",
+    .parser = assign_bool,
+    .off = offsetof (struct resolver_config, debug)
+  },
+  {
+    .name = "CNAMEChain",
+    .parser = assign_unsigned,
+    .off = offsetof (struct resolver_config, max_cname_chain)
+  },
+  { NULL }
+};
+
+static int
+parse_resolver (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  struct locus_range range;
+  int rc = parser_loop (resolver_parsetab, &dfl->resolver, dfl, &range);
+#ifndef ENABLE_RESOLVER
+  if (rc == PARSER_OK)
+    conf_error_at_locus_range (&range, "%s", "section ignored: pound compiled without resolver support");
+  return rc;
+#endif
 }
 
 static PARSER_TABLE top_level_parsetab[] = {
@@ -5906,7 +5977,10 @@ static PARSER_TABLE top_level_parsetab[] = {
     .parser = assign_regex_type,
     .off = offsetof (POUND_DEFAULTS, re_type),
   },
-
+  {
+    .name = "Resolver",
+    .parser = parse_resolver
+  },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
@@ -5920,7 +5994,126 @@ static PARSER_TABLE top_level_parsetab[] = {
 };
 
 static int
-resolve_backend_ref (BACKEND *be, void *data)
+str_is_ipv4 (const char *addr)
+{
+  int c;
+  int dot_count;
+  int digit_count;
+
+  dot_count = 0;
+  digit_count = 0;
+  for (; (c = *addr) != 0; addr++)
+    {
+      if (c == '.')
+	{
+	  if (++dot_count > 4)
+	    return 0;
+	  digit_count = 0;
+	}
+      else if (!(isdigit (c) && ++digit_count <= 3))
+	return 0;
+    }
+
+  return dot_count == 3;
+}
+
+static int
+str_is_ipv6 (const char *addr)
+{
+  int c;
+  int col_count = 0; /* Number of colons */
+  int dcol = 0;      /* Did we encounter a double-colon? */
+  int dig_count = 0; /* Number of digits in the last group */
+
+  for (; (c = *addr) != 0; addr++)
+    {
+      if (!isascii (c))
+	return 0;
+      else if (isxdigit (c))
+	{
+	  if (++dig_count > 4)
+	    return 0;
+	}
+      else if (c == ':')
+	{
+	  if (col_count && dig_count == 0 && ++dcol > 1)
+	    return 0;
+	  if (++col_count > 7)
+	    return 0;
+	  dig_count = 0;
+	}
+      else
+	return 0;
+    }
+  return col_count == 7 || dcol;
+}
+
+static int
+str_is_ip (const char *addr)
+{
+  int c;
+  int dot = 0;
+  for (; (c = *addr) != 0 && isascii (c); addr++)
+    {
+      if (!isascii (c))
+	break;
+      else if (isxdigit (c))
+	return str_is_ipv6 (addr);
+      else if (c == dot)
+	return str_is_ipv4 (addr);
+      else if (isdigit (c))
+	dot = '.';
+      else
+	break;
+    }
+  return 0;
+}
+
+static void
+backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
+			   struct be_regular *reg)
+{
+  memset (reg, 0, sizeof (*reg));
+  reg->addr = *addr;
+
+  switch (reg->addr.ai_family)
+    {
+    case AF_INET:
+      ((struct sockaddr_in *)reg->addr.ai_addr)->sin_port = mtx->port;
+      break;
+
+    case AF_INET6:
+      ((struct sockaddr_in6 *)reg->addr.ai_addr)->sin6_port = mtx->port;
+      break;
+    }
+
+  reg->alive = 1;
+  reg->to = mtx->to;
+  reg->conn_to = mtx->conn_to;
+  reg->ws_to = mtx->ws_to;
+  reg->ctx = mtx->ctx;
+  reg->servername = mtx->servername;
+}
+
+static int
+backend_resolve (BACKEND *be)
+{
+  struct addrinfo addr;
+  struct be_regular reg;
+  char *hostname = be->v.mtx.hostname;
+
+  if (resolve_address (hostname, &be->locus, be->v.mtx.family, &addr))
+    return -1;
+
+  backend_matrix_to_regular (&be->v.mtx, &addr, &reg);
+  free (hostname);
+  be->v.reg = reg;
+  be->be_type = BE_REGULAR;
+  return 0;
+}
+
+static int
+backend_finalize (BACKEND *be, void *data)
 {
   if (be->be_type == BE_BACKEND_REF)
     {
@@ -5935,12 +6128,57 @@ resolve_backend_ref (BACKEND *be, void *data)
 	  return -1;
 	}
       free (be->v.be_name);
-      be->be_type = BE_BACKEND;
-      be->v.reg = nb->bereg;
+      be->be_type = BE_MATRIX;
+      be->v.mtx = nb->bemtx;
+      /* Hostname will be freed after resolving backend to be_regular.
+	 FIXME: use STRING_REF? */
+      be->v.mtx.hostname = xstrdup (be->v.mtx.hostname);
       if (be->priority == -1)
 	be->priority = nb->priority;
       if (be->disabled == -1)
 	be->disabled = nb->disabled;
+    }
+
+  if (be->be_type == BE_MATRIX)
+    {
+      if (!be->v.mtx.hostname)
+	{
+	  conf_error_at_locus_range (&be->locus, "%s",
+				     "Backend missing Address declaration");
+	  return -1;
+	}
+
+      if (be->v.mtx.hostname[0] == '/' || str_is_ip (be->v.mtx.hostname))
+	be->v.mtx.resolve_mode = bres_immediate;
+
+      if (be->v.mtx.port == 0)
+	{
+	  be->v.mtx.port = be->v.mtx.ctx == NULL ? 80 : 443;
+	}
+      else if (be->v.mtx.hostname[0] == '/')
+	{
+	  conf_error_at_locus_range (&be->locus,
+				     "Port is not applicable to this address family");
+	  return -1;
+	}
+
+      if (be->v.mtx.resolve_mode == bres_immediate)
+	{
+	  if (backend_resolve (be))
+	    return -1;
+	}
+      // FIXME: Optimize for cases where hostname is an IP
+    }
+  return 0;
+}
+
+static int
+service_emergency_finalize (SERVICE *svc, void *unused)
+{
+  if (svc->emergency != NULL)
+    {
+      if (backend_resolve (svc->emergency))
+	return -1;
     }
   return 0;
 }
@@ -6066,7 +6304,8 @@ parse_config_file (char const *file, int nosyslog)
     .ignore_case = 0,
     .re_type = GENPAT_POSIX,
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
-    .balancer = BALANCER_RANDOM
+    .balancer = BALANCER_RANDOM,
+    .resolver = RESOLVER_CONFIG_INITIALIZER
   };
 
   named_backend_table_init (&pound_defaults.named_backend_table);
@@ -6089,8 +6328,10 @@ parse_config_file (char const *file, int nosyslog)
 	{
 	  if (cur_input)
 	    return -1;
-	  if (foreach_backend (resolve_backend_ref,
+	  if (foreach_backend (backend_finalize,
 			       &pound_defaults.named_backend_table))
+	    return -1;
+	  if (foreach_service (service_emergency_finalize, NULL))
 	    return -1;
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");
@@ -6102,6 +6343,10 @@ parse_config_file (char const *file, int nosyslog)
 	    return -1;
 
 	  workdir_unref (include_wd);
+
+#ifdef ENABLE_RESOLVE
+	  resolve_set_config (&pound_defaults.resolve);
+#endif
 	}
     }
   named_backend_table_free (&pound_defaults.named_backend_table);
