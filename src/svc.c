@@ -512,7 +512,7 @@ rand_backend (SERVICE *svc)
 {
   BACKEND *be;
   int pri = random_in_range (svc->tot_pri);
-  SLIST_FOREACH (be, &svc->backends, next)
+  DLIST_FOREACH (be, &svc->backends, link)
     {
       if (!backend_is_alive (be) || be->disabled)
 	continue;
@@ -534,9 +534,9 @@ iwrr_select (SERVICE *svc)
 	  if (svc->iwrr_round <= svc->iwrr_cur->priority)
 	    be = svc->iwrr_cur;
 	}
-      if ((svc->iwrr_cur = SLIST_NEXT (svc->iwrr_cur, next)) == NULL)
+      if ((svc->iwrr_cur = DLIST_NEXT (svc->iwrr_cur, link)) == NULL)
 	{
-	  svc->iwrr_cur = SLIST_FIRST (&svc->backends);
+	  svc->iwrr_cur = DLIST_FIRST (&svc->backends);
 	  svc->iwrr_round = (svc->iwrr_round + 1) % (svc->max_pri + 1);
 	}
     }
@@ -551,9 +551,9 @@ service_lb_select_backend (SERVICE *svc)
 
   if (svc->max_pri == 0)
     return NULL;
-  if (SLIST_NEXT (SLIST_FIRST (&svc->backends), next) == NULL)
+  if (DLIST_NEXT (DLIST_FIRST (&svc->backends), link) == NULL)
     {
-      be = SLIST_FIRST (&svc->backends);
+      be = DLIST_FIRST (&svc->backends);
       if (!be->disabled && backend_is_alive (be))
 	return be;
       return NULL;
@@ -581,7 +581,7 @@ service_lb_init (SERVICE *svc)
 
     case BALANCER_IWRR:
       svc->iwrr_round = 0;
-      svc->iwrr_cur = SLIST_FIRST (&svc->backends);
+      svc->iwrr_cur = DLIST_FIRST (&svc->backends);
       break;
     }
 }
@@ -604,7 +604,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
   while (*key)
     hv = ((hv ^ *key++) * 16777619) & 0xFFFFFFFF;
   pri = hv % abs_pri;
-  SLIST_FOREACH (tb, head, next)
+  DLIST_FOREACH (tb, head, link)
     if ((pri -= tb->priority) < 0)
       break;
   if (!tb)
@@ -612,9 +612,9 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
     return NULL;
   for (res = tb; !backend_is_alive (res) || res->disabled;)
     {
-      res = SLIST_NEXT (res, next);
+      res = DLIST_NEXT (res, link);
       if (res == NULL)
-	res = SLIST_FIRST (head);
+	res = DLIST_FIRST (head);
       if (res == tb)
 	/* NO back-end available */
 	return NULL;
@@ -900,7 +900,7 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
     logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
   svc->tot_pri = 0;
   svc->max_pri = 0;
-  SLIST_FOREACH (b, &svc->backends, next)
+  DLIST_FOREACH (b, &svc->backends, link)
     {
       if (b == be)
 	{
@@ -1561,7 +1561,7 @@ session_backend_index (SESSION *sess)
   int n = 0;
   BACKEND *be;
 
-  SLIST_FOREACH (be, &sess->backend->service->backends, next)
+  DLIST_FOREACH (be, &sess->backend->service->backends, link)
     {
       if (be == sess->backend)
 	break;
@@ -1795,14 +1795,14 @@ backends_serialize (BACKEND_HEAD *head)
 {
   struct json_value *obj;
 
-  if (SLIST_EMPTY (head))
+  if (DLIST_EMPTY (head))
     obj = json_new_null ();
   else
     {
       BACKEND *be;
 
       obj = json_new_array ();
-      SLIST_FOREACH (be, head, next)
+      DLIST_FOREACH (be, head, link)
 	{
 	  if (json_array_append (obj, backend_serialize (be)))
 	    {
@@ -2182,7 +2182,7 @@ locate_backend (SERVICE *svc, IDENT id)
   if (id.type == IDTYPE_NUM)
     {
       long n = 0;
-      SLIST_FOREACH (be, &svc->backends, next)
+      DLIST_FOREACH (be, &svc->backends, link)
 	{
 	  if (n == id.n)
 	    break;
@@ -2331,8 +2331,8 @@ listener_is_control (LISTENER *lstn)
 
       if (svc && SLIST_NEXT (svc, next) == NULL)
 	{
-	  BACKEND *be = SLIST_FIRST (&svc->backends);
-	  return SLIST_NEXT (be, next) == NULL && be->be_type == BE_CONTROL;
+	  BACKEND *be = DLIST_FIRST (&svc->backends);
+	  return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
 	}
     }
   return 0;
@@ -2674,7 +2674,7 @@ itr_service_backends (SERVICE *svc, void *data)
 {
   struct service_backends_iterator *itp = data;
   BACKEND *be;
-  SLIST_FOREACH (be, &svc->backends, next)
+  DLIST_FOREACH (be, &svc->backends, link)
     {
       int rc;
       if ((rc = itp->itr (be, itp->data)) != 0)

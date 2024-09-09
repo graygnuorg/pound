@@ -484,8 +484,6 @@ struct be_matrix
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
-
-  DLIST_HEAD (,_backend) be_head; /* List of produced backends. */
 };
 
 struct be_regular
@@ -497,11 +495,6 @@ struct be_regular
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
-
-  DLIST_ENTRY (_backend) link; /* For backends produced by be_matrix: link to
-				  next and previous generated backends.
-				  Empty for regular backends.
-				*/
 };
 
 struct be_redirect
@@ -531,7 +524,7 @@ typedef struct _backend
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
-  SLIST_ENTRY (_backend) next;
+  DLIST_ENTRY (_backend) link;
 
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
@@ -552,7 +545,7 @@ typedef struct _backend
 
 } BACKEND;
 
-typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
+typedef DLIST_HEAD (,_backend) BACKEND_HEAD;
 
 static inline int backend_is_https (BACKEND *be)
 {

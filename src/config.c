@@ -2499,7 +2499,7 @@ parse_backend (void *call_data, void *section_data)
 	return PARSER_FAIL;
     }
 
-  SLIST_PUSH (head, be, next);
+  DLIST_PUSH (head, be, link);
 
   return PARSER_OK;
 }
@@ -2522,7 +2522,7 @@ parse_use_backend (void *call_data, void *section_data)
   be->priority = 5;
   pthread_mutex_init (&be->mut, NULL);
 
-  SLIST_PUSH (head, be, next);
+  DLIST_PUSH (head, be, link);
 
   return PARSER_OK;
 }
@@ -2557,7 +2557,7 @@ parse_metrics (void *call_data, void *section_data)
   be->be_type = BE_METRICS;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
-  SLIST_PUSH (head, be, next);
+  DLIST_PUSH (head, be, link);
   return PARSER_OK;
 }
 
@@ -3121,7 +3121,7 @@ parse_redirect_backend (void *call_data, void *section_data)
     /* the path is a single '/', so remove it */
     be->v.redirect.url[matches[3].rm_so] = '\0';
 
-  SLIST_PUSH (head, be, next);
+  DLIST_PUSH (head, be, link);
 
   return PARSER_OK;
 }
@@ -3178,7 +3178,7 @@ parse_error_backend (void *call_data, void *section_data)
   be->v.error.status = status;
   be->v.error.text = text;
 
-  SLIST_PUSH (head, be, next);
+  DLIST_PUSH (head, be, link);
 
   return rc;
 }
@@ -4077,7 +4077,7 @@ parse_service (void *call_data, void *section_data)
 
   XZALLOC (svc);
   service_cond_init (&svc->cond, COND_BOOL);
-  SLIST_INIT (&svc->backends);
+  DLIST_INIT (&svc->backends);
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
@@ -4112,7 +4112,7 @@ parse_service (void *call_data, void *section_data)
     {
       BACKEND *be;
 
-      if ((be = SLIST_FIRST (&svc->backends)) == NULL)
+      if ((be = DLIST_FIRST (&svc->backends)) == NULL)
 	{
 	  conf_error_at_locus_range (&range, "warning: no backends defined");
 	}
@@ -4126,7 +4126,7 @@ parse_service (void *call_data, void *section_data)
 #         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
 	  int n = 0;
 
-	  SLIST_FOREACH (be, &svc->backends, next)
+	  DLIST_FOREACH (be, &svc->backends, link)
 	    {
 	      n++;
 	      be_class |= BE_MASK (be->be_type);
@@ -4214,7 +4214,7 @@ parse_acme (void *call_data, void *section_data)
   /* Create service */
   XZALLOC (svc);
   service_cond_init (&svc->cond, COND_BOOL);
-  SLIST_INIT (&svc->backends);
+  DLIST_INIT (&svc->backends);
 
   /* Create a URL matcher */
   cond = service_cond_append (&svc->cond, COND_URL);
@@ -4244,7 +4244,7 @@ parse_acme (void *call_data, void *section_data)
   be->v.acme.wd = fd;
 
   /* Register backend in service */
-  SLIST_PUSH (&svc->backends, be, next);
+  DLIST_PUSH (&svc->backends, be, link);
 
   /* Register service in the listener */
   SLIST_PUSH (head, svc, next);
@@ -5674,7 +5674,7 @@ parse_control (void *call_data, void *section_data)
   /* Create service */
   XZALLOC (svc);
   lst->locus_str = format_locus_str (&range);
-  SLIST_INIT (&svc->backends);
+  DLIST_INIT (&svc->backends);
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
   svc->tot_pri = 1;
@@ -5691,7 +5691,7 @@ parse_control (void *call_data, void *section_data)
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
-  SLIST_PUSH (&svc->backends, be, next);
+  DLIST_PUSH (&svc->backends, be, link);
 
   return PARSER_OK;
 }
