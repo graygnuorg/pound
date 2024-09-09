@@ -1453,6 +1453,20 @@ assign_CONTENT_LENGTH (void *call_data, void *section_data)
   return 0;
 }
 
+static int
+assign_int_enum (int *dst, struct token *tok, struct kwtab *kwtab, char *what)
+{
+  if (tok == NULL)
+    return PARSER_FAIL;
+
+  if (kw_to_tok (kwtab, tok->str, 0, dst))
+    {
+      conf_error ("unrecognized %s", what);
+      return PARSER_FAIL;
+    }
+  return PARSER_OK;
+}
+
 #define assign_timeout assign_unsigned
 
 static struct kwtab facility_table[] = {
@@ -1591,6 +1605,18 @@ assign_address (void *call_data, void *section_data)
   return assign_address_internal (call_data, gettkn_any ());
 }
 
+static int
+assign_address_family (void *call_data, void *section_data)
+{
+  static struct kwtab kwtab[] = {
+    { "unix", AF_UNIX },
+    { "inet", AF_INET },
+    { "inet6", AF_INET6 },
+    { NULL }
+  };
+  return assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,
+			  "address family name");
+}
 
 static int
 assign_port_generic (struct token *tok, int family, int *port)
@@ -2166,7 +2192,6 @@ backend_assign_priority (void *call_data, void *section_data)
 static int
 set_proto_opt (int *opt)
 {
-  struct token *tok;
   int n;
 
   static struct kwtab kwtab[] = {
@@ -2186,19 +2211,12 @@ set_proto_opt (int *opt)
 #endif
     { NULL }
   };
+  int res = assign_int_enum (&n, gettkn_expect (T_IDENT), kwtab,
+			     "protocol name");
+  if (res == PARSER_OK)
+    *opt |= n;
 
-  if ((tok = gettkn_expect (T_IDENT)) == NULL)
-    return PARSER_FAIL;
-
-  if (kw_to_tok (kwtab, tok->str, 0, &n))
-    {
-      conf_error ("%s", "unrecognized protocol name");
-      return PARSER_FAIL;
-    }
-
-  *opt |= n;
-
-  return PARSER_OK;
+  return res;
 }
 
 static int
@@ -2221,7 +2239,28 @@ disable_proto (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
-static PARSER_TABLE generic_backend_parsetab[] = {
+static int
+assign_resolve_mode (void *call_data, void *section_data)
+{
+  static struct kwtab kwtab[] = {
+    { "immediate", bres_immediate },
+    { "first", bres_first },
+    { "all", bres_all },
+    { NULL }
+  };
+  int res = assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,
+			     "backend resolve mode");
+#ifndef ENABLE_RESOLVER
+  if (res != bres_immediate)
+    {
+      conf_error ("%s", "value not supported: pound compiled without resolver support");
+      res = PARSER_FAIL
+    }
+#endif
+  return res;
+}
+
+static PARSER_TABLE backend_parsetab[] = {
   {
     .name = "End",
     .parser = parse_end
@@ -2236,7 +2275,16 @@ static PARSER_TABLE generic_backend_parsetab[] = {
     .parser = assign_port_int,
     .off = offsetof (BACKEND, v.mtx.port)
   },
-  // FIXME: family, resolve_mode
+  {
+    .name = "Family",
+    .parser = assign_address_family,
+    .off = offsetof (BACKEND, v.mtx.family)
+  },
+  {
+    .name = "Resolve",
+    .parser = assign_resolve_mode,
+    .off = offsetof (BACKEND, v.mtx.resolve_mode)
+  },
   {
     .name = "Priority",
     .parser = backend_assign_priority,
@@ -2446,7 +2494,7 @@ parse_backend (void *call_data, void *section_data)
   else
     {
       putback_tkn (tok);
-      be = parse_backend_internal (generic_backend_parsetab, section_data, &beg);
+      be = parse_backend_internal (backend_parsetab, section_data, &beg);
       if (!be)
 	return PARSER_FAIL;
     }
@@ -5665,7 +5713,7 @@ parse_named_backend (void *call_data, void *section_data)
 
   name = xstrdup (tok->str);
 
-  be = parse_backend_internal (generic_backend_parsetab, section_data, NULL);
+  be = parse_backend_internal (backend_parsetab, section_data, NULL);
   if (!be)
     return PARSER_FAIL;
   range.end = last_token_locus_range ()->end;
@@ -5748,19 +5796,9 @@ static struct kwtab regex_type_table[] = {
 static int
 assign_regex_type (void *call_data, void *section_data)
 {
-  int *gp_type = call_data;
-  struct token *tok;
-  int n;
-
-  if ((tok = gettkn_expect (T_IDENT)) == NULL)
-    return PARSER_FAIL;
-  if (kw_to_tok (regex_type_table, tok->str, 1, &n) != 0)
-    {
-      conf_error ("%s", "unsupported regex type");
-      return PARSER_FAIL;
-    }
-  *gp_type = n;
-  return PARSER_OK;
+  return assign_int_enum (call_data, gettkn_expect (T_IDENT),
+			  regex_type_table,
+			  "regex type");
 }
 
 static PARSER_TABLE resolver_parsetab[] = {
@@ -6167,7 +6205,6 @@ backend_finalize (BACKEND *be, void *data)
 	  if (backend_resolve (be))
 	    return -1;
 	}
-      // FIXME: Optimize for cases where hostname is an IP
     }
   return 0;
 }

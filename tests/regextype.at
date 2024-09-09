@@ -21,7 +21,7 @@ PT_CONF([RegexType nosuchre
 ],
 [1],
 [],
-[pound: pound.cfg:1.11-18: unsupported regex type
+[pound: pound.cfg:1.11-18: unrecognized regex type
 ])
 
 AT_CLEANUP
