@@ -528,6 +528,7 @@ typedef struct _backend
 
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
+  unsigned long refcount;       /* reference counter */
   double numreq;		/* number of requests seen */
   double avgtime;		/* Avg. time per request */
   double avgsqtime;             /* Avg. squared time per request */
@@ -948,6 +949,9 @@ SERVICE *get_service (POUND_HTTP *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
+
+void backend_ref (BACKEND *be);
+void backend_unref (BACKEND *be);
 
 /* Search for a host name, return the addrinfo for it */
 int get_host (char const *, struct addrinfo *, int);

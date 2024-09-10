@@ -4355,8 +4355,11 @@ select_backend (POUND_HTTP *phttp)
       if (phttp->be != NULL)
 	{
 	  if (backend == phttp->backend)
-	    /* Same backend as before: nothing to do */
-	    return 0;
+	    {
+	      /* Same backend as before: nothing to do */
+	      backend_unref (backend);
+	      return 0;
+	    }
 	  else
 	    close_backend (phttp);
 	}
@@ -4385,6 +4388,7 @@ select_backend (POUND_HTTP *phttp)
 		  break;
 
 		default:
+		  backend_unref (backend);
 		  log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
 			     "backend: unknown family %d",
 			     backend->v.reg.addr.ai_family);
@@ -4393,6 +4397,7 @@ select_backend (POUND_HTTP *phttp)
 
 	      if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
 		{
+		  backend_unref (backend);
 		  log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, errno,
 			     "backend %s: socket create",
 			     str_be (caddr, sizeof (caddr), backend));
@@ -4415,6 +4420,7 @@ select_backend (POUND_HTTP *phttp)
 		      return res;
 		    }
 		  /* New backend selected. */
+		  backend_unref (phttp->backend);
 		  phttp->backend = backend;
 		  return 0;
 		}
@@ -4433,10 +4439,12 @@ select_backend (POUND_HTTP *phttp)
 	       */
 	      kill_be (phttp->svc, backend, BE_KILL);
 	      /* Try next backend now. */
+	      backend_unref (backend);
 	    }
 	  else
 	    {
 	      /* New backend selected. */
+	      backend_unref (phttp->backend);
 	      phttp->backend = backend;
 	      return 0;
 	    }

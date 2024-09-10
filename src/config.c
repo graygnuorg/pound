@@ -6147,6 +6147,7 @@ backend_resolve (BACKEND *be)
   free (hostname);
   be->v.reg = reg;
   be->be_type = BE_REGULAR;
+  be->refcount = 1;
   return 0;
 }
 

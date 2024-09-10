@@ -386,6 +386,7 @@ pound_http_destroy (POUND_HTTP *arg)
       BIO_ssl_shutdown (arg->cl);
     }
 
+  backend_unref (arg->backend);
   if (arg->be != NULL)
     {
       BIO_flush (arg->be);

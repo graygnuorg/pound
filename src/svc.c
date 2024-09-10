@@ -770,6 +770,25 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
   return 1;
 }
 
+void
+backend_ref (BACKEND *be)
+{
+  pthread_mutex_lock (&be->mut);
+  be->refcount++;
+  pthread_mutex_unlock (&be->mut);
+}
+
+void
+backend_unref (BACKEND *be)
+{
+  if (be)
+    {
+      pthread_mutex_lock (&be->mut);
+      be->refcount--;
+      pthread_mutex_unlock (&be->mut);
+    }
+}
+
 /*
  * Find the right back-end for a request
  */
@@ -832,6 +851,7 @@ get_backend (POUND_HTTP *phttp)
       res = no_be ? svc->emergency : service_lb_select_backend (svc);
     }
 
+  backend_ref (res);
   pthread_mutex_unlock (&svc->mut);
 
   return res;
