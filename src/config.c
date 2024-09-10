@@ -6211,8 +6211,16 @@ backend_finalize (BACKEND *be, void *data)
 	}
       else
 	{
+#ifdef ENABLE_RESOLVER
 	  be->v.mtx.betab = backend_table_new ();
 	  backend_matrix_init (be);
+#else
+	  conf_error_at_locus_range (&be->locus,
+				     "Dynamic backend creation is not "
+				     "available: pound compiled without "
+				     "resolver support");
+				     
+#endif
 	}
     }
   return 0;
