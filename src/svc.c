@@ -20,13 +20,12 @@
 #include "pound.h"
 #include "extern.h"
 #include "json.h"
+#include <assert.h>
 
 static void init_rsa (void);
 static void do_RSAgen (void *, const struct timespec *);
 
 /* Periodic jobs */
-typedef void (*JOB_FUNC) (void *, const struct timespec *);
-
 typedef struct job
 {
   struct timespec ts;
@@ -69,13 +68,13 @@ job_arm_unlocked (JOB *job)
     pthread_cond_broadcast (&job_cond);
 }
 
-static void
+void
 job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
 {
   job_arm_unlocked (job_alloc (ts, func, data));
 }
 
-static void
+void
 job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
 {
   pthread_mutex_lock (&job_mutex);
@@ -773,18 +772,51 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
 void
 backend_ref (BACKEND *be)
 {
-  pthread_mutex_lock (&be->mut);
-  be->refcount++;
-  pthread_mutex_unlock (&be->mut);
+  if (be->be_type == BE_REGULAR)
+    {
+      pthread_mutex_lock (&be->mut);
+      be->refcount++;
+      pthread_mutex_unlock (&be->mut);
+    }
+}
+
+void *
+thr_backend_remover (void *arg)
+{
+  BACKEND *be = arg;
+  SERVICE *svc = be->service;
+  pthread_mutex_lock (&svc->mut);
+  DLIST_REMOVE (&be->service->backends, be, link);
+  free (be->v.reg.addr.ai_addr);
+  free (be);
+  pthread_mutex_unlock (&svc->mut);
+  return NULL;
+}
+
+// FIXME: Move to pound.c?
+void
+backend_schedule_removal (BACKEND *be)
+{
+  pthread_attr_t attr;
+  pthread_t tid;
+
+  be->disabled = 1;
+  pthread_attr_init (&attr);
+  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+  pthread_create (&tid, &attr, thr_backend_remover, be);
+  pthread_attr_destroy (&attr);
 }
 
 void
 backend_unref (BACKEND *be)
 {
-  if (be)
+  if (be && be->be_type == BE_REGULAR)
     {
       pthread_mutex_lock (&be->mut);
+      assert (be->refcount > 0);
       be->refcount--;
+      if (be->refcount == 0)
+	backend_schedule_removal (be);
       pthread_mutex_unlock (&be->mut);
     }
 }
@@ -1658,6 +1690,9 @@ backend_type_str (BACKEND_TYPE t)
 {
   switch (t)
     {
+    case BE_MATRIX:
+      return "matrix";
+
     case BE_REGULAR:
       return "backend";
 
@@ -1767,12 +1802,29 @@ backend_serialize (BACKEND *be)
 	  else
 	    switch (be->be_type)
 	      {
+	      case BE_MATRIX:
+		err = json_object_set (obj, "hostname",
+				       json_new_string (be->v.mtx.hostname))
+		       || json_object_set (obj, "resolve_mode",
+					json_new_integer (be->v.mtx.resolve_mode))
+		       || json_object_set (obj, "family",
+					   json_new_integer (be->v.mtx.family))
+		       || json_object_set (obj, "servername",
+					   be->v.reg.servername
+					     ? json_new_string (be->v.reg.servername)
+					     : json_new_null ());
+		break;
+
 	      case BE_REGULAR:
 		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
 		  || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
 		  || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
 		  || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-		  || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"));
+		  || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"))
+		  || json_object_set (obj, "servername",
+				      be->v.reg.servername
+				       ? json_new_string (be->v.reg.servername)
+				      : json_new_null ());
 		break;
 
 	      case BE_REDIRECT:

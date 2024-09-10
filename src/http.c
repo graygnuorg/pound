@@ -4820,7 +4820,7 @@ do_http (POUND_HTTP *phttp)
 	}
 
       /*
-       * if we have anything but a BACK_END we close the channel
+       * if we have anything but a regular backend we close the channel
        */
       if (phttp->be != NULL && phttp->backend->be_type != BE_REGULAR)
 	close_backend (phttp);

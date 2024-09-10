@@ -34,7 +34,7 @@ enum dns_status
 
 union dns_addr
 {
-  struct sockaddr s;
+  struct sockaddr sa;
   struct sockaddr_in s_in;
   struct sockaddr_in6 s_in6;
 };
@@ -69,3 +69,4 @@ struct dns_response
 int dns_lookup (char const *name, int family, struct dns_response **presp);
 void dns_response_free (struct dns_response *resp);
 void resolver_set_config (struct resolver_config *);
+int sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr);

@@ -65,6 +65,8 @@ Listeners:
       {{printf "%3d" $bno}}. {{block "default.print_backend" $backend -}}
        {{.type}} {{if eq .type "backend" -}}
 {{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
+     {{- else if eq .type "matrix" -}}
+"{{.hostname}}" {{.resolve_mode}} {{.family}}
      {{- else if eq .type "redirect" -}}
 {{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
      {{- end}} {{if .enabled}}active{{else}}disabled{{end}}

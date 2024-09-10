@@ -1772,7 +1772,7 @@ cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
  * for use with the above functions.  Store pointer in RET_PTR.  Return
  * address length in bytes, or -1 if SA has invalid address family.
  */
-static int
+int
 sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
 {
   switch (sa->sa_family)
@@ -5803,6 +5803,10 @@ assign_regex_type (void *call_data, void *section_data)
 
 static PARSER_TABLE resolver_parsetab[] = {
   {
+    .name = "End",
+    .parser = parse_end
+  },
+  {
     .name = "ConfigFile",
     .parser = assign_string,
     .off = offsetof (struct resolver_config, config_file)
@@ -6107,7 +6111,7 @@ str_is_ip (const char *addr)
   return 0;
 }
 
-static void
+void
 backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 			   struct be_regular *reg)
 {
@@ -6205,6 +6209,11 @@ backend_finalize (BACKEND *be, void *data)
 	{
 	  if (backend_resolve (be))
 	    return -1;
+	}
+      else
+	{
+	  be->v.mtx.betab = backend_table_new ();
+	  backend_matrix_init (be);
 	}
     }
   return 0;

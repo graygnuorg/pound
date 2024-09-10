@@ -472,6 +472,8 @@ enum backed_resolve_mode
     bres_all
   };
 
+typedef struct backend_table *BACKEND_TABLE;
+
 struct be_matrix
 {
   char *hostname;       /* Hostname or IP address. */
@@ -484,6 +486,8 @@ struct be_matrix
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
+  BACKEND_TABLE betab;  /* Table of regular backends generated from this
+			   matrix. */
 };
 
 struct be_regular
@@ -524,6 +528,7 @@ typedef struct _backend
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
+  int mark;
   DLIST_ENTRY (_backend) link;
 
   /* Statistics */
@@ -555,7 +560,10 @@ static inline int backend_is_https (BACKEND *be)
 
 static inline int backend_is_alive (BACKEND *be)
 {
-  /* Redirects, ACME, and control backends are always alive */
+  /* Matrix backends are special, they are never alive. */
+  if (be->be_type == BE_MATRIX)
+    return 0;
+  /* Redirects, ACME, and control backends are always alive. */
   return be->be_type != BE_REGULAR || be->v.reg.alive;
 }
 
@@ -952,6 +960,11 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
+void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
+				struct be_regular *reg);
+void backend_matrix_init (BACKEND *be);
+BACKEND_TABLE backend_table_new (void);
+void backend_schedule_removal (BACKEND *be);
 
 /* Search for a host name, return the addrinfo for it */
 int get_host (char const *, struct addrinfo *, int);
@@ -1204,3 +1217,7 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
+
+typedef void (*JOB_FUNC) (void *, const struct timespec *);
+void job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+void job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data);
