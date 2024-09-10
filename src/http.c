@@ -4866,6 +4866,7 @@ do_http (POUND_HTTP *phttp)
 	    res = backend_response (phttp);
 	  break;
 
+	case BE_MATRIX:
 	case BE_BACKEND_REF:
 	  /* shouldn't happen */
 	  abort ();

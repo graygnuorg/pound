@@ -664,6 +664,7 @@ be_service_name (BACKEND *be)
       return "(error)";
     case BE_METRICS:
       return "(metrics)";
+    case BE_MATRIX:
     case BE_BACKEND_REF:
       /* shouldn't happen */
       break;

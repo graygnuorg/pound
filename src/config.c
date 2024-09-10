@@ -1581,7 +1581,6 @@ assign_address_internal (struct addrinfo *addr, struct token *tok)
 static int
 assign_address_string (void *call_data, void *section_data)
 {
-  char *s;
   struct token *tok = gettkn_expect_mask (T_BIT (T_IDENT) |
 					  T_BIT (T_STRING) |
 					  T_BIT (T_LITERAL));
@@ -5833,8 +5832,8 @@ parse_resolver (void *call_data, void *section_data)
 #ifndef ENABLE_RESOLVER
   if (rc == PARSER_OK)
     conf_error_at_locus_range (&range, "%s", "section ignored: pound compiled without resolver support");
-  return rc;
 #endif
+  return rc;
 }
 
 static PARSER_TABLE top_level_parsetab[] = {
@@ -6167,7 +6166,7 @@ backend_finalize (BACKEND *be, void *data)
       if (!nb)
 	{
 	  logmsg (LOG_ERR, "%s: named backend %s is not declared",
-		  be->locus, be->v.be_name);
+		  be->locus_str, be->v.be_name);
 	  return -1;
 	}
       free (be->v.be_name);

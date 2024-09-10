@@ -41,6 +41,9 @@ dns_response_free (struct dns_response *resp)
     case dns_resp_srv:
       free (resp->srv);
       break;
+
+    case dns_resp_none:
+      break;
     }
   free (resp);
 }
@@ -454,8 +457,6 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
 void
 dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 {
-  socklen_t len;
-  
   memset (ai, 0, sizeof (*ai));
   ai->ai_socktype = SOCK_STREAM;
   ai->ai_family = da->sa.sa_family;
@@ -475,8 +476,8 @@ dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
   ai->ai_addr = (struct sockaddr *) da;
 }
 
-static int service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
-					   struct dns_response *resp);
+static void service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
+					    struct dns_response *resp);
 
 static int
 backend_matrix_resolve (BACKEND *be)
@@ -490,16 +491,17 @@ backend_matrix_resolve (BACKEND *be)
     case dns_success:
       service_matrix_update_backends (be->service, be, resp);
       dns_response_free (resp);
-      return 0;
+      break;
 
     case dns_not_found:
     case dns_temp_failure:
-      return 0;
+      break;
       
     case dns_failure:
       //FIXME
       return 1;
     }
+  return 0;
 }  
 
 void
@@ -619,7 +621,7 @@ backend_sweep (BACKEND *be, void *data)
   pthread_mutex_unlock (&be->mut);
 }
 
-static int
+static void
 service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 				struct dns_response *resp)
 {
