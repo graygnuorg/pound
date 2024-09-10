@@ -1254,7 +1254,7 @@ connect_nb (const int sockfd, const struct addrinfo *serv_addr, const int to)
 	  return -1;
 	}
 
-      if (!(p.revents & POLLOUT))
+      if ((p.revents & (POLLOUT | POLLERR | POLLHUP)) != POLLOUT)
 	{
 	  int error;
 	  socklen_t len = sizeof (error);
