@@ -2253,7 +2253,7 @@ assign_resolve_mode (void *call_data, void *section_data)
   if (res != bres_immediate)
     {
       conf_error ("%s", "value not supported: pound compiled without resolver support");
-      res = PARSER_FAIL
+      res = PARSER_FAIL;
     }
 #endif
   return res;
