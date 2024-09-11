@@ -763,7 +763,6 @@ backend_mark (BACKEND *be, void *data)
 {
   pthread_mutex_lock (&be->mut);
   be->mark = *(int*)data;
-  service_session_remove_by_backend (be->service, be);
   pthread_mutex_unlock (&be->mut);
 }
 
@@ -775,10 +774,20 @@ backend_sweep (BACKEND *be, void *data)
   if (be->mark)
     {
       assert (be->refcount > 0);
+      /* Mark backend as disabled so it won't get more requests. */
+      be->disabled = 1;
+      /* Remove any sessions associated with it. */
+      service_session_remove_by_backend (be->service, be);
+      /*
+       * Remove backend from the hash table, but don't schedule removal from
+       * the list unless its decremented refcount is 0.  If not (that means
+       * the backend is in use by one or more sessions), removal will be
+       * scheduled later by backend_unref, when its refcount reaches zero.
+       */
+      backend_table_delete (tab, be);
       be->refcount--;
       if (be->refcount == 0)
 	{
-	  backend_table_delete (tab, be);
 	  backend_schedule_removal (be);
 	}
       be->mark = 0;

@@ -81,7 +81,10 @@ job_arm_unlocked (JOB *job)
 	break;
     }
 
-  DLIST_INSERT_BEFORE (&job_head, t, job, link);
+  if (t == NULL)
+    DLIST_INSERT_TAIL (&job_head, job, link);
+  else
+    DLIST_INSERT_BEFORE (&job_head, t, job, link);
 
   if (DLIST_PREV (job, link) == NULL)
     pthread_cond_broadcast (&job_cond);
@@ -805,6 +808,7 @@ thr_backend_remover (void *arg)
   BACKEND *be = arg;
   SERVICE *svc = be->service;
   pthread_mutex_lock (&svc->mut);
+  service_session_remove_by_backend (be->service, be);
   DLIST_REMOVE (&be->service->backends, be, link);
   free (be->v.reg.addr.ai_addr);
   free (be);
