@@ -40,25 +40,28 @@ AC_TYPE_PID_T
 AC_TYPE_UNSIGNED_LONG_LONG_INT
 AC_TYPE_LONG_LONG_INT
 
-# Check for adns library
-AC_ARG_ENABLE([resolver],
- [AS_HELP_STRING([enable resolver support (default)])],
- [status_resolver=${enableval}],
- [status_resolver=probe])
+# Check whether they want dynamic backends
+AC_ARG_ENABLE([dynamic-backends],
+ [AS_HELP_STRING([--enable-dynamic-backends],
+                 [enable dynamic backend support (default)])],
+ [status_dynamic_backends=${enableval}],
+ [status_dynamic_backends=probe])
 
-if test $status_resolver != no; then
+if test $status_dynamic_backends != no; then
+  # Check for adns library
   AC_CHECK_HEADERS([adns.h])
   AC_CHECK_LIB([adns], [adns_init])
   if test "$ac_cv_lib_adns_adns_init$ac_cv_header_adns_h" = yesyes; then
-    AC_DEFINE([ENABLE_RESOLVER], [1], [Define if libadns is available])
-    status_resolver=yes
-  elif $status_resolver = yes; then
+    AC_DEFINE([ENABLE_DYNAMIC_BACKENDS], [1],
+              [Define if dynamic backends are supported])
+    status_dynamic_backends=yes
+  elif $status_dynamic_backends = yes; then
     AC_MSG_FAILURE([required library adns not found; install it or use --disable-resolver to disable])
   else
-    status_resolver=no
+    status_dynamic_backends=no
   fi
 fi
-AM_CONDITIONAL([COND_RESOLVER], [test $status_resolver = yes])
+AM_CONDITIONAL([COND_RESOLVER], [test $status_dynamic_backends = yes])
 
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
@@ -246,7 +249,7 @@ Owner group ................................... $owner_group
 Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
-GNU adns ...................................... $status_resolver
+Dynamic backends .............................. $status_dynamic_backends
 *******************************************************************
 
 EOF
@@ -265,7 +268,7 @@ if test "$early_pthread_cancel_probe" = 1; then
 else
   status_pthread_cancel_probe=no
 fi
-status_resolver=$status_resolver
+status_dynamic_backends=$status_dynamic_backends
 ])
 
 AC_CONFIG_TESTDIR(tests)

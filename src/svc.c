@@ -1032,7 +1032,7 @@ backend_disable (SERVICE *svc, BACKEND *be, const int disable_mode)
       kill_be (svc, be, disable_mode);
       break;
 
-#if ENABLE_RESOLVER
+#if ENABLE_DYNAMIC_BACKENDS
     case BE_MATRIX:
       backend_matrix_disable (be, disable_mode);
       break;

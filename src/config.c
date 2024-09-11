@@ -2250,10 +2250,10 @@ assign_resolve_mode (void *call_data, void *section_data)
   };
   int res = assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,
 			     "backend resolve mode");
-#ifndef ENABLE_RESOLVER
+#ifndef ENABLE_DYNAMIC_BACKENDS
   if (res != bres_immediate)
     {
-      conf_error ("%s", "value not supported: pound compiled without resolver support");
+      conf_error ("%s", "value not supported: pound compiled without support for dynamic backends");
       res = PARSER_FAIL;
     }
 #endif
@@ -2287,7 +2287,7 @@ static PARSER_TABLE backend_parsetab[] = {
   },
   {
     .name = "RetryInterval",
-    .parser = assign_unsigned,
+    .parser = assign_timeout,
     .off = offsetof (BACKEND, v.mtx.retry_interval)
   },
   {
@@ -5828,7 +5828,7 @@ static PARSER_TABLE resolver_parsetab[] = {
   },
   {
     .name = "RetryInterval",
-    .parser = assign_unsigned,
+    .parser = assign_timeout,
     .off = offsetof (struct resolver_config, retry_interval)
   },
   { NULL }
@@ -5840,9 +5840,9 @@ parse_resolver (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = section_data;
   struct locus_range range;
   int rc = parser_loop (resolver_parsetab, &dfl->resolver, dfl, &range);
-#ifndef ENABLE_RESOLVER
+#ifndef ENABLE_DYNAMIC_BACKENDS
   if (rc == PARSER_OK)
-    conf_error_at_locus_range (&range, "%s", "section ignored: pound compiled without resolver support");
+    conf_error_at_locus_range (&range, "%s", "section ignored: pound compiled without support for dynamic backends");
 #endif
   return rc;
 }
@@ -6222,14 +6222,14 @@ backend_finalize (BACKEND *be, void *data)
 	}
       else
 	{
-#ifdef ENABLE_RESOLVER
+#ifdef ENABLE_DYNAMIC_BACKENDS
 	  be->v.mtx.betab = backend_table_new ();
 	  backend_matrix_init (be);
 #else
 	  conf_error_at_locus_range (&be->locus,
 				     "Dynamic backend creation is not "
 				     "available: pound compiled without "
-				     "resolver support");
+				     "support for dynamic backends");
 
 #endif
 	}
@@ -6394,7 +6394,7 @@ parse_config_file (char const *file, int nosyslog)
 	  if (cur_input)
 	    return -1;
 
-#ifdef ENABLE_RESOLVER
+#ifdef ENABLE_DYNAMIC_BACKENDS
 	  resolver_set_config (&pound_defaults.resolver);
 #endif
 	  if (foreach_backend (backend_finalize,
@@ -6540,6 +6540,14 @@ struct string_value pound_settings[] = {
 				       ", PCRE"
 #elif HAVE_LIBPCRE == 2
 				       ", PCRE2"
+#endif
+    }
+  },
+  { "Dynamic backends", STRING_CONSTANT, { .s_const =
+#if ENABLE_DYNAMIC_BACKENDS
+					  "enabled"
+#else
+					  "disabled"
 #endif
     }
   },

@@ -465,7 +465,7 @@ typedef enum
   }
   BACKEND_TYPE;
 
-enum backed_resolve_mode
+enum backend_resolve_mode
   {
     bres_immediate,
     bres_first,

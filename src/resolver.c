@@ -84,8 +84,8 @@ dns_log_cb (adns_state ads, void *logfndata, const char *fmt, va_list ap)
     stringbuf_reset (sb);
   else
     {
-      char *p = memchr (stringbuf_value (sb), '\n', stringbuf_len (sb));
-      if (p != NULL)
+      char *p;
+      while ((p = memchr (stringbuf_value (sb), '\n', stringbuf_len (sb))))
 	{
 	  *p++ = 0;
 	  logmsg (LOG_ERR, "%s", stringbuf_value (sb));
@@ -877,7 +877,7 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
   backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
 
   /* Reschedule next update. */
-  ts.tv_sec = resp->expires + 1;
+  ts.tv_sec = resp->expires;
   ts.tv_nsec = 0;
   job_enqueue (&ts, job_resolver, mtx);
 }
@@ -898,7 +898,7 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
   else
     {
       /* For matrix backends, BE_DISABLE and BE_KILL are the same. */
-      /* Mark all generated backends and remove associated sessions. */
+      /* Mark all generated backends. */
       int mark = 1;
       backend_table_foreach (be->v.mtx.betab, backend_mark, &mark);
       /* Unreference all backends. */
