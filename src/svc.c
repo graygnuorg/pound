@@ -165,7 +165,7 @@ thr_timer (void *arg)
       if (job != DLIST_FIRST (&job_head))
 	/* Job was removed or its time changed */
 	continue;
-      
+
       DLIST_SHIFT (&job_head, link);
 
       job->func (job->data, &job->ts);

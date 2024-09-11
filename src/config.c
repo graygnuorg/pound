@@ -6230,7 +6230,7 @@ backend_finalize (BACKEND *be, void *data)
 				     "Dynamic backend creation is not "
 				     "available: pound compiled without "
 				     "resolver support");
-				     
+
 #endif
 	}
     }

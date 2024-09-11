@@ -43,7 +43,7 @@ LISTENER_HEAD listeners = SLIST_HEAD_INITIALIZER (listeners);
 				/* all available listeners */
 int n_listeners;                /* Number of listeners */
 
-GENPAT HEADER, 	        /* Allowed header */
+GENPAT HEADER,		/* Allowed header */
   CONN_UPGRD,			/* upgrade in connection header */
   LOCATION;			/* the host we are redirected to */
 
@@ -1095,8 +1095,8 @@ main (const int argc, char **argv)
 
 	  if (listen (lstn->sock, 512))
 	    abend ("can't listen on %s: %s",
-                   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-                   strerror (errno));
+		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
+		   strerror (errno));
 	}
       n_listeners++;
     }

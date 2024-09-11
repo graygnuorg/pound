@@ -129,7 +129,7 @@ slurp_file (char const *filename)
   int fd;
   int pos;
   int err;
-  
+
   if (stat (filename, &st))
     return NULL;
 
@@ -138,7 +138,7 @@ slurp_file (char const *filename)
       errno = E2BIG;
       return NULL;
     }
-  
+
   if ((buf = calloc (1, st.st_size + 1)) == NULL)
     return NULL;
 
@@ -467,7 +467,7 @@ dns_lookup_internal (char const *name, int family, struct dns_response **presp)
   int rr_type;
   int err, rc;
   struct dns_response *resp;
-  
+
   switch (family)
     {
     case AF_INET:
@@ -501,7 +501,7 @@ dns_lookup_internal (char const *name, int family, struct dns_response **presp)
 		rr_type == adns_r_a ? "A" : "AAAA",
 		name,
 		adns_strerror (ans->status));
-      
+
       free (ans);
       return rc;
     }
@@ -529,7 +529,7 @@ dns_lookup_internal (char const *name, int family, struct dns_response **presp)
 		  resp->addr[i].s_in.sin_port = 0;
 		  resp->addr[i].s_in.sin_addr = ans->rrs.inaddr[i];
 		  break;
-		  
+
 		case AF_INET6:
 		  resp->addr[i].s_in6.sin6_family = AF_INET6;
 		  resp->addr[i].s_in6.sin6_port = 0;
@@ -549,7 +549,7 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
 {
   int rc;
   struct dns_response *r4 = NULL, *r6 = NULL;
-  
+
   switch (family)
     {
     case AF_INET:
@@ -609,7 +609,7 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
     }
   return rc;
 }
-    
+
 void
 dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 {
@@ -621,11 +621,11 @@ dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
     case AF_INET:
       ai->ai_addrlen = sizeof (struct sockaddr_in);
       break;
-      
+
     case AF_INET6:
       ai->ai_addrlen = sizeof (struct sockaddr_in6);
       break;
-      
+
     default:
       abort ();
     }
@@ -643,7 +643,7 @@ backend_matrix_init (BACKEND *be)
   int rc;
   struct dns_response *resp;
   struct timespec ts;
-  
+
   rc = dns_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp);
   switch (rc)
     {
@@ -656,17 +656,17 @@ backend_matrix_init (BACKEND *be)
     case dns_temp_failure:
       clock_gettime (CLOCK_REALTIME, &ts);
       ts.tv_sec += be->v.mtx.retry_interval
-	              ? be->v.mtx.retry_interval : conf.retry_interval;
+		      ? be->v.mtx.retry_interval : conf.retry_interval;
       ts.tv_nsec = 0;
       job_enqueue (&ts, job_resolver, be);
       break;
-      
+
     case dns_failure:
       //FIXME
       return 1;
     }
   return 0;
-}  
+}
 
 static void
 job_resolver (void *arg, const struct timespec *ts)
@@ -714,7 +714,7 @@ struct backend_table
   BACKEND_HASH *hash;
 };
 
-BACKEND_TABLE 
+BACKEND_TABLE
 backend_table_new (void)
 {
   BACKEND_TABLE bt = malloc (sizeof (*bt));
@@ -768,7 +768,7 @@ backend_mark (BACKEND *be, void *data)
 
 static void
 backend_sweep (BACKEND *be, void *data)
-{ 
+{
   BACKEND_TABLE tab = data;
   pthread_mutex_lock (&be->mut);
   if (be->mark)
@@ -806,10 +806,10 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 
   if (mtx->disabled)
     return;
-  
+
   /* Mark all generated backends. */
   backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
-  
+
   mark = 0;
   switch (mtx->v.mtx.resolve_mode)
     {
@@ -825,7 +825,7 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
       /* should not happen: bres_immediate handled elsewhere. */
       abort ();
     }
-  
+
   for (i = 0; i < n; i++)
     {
       BACKEND *be = backend_table_lookup (mtx->v.mtx.betab, &resp->addr[i]);
@@ -857,7 +857,7 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 	    }
 	  memcpy (p, ai.ai_addr, ai.ai_addrlen);
 	  ai.ai_addr = p;
-      	  backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
+	  backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
 	  be->service = mtx->service;
 	  be->locus = mtx->locus;
 	  be->locus_str = mtx->locus_str;
