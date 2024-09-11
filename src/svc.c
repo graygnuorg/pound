@@ -36,8 +36,27 @@ typedef struct job
 
 typedef DLIST_HEAD (,job) JOB_HEAD;
 static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
-static pthread_mutex_t job_mutex = PTHREAD_MUTEX_INITIALIZER;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
+
+static pthread_once_t job_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t _job_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+job_mutex_init (void)
+{
+  pthread_mutexattr_t attr;
+  pthread_mutexattr_init (&attr);
+  pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
+  pthread_mutex_init (&_job_mutex, &attr);
+  pthread_mutexattr_destroy (&attr);
+}
+
+static pthread_mutex_t *
+job_mutex (void)
+{
+  pthread_once (&job_key_once, job_mutex_init);
+  return &_job_mutex;
+}
 
 static JOB *
 job_alloc (struct timespec const *ts, JOB_FUNC func, void *data)
@@ -68,7 +87,7 @@ job_arm_unlocked (JOB *job)
     pthread_cond_broadcast (&job_cond);
 }
 
-void
+static void
 job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
 {
   job_arm_unlocked (job_alloc (ts, func, data));
@@ -77,9 +96,9 @@ job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
 void
 job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
 {
-  pthread_mutex_lock (&job_mutex);
+  pthread_mutex_lock (job_mutex ());
   job_enqueue_unlocked (ts, func, data);
-  pthread_mutex_unlock (&job_mutex);
+  pthread_mutex_unlock (job_mutex ());
 }
 
 static void
@@ -94,15 +113,15 @@ job_enqueue_after_unlocked (unsigned t, JOB_FUNC func, void *data)
 static void
 job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
 {
-  pthread_mutex_lock (&job_mutex);
+  pthread_mutex_lock (job_mutex ());
   job_enqueue_after_unlocked (t, func, data);
-  pthread_mutex_unlock (&job_mutex);
+  pthread_mutex_unlock (job_mutex ());
 }
 
 static void
 timer_cleanup (void *ptr)
 {
-  pthread_mutex_unlock (&job_mutex);
+  pthread_mutex_unlock (job_mutex ());
 }
 
 /*
@@ -117,7 +136,7 @@ thr_timer (void *arg)
   job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 #endif
 
-  pthread_mutex_lock (&job_mutex);
+  pthread_mutex_lock (job_mutex ());
   pthread_cleanup_push (timer_cleanup, NULL);
 
   for (;;)
@@ -127,13 +146,13 @@ thr_timer (void *arg)
 
       if (DLIST_EMPTY (&job_head))
 	{
-	  pthread_cond_wait (&job_cond, &job_mutex);
+	  pthread_cond_wait (&job_cond, job_mutex ());
 	  continue;
 	}
 
       job = DLIST_FIRST (&job_head);
 
-      rc = pthread_cond_timedwait (&job_cond, &job_mutex, &job->ts);
+      rc = pthread_cond_timedwait (&job_cond, job_mutex (), &job->ts);
       if (rc == 0)
 	continue;
       if (rc != ETIMEDOUT)
@@ -143,7 +162,7 @@ thr_timer (void *arg)
       if (job != DLIST_FIRST (&job_head))
 	/* Job was removed or its time changed */
 	continue;
-
+      
       DLIST_SHIFT (&job_head, link);
 
       job->func (job->data, &job->ts);
@@ -312,7 +331,7 @@ service_session_remove_by_key (SERVICE *svc, char const *key)
  *
  * The service mutex must be locked.
  */
-static void
+void
 service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 {
   SESSION_TABLE *tab = svc->sessions;
@@ -933,9 +952,9 @@ static void touch_be (void *data, const struct timespec *ts);
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
- *  disable_only == 1:  mark as disabled
- *  disable_only == 0:  mark as dead, remove sessions
- *  disable_only == -1:  mark as enabled
+ *  disable_only == BE_DISABLE:  mark as disabled
+ *  disable_only == BE_KILL:     mark as dead, remove sessions
+ *  disable_only == BE_ENABLE:   mark as enabled
  */
 void
 kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
@@ -998,6 +1017,24 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
   if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
     logmsg (LOG_WARNING, "kill_be() unlock: %s", strerror (ret_val));
   return;
+}
+
+static void
+backend_disable (SERVICE *svc, BACKEND *be, const int disable_mode)
+{
+  switch (be->be_type)
+    {
+    case BE_REGULAR:
+      kill_be (svc, be, disable_mode);
+      break;
+      
+    case BE_MATRIX:
+      backend_matrix_disable (be, disable_mode);
+      break;
+      
+    default:
+      break;
+    }
 }
 
 /*
@@ -2426,7 +2463,7 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   switch (obj->type)
     {
     case OBJ_BACKEND:
-      kill_be (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
+      backend_disable (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
       break;
 
     case OBJ_SERVICE:

@@ -29,6 +29,27 @@ resolver_set_config (struct resolver_config *newcfg)
   conf = *newcfg;
 }
 
+static struct dns_response *
+dns_response_alloc (enum dns_resp_type type, size_t count)
+{
+  struct dns_response *resp;
+
+  if ((resp = calloc (1, sizeof (*resp))) != NULL)
+    {
+      if ((resp->addr = calloc (count, sizeof (resp->addr[0]))) != NULL)
+	{
+	  resp->type = type;
+	  resp->count = count;
+	}
+      else
+	{
+	  free (resp);
+	  resp = NULL;
+	}
+    }
+  return resp;
+}
+
 void
 dns_response_free (struct dns_response *resp)
 {
@@ -100,6 +121,57 @@ dns_state_key_create (void)
   pthread_key_create (&dns_state_key, dns_state_free);
 }
 
+static char *
+slurp_file (char const *filename)
+{
+  struct stat st;
+  char *buf;
+  int fd;
+  int pos;
+  int err;
+  
+  if (stat (filename, &st))
+    return NULL;
+
+  if (st.st_size > ((size_t)~0))
+    {
+      errno = E2BIG;
+      return NULL;
+    }
+  
+  if ((buf = calloc (1, st.st_size + 1)) == NULL)
+    return NULL;
+
+  err = 0;
+  if ((fd = open (filename, O_RDONLY)) == -1)
+    {
+      err = errno;
+    }
+  else
+    {
+      for (pos = 0; pos < st.st_size; )
+	{
+	  int n = read (fd, buf + pos, st.st_size - pos);
+	  if (n == 0)
+	    break;
+	  if (n == -1)
+	    {
+	      err = errno;
+	      break;
+	    }
+	  pos += n;
+	}
+      close (fd);
+    }
+  if (err)
+    {
+      free (buf);
+      buf = NULL;
+      errno = err;
+    }
+  return buf;
+}
+
 static struct thread_dns_state *
 dns_state_create (void)
 {
@@ -112,14 +184,28 @@ dns_state_create (void)
   else
     {
       int rc;
+      char *conftext = NULL;
+
       if (conf.debug)
 	flags |= adns_if_debug;
-      rc = adns_init_logfn (&ds->state, flags, conf.config_file, dns_log_cb, NULL);
-      if (rc == 0)
-	stringbuf_init_log (&ds->sb);
-      else
+      stringbuf_init_log (&ds->sb);
+      if (conf.config_file)
+	{
+	  conftext = slurp_file (conf.config_file);
+	  if (conftext == NULL)
+	    {
+	      logmsg (LOG_ERR, "%s: %s",
+		      conf.config_file,
+		      (errno == E2BIG) ? "file too big" : strerror (errno));
+	    }
+	}
+      rc = adns_init_logfn (&ds->state, flags, conftext,
+			    dns_log_cb, &ds->sb);
+      free (conftext);
+      if (rc)
 	{
 	  logmsg (LOG_ERR, "can't initialize DNS state: %s", strerror (rc));
+	  stringbuf_free (&ds->sb);
 	  free (ds);
 	  ds = NULL;
 	}
@@ -137,6 +223,8 @@ dns_get_state (void)
   if (!state)
     {
       state = dns_state_create ();
+      if (!state)
+	exit (1);
       pthread_setspecific (dns_state_key, state);
     }
   return &state->state;
@@ -217,6 +305,26 @@ adns_to_dns_status (int e)
   return dns_not_found;
 }
 
+static int
+errno_to_dns_status (int e)
+{
+  switch (e)
+    {
+    case 0:
+      return dns_success;
+    case EAGAIN:
+#ifdef EINPROGRESS
+    case EINPROGRESS:
+#endif
+#ifdef ETIMEDOUT
+    case ETIMEDOUT:
+#endif
+      return dns_temp_failure;
+    default:
+      break;
+    }
+  return dns_failure;
+}
 
 typedef struct
 {
@@ -352,48 +460,54 @@ dns_query (const char *name, adns_rrtype type, adns_answer **ans_ret)
   return adns_to_dns_status (rc);
 }
 
-int
-dns_lookup (char const *name, int family, struct dns_response **presp)
+static int
+dns_lookup_internal (char const *name, int family, struct dns_response **presp)
 {
-  adns_answer *ans_a = NULL, *ans_aaaa = NULL;
-  int rc_a, rc;
-  size_t count;
+  adns_answer *ans = NULL;
+  int rr_type;
+  int err, rc;
   struct dns_response *resp;
-
-  if (family == PF_UNSPEC || family == PF_INET)
+  
+  switch (family)
     {
-      rc_a = dns_query (name, adns_r_a, &ans_a);
-      if (rc_a != dns_success && family == PF_INET)
-	return rc_a;
+    case AF_INET:
+      rr_type = adns_r_a;
+      break;
+
+    case AF_INET6:
+      rr_type = adns_r_aaaa;
+      break;
+
+    default:
+      abort (); // FIXME
     }
 
-  if (family == PF_UNSPEC || family == PF_INET6)
+  err = dns_query (name, rr_type, &ans);
+  if (err != 0)
     {
-      rc = dns_query (name, adns_r_aaaa, &ans_aaaa);
-      switch (rc)
-	{
-	case dns_success:
-	  break;
-
-	case dns_not_found:
-	  if (rc_a != dns_success)
-	    return dns_not_found;
-	  break;
-
-	case dns_temp_failure:
-	  if (rc_a != dns_success)
-	    return rc_a;
-
-	case dns_failure:
-	  if (rc_a != dns_success)
-	    return rc;
-	}
+      rc = errno_to_dns_status (err);
+      if (rc != dns_not_found)
+	logmsg (LOG_ERR, "Querying for %s records of %s: %s",
+		rr_type == adns_r_a ? "A" : "AAAA",
+		name,
+		strerror (err));
+      return rc;
     }
-
-  count = (ans_a ? ans_a->nrrs : 0) + (ans_aaaa ? ans_aaaa->nrrs : 0);
+  if (ans->status != adns_s_ok)
+    {
+      rc = adns_to_dns_status (ans->status);
+      if (rc != dns_not_found)
+	logmsg (LOG_ERR, "Querying for %s records of %s: %s",
+		rr_type == adns_r_a ? "A" : "AAAA",
+		name,
+		adns_strerror (ans->status));
+      
+      free (ans);
+      return rc;
+    }
 
   rc = dns_success;
-  resp = calloc (1, sizeof (*resp));
+  resp = dns_response_alloc (dns_resp_addr, ans->nrrs);
   if (!resp)
     {
       lognomem ();
@@ -401,59 +515,101 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
     }
   else
     {
-      resp->type = dns_resp_addr;
-      resp->count = 0;
-      if (count != 0)
+      if (ans->nrrs > 0)
 	{
-	  resp->addr = calloc (count, sizeof (resp->addr[0]));
-	  if (resp->addr == NULL)
+	  int i;
+
+	  resp->expires = ans->expires;
+	  for (i = 0; i < ans->nrrs; i++)
 	    {
-	      free (resp);
-	      resp = NULL;
-	      lognomem ();
-	      rc = dns_failure;
-	    }
-	  else
-	    {
-	      int i;
-
-	      if (ans_a)
+	      switch (family)
 		{
-		  resp->expires = ans_a->expires;
-		  for (i = 0; i < ans_a->nrrs; i++, resp->count++)
-		    {
-		      resp->addr[i].s_in.sin_family = AF_INET;
-		      resp->addr[i].s_in.sin_port = 0;
-		      resp->addr[i].s_in.sin_addr = ans_a->rrs.inaddr[i];
-		    }
-		}
-
-	      if (rc == dns_success && ans_aaaa)
-		{
-		  if (ans_aaaa->expires < resp->expires)
-		      resp->expires = ans_aaaa->expires;
-
-		  for (i = 0; i < ans_aaaa->nrrs; i++, resp->count++)
-		    {
-		      resp->addr[i].s_in6.sin6_family = AF_INET6;
-		      resp->addr[i].s_in6.sin6_port = 0;
-		      resp->addr[i].s_in6.sin6_addr = ans_aaaa->rrs.in6addr[i];
-		    }
-		}
-	      if (rc != dns_success)
-		{
-		  dns_response_free (resp);
-		  resp = NULL;
+		case AF_INET:
+		  resp->addr[i].s_in.sin_family = AF_INET;
+		  resp->addr[i].s_in.sin_port = 0;
+		  resp->addr[i].s_in.sin_addr = ans->rrs.inaddr[i];
+		  break;
+		  
+		case AF_INET6:
+		  resp->addr[i].s_in6.sin6_family = AF_INET6;
+		  resp->addr[i].s_in6.sin6_port = 0;
+		  resp->addr[i].s_in6.sin6_addr = ans->rrs.in6addr[i];
 		}
 	    }
 	}
     }
+
+  free (ans);
   *presp = resp;
-  free (ans_a);
-  free (ans_aaaa);
   return rc;
 }
 
+int
+dns_lookup (char const *name, int family, struct dns_response **presp)
+{
+  int rc;
+  struct dns_response *r4 = NULL, *r6 = NULL;
+  
+  switch (family)
+    {
+    case AF_INET:
+    case AF_INET6:
+      return dns_lookup_internal (name, family, presp);
+
+    case AF_UNSPEC:
+      break;
+
+    default:
+      abort();
+    }
+
+  rc = dns_lookup_internal (name, AF_INET, &r4);
+  switch (dns_lookup_internal (name, AF_INET6, &r6))
+    {
+    case dns_success:
+      rc = 0;
+      break;
+
+    case dns_not_found:
+      if (rc != dns_success)
+	return dns_not_found;
+      break;
+
+    case dns_temp_failure:
+      if (rc != dns_success)
+	return rc;
+
+    case dns_failure:
+      if (rc != dns_success)
+	return dns_failure;
+    }
+
+  if (r4 == NULL)
+    *presp = r6;
+  else if (r6 == NULL)
+    *presp = r4;
+  else
+    {
+      struct dns_response *resp = dns_response_alloc (dns_resp_addr,
+						      r4->count + r6->count);
+      if (resp)
+	{
+	  int i, j;
+	  resp->expires = r4->expires < r6->expires ? r4->expires : r6->expires;
+
+	  for (i = j = 0; j < r4->count; i++, j++)
+	    resp->addr[i] = r4->addr[j];
+	  for (j = 0; j < r6->count; i++, j++)
+	    resp->addr[i] = r6->addr[j];
+	}
+      *presp = resp;
+
+      dns_response_free (r4);
+      dns_response_free (r6);
+    }
+  return rc;
+}
+    
 void
 dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 {
@@ -478,12 +634,15 @@ dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 
 static void service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 					    struct dns_response *resp);
+static void job_resolver (void *arg, const struct timespec *ts);
 
-static int
-backend_matrix_resolve (BACKEND *be)
+/* Before calling, lock be->service! */
+int
+backend_matrix_init (BACKEND *be)
 {
   int rc;
   struct dns_response *resp;
+  struct timespec ts;
   
   rc = dns_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp);
   switch (rc)
@@ -495,6 +654,11 @@ backend_matrix_resolve (BACKEND *be)
 
     case dns_not_found:
     case dns_temp_failure:
+      clock_gettime (CLOCK_REALTIME, &ts);
+      ts.tv_sec += be->v.mtx.retry_interval
+	              ? be->v.mtx.retry_interval : conf.retry_interval;
+      ts.tv_nsec = 0;
+      job_enqueue (&ts, job_resolver, be);
       break;
       
     case dns_failure:
@@ -504,11 +668,11 @@ backend_matrix_resolve (BACKEND *be)
   return 0;
 }  
 
-void
+static void
 job_resolver (void *arg, const struct timespec *ts)
 {
   BACKEND *be = arg;
-  backend_matrix_resolve (be);
+  backend_matrix_init (be);
 }
 
 unsigned long
@@ -599,6 +763,7 @@ backend_mark (BACKEND *be, void *data)
 {
   pthread_mutex_lock (&be->mut);
   be->mark = *(int*)data;
+  service_session_remove_by_backend (be->service, be);
   pthread_mutex_unlock (&be->mut);
 }
 
@@ -613,8 +778,8 @@ backend_sweep (BACKEND *be, void *data)
       be->refcount--;
       if (be->refcount == 0)
 	{
-	  backend_schedule_removal (be);
 	  backend_table_delete (tab, be);
+	  backend_schedule_removal (be);
 	}
       be->mark = 0;
     }
@@ -629,6 +794,9 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
   int mark = 1;
   size_t n;
   struct timespec ts;
+
+  if (mtx->disabled)
+    return;
   
   /* Mark all generated backends. */
   backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
@@ -667,7 +835,7 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 	  if (!be)
 	    {
 	      lognomem ();
-	      continue; // FIXME
+	      break;
 	    }
 
 	  dns_addr_to_addrinfo (&resp->addr[i], &ai);
@@ -675,7 +843,8 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 	  if (!p)
 	    {
 	      lognomem ();
-	      continue; // FIXME
+	      free (be);
+	      break;
 	    }
 	  memcpy (p, ai.ai_addr, ai.ai_addrlen);
 	  ai.ai_addr = p;
@@ -701,11 +870,31 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
   /* Reschedule next update. */
   ts.tv_sec = resp->expires + 1;
   ts.tv_nsec = 0;
-  job_enqueue_unlocked (&ts, job_resolver, mtx);
+  job_enqueue (&ts, job_resolver, mtx);
 }
 
 void
-backend_matrix_init (BACKEND *be)
+backend_matrix_disable (BACKEND *be, int disable_mode)
 {
-  backend_matrix_resolve (be);
+  if (disable_mode == BE_ENABLE)
+    {
+      if (be->disabled)
+	{
+	  be->disabled = 0;
+	  pthread_mutex_lock (&be->service->mut);
+	  backend_matrix_init (be);
+	  pthread_mutex_unlock (&be->service->mut);
+	}
+    }
+  else
+    {
+      /* For matrix backends, BE_DISABLE and BE_KILL are the same. */
+      /* Mark all generated backends and remove associated sessions. */
+      int mark = 1;
+      backend_table_foreach (be->v.mtx.betab, backend_mark, &mark);
+      /* Unreference all backends. */
+      backend_table_foreach (be->v.mtx.betab, backend_sweep, be->v.mtx.betab);
+      /* Mark matrix as disabled. */
+      be->disabled = 1;
+    }
 }

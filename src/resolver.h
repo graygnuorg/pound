@@ -20,9 +20,10 @@ struct resolver_config
   char *config_file;
   int debug;
   unsigned max_cname_chain;
+  unsigned retry_interval;
 };
 
-#define RESOLVER_CONFIG_INITIALIZER { NULL, 0, 0 }
+#define RESOLVER_CONFIG_INITIALIZER { NULL, 0, 0, 600 }
 
 enum dns_status
   {

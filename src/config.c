@@ -1608,6 +1608,7 @@ static int
 assign_address_family (void *call_data, void *section_data)
 {
   static struct kwtab kwtab[] = {
+    { "any",  AF_UNSPEC },
     { "unix", AF_UNIX },
     { "inet", AF_INET },
     { "inet6", AF_INET6 },
@@ -1858,7 +1859,7 @@ parse_cidr (ACL *acl)
     }
 
   memset (&hints, 0, sizeof (hints));
-  hints.ai_family = PF_UNSPEC;
+  hints.ai_family = AF_UNSPEC;
   hints.ai_flags = AI_NUMERICHOST;
 
   if ((rc = getaddrinfo (tok->str, NULL, &hints, &res)) == 0)
@@ -2283,6 +2284,11 @@ static PARSER_TABLE backend_parsetab[] = {
     .name = "Resolve",
     .parser = assign_resolve_mode,
     .off = offsetof (BACKEND, v.mtx.resolve_mode)
+  },
+  {
+    .name = "RetryInterval",
+    .parser = assign_unsigned,
+    .off = offsetof (BACKEND, v.mtx.retry_interval)
   },
   {
     .name = "Priority",
@@ -5820,6 +5826,11 @@ static PARSER_TABLE resolver_parsetab[] = {
     .parser = assign_unsigned,
     .off = offsetof (struct resolver_config, max_cname_chain)
   },
+  {
+    .name = "RetryInterval",
+    .parser = assign_unsigned,
+    .off = offsetof (struct resolver_config, retry_interval)
+  },
   { NULL }
 };
 
@@ -6382,6 +6393,10 @@ parse_config_file (char const *file, int nosyslog)
 	{
 	  if (cur_input)
 	    return -1;
+
+#ifdef ENABLE_RESOLVER
+	  resolver_set_config (&pound_defaults.resolver);
+#endif
 	  if (foreach_backend (backend_finalize,
 			       &pound_defaults.named_backend_table))
 	    return -1;
@@ -6397,10 +6412,6 @@ parse_config_file (char const *file, int nosyslog)
 	    return -1;
 
 	  workdir_unref (include_wd);
-
-#ifdef ENABLE_RESOLVE
-	  resolve_set_config (&pound_defaults.resolve);
-#endif
 	}
     }
   named_backend_table_free (&pound_defaults.named_backend_table);

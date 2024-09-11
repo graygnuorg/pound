@@ -480,6 +480,7 @@ struct be_matrix
   int port;             /* Port number (network order). */
   int family;           /* Address family for resolving hostname. */
   int resolve_mode;     /* Mode for resolving hostname. */
+  unsigned retry_interval; /* Retry interval for failed queries. */
 
   unsigned to;		/* read/write time-out */
   unsigned conn_to;	/* connection time-out */
@@ -962,7 +963,8 @@ void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
 void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 				struct be_regular *reg);
-void backend_matrix_init (BACKEND *be);
+int backend_matrix_init (BACKEND *be);
+void backend_matrix_disable (BACKEND *be, int disable_mode);
 BACKEND_TABLE backend_table_new (void);
 void backend_schedule_removal (BACKEND *be);
 
@@ -992,10 +994,7 @@ void upd_session (SERVICE *, HTTP_HEADER_LIST *, BACKEND *);
  */
 void kill_be (SERVICE *, BACKEND *, const int);
 
-/*
- * Update the number of requests and time to answer for a given back-end
- */
-void upd_be (SERVICE * const svc, BACKEND * const be, const double);
+void service_session_remove_by_backend (SERVICE *svc, BACKEND *be);
 
 /*
  * Non-blocking version of connect(2). Does the same as connect(2) but
@@ -1220,4 +1219,3 @@ int is_combinable_header (struct http_header *hdr);
 
 typedef void (*JOB_FUNC) (void *, const struct timespec *);
 void job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
-void job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data);
