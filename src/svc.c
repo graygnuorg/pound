@@ -1031,11 +1031,13 @@ backend_disable (SERVICE *svc, BACKEND *be, const int disable_mode)
     case BE_REGULAR:
       kill_be (svc, be, disable_mode);
       break;
-      
+
+#if ENABLE_RESOLVER
     case BE_MATRIX:
       backend_matrix_disable (be, disable_mode);
       break;
-      
+#endif
+
     default:
       break;
     }
