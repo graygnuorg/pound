@@ -63,7 +63,10 @@ job_arm_unlocked (JOB *job)
 	break;
     }
 
-  DLIST_INSERT_BEFORE (&job_head, t, job, link);
+  if (t == NULL)
+    DLIST_INSERT_TAIL (&job_head, job, link);
+  else
+    DLIST_INSERT_BEFORE (&job_head, t, job, link);
 
   if (DLIST_PREV (job, link) == NULL)
     pthread_cond_broadcast (&job_cond);
