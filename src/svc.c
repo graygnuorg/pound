@@ -22,8 +22,10 @@
 #include "json.h"
 #include <assert.h>
 
+#if ! SET_DH_AUTO
 static void init_rsa (void);
 static void do_RSAgen (void *, const struct timespec *);
+#endif
 
 /* Periodic jobs */
 typedef struct job
@@ -648,7 +650,7 @@ hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
  * create one and associate it with a randomly selected backend.
  */
 static BACKEND *
-find_backend_by_key (SERVICE *svc, char const *key, int no_be)
+find_backend_by_key (SERVICE *svc, char const *key)
 {
   BACKEND *res;
   char keybuf[KEY_SIZE + 1];
@@ -660,18 +662,12 @@ find_backend_by_key (SERVICE *svc, char const *key, int no_be)
   keybuf[sizeof (keybuf) - 1] = 0;
 
   if (svc->sess_ttl == 0)
-    res = no_be ? svc->emergency
-		: hash_backend (&svc->backends, svc->abs_pri, keybuf);
+    res = hash_backend (&svc->backends, svc->abs_pri, keybuf);
   else if ((res = service_session_find (svc, keybuf)) == NULL)
     {
-      if (no_be)
-	res = svc->emergency;
-      else
-	{
-	  /* no session yet - create one */
-	  res = service_lb_select_backend (svc);
-	  service_session_add (svc, keybuf, res);
-	}
+      /* no session yet - create one */
+      res = service_lb_select_backend (svc);
+      service_session_add (svc, keybuf, res);
     }
 
   return res;
@@ -722,7 +718,7 @@ find_key_by_header (HTTP_HEADER_LIST *headers, char const *hname,
  * for details.
  */
 static BACKEND *
-find_backend_by_header (SERVICE *svc, int no_be,
+find_backend_by_header (SERVICE *svc,
 			struct http_request *req, char const *hname,
 			int (*keyfun) (char const *, char const *, char *),
 			char const *id)
@@ -731,7 +727,7 @@ find_backend_by_header (SERVICE *svc, int no_be,
 
   if (find_key_by_header (&req->headers, hname, keyfun, id, key) == 0)
     {
-      return find_backend_by_key (svc, key, no_be);
+      return find_backend_by_key (svc, key);
     }
 
   return NULL;
@@ -854,57 +850,58 @@ get_backend (POUND_HTTP *phttp)
   BACKEND *res = NULL;
   char keybuf[KEY_SIZE + 1];
   char const *key;
-  int no_be;
 
   pthread_mutex_lock (&svc->mut);
 
-  no_be = (svc->tot_pri <= 0);
-
-  switch (svc->sess_type)
+  if (svc->tot_pri > 0)
     {
-    case SESS_NONE:
-      /* choose one back-end randomly */
-      res = no_be ? svc->emergency : service_lb_select_backend (svc);
-      break;
-
-    case SESS_COOKIE:
-      res = find_backend_by_header (svc, no_be, &phttp->request,
-				    "Cookie", key_cookie, svc->sess_id);
-      break;
-
-    case SESS_IP:
-      addr2str (keybuf, sizeof (keybuf), &phttp->from_host, 1);
-      res = find_backend_by_key (svc, keybuf, no_be);
-      break;
-
-    case SESS_URL:
-      if (http_request_get_query_param_value (&phttp->request, svc->sess_id, &key) == RETRIEVE_OK)
-	res = find_backend_by_key (svc, key, no_be);
-      break;
-
-    case SESS_PARM:
-      if (http_request_get_path (&phttp->request, &key) == 0)
+      switch (svc->sess_type)
 	{
-	  char *p = strrchr (key, ';');
-	  if (p)
-	    res = find_backend_by_key (svc, p + 1, no_be);
+	case SESS_NONE:
+	  /* choose one back-end randomly */
+	  break;
+
+	case SESS_COOKIE:
+	  res = find_backend_by_header (svc, &phttp->request,
+					"Cookie", key_cookie, svc->sess_id);
+	  break;
+
+	case SESS_IP:
+	  addr2str (keybuf, sizeof (keybuf), &phttp->from_host, 1);
+	  res = find_backend_by_key (svc, keybuf);
+	  break;
+
+	case SESS_URL:
+	  if (http_request_get_query_param_value (&phttp->request,
+						  svc->sess_id, &key) == RETRIEVE_OK)
+	    res = find_backend_by_key (svc, key);
+	  break;
+
+	case SESS_PARM:
+	  if (http_request_get_path (&phttp->request, &key) == 0)
+	    {
+	      char *p = strrchr (key, ';');
+	      if (p)
+		res = find_backend_by_key (svc, p + 1);
+	    }
+	  break;
+
+	case SESS_HEADER:
+	  res = find_backend_by_header (svc, &phttp->request,
+					svc->sess_id, NULL, NULL);
+	  break;
+
+	case SESS_BASIC:
+	  res = find_backend_by_header (svc, &phttp->request,
+					"Authorization", key_authbasic, NULL);
 	}
-      break;
 
-    case SESS_HEADER:
-      res = find_backend_by_header (svc, no_be, &phttp->request,
-				    svc->sess_id, NULL, NULL);
-      break;
-
-    case SESS_BASIC:
-      res = find_backend_by_header (svc, no_be, &phttp->request,
-				    "Authorization", key_authbasic, NULL);
+      if (!res)
+	res = service_lb_select_backend (svc);
     }
-
+  
   if (!res)
-    {
-      res = no_be ? svc->emergency : service_lb_select_backend (svc);
-    }
+    res = svc->emergency;
 
   backend_ref (res);
   pthread_mutex_unlock (&svc->mut);
