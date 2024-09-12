@@ -8,6 +8,25 @@ on:
       - "*"
   pull_request:
 
+x-check:
+  &run-check
+  run: |
+          if ! make check; then
+            for dir in tests/testsuite.dir/*
+            do
+              echo "Test $(basename $dir)"
+              for file in testsuite.log xscript.log pound.log pound.cfi pound.cfg input
+              do
+                if test -f $dir/$file; then
+                  echo "File $file"
+                  echo "File $file"|sed -e 's/./=/g'
+                  cat $dir/$file
+                fi
+              done
+            done
+            false
+          fi
+
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -38,19 +57,35 @@ jobs:
         run: make
 
       - name: Check
+        <<: *run-check
+
+  linux-dynamic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    strategy:
+      fail-fast: false
+
+    steps:
+      - name: Dump GitHub context
+        env:
+          GITHUB_CONTEXT: ${{ toJson(github) }}
+        run: echo "$GITHUB_CONTEXT"
+      - uses: actions/checkout@v3
+
+      - name: Install System dependencies
         run: |
-          if ! make check; then
-            for dir in tests/testsuite.dir/*
-            do
-              echo "Test $(basename $dir)"
-              for file in testsuite.log xscript.log pound.log pound.cfi pound.cfg input
-              do
-                if test -f $dir/$file; then
-                  echo "File $file"
-                  echo "File $file"|sed -e 's/./=/g'
-                  cat $dir/$file
-                fi
-              done
-            done
-            false
-          fi
+          sudo apt-get update
+          sudo apt-get install -y libssl-dev libio-fdpass-perl libio-socket-ssl-perl libnet-ssleay-perl libadns1-dev
+
+      - name: Bootstrap
+        run: ./bootstrap
+
+      - name: Configure
+        run: ./configure
+
+      - name: Build
+        run: make
+
+      - name: Check
+        <<: *run-check
