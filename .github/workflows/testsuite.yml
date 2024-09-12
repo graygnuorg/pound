@@ -8,25 +8,6 @@ on:
       - "*"
   pull_request:
 
-x-check:
-  &run-check
-  run: |
-          if ! make check; then
-            for dir in tests/testsuite.dir/*
-            do
-              echo "Test $(basename $dir)"
-              for file in testsuite.log xscript.log pound.log pound.cfi pound.cfg input
-              do
-                if test -f $dir/$file; then
-                  echo "File $file"
-                  echo "File $file"|sed -e 's/./=/g'
-                  cat $dir/$file
-                fi
-              done
-            done
-            false
-          fi
-
 jobs:
   linux:
     runs-on: ubuntu-latest
@@ -57,7 +38,22 @@ jobs:
         run: make
 
       - name: Check
-        <<: *run-check
+        run: |
+          if ! make check; then
+            for dir in tests/testsuite.dir/*
+            do
+              echo "Test $(basename $dir)"
+              for file in testsuite.log xscript.log pound.log pound.cfi pound.cfg input
+              do
+                if test -f $dir/$file; then
+                  echo "File $file"
+                  echo "File $file"|sed -e 's/./=/g'
+                  cat $dir/$file
+                fi
+              done
+            done
+            false
+          fi
 
   linux-dynamic:
     runs-on: ubuntu-latest
@@ -88,4 +84,20 @@ jobs:
         run: make
 
       - name: Check
-        <<: *run-check
+        run: |
+          if ! make check; then
+            for dir in tests/testsuite.dir/*
+            do
+              echo "Test $(basename $dir)"
+              for file in testsuite.log xscript.log pound.log pound.cfi pound.cfg input
+              do
+                if test -f $dir/$file; then
+                  echo "File $file"
+                  echo "File $file"|sed -e 's/./=/g'
+                  cat $dir/$file
+                fi
+              done
+            done
+            false
+          fi
+
