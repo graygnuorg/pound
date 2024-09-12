@@ -588,42 +588,6 @@ service_lb_init (SERVICE *svc)
 }
 
 /*
- * return a back-end based on a fixed hash value
- * this is used for session_ttl < 0
- *
- * WARNING: the function may return different back-ends
- * if the target back-end is disabled or not alive
- */
-static BACKEND *
-hash_backend (BACKEND_HEAD *head, int abs_pri, char *key)
-{
-  unsigned long hv;
-  BACKEND *res, *tb;
-  int pri;
-
-  hv = 2166136261;
-  while (*key)
-    hv = ((hv ^ *key++) * 16777619) & 0xFFFFFFFF;
-  pri = hv % abs_pri;
-  SLIST_FOREACH (tb, head, next)
-    if ((pri -= tb->priority) < 0)
-      break;
-  if (!tb)
-    /* should NEVER happen */
-    return NULL;
-  for (res = tb; !backend_is_alive (res) || res->disabled;)
-    {
-      res = SLIST_NEXT (res, next);
-      if (res == NULL)
-	res = SLIST_FIRST (head);
-      if (res == tb)
-	/* NO back-end available */
-	return NULL;
-    }
-  return res;
-}
-
-/*
  * Find backend by session key.  If no session with the given key is found,
  * create one and associate it with a randomly selected backend.
  */
@@ -639,9 +603,7 @@ find_backend_by_key (SERVICE *svc, char const *key)
   strncpy (keybuf, key, sizeof (keybuf) - 1);
   keybuf[sizeof (keybuf) - 1] = 0;
 
-  if (svc->sess_ttl == 0)
-    res = hash_backend (&svc->backends, svc->abs_pri, keybuf);
-  else if ((res = service_session_find (svc, keybuf)) == NULL)
+  if ((res = service_session_find (svc, keybuf)) == NULL)
     {
       /* no session yet - create one */
       res = service_lb_select_backend (svc);
@@ -1826,7 +1788,6 @@ service_serialize (SERVICE *svc)
 			   svc->name ? json_new_string (svc->name) : json_new_null ())
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
-	  || json_object_set (obj, "abs_pri", json_new_integer (svc->abs_pri))
 	  || json_object_set (obj, "max_pri", json_new_integer (svc->max_pri))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))

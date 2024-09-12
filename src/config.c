@@ -4052,7 +4052,6 @@ parse_service (void *call_data, void *section_data)
 		  if (svc->max_pri < be->priority)
 		    svc->max_pri = be->priority;
 		}
-	      svc->abs_pri += be->priority;
 	    }
 
 	  if (n > 1)
@@ -4144,7 +4143,6 @@ parse_acme (void *call_data, void *section_data)
   svc->locus = format_locus_str (&range);
 
   svc->tot_pri = 1;
-  svc->abs_pri = 1;
   svc->max_pri = 1;
 
   /* Create ACME backend */
@@ -5590,7 +5588,6 @@ parse_control (void *call_data, void *section_data)
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
   svc->tot_pri = 1;
-  svc->abs_pri = 1;
   svc->max_pri = 1;
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
