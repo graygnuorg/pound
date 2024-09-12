@@ -693,14 +693,6 @@ gen_service_pri (EXPOSITION *exp, struct metric *metric,
     return -1;
   samp->number = jv->v.n;
 
-  if (json_object_get_type (obj, "abs_pri", json_integer, &jv))
-    return -1;
-  if ((samp = metric_add_sample (metric, pfx)) == NULL)
-    return -1;
-  if (metric_labels_add (&samp->labels, "entity", "absolute"))
-    return -1;
-  samp->number = jv->v.n;
-
   return 0;
 }
 

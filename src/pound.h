@@ -743,7 +743,6 @@ typedef struct _service
   REWRITE_RULE_HEAD rewrite[2];
   BACKEND_HEAD backends;
   BACKEND *emergency;
-  int abs_pri;			/* abs total priority for all back-ends */
   int tot_pri;			/* total priority for current back-ends */
   int max_pri;                  /* maximum priority */
   BALANCER balancer;

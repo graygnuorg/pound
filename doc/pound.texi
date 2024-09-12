@@ -4763,9 +4763,6 @@ Boolean.  Whether this service is enabled or not.
 @item tot_pri
 Sum of priority values of active backends in this service.
 
-@item abs_pri
-Sum of priority values of all defined backends in this service.
-
 @item session_type
 Name of the session handling algorithm for this service.  One of:
 @samp{IP}, @samp{BASIC}, @samp{URL}, @samp{PARM}, @samp{COOKIE},
