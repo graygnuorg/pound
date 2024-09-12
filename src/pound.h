@@ -994,6 +994,12 @@ void upd_session (SERVICE *, HTTP_HEADER_LIST *, BACKEND *);
 void kill_be (SERVICE *, BACKEND *, const int);
 
 void service_session_remove_by_backend (SERVICE *svc, BACKEND *be);
+void service_recompute_pri (SERVICE *svc,
+			    void (*cb) (BACKEND *, void *),
+			    void *data);
+void service_recompute_pri_unlocked (SERVICE *svc,
+				     void (*cb) (BACKEND *, void *),
+				     void *data);
 
 /*
  * Non-blocking version of connect(2). Does the same as connect(2) but

@@ -6220,13 +6220,24 @@ backend_finalize (BACKEND *be, void *data)
       else
 	{
 #ifdef ENABLE_DYNAMIC_BACKENDS
-	  be->v.mtx.betab = backend_table_new ();
-	  backend_matrix_init (be);
+	  if (feature_is_set (FEATURE_DNS))
+	    {
+	      be->v.mtx.betab = backend_table_new ();
+	      backend_matrix_init (be);
+	    }
+	  else
+	    {
+	      conf_error_at_locus_range (&be->locus,
+					 "Dynamic backend creation is not "
+					 "available: disabled by -Wno-dns");
+	      return 1;
+	    }
 #else
 	  conf_error_at_locus_range (&be->locus,
 				     "Dynamic backend creation is not "
 				     "available: pound compiled without "
 				     "support for dynamic backends");
+	  return 1;
 
 #endif
 	}

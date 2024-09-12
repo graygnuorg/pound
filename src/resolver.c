@@ -636,16 +636,14 @@ static void service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
 					    struct dns_response *resp);
 static void job_resolver (void *arg, const struct timespec *ts);
 
-/* Before calling, lock be->service! */
 int
 backend_matrix_init (BACKEND *be)
 {
-  int rc;
+  int rc = 0;
   struct dns_response *resp;
   struct timespec ts;
 
-  rc = dns_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp);
-  switch (rc)
+  switch (dns_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp))
     {
     case dns_success:
       service_matrix_update_backends (be->service, be, resp);
@@ -663,9 +661,9 @@ backend_matrix_init (BACKEND *be)
 
     case dns_failure:
       //FIXME
-      return 1;
+      rc = 1;
     }
-  return 0;
+  return rc;
 }
 
 static void
@@ -804,82 +802,88 @@ service_matrix_update_backends (SERVICE *svc, BACKEND *mtx,
   size_t n;
   struct timespec ts;
 
-  if (mtx->disabled)
-    return;
-
-  /* Mark all generated backends. */
-  backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
-
-  mark = 0;
-  switch (mtx->v.mtx.resolve_mode)
+  pthread_mutex_lock (&svc->mut);
+  pthread_mutex_lock (&mtx->mut);
+  if (!mtx->disabled)
     {
-    case bres_first:
-      n = resp->count > 0 ? 1 : 0;
-      break;
+      /* Mark all generated backends. */
+      backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
 
-    case bres_all:
-      n = resp->count;
-      break;
-
-    default:
-      /* should not happen: bres_immediate handled elsewhere. */
-      abort ();
-    }
-
-  for (i = 0; i < n; i++)
-    {
-      BACKEND *be = backend_table_lookup (mtx->v.mtx.betab, &resp->addr[i]);
-      if (be)
+      mark = 0;
+      switch (mtx->v.mtx.resolve_mode)
 	{
-	  /* Backend didn't change.  Clear mark. */
-	  backend_mark (be, &mark);
+	case bres_first:
+	  n = resp->count > 0 ? 1 : 0;
+	  break;
+
+	case bres_all:
+	  n = resp->count;
+	  break;
+
+	default:
+	  /* should not happen: bres_immediate handled elsewhere. */
+	  abort ();
 	}
-      else
+
+      for (i = 0; i < n; i++)
 	{
-	  struct addrinfo ai;
-	  void *p;
-
-	  /* Generate new backend. */
-	  be = calloc (1, sizeof (*be));
-	  if (!be)
+	  BACKEND *be = backend_table_lookup (mtx->v.mtx.betab, &resp->addr[i]);
+	  if (be)
 	    {
-	      lognomem ();
-	      break;
+	      /* Backend didn't change.  Clear mark. */
+	      backend_mark (be, &mark);
 	    }
-
-	  dns_addr_to_addrinfo (&resp->addr[i], &ai);
-	  p = malloc (ai.ai_addrlen);
-	  if (!p)
+	  else
 	    {
-	      lognomem ();
-	      free (be);
-	      break;
-	    }
-	  memcpy (p, ai.ai_addr, ai.ai_addrlen);
-	  ai.ai_addr = p;
-	  backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
-	  be->service = mtx->service;
-	  be->locus = mtx->locus;
-	  be->locus_str = mtx->locus_str;
-	  be->be_type = BE_REGULAR;
-	  be->priority = mtx->priority;
-	  be->disabled = mtx->disabled;
-	  pthread_mutex_init (&be->mut, NULL);
-	  be->refcount = 1;
+	      struct addrinfo ai;
+	      void *p;
 
-	  /* Add it to the list of service backends and to the hash table. */
-	  DLIST_PUSH (&svc->backends, be, link);
-	  backend_table_insert (mtx->v.mtx.betab, be);
+	      /* Generate new backend. */
+	      be = calloc (1, sizeof (*be));
+	      if (!be)
+		{
+		  lognomem ();
+		  break;
+		}
+
+	      dns_addr_to_addrinfo (&resp->addr[i], &ai);
+	      p = malloc (ai.ai_addrlen);
+	      if (!p)
+		{
+		  lognomem ();
+		  free (be);
+		  break;
+		}
+	      memcpy (p, ai.ai_addr, ai.ai_addrlen);
+	      ai.ai_addr = p;
+	      backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
+	      be->service = mtx->service;
+	      be->locus = mtx->locus;
+	      be->locus_str = mtx->locus_str;
+	      be->be_type = BE_REGULAR;
+	      be->priority = mtx->priority;
+	      be->disabled = mtx->disabled;
+	      pthread_mutex_init (&be->mut, NULL);
+	      be->refcount = 1;
+	      
+	      /* Add it to the list of service backends and to the hash
+		 table. */
+	      DLIST_PUSH (&svc->backends, be, link);
+	      backend_table_insert (mtx->v.mtx.betab, be);
+	    }
 	}
+
+      /* Remove all unreferenced backends. */
+      backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
+      service_recompute_pri_unlocked (svc, NULL, NULL);
+      
+      /* Reschedule next update. */
+      ts.tv_sec = resp->expires;
+      ts.tv_nsec = 0;
+      job_enqueue (&ts, job_resolver, mtx);
     }
-
-  /* Remove all unreferenced backends. */
-  backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
-
-  /* Reschedule next update. */
-  ts.tv_sec = resp->expires;
-  ts.tv_nsec = 0;
-  job_enqueue (&ts, job_resolver, mtx);
+  pthread_mutex_unlock (&mtx->mut);
+  pthread_mutex_unlock (&svc->mut);
 }
 
 void
@@ -890,9 +894,7 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
       if (be->disabled)
 	{
 	  be->disabled = 0;
-	  pthread_mutex_lock (&be->service->mut);
 	  backend_matrix_init (be);
-	  pthread_mutex_unlock (&be->service->mut);
 	}
     }
   else
@@ -905,5 +907,6 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
       backend_table_foreach (be->v.mtx.betab, backend_sweep, be->v.mtx.betab);
       /* Mark matrix as disabled. */
       be->disabled = 1;
+      service_recompute_pri_unlocked (be->service, NULL, NULL);
     }
 }

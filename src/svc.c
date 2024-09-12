@@ -768,6 +768,7 @@ thr_backend_remover (void *arg)
   pthread_mutex_lock (&svc->mut);
   service_session_remove_by_backend (be->service, be);
   DLIST_REMOVE (&be->service->backends, be, link);
+  pthread_mutex_destroy (&be->mut);
   free (be->v.reg.addr.ai_addr);
   free (be);
   pthread_mutex_unlock (&svc->mut);
@@ -781,7 +782,6 @@ backend_schedule_removal (BACKEND *be)
   pthread_attr_t attr;
   pthread_t tid;
 
-  be->disabled = 1;
   pthread_attr_init (&attr);
   pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
   pthread_create (&tid, &attr, thr_backend_remover, be);
@@ -910,8 +910,98 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
     }
   pthread_mutex_unlock (&svc->mut);
 }
+
+void
+service_recompute_pri_unlocked (SERVICE *svc, void (*cb) (BACKEND *, void *),
+				void *data)
+{
+  BACKEND *b;
+  
+  svc->tot_pri = 0;
+  svc->max_pri = 0;
+  DLIST_FOREACH (b, &svc->backends, link)
+    {
+      if (cb)
+	cb (b, data);
+      if (backend_is_alive (b) && !b->disabled)
+	{
+	  svc->tot_pri += b->priority;
+	  if (svc->max_pri < b->priority)
+	    svc->max_pri = b->priority;
+	}
+    }
+}
+
+void
+service_recompute_pri (SERVICE *svc, void (*cb) (BACKEND *, void *),
+		       void *data)
+{
+  pthread_mutex_lock (&svc->mut);
+  service_recompute_pri_unlocked (svc, cb, data);
+  pthread_mutex_unlock (&svc->mut);
+}  
+
+struct disable_closure
+{
+  BACKEND *be;
+  int disable_mode;
+};
 
 static void touch_be (void *data, const struct timespec *ts);
+
+/*
+ * NOTE:
+ * Changing the disabled state of a backend cannot be done separately from
+ * the service where that backend is hosted, because service priorities
+ * depend on it.  Updating priorities after state change would create a
+ * race condition.  Therefore, state change is done as part of priority
+ * recalculation, while service mutex is being locked.  It is thus guaranteed
+ * that the disabled field of any backend is safe to be accessed for
+ * reading while the hosting service of that backend is locked.
+ *
+ * The convention of using service mutex for locking access to the
+ * disabled field of a backend (instead of that of the backend itself) is
+ * used throughout the code.  In particular, it is used in backend
+ * serialization code below as well as in matrix backend manuipulations
+ * (see resolver.c).
+ */
+static void
+cb_backend_disable (BACKEND *b, void *data)
+{
+  struct disable_closure *c = data;
+  char buf[MAXBUF];
+  
+  if (b == c->be)
+    {
+      switch (c->disable_mode)
+	{
+	case BE_DISABLE:
+	  b->disabled = 1;
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
+		  POUND_TID (),
+		  buf);
+	  break;
+
+	case BE_KILL:
+	  b->v.reg.alive = 0;
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
+		  POUND_TID (), buf);
+	  service_session_remove_by_backend (b->service, b);
+	  job_enqueue_after (alive_to, touch_be, b);
+	  break;
+
+	case BE_ENABLE:
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
+		  POUND_TID (),
+		  buf);
+	  b->disabled = 0;
+	  break;
+	}
+    }
+}  
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
@@ -922,64 +1012,13 @@ static void touch_be (void *data, const struct timespec *ts);
 void
 kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 {
-  BACKEND *b;
-  int ret_val;
-  char buf[MAXBUF];
-
-  /* This function operates on regular backends only. */
-  if (be->be_type != BE_REGULAR)
-    return;
-
-  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
-  svc->tot_pri = 0;
-  svc->max_pri = 0;
-  DLIST_FOREACH (b, &svc->backends, link)
+  if (be->be_type == BE_REGULAR)
     {
-      if (b == be)
-	{
-	  switch (disable_mode)
-	    {
-	    case BE_DISABLE:
-	      b->disabled = 1;
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
-		      POUND_TID (),
-		      buf);
-	      break;
-
-	    case BE_KILL:
-	      b->v.reg.alive = 0;
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
-		      POUND_TID (), buf);
-	      service_session_remove_by_backend (svc, be);
-	      job_enqueue_after (alive_to, touch_be, be);
-	      break;
-
-	    case BE_ENABLE:
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
-		      POUND_TID (),
-		      buf);
-	      b->disabled = 0;
-	      break;
-
-	    default:
-	      logmsg (LOG_WARNING, "kill_be(): unknown mode %d", disable_mode);
-	      break;
-	    }
-	}
-      if (backend_is_alive (b) && !b->disabled)
-	{
-	  svc->tot_pri += b->priority;
-	  if (svc->max_pri < be->priority)
-	    svc->max_pri = be->priority;
-	}
+      struct disable_closure clos;
+      clos.be = be;
+      clos.disable_mode = disable_mode;
+      service_recompute_pri (svc, cb_backend_disable, &clos);
     }
-  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "kill_be() unlock: %s", strerror (ret_val));
-  return;
 }
 
 static void
@@ -2345,7 +2384,14 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   switch (obj->type)
     {
     case OBJ_BACKEND:
+      /*
+       * backend_serialize needs to access the backend disabled field.
+       * To do it safely, the holdiing service must be locked.  See the
+       * NOTE to cb_backend_disable, above.
+       */
+      pthread_mutex_lock (&obj->be->service->mut);
       val = backend_serialize (obj->be);
+      pthread_mutex_unlock (&obj->be->service->mut);
       break;
 
     case OBJ_SERVICE:
