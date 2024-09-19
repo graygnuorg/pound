@@ -24,7 +24,7 @@
 
 #if ! SET_DH_AUTO
 static void init_rsa (void);
-static void do_RSAgen (void *, const struct timespec *);
+static void do_RSAgen (enum job_ctl, void *, const struct timespec *);
 #endif
 
 /* Periodic jobs */
