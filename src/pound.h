@@ -430,6 +430,17 @@ typedef SLIST_HEAD (,acl) ACL_HEAD;
 
 int acl_match (ACL *acl, struct sockaddr *sa);
 
+enum job_ctl
+  {
+    job_ctl_run,
+    job_ctl_cancel
+  };
+typedef void (*JOB_FUNC) (enum job_ctl, void *, const struct timespec *);
+typedef unsigned long JOB_ID;
+
+JOB_ID job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+void job_cancel (JOB_ID id);
+
 /* matcher chain */
 typedef struct _matcher
 {
@@ -469,7 +480,8 @@ enum backend_resolve_mode
   {
     bres_immediate,
     bres_first,
-    bres_all
+    bres_all,
+    bres_srv
   };
 
 typedef struct backend_table *BACKEND_TABLE;
@@ -489,6 +501,7 @@ struct be_matrix
   char *servername;     /* SNI */
   BACKEND_TABLE betab;  /* Table of regular backends generated from this
 			   matrix. */
+  JOB_ID jid;
 };
 
 struct be_regular
@@ -965,6 +978,7 @@ void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 int backend_matrix_init (BACKEND *be);
 void backend_matrix_disable (BACKEND *be, int disable_mode);
 BACKEND_TABLE backend_table_new (void);
+void backend_table_free (BACKEND_TABLE bt);
 void backend_schedule_removal (BACKEND *be);
 
 /* Search for a host name, return the addrinfo for it */
@@ -1221,6 +1235,4 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
-
-typedef void (*JOB_FUNC) (void *, const struct timespec *);
-void job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+

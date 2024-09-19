@@ -2246,6 +2246,7 @@ assign_resolve_mode (void *call_data, void *section_data)
     { "immediate", bres_immediate },
     { "first", bres_first },
     { "all", bres_all },
+    { "srv", bres_srv },
     { NULL }
   };
   int res = assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,

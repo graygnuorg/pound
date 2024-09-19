@@ -30,6 +30,7 @@ static void do_RSAgen (void *, const struct timespec *);
 /* Periodic jobs */
 typedef struct job
 {
+  JOB_ID id;
   struct timespec ts;
   JOB_FUNC func;
   void *data;
@@ -37,7 +38,18 @@ typedef struct job
 } JOB;
 
 typedef DLIST_HEAD (,job) JOB_HEAD;
+
+typedef struct jobcancel
+{
+  JOB_ID id;
+  DLIST_ENTRY (jobcancel) link;
+} JOBCNCL;
+
+typedef DLIST_HEAD (,jobcancel) JOBCNCL_HEAD;
+
 static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
+static JOBCNCL_HEAD jobcncl_head = SLIST_HEAD_INITIALIZER (jobcncl_head);
+static JOB_ID job_next_id;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
 
 static pthread_once_t job_key_once = PTHREAD_ONCE_INIT;
@@ -72,11 +84,14 @@ job_alloc (struct timespec const *ts, JOB_FUNC func, void *data)
   return job;
 }
 
-static void
+static JOB_ID
 job_arm_unlocked (JOB *job)
 {
   JOB *t;
-
+  JOB_ID jid = job_next_id++;
+  
+  job->id = jid;
+  
   DLIST_FOREACH (t, &job_head, link)
     {
       if (timespec_cmp (&job->ts, &t->ts) < 0)
@@ -90,36 +105,73 @@ job_arm_unlocked (JOB *job)
 
   if (DLIST_PREV (job, link) == NULL)
     pthread_cond_broadcast (&job_cond);
+
+  return jid;
 }
 
-static void
+static JOB_ID
 job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
 {
-  job_arm_unlocked (job_alloc (ts, func, data));
+  return job_arm_unlocked (job_alloc (ts, func, data));
 }
 
-void
+JOB_ID
 job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
 {
+  JOB_ID jid;
+  
   pthread_mutex_lock (job_mutex ());
-  job_enqueue_unlocked (ts, func, data);
+  jid = job_enqueue_unlocked (ts, func, data);
   pthread_mutex_unlock (job_mutex ());
+  return jid;
 }
 
-static void
+static JOB_ID
 job_enqueue_after_unlocked (unsigned t, JOB_FUNC func, void *data)
 {
   struct timespec ts;
   clock_gettime (CLOCK_REALTIME, &ts);
   ts.tv_sec += t;
-  job_enqueue_unlocked (&ts, func, data);
+  return job_enqueue_unlocked (&ts, func, data);
+}
+
+static JOB_ID
+job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
+{
+  JOB_ID jid;
+  pthread_mutex_lock (job_mutex ());
+  jid = job_enqueue_after_unlocked (t, func, data);
+  pthread_mutex_unlock (job_mutex ());
+  return jid;
 }
 
 static void
-job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
+job_remove (JOB_ID jid)
 {
+  JOB *job, *tmp;
+  DLIST_FOREACH_SAFE (job, tmp, &job_head, link)
+    {
+      if (job->id == jid)
+	{
+	  struct timespec ts;
+	  clock_gettime (CLOCK_REALTIME, &ts);
+	  job->func (job_ctl_cancel, job->data, &ts);
+	  DLIST_REMOVE (&job_head, job, link);
+	  free (job);
+	  break;
+	}
+    }
+}
+
+void
+job_cancel (JOB_ID id)
+{
+  JOBCNCL *jc;
+  XZALLOC (jc);
+  jc->id = id;
   pthread_mutex_lock (job_mutex ());
-  job_enqueue_after_unlocked (t, func, data);
+  DLIST_PUSH (&jobcncl_head, jc, link);
+  pthread_cond_broadcast (&job_cond);
   pthread_mutex_unlock (job_mutex ());
 }
 
@@ -149,6 +201,14 @@ thr_timer (void *arg)
       int rc;
       JOB *job;
 
+      while (!DLIST_EMPTY (&jobcncl_head))
+	{
+	  JOBCNCL *jc = DLIST_FIRST (&jobcncl_head);
+	  job_remove (jc->id);
+	  DLIST_SHIFT (&jobcncl_head, link);
+	  free (jc);
+	}
+      
       if (DLIST_EMPTY (&job_head))
 	{
 	  pthread_cond_wait (&job_cond, job_mutex ());
@@ -159,19 +219,23 @@ thr_timer (void *arg)
 
       rc = pthread_cond_timedwait (&job_cond, job_mutex (), &job->ts);
       if (rc == 0)
-	continue;
-      if (rc != ETIMEDOUT)
+	{
+	  continue;
+	}
+      else if (rc == ETIMEDOUT)
+	{
+	  if (job != DLIST_FIRST (&job_head))
+	    /* Job was removed or its time changed */
+	    continue;
+
+	  DLIST_SHIFT (&job_head, link);
+
+	  job->func (job_ctl_run, job->data, &job->ts);
+	  free (job);
+	}
+      else
 	abend ("unexpected error from pthread_cond_timedwait: %s",
 	       strerror (errno));
-
-      if (job != DLIST_FIRST (&job_head))
-	/* Job was removed or its time changed */
-	continue;
-
-      DLIST_SHIFT (&job_head, link);
-
-      job->func (job->data, &job->ts);
-      free (job);
     }
   pthread_cleanup_pop (1);
 }
@@ -217,12 +281,15 @@ session_free (SESSION *sess)
  * Before returning, the function rearms the periodic job if necessary.
  */
 static void
-expire_sessions (void *data, const struct timespec *now)
+expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
 {
   SERVICE *svc = data;
   SESSION_TABLE *tab;
   SESSION *sess;
 
+  if (ctl != job_ctl_run)
+    return;
+  
   pthread_mutex_lock (&svc->mut);
 
   tab = svc->sessions;
@@ -766,10 +833,23 @@ thr_backend_remover (void *arg)
   BACKEND *be = arg;
   SERVICE *svc = be->service;
   pthread_mutex_lock (&svc->mut);
-  service_session_remove_by_backend (be->service, be);
-  DLIST_REMOVE (&be->service->backends, be, link);
+  switch (be->be_type)
+    {
+    case BE_REGULAR:
+      service_session_remove_by_backend (be->service, be);
+      DLIST_REMOVE (&be->service->backends, be, link);
+      free (be->v.reg.addr.ai_addr);
+      break;
+
+    case BE_MATRIX:
+      free (be->v.mtx.hostname);
+      backend_table_free (be->v.mtx.betab);
+      break;
+
+    default:
+      abort ();
+    }
   pthread_mutex_destroy (&be->mut);
-  free (be->v.reg.addr.ai_addr);
   free (be);
   pthread_mutex_unlock (&svc->mut);
   return NULL;
@@ -947,7 +1027,7 @@ struct disable_closure
   int disable_mode;
 };
 
-static void touch_be (void *data, const struct timespec *ts);
+static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
 
 /*
  * NOTE:
@@ -1437,11 +1517,14 @@ backend_probe (BACKEND *be)
  * itself for alive_to seconds later.
  */
 static void
-touch_be (void *data, const struct timespec *ts)
+touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 {
   BACKEND *be = data;
   char buf[MAXBUF];
 
+  if (ctl != job_ctl_run)
+    return;
+  
   /* This function operates on regular backends only. */
   if (be->be_type != BE_REGULAR)
     return;
@@ -1517,12 +1600,15 @@ generate_key (RSA ** ret_rsa, unsigned long bits)
  * runs every T_RSA_KEYS seconds
  */
 static void
-do_RSAgen (void *unused1, const struct timespec *unused2)
+do_RSAgen (enum job_ctl ctl, void *unused1, const struct timespec *unused2)
 {
   int n, ret_val;
   RSA *t_RSA512_keys[N_RSA_KEYS];
   RSA *t_RSA1024_keys[N_RSA_KEYS];
 
+  if (ctl != job_ctl_run)
+    return;
+  
   /* Re-arm the job */
   job_enqueue_after_unlocked (T_RSA_KEYS, do_RSAgen, NULL);
 
