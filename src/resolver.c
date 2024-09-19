@@ -1251,3 +1251,70 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
       service_recompute_pri_unlocked (be->service, NULL, NULL);
     }
 }
+
+void *
+thr_backend_remover (void *arg)
+{
+  BACKEND *be = arg;
+  SERVICE *svc = be->service;
+  pthread_mutex_lock (&svc->mut);
+  switch (be->be_type)
+    {
+    case BE_REGULAR:
+      service_session_remove_by_backend (be->service, be);
+      DLIST_REMOVE (&be->service->backends, be, link);
+      free (be->v.reg.addr.ai_addr);
+      break;
+
+    case BE_MATRIX:
+      free (be->v.mtx.hostname);
+      backend_table_free (be->v.mtx.betab);
+      break;
+
+    default:
+      abort ();
+    }
+  pthread_mutex_destroy (&be->mut);
+  free (be);
+  pthread_mutex_unlock (&svc->mut);
+  return NULL;
+}
+
+// FIXME: Move to pound.c?
+void
+backend_schedule_removal (BACKEND *be)
+{
+  pthread_attr_t attr;
+  pthread_t tid;
+
+  pthread_attr_init (&attr);
+  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
+  pthread_create (&tid, &attr, thr_backend_remover, be);
+  pthread_attr_destroy (&attr);
+}
+
+void
+backend_ref (BACKEND *be)
+{
+  if (be->be_type == BE_REGULAR)
+    {
+      pthread_mutex_lock (&be->mut);
+      be->refcount++;
+      pthread_mutex_unlock (&be->mut);
+    }
+}
+
+void
+backend_unref (BACKEND *be)
+{
+  if (be && be->be_type == BE_REGULAR)
+    {
+      pthread_mutex_lock (&be->mut);
+      assert (be->refcount > 0);
+      be->refcount--;
+      if (be->refcount == 0)
+	backend_schedule_removal (be);
+      pthread_mutex_unlock (&be->mut);
+    }
+}
+

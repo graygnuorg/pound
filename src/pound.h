@@ -972,8 +972,14 @@ SERVICE *get_service (POUND_HTTP *);
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
 
+#ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
+#else
+# define backend_ref(be)
+# define backend_unref(be)
+#endif
+
 void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 				struct be_regular *reg);
 int backend_matrix_init (BACKEND *be);
