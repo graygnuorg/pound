@@ -53,6 +53,8 @@ dns_response_alloc (enum dns_resp_type type, size_t count)
 void
 dns_response_free (struct dns_response *resp)
 {
+  int i;
+
   switch (resp->type)
     {
     case dns_resp_addr:
@@ -60,6 +62,8 @@ dns_response_free (struct dns_response *resp)
       break;
 
     case dns_resp_srv:
+      for (i = 0; i < resp->count; i++)
+	free (resp->srv[i].host);
       free (resp->srv);
       break;
 
@@ -461,34 +465,21 @@ dns_query (const char *name, adns_rrtype type, adns_answer **ans_ret)
 }
 
 static int
-dns_lookup_internal (char const *name, int family, struct dns_response **presp)
+dns_generic_lookup (char const *name, adns_rrtype rrtype, char const *rrname,
+		    int (*conv) (int, struct dns_response *, adns_answer *),
+		    struct dns_response **presp)
 {
   adns_answer *ans = NULL;
-  int rr_type;
   int err, rc;
   struct dns_response *resp;
 
-  switch (family)
-    {
-    case AF_INET:
-      rr_type = adns_r_a;
-      break;
-
-    case AF_INET6:
-      rr_type = adns_r_aaaa;
-      break;
-
-    default:
-      abort (); // FIXME
-    }
-
-  err = dns_query (name, rr_type, &ans);
+  err = dns_query (name, rrtype, &ans);
   if (err != 0)
     {
       rc = errno_to_dns_status (err);
       if (rc != dns_not_found)
 	logmsg (LOG_ERR, "Querying for %s records of %s: %s",
-		rr_type == adns_r_a ? "A" : "AAAA",
+		rrname,
 		name,
 		strerror (err));
       return rc;
@@ -498,16 +489,21 @@ dns_lookup_internal (char const *name, int family, struct dns_response **presp)
       rc = adns_to_dns_status (ans->status);
       if (rc != dns_not_found)
 	logmsg (LOG_ERR, "Querying for %s records of %s: %s",
-		rr_type == adns_r_a ? "A" : "AAAA",
+		rrname,
 		name,
 		adns_strerror (ans->status));
 
       free (ans);
       return rc;
     }
-
+  if (ans->nrrs == 0)
+    {
+      free (ans);
+      return dns_not_found;
+    }
+  
   rc = dns_success;
-  resp = dns_response_alloc (dns_resp_addr, ans->nrrs);
+  resp = dns_response_alloc (dns_resp_srv, ans->nrrs);
   if (!resp)
     {
       lognomem ();
@@ -515,37 +511,75 @@ dns_lookup_internal (char const *name, int family, struct dns_response **presp)
     }
   else
     {
-      if (ans->nrrs > 0)
+      int i;
+
+      resp->expires = ans->expires;
+      for (i = 0; i < ans->nrrs; i++)
 	{
-	  int i;
-
-	  resp->expires = ans->expires;
-	  for (i = 0; i < ans->nrrs; i++)
+	  if (conv (i, resp, ans))
 	    {
-	      switch (family)
-		{
-		case AF_INET:
-		  resp->addr[i].s_in.sin_family = AF_INET;
-		  resp->addr[i].s_in.sin_port = 0;
-		  resp->addr[i].s_in.sin_addr = ans->rrs.inaddr[i];
-		  break;
-
-		case AF_INET6:
-		  resp->addr[i].s_in6.sin6_family = AF_INET6;
-		  resp->addr[i].s_in6.sin6_port = 0;
-		  resp->addr[i].s_in6.sin6_addr = ans->rrs.in6addr[i];
-		}
+	      resp->count = i;
+	      dns_response_free (resp);
+	      resp = NULL;
+	      rc = dns_failure;
+	      break;
 	    }
 	}
     }
-
   free (ans);
   *presp = resp;
   return rc;
 }
 
+static int
+rr_a_conv (int i, struct dns_response *resp, adns_answer *ans)
+{
+  resp->addr[i].s_in.sin_family = AF_INET;
+  resp->addr[i].s_in.sin_port = 0;
+  resp->addr[i].s_in.sin_addr = ans->rrs.inaddr[i];
+  return 0;
+}
+
+static int
+rr_aaaa_conv (int i, struct dns_response *resp, adns_answer *ans)
+{
+  resp->addr[i].s_in6.sin6_family = AF_INET6;
+  resp->addr[i].s_in6.sin6_port = 0;
+  resp->addr[i].s_in6.sin6_addr = ans->rrs.in6addr[i];
+  return 0;
+}
+
+static int
+dns_generic_addr_lookup (char const *name, int family,
+			 struct dns_response **presp)
+{
+  int rr_type;
+  char const *rr_name;
+  int (*rr_conv) (int, struct dns_response *, adns_answer *);
+
+  switch (family)
+    {
+    case AF_INET:
+      rr_type = adns_r_a;
+      rr_name = "A";
+      rr_conv = rr_a_conv;
+      break;
+
+    case AF_INET6:
+      rr_type = adns_r_aaaa;
+      rr_name = "AAAA";
+      rr_conv = rr_aaaa_conv;
+      break;
+
+    default:
+      abort (); // FIXME
+    }
+
+  return dns_generic_lookup (name, rr_type, rr_name, rr_conv, presp);
+}
+
 int
-dns_lookup (char const *name, int family, struct dns_response **presp)
+dns_addr_lookup (char const *name, int family, struct dns_response **presp)
 {
   int rc;
   struct dns_response *r4 = NULL, *r6 = NULL;
@@ -554,7 +588,7 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
     {
     case AF_INET:
     case AF_INET6:
-      return dns_lookup_internal (name, family, presp);
+      return dns_generic_addr_lookup (name, family, presp);
 
     case AF_UNSPEC:
       break;
@@ -563,8 +597,8 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
       abort();
     }
 
-  rc = dns_lookup_internal (name, AF_INET, &r4);
-  switch (dns_lookup_internal (name, AF_INET6, &r6))
+  rc = dns_generic_addr_lookup (name, AF_INET, &r4);
+  switch (dns_generic_addr_lookup (name, AF_INET6, &r6))
     {
     case dns_success:
       rc = 0;
@@ -609,7 +643,27 @@ dns_lookup (char const *name, int family, struct dns_response **presp)
     }
   return rc;
 }
+
+static int
+rr_srv_conv (int i, struct dns_response *resp, adns_answer *ans)
+{
+  resp->srv[i].priority = ans->rrs.srvraw[i].priority;
+  resp->srv[i].weight = ans->rrs.srvraw[i].weight;
+  resp->srv[i].port = ans->rrs.srvraw[i].port;
+  if ((resp->srv[i].host = xstrdup (ans->rrs.srvraw[i].host)) == NULL)
+    {
+      lognomem ();
+      return 1;
+    }
+  return 0;
+}
 
+int
+dns_srv_lookup (char const *name, struct dns_response **presp)
+{
+  return dns_generic_lookup (name, adns_r_srv_raw, "SRV", rr_srv_conv, presp);
+}
+
 void
 dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 {
@@ -643,7 +697,7 @@ backend_matrix_init (BACKEND *be)
   struct dns_response *resp;
   struct timespec ts;
 
-  switch (dns_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp))
+  switch (dns_addr_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp))
     {
     case dns_success:
       service_matrix_update_backends (be->service, be, resp);

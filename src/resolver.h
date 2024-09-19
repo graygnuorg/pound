@@ -42,9 +42,9 @@ union dns_addr
 
 struct dns_srv
 {
-  uint16_t priority;
-  uint16_t weight;
-  uint16_t port;
+  int priority;
+  int weight;
+  int port;
   char *host;
 };
 
