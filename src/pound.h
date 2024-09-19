@@ -501,7 +501,8 @@ struct be_matrix
   char *servername;     /* SNI */
   BACKEND_TABLE betab;  /* Table of regular backends generated from this
 			   matrix. */
-  JOB_ID jid;
+  JOB_ID jid;           /* ID of the periodic job scheduled to update this
+			   matrix. */
 };
 
 struct be_regular
