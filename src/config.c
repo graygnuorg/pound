@@ -2477,7 +2477,7 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl,
 static int
 parse_backend (void *call_data, void *section_data)
 {
-  BACKEND_HEAD *head = call_data;
+  BACKEND_META_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
   struct locus_point beg = last_token_locus_range ()->beg;
@@ -2510,7 +2510,7 @@ parse_backend (void *call_data, void *section_data)
 	return PARSER_FAIL;
     }
 
-  DLIST_PUSH (head, be, link);
+  backend_list_add (backend_meta_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -2518,7 +2518,7 @@ parse_backend (void *call_data, void *section_data)
 static int
 parse_use_backend (void *call_data, void *section_data)
 {
-  BACKEND_HEAD *head = call_data;
+  BACKEND_META_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
 
@@ -2533,7 +2533,7 @@ parse_use_backend (void *call_data, void *section_data)
   be->priority = 5;
   pthread_mutex_init (&be->mut, NULL);
 
-  DLIST_PUSH (head, be, link);
+  backend_list_add (backend_meta_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -2541,7 +2541,7 @@ parse_use_backend (void *call_data, void *section_data)
 static int
 parse_emergency (void *call_data, void *section_data)
 {
-  BACKEND **res_ptr = call_data;
+  BACKEND_META_LIST *bml = call_data;
   BACKEND *be;
   POUND_DEFAULTS dfl = *(POUND_DEFAULTS*)section_data;
 
@@ -2553,7 +2553,7 @@ parse_emergency (void *call_data, void *section_data)
   if (!be)
     return PARSER_FAIL;
 
-  *res_ptr = be;
+  backend_list_add (backend_meta_list_get_emerg (bml), be);
 
   return PARSER_OK;
 }
@@ -2561,14 +2561,14 @@ parse_emergency (void *call_data, void *section_data)
 static int
 parse_metrics (void *call_data, void *section_data)
 {
-  BACKEND_HEAD *head = call_data;
+  BACKEND_META_LIST *bml = call_data;
   BACKEND *be;
 
   XZALLOC (be);
   be->be_type = BE_METRICS;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
-  DLIST_PUSH (head, be, link);
+  backend_list_add (backend_meta_list_get_normal (bml), be);
   return PARSER_OK;
 }
 
@@ -3071,7 +3071,7 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
-  BACKEND_HEAD *head = call_data;
+  BACKEND_META_LIST *bml = call_data;
   struct token *tok;
   int code = 302;
   BACKEND *be;
@@ -3132,7 +3132,7 @@ parse_redirect_backend (void *call_data, void *section_data)
     /* the path is a single '/', so remove it */
     be->v.redirect.url[matches[3].rm_so] = '\0';
 
-  DLIST_PUSH (head, be, link);
+  backend_list_add (backend_meta_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -3140,7 +3140,7 @@ parse_redirect_backend (void *call_data, void *section_data)
 static int
 parse_error_backend (void *call_data, void *section_data)
 {
-  BACKEND_HEAD *head = call_data;
+  BACKEND_META_LIST *bml = call_data;
   struct token *tok;
   int n, status;
   char *text = NULL;
@@ -3189,7 +3189,7 @@ parse_error_backend (void *call_data, void *section_data)
   be->v.error.status = status;
   be->v.error.text = text;
 
-  DLIST_PUSH (head, be, link);
+  backend_list_add (backend_meta_list_get_normal (bml), be);
 
   return rc;
 }
@@ -4022,7 +4022,7 @@ static PARSER_TABLE service_parsetab[] = {
   {
     .name = "Emergency",
     .parser = parse_emergency,
-    .off = offsetof (SERVICE, emergency)
+    .off = offsetof (SERVICE, backends)
   },
   {
     .name = "Metrics",
@@ -4126,14 +4126,12 @@ parse_service (void *call_data, void *section_data)
     return PARSER_FAIL;
   else
     {
-      BACKEND *be;
-
-      if ((be = DLIST_FIRST (&svc->backends)) == NULL)
+      BACKEND_LIST *be_list;
+      unsigned be_count = 0;
+      
+      DLIST_FOREACH (be_list, &svc->backends, link)
 	{
-	  conf_error_at_locus_range (&range, "warning: no backends defined");
-	}
-      else
-	{
+	  BACKEND *be;	  
 	  int be_class = 0;
 #         define BE_MASK(n) (1<<(n))
 #         define  BX_(x)  ((x) - (((x)>>1)&0x77777777)			\
@@ -4142,8 +4140,10 @@ parse_service (void *call_data, void *section_data)
 #         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
 	  int n = 0;
 	  int pri_max = backend_pri_max[svc->balancer];
-	  
-	  DLIST_FOREACH (be, &svc->backends, link)
+
+	  be_list->tot_pri = 0;
+	  be_list->max_pri = 0;
+	  DLIST_FOREACH (be, &be_list->backends, link)
 	    {
 	      n++;
 	      if (be->priority > pri_max)
@@ -4158,8 +4158,8 @@ parse_service (void *call_data, void *section_data)
 	      be->service = svc;
 	      if (!be->disabled)
 		{
-		  if (TOT_PRI_MAX - svc->tot_pri > be->priority)
-		    svc->tot_pri += be->priority;
+		  if (TOT_PRI_MAX - be_list->tot_pri > be->priority)
+		    be_list->tot_pri += be->priority;
 		  else
 		    {
 		      conf_error_at_locus_range (&be->locus,
@@ -4167,8 +4167,8 @@ parse_service (void *call_data, void *section_data)
 						 " sum of priorities");
 		      return PARSER_FAIL;
 		    }
-		  if (svc->max_pri < be->priority)
-		    svc->max_pri = be->priority;
+		  if (be_list->max_pri < be->priority)
+		    be_list->max_pri = be->priority;
 		}
 	    }
 
@@ -4198,8 +4198,15 @@ parse_service (void *call_data, void *section_data)
 			  "see section \"DEPRECATED FEATURES\" in pound(8)");
 		}
 	    }
+	  
+	  be_count += n;
 	}
 
+      if (be_count == 0)
+	{
+	  conf_error_at_locus_range (&range, "warning: no backends defined");
+	}
+      
       service_lb_init (svc);
 
       SLIST_PUSH (head, svc, next);
@@ -4263,9 +4270,6 @@ parse_acme (void *call_data, void *section_data)
   range.end = last_token_locus_range ()->beg;
   svc->locus_str = format_locus_str (&range);
 
-  svc->tot_pri = 1;
-  svc->max_pri = 1;
-
   /* Create ACME backend */
   XZALLOC (be);
   be->be_type = BE_ACME;
@@ -4275,7 +4279,8 @@ parse_acme (void *call_data, void *section_data)
   be->v.acme.wd = fd;
 
   /* Register backend in service */
-  DLIST_PUSH (&svc->backends, be, link);
+  backend_list_add (backend_meta_list_get_normal (&svc->backends), be);
+  service_recompute_pri_unlocked (svc, NULL, NULL);
 
   /* Register service in the listener */
   SLIST_PUSH (head, svc, next);
@@ -5708,8 +5713,7 @@ parse_control (void *call_data, void *section_data)
   DLIST_INIT (&svc->backends);
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
-  svc->tot_pri = 1;
-  svc->max_pri = 1;
+
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
 
@@ -5721,8 +5725,9 @@ parse_control (void *call_data, void *section_data)
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
-  DLIST_PUSH (&svc->backends, be, link);
-
+  backend_list_add (backend_meta_list_get_normal (&svc->backends), be);
+  service_recompute_pri_unlocked (svc, NULL, NULL);
+  
   return PARSER_OK;
 }
 
@@ -6272,17 +6277,6 @@ backend_finalize (BACKEND *be, void *data)
     }
   return 0;
 }
-
-static int
-service_emergency_finalize (SERVICE *svc, void *unused)
-{
-  if (svc->emergency != NULL)
-    {
-      if (backend_resolve (svc->emergency))
-	return -1;
-    }
-  return 0;
-}
 
 /*
  * Fix-up password file structures for use in restricted chroot
@@ -6435,8 +6429,6 @@ parse_config_file (char const *file, int nosyslog)
 #endif
 	  if (foreach_backend (backend_finalize,
 			       &pound_defaults.named_backend_table))
-	    return -1;
-	  if (foreach_service (service_emergency_finalize, NULL))
 	    return -1;
 	  if (worker_min_count > worker_max_count)
 	    abend ("WorkerMinCount is greater than WorkerMaxCount");

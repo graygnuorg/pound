@@ -488,7 +488,7 @@ dns_generic_lookup (char const *name, adns_rrtype rrtype, char const *rrname,
     default:
       abort ();
     }
-	  
+
   err = dns_query (name, rrtype, &ans);
   if (err != 0)
     {
@@ -517,7 +517,7 @@ dns_generic_lookup (char const *name, adns_rrtype rrtype, char const *rrname,
       free (ans);
       return dns_not_found;
     }
-  
+
   rc = dns_success;
   resp = dns_response_alloc (resp_type, ans->nrrs);
   if (!resp)
@@ -696,8 +696,8 @@ dns_srv_lookup (char const *name, struct dns_response **presp)
   int rc = dns_generic_lookup (name, adns_r_srv_raw, "SRV", rr_srv_conv, &resp);
   if (rc == dns_success)
     {
-      qsort (resp->srv, resp->count, sizeof (resp->srv[0]), srv_cmp);      
-      *presp = resp;	     
+      qsort (resp->srv, resp->count, sizeof (resp->srv[0]), srv_cmp);
+      *presp = resp;
     }
   return rc;
 }
@@ -796,7 +796,7 @@ int
 backend_matrix_init (BACKEND *be)
 {
   int rc = -1;
-    
+
   switch (be->v.mtx.resolve_mode)
     {
     case bres_first:
@@ -986,7 +986,8 @@ backend_sweep (BACKEND *be, void *data)
 }
 
 static void
-service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
+service_matrix_addr_update_backends (SERVICE *svc,
+				     BACKEND *mtx,
 				     struct dns_response *resp,
 				     int locked)
 {
@@ -994,6 +995,8 @@ service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
   int mark = 1;
   size_t n;
   struct timespec ts;
+  BACKEND_LIST *be_list = backend_meta_list_get (&svc->backends,
+						 mtx->v.mtx.weight);
 
   if (!locked)
     {
@@ -1062,10 +1065,10 @@ service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
 	      be->disabled = mtx->disabled;
 	      pthread_mutex_init (&be->mut, NULL);
 	      be->refcount = 1;
-	      
+
 	      /* Add it to the list of service backends and to the hash
 		 table. */
-	      DLIST_PUSH (&svc->backends, be, link);
+	      backend_list_add (be_list, be);
 	      backend_table_insert (mtx->v.mtx.betab, be);
 	    }
 	}
@@ -1073,7 +1076,7 @@ service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
       /* Remove all unreferenced backends. */
       backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
       service_recompute_pri_unlocked (svc, NULL, NULL);
-      
+
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
@@ -1090,13 +1093,13 @@ static int
 compute_priority (SERVICE *svc, struct dns_srv *srv, int total_weight)
 {
   int result;
-  
+
   switch (svc->balancer)
     {
     case BALANCER_RANDOM:
       result = srv->weight * 9 / total_weight;
       break;
-      
+
     case BALANCER_IWRR:
       result = srv->weight;
       break;
@@ -1116,98 +1119,172 @@ backend_set_prio (BACKEND *be, void *data)
   pthread_mutex_unlock (&be->mut);
 }
 
+struct srv_stat
+{
+  int priority;
+  int start;
+  int count;
+  unsigned long total_weight;
+};
+
+static int
+analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)
+{
+  int i, j;
+  int ngrp = 0;
+  struct srv_stat *grp;
+  int prio = -1;
+
+  /* Count SRV groups. */
+  for (i = 0; i < resp->count; i++)
+    if (prio != resp->srv[i].priority)
+      {
+	ngrp++;
+	prio = resp->srv[i].priority;
+      }
+
+  /* Allocate statistics array. */
+  if ((grp = calloc (ngrp, sizeof (grp[0]))) == NULL)
+    return 0;
+
+  /* Fill it in. */
+  j = 0;
+  prio = grp[j].priority = resp->srv[0].priority;
+  for (i = 0; i < resp->count; i++)
+    {
+      if (prio != resp->srv[i].priority)
+	{
+	  j++;
+	  prio = resp->srv[i].priority;
+	  grp[j].priority = prio;
+	  grp[j].start = i;
+	}
+      if (TOT_PRI_MAX - grp[j].total_weight > resp->srv[i].weight)
+	{
+	  grp[j].total_weight += resp->srv[i].weight;
+	  grp[j].count++;
+	}
+      else
+	{
+	  logmsg (LOG_NOTICE,
+		  "SRV record %d %d %d %s overflows total priority",
+		  resp->srv[i].priority, resp->srv[i].weight,
+		  resp->srv[i].port, resp->srv[i].host);
+	  /* Skip rest of records with this priority. */
+	  for (; i + 1 < resp->count; i++)
+	    if (resp->srv[i].priority != prio)
+	      break;
+	}
+    }
+
+  *pstat = grp;
+  return ngrp;
+}
+
 static void
 service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 				    struct dns_response *resp)
 {
   int i;
-  int mark = 1;
-  size_t n = resp->count;
-  struct timespec ts;
-  long total_weight = 0;
-
-  // FIXME: That doesn't take into account RR priorities.
-  for (i = 0; i < resp->count; i++)
-    total_weight += resp->srv[i].weight;
+  int nstat;
+  BACKEND_LIST *be_list;
+  struct srv_stat *stat;
   
+  nstat = analyze_srv_response (resp, &stat);
+  if (nstat == 0)
+    return; //FIXME
+
   pthread_mutex_lock (&svc->mut);
   pthread_mutex_lock (&mtx->mut);
   if (!mtx->disabled)
     {
+      int mark = 1;
+      struct timespec ts;
+
       /* Mark all generated backends. */
       backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
-      
+
       mark = 0;
 
-      for (i = 0; i < n; i++)
+      for (i = 0; i < nstat; i++)
 	{
-	  BACKEND *be = backend_table_hostname_lookup (mtx->v.mtx.betab,
-						       resp->srv[i].host);
-	  if (be)
+	  int j;
+
+	  be_list = backend_meta_list_get (&svc->backends, stat[i].priority);
+
+	  for (j = 0; j < stat[i].count; j++)
 	    {
-	      int prio = compute_priority (svc, &resp->srv[i], total_weight);
-	      if (be->priority != prio)
+	      struct dns_srv *srv = &resp->srv[stat[i].start + j];
+	      BACKEND *be = backend_table_hostname_lookup (mtx->v.mtx.betab,
+							   srv->host);
+	      if (be)
 		{
-		  /* Update priority of the matrix and all backends produced
-		     by it. */
-		  be->priority = prio;
-		  backend_table_foreach (be->v.mtx.betab, backend_set_prio,
-					 be);
+		  int prio = compute_priority (svc, srv, stat[i].total_weight);
+		  if (be->priority != prio)
+		    {
+		      /* Update priority of the matrix and all backends
+			 produced by it. */
+		      be->priority = prio;
+		      backend_table_foreach (be->v.mtx.betab, backend_set_prio,
+					     be);
+		    }
+		  be->mark = 0;
 		}
-	      be->mark = 0;
-	    }
-	  else
-	    {
-	      /*
-	       * Backend doesn't exist.  Create new matrix backend using data
-	       * from the SRV matrix and SRV RR.
-	       */
-	      be = calloc (1, sizeof (*be));
-	      if (!be)
+	      else
 		{
-		  lognomem ();
-		  break;
+		  /*
+		   * Backend doesn't exist.  Create new matrix backend using
+		   * data from the SRV matrix and SRV RR.
+		   */
+		  be = calloc (1, sizeof (*be));
+		  if (!be)
+		    {
+		      lognomem ();
+		      break;
+		    }
+		  be->service = mtx->service;
+		  be->locus = mtx->locus;
+		  be->locus_str = mtx->locus_str;
+		  be->be_type = BE_MATRIX;
+		  be->priority = compute_priority (svc, srv,
+						   stat->total_weight);
+		  be->disabled = 0;
+		  pthread_mutex_init (&be->mut, NULL);
+		  be->refcount = 1;
+
+		  be->v.mtx.hostname = strdup (srv->host);
+		  if (!be->v.mtx.hostname)
+		    {
+		      lognomem ();
+		      free (be);
+		      break;
+		    }
+		  be->v.mtx.port = htons (srv->port);
+		  be->v.mtx.family = mtx->v.mtx.family;
+		  be->v.mtx.resolve_mode = bres_all;
+		  be->v.mtx.retry_interval = mtx->v.mtx.retry_interval;
+		  be->v.mtx.to = mtx->v.mtx.to;
+		  be->v.mtx.conn_to = mtx->v.mtx.conn_to;
+		  be->v.mtx.ws_to = mtx->v.mtx.ws_to;
+		  be->v.mtx.ctx = mtx->v.mtx.ctx;
+		  be->v.mtx.servername = mtx->v.mtx.servername;
+		  be->v.mtx.betab = backend_table_new ();
+		  be->v.mtx.weight = srv->priority;
+		  
+		  /*
+		   * Trigger regular backend creation.
+		   */
+		  backend_matrix_addr_init (be, 1);
+
+		  /* Add new matrix to the hash table. */
+		  backend_table_insert (mtx->v.mtx.betab, be);
+
+		  /*
+		   * Notice, that subsidiary matrix backends are not added to
+		   * the service backend list.  That would be senseless.
+		   * This backend is here only to produce regular backends.
+		   */
 		}
-	      be->service = mtx->service;
-	      be->locus = mtx->locus;
-	      be->locus_str = mtx->locus_str;
-	      be->be_type = BE_MATRIX;
-	      be->priority = compute_priority (svc, &resp->srv[i], total_weight);
-	      be->disabled = 0;
-	      pthread_mutex_init (&be->mut, NULL);
-	      be->refcount = 1;
-
-	      be->v.mtx.hostname = strdup (resp->srv[i].host);
-	      if (!be->v.mtx.hostname)
-		{
-		  lognomem ();
-		  free (be);
-		  break;
-		}
-	      be->v.mtx.port = htons (resp->srv[i].port);
-	      be->v.mtx.family = mtx->v.mtx.family;
-	      be->v.mtx.resolve_mode = bres_all;
-	      be->v.mtx.retry_interval = mtx->v.mtx.retry_interval;
-	      be->v.mtx.to = mtx->v.mtx.to;
-	      be->v.mtx.conn_to = mtx->v.mtx.conn_to;
-	      be->v.mtx.ws_to = mtx->v.mtx.ws_to;
-	      be->v.mtx.ctx = mtx->v.mtx.ctx;
-	      be->v.mtx.servername = mtx->v.mtx.servername;
-	      be->v.mtx.betab = backend_table_new ();
-
-	      /*
-	       * Trigger creation of the backends.
-	       */
-	      backend_matrix_addr_init (be, 1);
-	      
-	      /* Add new matrix to the hash table. */
-	      backend_table_insert (mtx->v.mtx.betab, be);
-
-	      /*
-	       * Notice, that subsidiary matrix backends are not added to the
-	       * service backend list.  That would be senseless.  This backend
-	       * is here only to produce regular backends.
-	       */
 	    }
 	}
       
@@ -1216,15 +1293,19 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 			     mtx->v.mtx.betab);
 
       /* Recompute service priorities. */
-      service_recompute_pri_unlocked (svc, NULL, NULL);
-      
+      DLIST_FOREACH (be_list, &svc->backends, link)
+	backend_list_recompute_pri_unlocked (be_list, NULL, NULL);
+
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
       mtx->v.mtx.jid = job_enqueue (&ts, job_resolver, mtx);
     }
+
   pthread_mutex_unlock (&mtx->mut);
   pthread_mutex_unlock (&svc->mut);
+  
+  free (stat);  
 }
 
 void
@@ -1261,9 +1342,17 @@ thr_backend_remover (void *arg)
   switch (be->be_type)
     {
     case BE_REGULAR:
-      service_session_remove_by_backend (be->service, be);
-      DLIST_REMOVE (&be->service->backends, be, link);
-      free (be->v.reg.addr.ai_addr);
+      {
+	BACKEND_LIST *be_list = be->be_list;
+	service_session_remove_by_backend (be->service, be);
+	backend_list_remove (be->be_list, be);
+	if (DLIST_EMPTY (&be_list->backends))
+	  {
+	    DLIST_REMOVE (&be->service->backends, be_list, link);
+	    free (be_list);
+	  }
+	free (be->v.reg.addr.ai_addr);
+      }
       break;
 
     case BE_MATRIX:
@@ -1316,4 +1405,3 @@ backend_unref (BACKEND *be)
       pthread_mutex_unlock (&be->mut);
     }
 }
-

@@ -503,6 +503,8 @@ struct be_matrix
 			   matrix. */
   JOB_ID jid;           /* ID of the periodic job scheduled to update this
 			   matrix. */
+  int weight;           /* Weight of the backend list where to allocate
+			   regular backends. */
 };
 
 struct be_regular
@@ -538,6 +540,7 @@ struct be_error
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
+  struct backend_list *be_list; /* Back pointer to the owning backend list. */
   struct locus_range locus;     /* Location in the config file */
   char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
@@ -753,6 +756,20 @@ enum
 
 #define TOT_PRI_MAX ULONG_MAX
 
+typedef struct backend_list
+{
+  int weight;
+  unsigned long tot_pri;	/* total priority of active backends */
+  int max_pri;                  /* maximum priority */
+  /* For IWRR balancer */
+  int iwrr_round;
+  BACKEND *iwrr_cur;
+  BACKEND_HEAD backends;
+  DLIST_ENTRY (backend_list) link;
+} BACKEND_LIST;
+
+typedef DLIST_HEAD (,backend_list) BACKEND_META_LIST;
+
 /* service definition */
 typedef struct _service
 {
@@ -760,14 +777,8 @@ typedef struct _service
   char *locus_str;              /* Location in the config file, as string. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
-  BACKEND_HEAD backends;
-  BACKEND *emergency;
-  unsigned long tot_pri;	/* total priority for current back-ends */
-  int max_pri;                  /* maximum priority */
+  BACKEND_META_LIST backends;
   BALANCER balancer;
-  /* For IWRR balancer */
-  int iwrr_round;
-  BACKEND *iwrr_cur;
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
   unsigned sess_ttl;		/* session time-to-live */
@@ -1021,11 +1032,44 @@ void kill_be (SERVICE *, BACKEND *, const int);
 
 void service_session_remove_by_backend (SERVICE *svc, BACKEND *be);
 void service_recompute_pri (SERVICE *svc,
+			    BACKEND_LIST *bl,
 			    void (*cb) (BACKEND *, void *),
 			    void *data);
 void service_recompute_pri_unlocked (SERVICE *svc,
 				     void (*cb) (BACKEND *, void *),
 				     void *data);
+void backend_list_recompute_pri_unlocked (BACKEND_LIST *bl,
+					  void (*cb) (BACKEND *, void *),
+					  void *data);
+
+static inline void backend_list_add (BACKEND_LIST *bl, BACKEND *be)
+{
+  be->be_list = bl;
+  DLIST_INSERT_TAIL (&bl->backends, be, link);
+}
+
+static inline void backend_list_remove (BACKEND_LIST *bl, BACKEND *be)
+{
+  be->be_list = NULL;
+  DLIST_REMOVE (&bl->backends, be, link);
+}
+
+BACKEND_LIST *backend_meta_list_alloc (BACKEND_META_LIST *ml);
+BACKEND_LIST *backend_meta_list_get (BACKEND_META_LIST *ml, int n);
+
+#define BACKEND_LIST_WEIGTH_MAX  65535
+
+static inline BACKEND_LIST *
+backend_meta_list_get_normal (BACKEND_META_LIST *ml)
+{
+  return backend_meta_list_get (ml, 0);
+}
+
+static inline BACKEND_LIST *
+backend_meta_list_get_emerg (BACKEND_META_LIST *ml)
+{
+  return backend_meta_list_get (ml, BACKEND_LIST_WEIGTH_MAX);
+}
 
 /*
  * Non-blocking version of connect(2). Does the same as connect(2) but

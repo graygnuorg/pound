@@ -302,7 +302,8 @@ expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
     }
 
   if (!DLIST_EMPTY (&tab->head))
-    job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
+    job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire,
+			  expire_sessions, svc);
   pthread_mutex_unlock (&svc->mut);
 }
 
@@ -598,11 +599,16 @@ random_in_range (unsigned long max)
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (SERVICE *svc)
+rand_backend (BACKEND_LIST *blist)
 {
   BACKEND *be;
-  int pri = random_in_range (svc->tot_pri);
-  DLIST_FOREACH (be, &svc->backends, link)
+  int pri;
+
+  if (DLIST_EMPTY (&blist->backends))
+    return NULL;
+  
+  pri = random_in_range (blist->tot_pri);
+  DLIST_FOREACH (be, &blist->backends, link)
     {
       if (!backend_is_alive (be) || be->disabled)
 	continue;
@@ -613,21 +619,21 @@ rand_backend (SERVICE *svc)
 }
 
 static BACKEND *
-iwrr_select (SERVICE *svc)
+iwrr_select (BACKEND_LIST *blist)
 {
   BACKEND *be = NULL;
 
   do
     {
-      if (!svc->iwrr_cur->disabled && backend_is_alive (svc->iwrr_cur))
+      if (!blist->iwrr_cur->disabled && backend_is_alive (blist->iwrr_cur))
 	{
-	  if (svc->iwrr_round <= svc->iwrr_cur->priority)
-	    be = svc->iwrr_cur;
+	  if (blist->iwrr_round <= blist->iwrr_cur->priority)
+	    be = blist->iwrr_cur;
 	}
-      if ((svc->iwrr_cur = DLIST_NEXT (svc->iwrr_cur, link)) == NULL)
+      if ((blist->iwrr_cur = DLIST_NEXT (blist->iwrr_cur, link)) == NULL)
 	{
-	  svc->iwrr_cur = DLIST_FIRST (&svc->backends);
-	  svc->iwrr_round = (svc->iwrr_round + 1) % (svc->max_pri + 1);
+	  blist->iwrr_cur = DLIST_FIRST (&blist->backends);
+	  blist->iwrr_round = (blist->iwrr_round + 1) % (blist->max_pri + 1);
 	}
     }
   while (be == NULL);
@@ -635,44 +641,67 @@ iwrr_select (SERVICE *svc)
 }
 
 static BACKEND *
-service_lb_select_backend (SERVICE *svc)
+backend_list_lb_select (BALANCER balancer, BACKEND_LIST *blist)
 {
   BACKEND *be;
 
-  if (svc->max_pri == 0)
+  if (blist->max_pri == 0)
     return NULL;
-  if (DLIST_NEXT (DLIST_FIRST (&svc->backends), link) == NULL)
+  if (DLIST_NEXT (DLIST_FIRST (&blist->backends), link) == NULL)
     {
-      be = DLIST_FIRST (&svc->backends);
+      be = DLIST_FIRST (&blist->backends);
       if (!be->disabled && backend_is_alive (be))
 	return be;
       return NULL;
     }
 
-  switch (svc->balancer)
+  switch (balancer)
     {
     case BALANCER_RANDOM:
-      be = rand_backend (svc);
+      be = rand_backend (blist);
       break;
 
     case BALANCER_IWRR:
-      be = iwrr_select (svc);
+      be = iwrr_select (blist);
     }
   return be;
 }
 
 void
-service_lb_init (SERVICE *svc)
+backend_list_lb_init (BALANCER balancer, BACKEND_LIST *blist)
 {
-  switch (svc->balancer)
+  switch (balancer)
     {
     case BALANCER_RANDOM:
       break;
 
     case BALANCER_IWRR:
-      svc->iwrr_round = 0;
-      svc->iwrr_cur = DLIST_FIRST (&svc->backends);
+      blist->iwrr_round = 0;
+      blist->iwrr_cur = DLIST_FIRST (&blist->backends);
       break;
+    }
+}
+
+BACKEND *
+service_lb_select_backend (SERVICE *svc)
+{
+  BACKEND_LIST *blist;
+  DLIST_FOREACH (blist, &svc->backends, link)
+    {
+      BACKEND *be = backend_list_lb_select (svc->balancer, blist);
+      if (be)
+	return be;
+    }
+  return NULL;
+}
+
+void
+service_lb_init (SERVICE *svc)
+{
+  BACKEND_LIST *blist;
+  DLIST_FOREACH (blist, &svc->backends, link)
+    {
+      backend_list_lb_init (svc->balancer, blist);
     }
 }
 
@@ -816,6 +845,18 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
   return 1;
 }
 
+static int
+service_has_backends (SERVICE *svc)
+{
+  BACKEND_LIST *bl;
+  DLIST_FOREACH (bl, &svc->backends, link)
+    {
+      if (bl->tot_pri > 0)
+	return 1;
+    }
+  return 0;
+}
+
 /*
  * Find the right back-end for a request
  */
@@ -829,7 +870,7 @@ get_backend (POUND_HTTP *phttp)
 
   pthread_mutex_lock (&svc->mut);
 
-  if (svc->tot_pri > 0)
+  if (service_has_backends (svc))
     {
       switch (svc->sess_type)
 	{
@@ -874,12 +915,9 @@ get_backend (POUND_HTTP *phttp)
 
       if (!res)
 	res = service_lb_select_backend (svc);
+      backend_ref (res);
     }
   
-  if (!res)
-    res = svc->emergency;
-  
-  backend_ref (res);
   pthread_mutex_unlock (&svc->mut);
 
   return res;
@@ -926,7 +964,7 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
 }
 
 /*
- * Recompute max. backend priority and sum of priorities for the service.
+ * Recompute max. backend priority and sum of priorities for the backend list.
  * If call-back function cb is supplied, call it for each backend.
  *
  * NOTICE:
@@ -936,39 +974,64 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
  *     dynamic backends, this should be ensured when allocating them.
  */
 void
-service_recompute_pri_unlocked (SERVICE *svc, void (*cb) (BACKEND *, void *),
-				void *data)
+backend_list_recompute_pri_unlocked (BACKEND_LIST *bl,
+				     void (*cb) (BACKEND *, void *),
+				     void *data)
 {
   BACKEND *b;
   
-  svc->tot_pri = 0;
-  svc->max_pri = 0;
-  DLIST_FOREACH (b, &svc->backends, link)
+  bl->tot_pri = 0;
+  bl->max_pri = 0;
+  DLIST_FOREACH (b, &bl->backends, link)
     {
       if (cb)
 	cb (b, data);
       if (backend_is_alive (b) && !b->disabled)
 	{
-	  svc->tot_pri += b->priority;
-	  if (svc->max_pri < b->priority)
-	    svc->max_pri = b->priority;
+	  bl->tot_pri += b->priority;
+	  if (bl->max_pri < b->priority)
+	    bl->max_pri = b->priority;
 	}
     }
 }
 
+void
+service_recompute_pri_unlocked (SERVICE *svc,
+				void (*cb) (BACKEND *, void *),
+				void *data)
+{
+  BACKEND_LIST *bl;
+  DLIST_FOREACH (bl, &svc->backends, link)
+    {
+      backend_list_recompute_pri_unlocked (bl, cb, data);
+    }
+}  
+
 /*
- * Recompute max. backend priority and sum of priorities for the service.
- * If call-back function cb is supplied, call it for each backend.
+ * Recompute max. backend priority and sum of priorities for the given
+ * backend list of the service.  If call-back function cb is supplied,
+ * call it for each backend.
+ *
+ * If bl == NULL, recompute all backend lists.
  *
  * Locks the svc mutex prior to use.  See second notice to
- * service_recompute_pri_unlocked.
+ * backend_list_recompute_pri_unlocked, above.
  */
 void
-service_recompute_pri (SERVICE *svc, void (*cb) (BACKEND *, void *),
+service_recompute_pri (SERVICE *svc, BACKEND_LIST *bl,
+		       void (*cb) (BACKEND *, void *),
 		       void *data)
 {
   pthread_mutex_lock (&svc->mut);
-  service_recompute_pri_unlocked (svc, cb, data);
+  if (bl)
+    backend_list_recompute_pri_unlocked (bl, cb, data);
+  else
+    {
+      DLIST_FOREACH (bl, &svc->backends, link)
+	{
+	  backend_list_recompute_pri_unlocked (bl, cb, data);
+	}
+    }
   pthread_mutex_unlock (&svc->mut);
 }  
 
@@ -1048,7 +1111,8 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
       struct disable_closure clos;
       clos.be = be;
       clos.disable_mode = disable_mode;
-      service_recompute_pri (svc, cb_backend_disable, &clos);
+      assert (be->be_list != NULL);
+      service_recompute_pri (svc, be->be_list, cb_backend_disable, &clos);
     }
 }
 
@@ -1490,9 +1554,9 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 	  if (!be->disabled)
 	    {
 	      pthread_mutex_lock (&be->service->mut);
-	      be->service->tot_pri += be->priority;
-	      if (be->service->max_pri < be->priority)
-		be->service->max_pri = be->priority;
+	      be->be_list->tot_pri += be->priority;
+	      if (be->be_list->max_pri < be->priority)
+		be->be_list->max_pri = be->priority;
 	      pthread_mutex_unlock (&be->service->mut);
 	    }
 	}
@@ -1689,13 +1753,17 @@ static int
 session_backend_index (SESSION *sess)
 {
   int n = 0;
-  BACKEND *be;
+  BACKEND_LIST *blist;
 
-  DLIST_FOREACH (be, &sess->backend->service->backends, link)
+  DLIST_FOREACH (blist, &sess->backend->service->backends, link)
     {
-      if (be == sess->backend)
-	break;
-      n++;
+      BACKEND *be;
+      DLIST_FOREACH (be, &blist->backends, link)
+	{
+	  if (be == sess->backend)
+	    break;
+	  n++;
+	}
     }
   return n;
 }
@@ -1878,58 +1946,64 @@ backend_serialize (BACKEND *be)
 	      err = 1;
 	    }
 	  else
-	    switch (be->be_type)
-	      {
-	      case BE_MATRIX:
-		err = json_object_set (obj, "hostname",
-				       json_new_string (be->v.mtx.hostname))
-		       || json_object_set (obj, "resolve_mode",
-					json_new_integer (be->v.mtx.resolve_mode))
-		       || json_object_set (obj, "family",
-					   json_new_integer (be->v.mtx.family))
-		       || json_object_set (obj, "servername",
-					   be->v.reg.servername
-					     ? json_new_string (be->v.reg.servername)
-					     : json_new_null ());
-		break;
+	    {
+	      if (be->be_list) 
+		err = json_object_set (obj, "weight",
+				       json_new_integer (be->be_list->weight));
+	      if (err == 0)
+		switch (be->be_type)
+		  {
+		  case BE_MATRIX:
+		    err = json_object_set (obj, "hostname",
+					   json_new_string (be->v.mtx.hostname))
+		      || json_object_set (obj, "resolve_mode",
+					  json_new_integer (be->v.mtx.resolve_mode))
+		      || json_object_set (obj, "family",
+					  json_new_integer (be->v.mtx.family))
+		      || json_object_set (obj, "servername",
+					  be->v.reg.servername
+					  ? json_new_string (be->v.reg.servername)
+					  : json_new_null ());
+		    break;
 
-	      case BE_REGULAR:
-		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
-		  || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
-		  || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
-		  || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-		  || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"))
-		  || json_object_set (obj, "servername",
-				      be->v.reg.servername
-				       ? json_new_string (be->v.reg.servername)
-				      : json_new_null ());
-		break;
+		  case BE_REGULAR:
+		    err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
+		      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
+		      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
+		      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
+		      || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"))
+		      || json_object_set (obj, "servername",
+					  be->v.reg.servername
+					  ? json_new_string (be->v.reg.servername)
+					  : json_new_null ());
+		    break;
 
-	      case BE_REDIRECT:
-		err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
-		  || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
-		  || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
-		break;
-
-	      case BE_ACME:
-	      case BE_CONTROL:
-	      case BE_METRICS:
-		/* FIXME */
-		break;
-
-	      case BE_BACKEND_REF:
-		/* Can't happen */
-		break;
-
-	      case BE_ERROR:
-		err = json_object_set (obj, "status",
-				       json_new_integer (pound_to_http_status (be->v.error.status)))
-		  || json_object_set (obj, "text",
-				      be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
-		break;
-	      }
-	  if (enable_backend_stats)
-	    err |= json_object_set (obj, "stats", backend_stats_serialize (be));
+		  case BE_REDIRECT:
+		    err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
+		      || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
+		      || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
+		    break;
+		    
+		  case BE_ACME:
+		  case BE_CONTROL:
+		  case BE_METRICS:
+		    /* FIXME */
+		    break;
+		    
+		  case BE_BACKEND_REF:
+		    /* Can't happen */
+		    break;
+		    
+		  case BE_ERROR:
+		    err = json_object_set (obj, "status",
+					   json_new_integer (pound_to_http_status (be->v.error.status)))
+		      || json_object_set (obj, "text",
+					  be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
+		    break;
+		  }
+	      if (enable_backend_stats)
+		err |= json_object_set (obj, "stats", backend_stats_serialize (be));
+	    }
 	}
     }
   if (err)
@@ -1941,24 +2015,28 @@ backend_serialize (BACKEND *be)
 }
 
 static struct json_value *
-backends_serialize (BACKEND_HEAD *head)
+backends_serialize (BACKEND_META_LIST *meta)
 {
   struct json_value *obj;
 
-  if (DLIST_EMPTY (head))
+  if (DLIST_EMPTY (meta))
     obj = json_new_null ();
   else
     {
-      BACKEND *be;
-
+      BACKEND_LIST *be_list;
       obj = json_new_array ();
-      DLIST_FOREACH (be, head, link)
+      DLIST_FOREACH (be_list, meta, link)
 	{
-	  if (json_array_append (obj, backend_serialize (be)))
+	  BACKEND *be;
+
+	  DLIST_FOREACH (be, &be_list->backends, link)
 	    {
-	      json_value_free (obj);
-	      obj = NULL;
-	      break;
+	      if (json_array_append (obj, backend_serialize (be)))
+		{
+		  json_value_free (obj);
+		  obj = NULL;
+		  break;
+		}
 	    }
 	}
     }
@@ -1979,12 +2057,9 @@ service_serialize (SERVICE *svc)
       if (json_object_set (obj, "name",
 			   svc->name ? json_new_string (svc->name) : json_new_null ())
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
-	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
-	  || json_object_set (obj, "max_pri", json_new_integer (svc->max_pri))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
-	  || json_object_set (obj, "backends", backends_serialize (&svc->backends))
-	  || json_object_set (obj, "emergency", backend_serialize (svc->emergency)))
+	  || json_object_set (obj, "backends", backends_serialize (&svc->backends)))
 	{
 	  json_value_free (obj);
 	  obj = NULL;
@@ -2326,19 +2401,22 @@ locate_service (LISTENER *lstn, IDENT id)
 static BACKEND *
 locate_backend (SERVICE *svc, IDENT id)
 {
-  BACKEND *be = NULL;
-
   if (id.type == IDTYPE_NUM)
     {
       long n = 0;
-      DLIST_FOREACH (be, &svc->backends, link)
+      BACKEND_LIST *be_list;
+      DLIST_FOREACH (be_list, &svc->backends, link)
 	{
-	  if (n == id.n)
-	    break;
-	  n++;
+	  BACKEND *be;
+	  DLIST_FOREACH (be, &be_list->backends, link)
+	    {
+	      if (n == id.n)
+		return be;
+	      n++;
+	    }
 	}
     }
-  return be;
+  return NULL;
 }
 
 enum object_type
@@ -2487,8 +2565,12 @@ listener_is_control (LISTENER *lstn)
 
       if (svc && SLIST_NEXT (svc, next) == NULL)
 	{
-	  BACKEND *be = DLIST_FIRST (&svc->backends);
-	  return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
+	  BACKEND_LIST *be_list = DLIST_FIRST (&svc->backends);
+	  if (be_list && DLIST_NEXT (be_list, link) == NULL)
+	    {
+	      BACKEND *be = DLIST_FIRST (&be_list->backends);
+	      return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
+	    }
 	}
     }
   return 0;
@@ -2829,12 +2911,16 @@ static int
 itr_service_backends (SERVICE *svc, void *data)
 {
   struct service_backends_iterator *itp = data;
-  BACKEND *be;
-  DLIST_FOREACH (be, &svc->backends, link)
+  BACKEND_LIST *be_list;
+  DLIST_FOREACH (be_list, &svc->backends, link)
     {
-      int rc;
-      if ((rc = itp->itr (be, itp->data)) != 0)
-	return rc;
+      BACKEND *be;
+      DLIST_FOREACH (be, &be_list->backends, link)
+	{
+	  int rc;
+	  if ((rc = itp->itr (be, itp->data)) != 0)
+	    return rc;
+	}
     }
   return 0;
 }
@@ -2848,3 +2934,37 @@ foreach_backend (BACKEND_ITERATOR itr, void *data)
   bitr.data = data;
   return foreach_service (itr_service_backends, &bitr);
 }
+
+BACKEND_LIST *
+backend_meta_list_get (BACKEND_META_LIST *ml, int weight)
+{
+  BACKEND_LIST *bl, *new_list;
+  DLIST_FOREACH (bl, ml, link)
+    {
+      if (weight == bl->weight)
+	return bl;
+      if (weight < bl->weight)
+	break;
+    }
+
+  if ((new_list = calloc (1, sizeof (*bl))) == NULL)
+    return NULL;
+  new_list->weight = weight;
+  DLIST_INIT (&new_list->backends);
+  
+  if (bl)
+    DLIST_INSERT_BEFORE (ml, bl, new_list, link);
+  else
+    DLIST_INSERT_TAIL (ml, new_list, link);
+
+  return new_list;
+}
+
+void
+backend_meta_list_remove (BACKEND_META_LIST *ml, BACKEND_LIST *bl)
+{
+  DLIST_REMOVE (ml, bl, link);
+}
+
+
+  
