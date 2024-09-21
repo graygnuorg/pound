@@ -3976,11 +3976,12 @@ The metrics output is discussed in @ref{Metric Families}.
 
 @deffn {Service directive} Emergency ... End
 Defines an @dfn{emergency backend}, which will be used only if all
-other backends become unavailable.  The following directives are
-available for use within the @code{Emergency} section: @code{Address},
-@code{Port}, @code{TimeOut}, @code{WSTimeOut}, @code{ConnTO},
-@code{HTTPS}, @code{Cert}, @code{Ciphers}, @code{Disable},
-@code{ServerName},  These are discussed in @ref{Backend}.
+other backends become unavailable.  @xref{Backend}, for a discussion
+of directives that can be used within @code{Emergency} section.
+
+If multiple @code{Emergency} sections are defined, an emergency
+backend to use will be selected using the usual balancing technique
+(@pxref{Balancer}).
 @end deffn
 
 @node Session

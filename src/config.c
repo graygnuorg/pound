@@ -2364,61 +2364,6 @@ static PARSER_TABLE use_backend_parsetab[] = {
   { NULL }
 };
 
-static PARSER_TABLE emergency_parsetab[] = {
-  {
-    .name = "End",
-    .parser = parse_end
-  },
-  {
-    .name = "Address",
-    .parser = assign_address_string,
-    .off = offsetof (BACKEND, v.mtx.hostname)
-  },
-  {
-    .name = "Port",
-    .parser = assign_port_int,
-    .off = offsetof (BACKEND, v.mtx.port)
-  },
-  {
-    .name = "TimeOut",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.to)
-  },
-  {
-    .name = "WSTimeOut",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.ws_to)
-  },
-  {
-    .name = "ConnTO",
-    .parser = assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.conn_to)
-  },
-  {
-    .name = "HTTPS",
-    .parser = backend_parse_https
-  },
-  {
-    .name = "Cert",
-    .parser = backend_parse_cert
-  },
-  {
-    .name = "Ciphers",
-    .parser = backend_assign_ciphers
-  },
-  {
-    .name = "Disable",
-    .parser = disable_proto,
-    .off = offsetof (BACKEND, v.mtx.ctx)
-  },
-  {
-    .name = "ServerName",
-    .parser = assign_string,
-    .off = offsetof (BACKEND, v.mtx.servername)
-  },
-  { NULL }
-};
-
 static int
 check_addrinfo (struct addrinfo const *addr, struct locus_range const *range, char const *name)
 {
@@ -2549,7 +2494,7 @@ parse_emergency (void *call_data, void *section_data)
   dfl.be_connto = 120;
   dfl.ws_to = 120;
 
-  be = parse_backend_internal (emergency_parsetab, &dfl, NULL);
+  be = parse_backend_internal (backend_parsetab, &dfl, NULL);
   if (!be)
     return PARSER_FAIL;
 

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-09-12
+Pound -- history of user-visible changes. 2024-09-21
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -26,6 +26,15 @@ statement with one of the following values:
             balancing between created backends.  Each backend will be
 	    assigned the same priority.
 
+  srv       Obtain SRV records for the host name and use them to
+            generate regular backends.  Each record produces new
+	    dynamic backend of "Resolve all" type, which creates
+	    regular backends as described above.  The weight field
+	    of the SRV record is mapped to the priority field of each
+	    generated backend.  The SRV priority field determines
+	    the balancing group (see below) where the backend will
+	    be hosted.
+  
 By default, both IPv4 and IPv6 addresses are looked for.  You can
 select the specific address family using the "Family" statement.  Its
 allowed values are:
@@ -111,6 +120,31 @@ will contain the following line in the "Built-in defaults" section:
 
   Dynamic backends:           enabled
 
+* Backend groups
+
+Backend groups are a new pound feature, that extends the idea of
+regular and emergency backends used in previous versions.  Any number
+of backend groups can be associated with a service.  Each group
+is assigned an integer number (weight).  The groups are ordered by
+weight (in ascending order) and are tried in that order when looking
+for a backend to serve the request.  The look up starts with the first
+group.  The balancing algorithm configured for the service is applied.
+If no backend can be selected, next group will be tried, and so on.
+
+In the static configuration, regular backends are hosted in backend
+group of weight 0 and emergency (high availability) backends are
+stored in group of weight 65535.  One consequence of this is that
+any number of Emergency backend declarations are now allowed in
+a service.  More backend groups can be allocated when using dynamic
+backends of "srv" resolve type (see above).
+
+* Emergency backends
+
+Any number of emergency backends can be defined.  Usual request
+balancing algorightm applies when selecting an emergency backend.
+
+All statements valid within a "Backend" section are also valid within
+an emergency backend declaration.
 
 Version 4.13, 2024-08-24
 

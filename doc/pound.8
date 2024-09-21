@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 18, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "September 21, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1667,9 +1667,8 @@ Directives enclosed between
 and the following
 .B End
 directives define an emergency backend server (see below for
-details). You may define only one emergency server per service, which
-.B pound
-will attempt to use if all backends are down.
+details). You may define any number of emergency servers.  A backend
+will be selected from emergency backends if all regular backends are down.
 .TP
 .B Metrics
 Special backend type that implements Openmetrics protocol output.  See
@@ -1970,37 +1969,11 @@ All configuration directives enclosed between
 .B Emergency
 and
 .B End
-are specific to a single service. The following directives are available:
-.TP
-\fBAddress\fR \fIaddress\fR
-The address that
-.B pound
-will connect to. This can be a numeric IP address, or a symbolic host name
-that must be resolvable at run-time. If the name cannot be resolved to a valid
-address,
-.B pound
-will assume that it represents the path for a Unix-domain socket. This is a
-.B mandatory
-parameter.
-.TP
-\fBPort\fR \fIport\fR
-The port number that
-.B pound
-will connect to. This is a
-.B mandatory
-parameter for non Unix-domain backends.
-.PP
-Additionally, the following directives are also supported:
-.BR TimeOut ,
-.BR WSTimeOut ,
-.BR ConnTO ,
-.BR HTTPS ,
-.BR Cert ,
-.BR Ciphers ,
-.BR Disable  .
-These have the same meaning as in the
-.B Backend
-section, which see.
+are specific to a single service.  For the list of directives allowed
+for use in
+.B Emergency
+sections, refer to the description of
+.BR Backend .
 .SH "Session"
 Defines how a service deals with possible HTTP sessions.  All configuration
 directives enclosed between
