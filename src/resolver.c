@@ -1280,7 +1280,6 @@ thr_backend_remover (void *arg)
   return NULL;
 }
 
-// FIXME: Move to pound.c?
 void
 backend_schedule_removal (BACKEND *be)
 {
@@ -1296,7 +1295,7 @@ backend_schedule_removal (BACKEND *be)
 void
 backend_ref (BACKEND *be)
 {
-  if (be->be_type == BE_REGULAR)
+  if (be && be->be_type == BE_REGULAR)
     {
       pthread_mutex_lock (&be->mut);
       be->refcount++;

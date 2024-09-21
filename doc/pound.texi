@@ -3810,7 +3810,7 @@ multiple backends.  @xref{Balancer}, for a detailed discussion.
 
 Allowed values for @var{n} depend on the balancing algorithm in use.
 For random balancing, allowed values are 0 to 9.  For @sc{iwrr},
-allowed values are between 0 and 100.
+allowed values are between 0 and 65535.
 @end deffn
 
 The following three directives set various timeout parameters for

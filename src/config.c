@@ -1407,9 +1407,14 @@ assign_int_range (int *dst, int min, int max)
   if ((rc = assign_int (&n, NULL)) != PARSER_OK)
     return rc;
 
-  if (!(min <= n && n <= max))
+  if ((min >= 0 && n < min) || (max > 0 && n > max))
     {
-      conf_error ("value out of allowed range (%d..%d)", min, max);
+      if (min < 0)
+	conf_error ("value out of allowed range (< %d)", min);
+      else if (max < 0)
+	conf_error ("value out of allowed range (> %d)", max);
+      else
+	conf_error ("value out of allowed range (%d..%d)", min, max);
       return PARSER_FAIL;
     }
   *dst = n;
@@ -2186,7 +2191,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
 static int
 backend_assign_priority (void *call_data, void *section_data)
 {
-  return assign_int_range (call_data, 0, 9);
+  return assign_int_range (call_data, 0, -1);
 }
 
 static int
@@ -4072,6 +4077,11 @@ find_service_ident (SERVICE_HEAD *svc_head, char const *name)
   return 0;
 }
 
+static int backend_pri_max[] = {
+  [BALANCER_RANDOM] = PRI_MAX_RANDOM,
+  [BALANCER_IWRR]   = PRI_MAX_IWRR
+};
+   
 static int
 parse_service (void *call_data, void *section_data)
 {
@@ -4131,15 +4141,32 @@ parse_service (void *call_data, void *section_data)
 			   - (((x)>>3)&0x11111111))
 #         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
 	  int n = 0;
-
+	  int pri_max = backend_pri_max[svc->balancer];
+	  
 	  DLIST_FOREACH (be, &svc->backends, link)
 	    {
 	      n++;
+	      if (be->priority > pri_max)
+		{
+		  conf_error_at_locus_range (&be->locus,
+					     "backend priority out of allowed"
+					     " range; reset to max. %d",
+					     pri_max);
+		  be->priority = pri_max;
+		}
 	      be_class |= BE_MASK (be->be_type);
 	      be->service = svc;
 	      if (!be->disabled)
 		{
-		  svc->tot_pri += be->priority;
+		  if (TOT_PRI_MAX - svc->tot_pri > be->priority)
+		    svc->tot_pri += be->priority;
+		  else
+		    {
+		      conf_error_at_locus_range (&be->locus,
+						 "this backend overflows the"
+						 " sum of priorities");
+		      return PARSER_FAIL;
+		    }
 		  if (svc->max_pri < be->priority)
 		    svc->max_pri = be->priority;
 		}

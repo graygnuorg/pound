@@ -878,7 +878,7 @@ get_backend (POUND_HTTP *phttp)
   
   if (!res)
     res = svc->emergency;
-
+  
   backend_ref (res);
   pthread_mutex_unlock (&svc->mut);
 
@@ -925,6 +925,16 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
   pthread_mutex_unlock (&svc->mut);
 }
 
+/*
+ * Recompute max. backend priority and sum of priorities for the service.
+ * If call-back function cb is supplied, call it for each backend.
+ *
+ * NOTICE:
+ *  1. The service should be locked prior to calling this function.
+ *  2. Sum of priorities of all the backends should not overflow the type
+ *     of svc->tot_pri.  For static backends, this is always true.  For
+ *     dynamic backends, this should be ensured when allocating them.
+ */
 void
 service_recompute_pri_unlocked (SERVICE *svc, void (*cb) (BACKEND *, void *),
 				void *data)
@@ -946,6 +956,13 @@ service_recompute_pri_unlocked (SERVICE *svc, void (*cb) (BACKEND *, void *),
     }
 }
 
+/*
+ * Recompute max. backend priority and sum of priorities for the service.
+ * If call-back function cb is supplied, call it for each backend.
+ *
+ * Locks the svc mutex prior to use.  See second notice to
+ * service_recompute_pri_unlocked.
+ */
 void
 service_recompute_pri (SERVICE *svc, void (*cb) (BACKEND *, void *),
 		       void *data)

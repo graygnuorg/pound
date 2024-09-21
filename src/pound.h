@@ -742,11 +742,16 @@ typedef enum
     BALANCER_IWRR,
   } BALANCER;
 
+#define PRI_MAX_RANDOM 9
+#define PRI_MAX_IWRR   65535
+
 enum
   {
     REWRITE_REQUEST,
     REWRITE_RESPONSE
   };
+
+#define TOT_PRI_MAX ULONG_MAX
 
 /* service definition */
 typedef struct _service
@@ -757,7 +762,7 @@ typedef struct _service
   REWRITE_RULE_HEAD rewrite[2];
   BACKEND_HEAD backends;
   BACKEND *emergency;
-  int tot_pri;			/* total priority for current back-ends */
+  unsigned long tot_pri;	/* total priority for current back-ends */
   int max_pri;                  /* maximum priority */
   BALANCER balancer;
   /* For IWRR balancer */
