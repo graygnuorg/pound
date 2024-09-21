@@ -702,6 +702,31 @@ dns_srv_lookup (char const *name, struct dns_response **presp)
   return rc;
 }
 
+static void
+get_negative_expire_time (struct timespec *ts, BACKEND *be)
+{
+  clock_gettime (CLOCK_REALTIME, ts);
+  ts->tv_sec += be->v.mtx.retry_interval
+		      ? be->v.mtx.retry_interval : conf.retry_interval;
+}
+
+static struct dns_response *
+dns_not_found_response_alloc (enum dns_resp_type type, BACKEND *be)
+{
+  struct dns_response *resp;
+
+  if ((resp = calloc (1, sizeof (*resp))) != NULL)
+    {
+      struct timespec ts;
+      
+      resp->type = type;
+      resp->count = 0;
+      get_negative_expire_time (&ts, be);
+      resp->expires = ts.tv_sec;
+    }
+  return resp;
+}
+
 void
 dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 {
@@ -741,17 +766,16 @@ backend_matrix_addr_init (BACKEND *be, int locked)
 
   switch (dns_addr_lookup (be->v.mtx.hostname, be->v.mtx.family, &resp))
     {
+    case dns_not_found:
+      resp = dns_not_found_response_alloc (dns_resp_addr, be);
+      /* fall through */
     case dns_success:
       service_matrix_addr_update_backends (be->service, be, resp, locked);
       dns_response_free (resp);
       break;
 
-    case dns_not_found:
     case dns_temp_failure:
-      clock_gettime (CLOCK_REALTIME, &ts);
-      ts.tv_sec += be->v.mtx.retry_interval
-		      ? be->v.mtx.retry_interval : conf.retry_interval;
-      ts.tv_nsec = 0;
+      get_negative_expire_time (&ts, be);
       job_enqueue (&ts, job_resolver, be);
       break;
 
@@ -771,17 +795,16 @@ backend_matrix_srv_init (BACKEND *be)
 
   switch (dns_srv_lookup (be->v.mtx.hostname, &resp))
     {
+    case dns_not_found:
+      resp = dns_not_found_response_alloc (dns_resp_srv, be);
+      /* fall through */
     case dns_success:
       service_matrix_srv_update_backends (be->service, be, resp);
       dns_response_free (resp);
       break;
 
-    case dns_not_found:
     case dns_temp_failure:
-      clock_gettime (CLOCK_REALTIME, &ts);
-      ts.tv_sec += be->v.mtx.retry_interval
-		      ? be->v.mtx.retry_interval : conf.retry_interval;
-      ts.tv_nsec = 0;
+      get_negative_expire_time (&ts, be);
       job_enqueue (&ts, job_resolver, be);
       break;
 
@@ -1135,6 +1158,12 @@ analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)
   struct srv_stat *grp;
   int prio = -1;
 
+  if (resp->count == 0)
+    {
+      *pstat = NULL;
+      return 0;
+    }
+  
   /* Count SRV groups. */
   for (i = 0; i < resp->count; i++)
     if (prio != resp->srv[i].priority)
@@ -1145,7 +1174,7 @@ analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)
 
   /* Allocate statistics array. */
   if ((grp = calloc (ngrp, sizeof (grp[0]))) == NULL)
-    return 0;
+    return -1;
 
   /* Fill it in. */
   j = 0;
@@ -1191,7 +1220,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
   struct srv_stat *stat;
   
   nstat = analyze_srv_response (resp, &stat);
-  if (nstat == 0)
+  if (nstat < 0)
     return; //FIXME
 
   pthread_mutex_lock (&svc->mut);
