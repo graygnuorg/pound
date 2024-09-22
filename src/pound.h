@@ -485,6 +485,8 @@ enum backend_resolve_mode
     bres_srv
   };
 
+char const *resolve_mode_str (int mode);
+
 typedef struct backend_table *BACKEND_TABLE;
 
 struct be_matrix

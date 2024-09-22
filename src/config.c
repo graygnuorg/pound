@@ -2244,17 +2244,26 @@ disable_proto (void *call_data, void *section_data)
   return PARSER_OK;
 }
 
+static struct kwtab resolve_mode_kwtab[] = {
+  { "immediate", bres_immediate },
+  { "first", bres_first },
+  { "all", bres_all },
+  { "srv", bres_srv },
+  { NULL }
+};
+
+char const *
+resolve_mode_str (int mode)
+{
+  char const *ret = kw_to_str (resolve_mode_kwtab, mode);
+  return ret ? ret : "UNKNOWN";
+}
+
 static int
 assign_resolve_mode (void *call_data, void *section_data)
 {
-  static struct kwtab kwtab[] = {
-    { "immediate", bres_immediate },
-    { "first", bres_first },
-    { "all", bres_all },
-    { "srv", bres_srv },
-    { NULL }
-  };
-  int res = assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,
+  int res = assign_int_enum (call_data, gettkn_expect (T_IDENT),
+			     resolve_mode_kwtab,
 			     "backend resolve mode");
 #ifndef ENABLE_DYNAMIC_BACKENDS
   if (res != bres_immediate)

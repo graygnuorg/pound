@@ -2047,7 +2047,7 @@ backend_serialize (BACKEND *be)
 		    err = json_object_set (obj, "hostname",
 					   json_new_string (be->v.mtx.hostname))
 		      || json_object_set (obj, "resolve_mode",
-					  json_new_integer (be->v.mtx.resolve_mode))
+					  json_new_string (resolve_mode_str (be->v.mtx.resolve_mode)))
 		      || json_object_set (obj, "family",
 					  json_new_integer (be->v.mtx.family))
 		      || json_object_set (obj, "servername",
