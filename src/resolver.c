@@ -1098,8 +1098,8 @@ service_matrix_addr_update_backends (SERVICE *svc,
 
       /* Remove all unreferenced backends. */
       backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
-      service_recompute_pri_unlocked (svc, NULL, NULL);
-
+      backend_list_recompute_pri_unlocked (be_list, NULL, NULL);
+					   
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
@@ -1322,8 +1322,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 			     mtx->v.mtx.betab);
 
       /* Recompute service priorities. */
-      DLIST_FOREACH (be_list, &svc->backends, link)
-	backend_list_recompute_pri_unlocked (be_list, NULL, NULL);
+      service_recompute_pri_unlocked (svc, NULL, NULL);
 
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
