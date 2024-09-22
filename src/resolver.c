@@ -1088,7 +1088,8 @@ service_matrix_addr_update_backends (SERVICE *svc,
 	      be->disabled = mtx->disabled;
 	      pthread_mutex_init (&be->mut, NULL);
 	      be->refcount = 1;
-
+	      be->v.reg.master = mtx;
+	      
 	      /* Add it to the list of service backends and to the hash
 		 table. */
 	      backend_list_add (be_list, be);
@@ -1216,7 +1217,6 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 {
   int i;
   int nstat;
-  BACKEND_LIST *be_list;
   struct srv_stat *stat;
   
   nstat = analyze_srv_response (resp, &stat);
@@ -1238,8 +1238,6 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
       for (i = 0; i < nstat; i++)
 	{
 	  int j;
-
-	  be_list = backend_meta_list_get (&svc->backends, stat[i].priority);
 
 	  for (j = 0; j < stat[i].count; j++)
 	    {
@@ -1299,6 +1297,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		  be->v.mtx.servername = mtx->v.mtx.servername;
 		  be->v.mtx.betab = backend_table_new ();
 		  be->v.mtx.weight = srv->priority;
+		  be->v.mtx.master = mtx;
 		  
 		  /*
 		   * Trigger regular backend creation.
@@ -1355,6 +1354,8 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
       backend_table_foreach (be->v.mtx.betab, backend_mark, &mark);
       /* Unreference all backends. */
       backend_table_foreach (be->v.mtx.betab, backend_sweep, be->v.mtx.betab);
+      /* Cancel pending job. */
+      job_cancel (be->v.mtx.jid);
       /* Mark matrix as disabled. */
       be->disabled = 1;
       service_recompute_pri_unlocked (be->service, NULL, NULL);

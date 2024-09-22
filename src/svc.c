@@ -163,6 +163,25 @@ job_remove (JOB_ID jid)
     }
 }
 
+int
+job_get_timestamp (JOB_ID jid, struct timespec *ts)
+{
+  int rc = 1;
+  JOB *job;
+  pthread_mutex_lock (job_mutex ());
+  DLIST_FOREACH (job, &job_head, link)
+    {
+      if (job->id == jid)
+	{
+	  *ts = job->ts;
+	  rc = 0;
+	  break;
+	}
+    }
+  pthread_mutex_unlock (job_mutex ());
+  return rc;
+}
+
 void
 job_cancel (JOB_ID id)
 {
@@ -1922,6 +1941,77 @@ backend_stats_serialize (BACKEND *be)
   return obj;
 }
 
+/*
+ * Find index of the backend in the list.
+ * FIXME: Grossly ineffective.  Think how to cache this info.
+ */
+static int
+find_backend_index (BACKEND *be)
+{
+  int i = 0;
+  BACKEND_LIST *be_list;
+  DLIST_FOREACH (be_list, &be->service->backends, link)
+    {
+      BACKEND *b;
+      DLIST_FOREACH (b, &be_list->backends, link)
+	{
+	  if (b == be)
+	    return i;
+	  i++;
+	}
+    }
+  return -1;
+}
+
+/*
+ * Add information about dynamic backend generation:
+ *  If be is a matrix backend, its expiration time is stored in
+ *  attribute "expire".
+ *  If it is a regular dynamically created backend, the index of
+ *  the matrix backend that created it is stored in attribute
+ *  "master".
+ *  For any other backend types, do nothing.
+ */
+static int
+backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
+{
+  BACKEND *up = be, *master;
+  int err = 0;
+
+  while (up)
+    {
+      master = up;
+      switch (up->be_type)
+	{
+	case BE_MATRIX:
+	  up = up->v.mtx.master;
+	  break;
+
+	case BE_REGULAR:
+	  up = up->v.reg.master;
+	  break;
+
+	default:
+	  return 0;
+	}
+    }
+  if (master == NULL)
+    return 0;
+  if (master != be)
+    {
+      err = json_object_set (obj, "master",
+			     json_new_number (find_backend_index (master)));
+    }
+  else if (err == 0 && be->be_type == BE_MATRIX)
+    {
+      struct timespec ts;
+      
+      if (job_get_timestamp (master->v.mtx.jid, &ts) == 0)
+	err = json_object_set (obj, "expire", timespec_serialize (&ts));
+    }
+  return err;
+}
+
 static struct json_value *
 backend_serialize (BACKEND *be)
 {
@@ -1963,7 +2053,8 @@ backend_serialize (BACKEND *be)
 		      || json_object_set (obj, "servername",
 					  be->v.reg.servername
 					  ? json_new_string (be->v.reg.servername)
-					  : json_new_null ());
+					  : json_new_null ())
+		      || backend_serialize_dyninfo (obj, be);
 		    break;
 
 		  case BE_REGULAR:
@@ -1975,7 +2066,8 @@ backend_serialize (BACKEND *be)
 		      || json_object_set (obj, "servername",
 					  be->v.reg.servername
 					  ? json_new_string (be->v.reg.servername)
-					  : json_new_null ());
+					  : json_new_null ())
+		      || backend_serialize_dyninfo (obj, be);
 		    break;
 
 		  case BE_REDIRECT:

@@ -440,6 +440,7 @@ typedef unsigned long JOB_ID;
 
 JOB_ID job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
 void job_cancel (JOB_ID id);
+int job_get_timestamp (JOB_ID jid, struct timespec *ts);
 
 /* matcher chain */
 typedef struct _matcher
@@ -499,12 +500,15 @@ struct be_matrix
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
+  
   BACKEND_TABLE betab;  /* Table of regular backends generated from this
 			   matrix. */
   JOB_ID jid;           /* ID of the periodic job scheduled to update this
 			   matrix. */
   int weight;           /* Weight of the backend list where to allocate
 			   regular backends. */
+  struct _backend *master;  /* Points to matrix backend, if this backend was
+			       dynamically generated. */
 };
 
 struct be_regular
@@ -516,6 +520,9 @@ struct be_regular
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
+
+  struct _backend *master; /* Points to matrix backend, if this backend was
+			      dynamically generated. */
 };
 
 struct be_redirect
@@ -546,9 +553,13 @@ typedef struct _backend
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
-  int mark;
   DLIST_ENTRY (_backend) link;
 
+  /* Auxiliary fields. */
+  int mark;                     /* If set, this backend is a candidate for
+				   deletion. */
+
+  
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
   unsigned long refcount;       /* reference counter */
