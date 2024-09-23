@@ -244,8 +244,6 @@ static int gen_service_info (EXPOSITION *exp, struct metric *metric,
 			     METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_service_enabled (EXPOSITION *exp, struct metric *metric,
 				METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_service_pri (EXPOSITION *exp, struct metric *metric,
-			    METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_backend_state (EXPOSITION *exp, struct metric *metric,
 			      METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_backend_requests (EXPOSITION *exp, struct metric *metric,
@@ -283,11 +281,6 @@ static struct metric_family service_metric_families[] = {
     NULL,
     "State of a particular service.",
     gen_service_enabled },
-  { "pound_service_pri",
-    "gauge",
-    NULL,
-    "Service priority value.",
-    gen_service_pri },
   { "pound_backends",
     "gauge",
     NULL,
@@ -675,24 +668,6 @@ gen_service_enabled (EXPOSITION *exp, struct metric *metric,
   if ((samp = metric_add_sample (metric, pfx)) == NULL)
     return -1;
   samp->number = jv->v.b;
-  return 0;
-}
-
-static int
-gen_service_pri (EXPOSITION *exp, struct metric *metric,
-		 METRIC_LABELS *pfx, struct json_value *obj)
-{
-  struct metric_sample *samp;
-  struct json_value *jv;
-
-  if (json_object_get_type (obj, "tot_pri", json_integer, &jv))
-    return -1;
-  if ((samp = metric_add_sample (metric, pfx)) == NULL)
-    return -1;
-  if (metric_labels_add (&samp->labels, "entity", "total"))
-    return -1;
-  samp->number = jv->v.n;
-
   return 0;
 }
 

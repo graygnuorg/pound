@@ -991,6 +991,9 @@ backend_sweep (BACKEND *be, void *data)
 	default:
 	  abort ();
 	}
+
+      service_lb_reset (be->service, be);
+      
       /*
        * Remove backend from the hash table, but don't schedule removal from
        * the list unless its decremented refcount is 0.  If not (that means

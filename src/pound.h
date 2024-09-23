@@ -1286,6 +1286,7 @@ int http_request_get_basic_auth (struct http_request *req,
 				 char **u_name, char **u_pass);
 
 void service_lb_init (SERVICE *svc);
+void service_lb_reset (SERVICE *svc, BACKEND *be);
 
 FILE *fopen_wd (WORKDIR *wd, const char *filename);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,

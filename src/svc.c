@@ -637,11 +637,25 @@ rand_backend (BACKEND_LIST *blist)
   return be;
 }
 
+static inline void
+iwrr_init (BACKEND_LIST *blist)
+{
+  blist->iwrr_round = 0;
+  blist->iwrr_cur = DLIST_FIRST (&blist->backends);
+}
+
 static BACKEND *
 iwrr_select (BACKEND_LIST *blist)
 {
   BACKEND *be = NULL;
 
+  if (blist->iwrr_cur == NULL)
+    {
+      iwrr_init (blist);
+      if (blist->iwrr_cur == NULL)
+	return NULL;
+    }
+  
   do
     {
       if (!blist->iwrr_cur->disabled && backend_is_alive (blist->iwrr_cur))
@@ -695,8 +709,7 @@ backend_list_lb_init (BALANCER balancer, BACKEND_LIST *blist)
       break;
 
     case BALANCER_IWRR:
-      blist->iwrr_round = 0;
-      blist->iwrr_cur = DLIST_FIRST (&blist->backends);
+      iwrr_init (blist);
       break;
     }
 }
@@ -721,6 +734,23 @@ service_lb_init (SERVICE *svc)
   DLIST_FOREACH (blist, &svc->backends, link)
     {
       backend_list_lb_init (svc->balancer, blist);
+    }
+}
+
+void
+service_lb_reset (SERVICE *svc, BACKEND *be)
+{
+  if (svc->balancer == BALANCER_IWRR)
+    {
+      BACKEND_LIST *blist;
+      DLIST_FOREACH (blist, &svc->backends, link)
+	{
+	  if (blist->iwrr_cur == be)
+	    {
+	      backend_list_lb_init (svc->balancer, blist);
+	      break;
+	    }
+	}
     }
 }
 
