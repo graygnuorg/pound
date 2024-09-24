@@ -618,16 +618,16 @@ random_in_range (unsigned long max)
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (BALANCER *blist)
+rand_backend (BALANCER *balancer)
 {
   BACKEND *be;
   int pri;
 
-  if (DLIST_EMPTY (&blist->backends))
+  if (DLIST_EMPTY (&balancer->backends))
     return NULL;
   
-  pri = random_in_range (blist->tot_pri);
-  DLIST_FOREACH (be, &blist->backends, link)
+  pri = random_in_range (balancer->tot_pri);
+  DLIST_FOREACH (be, &balancer->backends, link)
     {
       if (!backend_is_alive (be) || be->disabled)
 	continue;
@@ -638,35 +638,37 @@ rand_backend (BALANCER *blist)
 }
 
 static inline void
-iwrr_init (BALANCER *blist)
+iwrr_init (BALANCER *balancer)
 {
-  blist->iwrr_round = 0;
-  blist->iwrr_cur = DLIST_FIRST (&blist->backends);
+  balancer->iwrr_round = 0;
+  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
 }
 
 static BACKEND *
-iwrr_select (BALANCER *blist)
+iwrr_select (BALANCER *balancer)
 {
   BACKEND *be = NULL;
 
-  if (blist->iwrr_cur == NULL)
+  if (balancer->iwrr_cur == NULL)
     {
-      iwrr_init (blist);
-      if (blist->iwrr_cur == NULL)
+      iwrr_init (balancer);
+      if (balancer->iwrr_cur == NULL)
 	return NULL;
     }
   
   do
     {
-      if (!blist->iwrr_cur->disabled && backend_is_alive (blist->iwrr_cur))
+      if (!balancer->iwrr_cur->disabled &&
+	  backend_is_alive (balancer->iwrr_cur))
 	{
-	  if (blist->iwrr_round <= blist->iwrr_cur->priority)
-	    be = blist->iwrr_cur;
+	  if (balancer->iwrr_round <= balancer->iwrr_cur->priority)
+	    be = balancer->iwrr_cur;
 	}
-      if ((blist->iwrr_cur = DLIST_NEXT (blist->iwrr_cur, link)) == NULL)
+      if ((balancer->iwrr_cur = DLIST_NEXT (balancer->iwrr_cur, link)) == NULL)
 	{
-	  blist->iwrr_cur = DLIST_FIRST (&blist->backends);
-	  blist->iwrr_round = (blist->iwrr_round + 1) % (blist->max_pri + 1);
+	  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
+	  balancer->iwrr_round = (balancer->iwrr_round + 1) %
+	                            (balancer->max_pri + 1);
 	}
     }
   while (be == NULL);
@@ -674,42 +676,42 @@ iwrr_select (BALANCER *blist)
 }
 
 static BACKEND *
-balancer_lb_select (BALANCER_ALGO balancer, BALANCER *blist)
+balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
 {
   BACKEND *be;
 
-  if (blist->max_pri == 0)
+  if (balancer->max_pri == 0)
     return NULL;
-  if (DLIST_NEXT (DLIST_FIRST (&blist->backends), link) == NULL)
+  if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
-      be = DLIST_FIRST (&blist->backends);
+      be = DLIST_FIRST (&balancer->backends);
       if (!be->disabled && backend_is_alive (be))
 	return be;
       return NULL;
     }
 
-  switch (balancer)
+  switch (algo)
     {
     case BALANCER_ALGO_RANDOM:
-      be = rand_backend (blist);
+      be = rand_backend (balancer);
       break;
 
     case BALANCER_ALGO_IWRR:
-      be = iwrr_select (blist);
+      be = iwrr_select (balancer);
     }
   return be;
 }
 
 void
-balancer_lb_init (BALANCER_ALGO balancer, BALANCER *blist)
+balancer_init (BALANCER_ALGO algo, BALANCER *balancer)
 {
-  switch (balancer)
+  switch (algo)
     {
     case BALANCER_ALGO_RANDOM:
       break;
 
     case BALANCER_ALGO_IWRR:
-      iwrr_init (blist);
+      iwrr_init (balancer);
       break;
     }
 }
@@ -717,10 +719,10 @@ balancer_lb_init (BALANCER_ALGO balancer, BALANCER *blist)
 BACKEND *
 service_lb_select_backend (SERVICE *svc)
 {
-  BALANCER *blist;
-  DLIST_FOREACH (blist, &svc->backends, link)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
     {
-      BACKEND *be = balancer_lb_select (svc->balancer_algo, blist);
+      BACKEND *be = balancer_select_backend (svc->balancer_algo, balancer);
       if (be)
 	return be;
     }
@@ -730,10 +732,10 @@ service_lb_select_backend (SERVICE *svc)
 void
 service_lb_init (SERVICE *svc)
 {
-  BALANCER *blist;
-  DLIST_FOREACH (blist, &svc->backends, link)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
     {
-      balancer_lb_init (svc->balancer_algo, blist);
+      balancer_init (svc->balancer_algo, balancer);
     }
 }
 
@@ -742,12 +744,12 @@ service_lb_reset (SERVICE *svc, BACKEND *be)
 {
   if (svc->balancer_algo == BALANCER_ALGO_IWRR)
     {
-      BALANCER *blist;
-      DLIST_FOREACH (blist, &svc->backends, link)
+      BALANCER *balancer;
+      DLIST_FOREACH (balancer, &svc->backends, link)
 	{
-	  if (blist->iwrr_cur == be)
+	  if (balancer->iwrr_cur == be)
 	    {
-	      balancer_lb_init (svc->balancer_algo, blist);
+	      balancer_init (svc->balancer_algo, balancer);
 	      break;
 	    }
 	}
@@ -1802,12 +1804,12 @@ static int
 session_backend_index (SESSION *sess)
 {
   int n = 0;
-  BALANCER *blist;
+  BALANCER *balancer;
 
-  DLIST_FOREACH (blist, &sess->backend->service->backends, link)
+  DLIST_FOREACH (balancer, &sess->backend->service->backends, link)
     {
       BACKEND *be;
-      DLIST_FOREACH (be, &blist->backends, link)
+      DLIST_FOREACH (be, &balancer->backends, link)
 	{
 	  if (be == sess->backend)
 	    break;
