@@ -125,57 +125,6 @@ dns_state_key_create (void)
   pthread_key_create (&dns_state_key, dns_state_free);
 }
 
-static char *
-slurp_file (char const *filename)
-{
-  struct stat st;
-  char *buf;
-  int fd;
-  int pos;
-  int err;
-
-  if (stat (filename, &st))
-    return NULL;
-
-  if (st.st_size > ((size_t)~0))
-    {
-      errno = E2BIG;
-      return NULL;
-    }
-
-  if ((buf = calloc (1, st.st_size + 1)) == NULL)
-    return NULL;
-
-  err = 0;
-  if ((fd = open (filename, O_RDONLY)) == -1)
-    {
-      err = errno;
-    }
-  else
-    {
-      for (pos = 0; pos < st.st_size; )
-	{
-	  int n = read (fd, buf + pos, st.st_size - pos);
-	  if (n == 0)
-	    break;
-	  if (n == -1)
-	    {
-	      err = errno;
-	      break;
-	    }
-	  pos += n;
-	}
-      close (fd);
-    }
-  if (err)
-    {
-      free (buf);
-      buf = NULL;
-      errno = err;
-    }
-  return buf;
-}
-
 static struct thread_dns_state *
 dns_state_create (void)
 {
@@ -188,24 +137,12 @@ dns_state_create (void)
   else
     {
       int rc;
-      char *conftext = NULL;
 
       if (conf.debug)
 	flags |= adns_if_debug;
       stringbuf_init_log (&ds->sb);
-      if (conf.config_file)
-	{
-	  conftext = slurp_file (conf.config_file);
-	  if (conftext == NULL)
-	    {
-	      logmsg (LOG_ERR, "%s: %s",
-		      conf.config_file,
-		      (errno == E2BIG) ? "file too big" : strerror (errno));
-	    }
-	}
-      rc = adns_init_logfn (&ds->state, flags, conftext,
+      rc = adns_init_logfn (&ds->state, flags, conf.config_text,
 			    dns_log_cb, &ds->sb);
-      free (conftext);
       if (rc)
 	{
 	  logmsg (LOG_ERR, "can't initialize DNS state: %s", strerror (rc));

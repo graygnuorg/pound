@@ -5790,6 +5790,133 @@ assign_regex_type (void *call_data, void *section_data)
 			  "regex type");
 }
 
+/*
+ * Read from the input all material up to "End" (case-insensitive) on a
+ * line by itself.  Leave the material in input->buf.  Return last character
+ * read.
+ */
+static int
+read_to_end (struct input *input)
+{
+  int c;
+  struct locus_range range;
+  
+  range.beg = input->locus;
+
+  stringbuf_reset (&input->buf);
+
+  /* Drain putback */
+  while (input->putback_index > 0)
+    {
+      struct token tkn = input->putback[--input->putback_index];
+      if (tkn.str != NULL)
+	{
+	  stringbuf_add_string (&input->buf, tkn.str);
+	  free (tkn.str);
+	}
+      if (input->putback_index > 0)
+	stringbuf_add_char (&input->buf, ' ');
+    }
+
+  for (;;)
+    {
+      c = input_getc (input);
+      if (c == EOF)
+	{
+	  range.end = input->locus;
+	  conf_error_at_locus_range (&range, "%s",
+				     "unexpected end of file");
+	  break;
+	}
+      if (c == '\n')
+	{
+	  char *start = stringbuf_value (&input->buf);
+	  char *end = start + stringbuf_len (&input->buf);
+	  char *line;
+	  size_t linelen, len;
+	  
+	  for (line = end - 1; line > start; line--)
+	    {
+	      if (*line == '\n')
+		{
+		  ++line;
+		  break;
+		}
+	    }
+
+	  len = linelen = end - line;
+	  while (len > 0 && isspace (*line))
+	    {
+	      line++;
+	      len--;
+	    }
+	  
+	  while (len > 0 && isspace (end[-1]))
+	    {
+	      end--;
+	      len--;
+	    }
+
+	  if (len == 3 && strncasecmp (line, "end", 3) == 0)
+	    {
+	      stringbuf_truncate (&input->buf, stringbuf_len (&input->buf) -
+				  linelen);
+	      break;
+	    }
+	}
+      stringbuf_add_char (&input->buf, c);
+    }
+  return c;
+}
+
+static int
+read_resolv_conf (void *call_data, void *section_data)
+{
+  char **pstr = call_data;
+
+  if (*pstr)
+    {
+      conf_error ("%s", "ConfigFile statement overrides prior ConfigText");
+      free (*pstr);
+      *pstr = NULL;
+    }
+  return assign_string_from_file (pstr, section_data);
+}
+  
+static int
+read_resolv_text (void *call_data, void *section_data)
+{
+  char **pstr = call_data;
+  struct token *tok;
+  int c;
+  
+  if (*pstr)
+    {
+      conf_error ("%s", "ConfigText statement overrides prior ConfigFile");
+      free (*pstr);
+      *pstr = NULL;
+    }
+  
+  if ((c = input_gettkn (cur_input, &tok)) == EOF)
+    {
+      conf_error_at_locus_point (&cur_input->locus, "%s",
+				 "unexpected end of file");
+      return PARSER_FAIL;
+    }
+  if (c != '\n')
+    {
+      conf_error_at_locus_point (&cur_input->locus,
+				 "expected newline, but found %s",
+				 token_type_str (tok->type));
+      return PARSER_FAIL;
+    }
+      
+  if (read_to_end (cur_input) == EOF)
+    return PARSER_FAIL;
+  *pstr = xstrdup (stringbuf_finish (&cur_input->buf));
+  return PARSER_OK_NONL;
+}
+
 static PARSER_TABLE resolver_parsetab[] = {
   {
     .name = "End",
@@ -5797,9 +5924,12 @@ static PARSER_TABLE resolver_parsetab[] = {
   },
   {
     .name = "ConfigFile",
-    .parser = assign_string,
-    .off = offsetof (struct resolver_config, config_file)
+    .parser = read_resolv_conf,
   },
+  {
+    .name = "ConfigText",
+    .parser = read_resolv_text,
+  },    
   {
     .name = "Debug",
     .parser = assign_bool,
@@ -5826,7 +5956,10 @@ parse_resolver (void *call_data, void *section_data)
   int rc = parser_loop (resolver_parsetab, &dfl->resolver, dfl, &range);
 #ifndef ENABLE_DYNAMIC_BACKENDS
   if (rc == PARSER_OK)
-    conf_error_at_locus_range (&range, "%s", "section ignored: pound compiled without support for dynamic backends");
+    conf_error_at_locus_range (&range, "%s",
+			       "section ignored: "
+			       "pound compiled without support "
+			       "for dynamic backends");
 #endif
   return rc;
 }

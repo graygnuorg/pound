@@ -17,7 +17,7 @@
  */
 struct resolver_config
 {
-  char *config_file;
+  char *config_text;
   int debug;
   unsigned max_cname_chain;
   unsigned retry_interval;

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-09-21
+Pound -- history of user-visible changes. 2024-09-24
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -77,7 +77,16 @@ performed.  It can contain the following directives:
 		      most cases.
 
   ConfigFile          (string) Name of the resolver configuration file.
-                      Default is "/etc/resolv.conf"
+                      Default is "/etc/resolv.conf".
+
+  ConfigText
+    ...
+  End                 The material within this section is read
+                      verbatim and used as the content of the resolver
+		      configuration file.
+
+                      If both ConfigFile and ConfigText are used, the
+		      last statement used wins.
 
   Debug               (boolean) Whether to enable DNS debugging info.
 
