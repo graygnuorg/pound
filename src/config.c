@@ -1227,7 +1227,7 @@ typedef struct
   unsigned ignore_case;
   int re_type;
   int header_options;
-  BALANCER balancer;
+  BALANCER_ALGO balancer_algo;
   NAMED_BACKEND_TABLE named_backend_table;
   struct resolver_config resolver;
 } POUND_DEFAULTS;
@@ -2431,7 +2431,7 @@ parse_backend_internal (PARSER_TABLE *table, POUND_DEFAULTS *dfl,
 static int
 parse_backend (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
   struct locus_point beg = last_token_locus_range ()->beg;
@@ -2464,7 +2464,7 @@ parse_backend (void *call_data, void *section_data)
 	return PARSER_FAIL;
     }
 
-  backend_list_add (backend_meta_list_get_normal (bml), be);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -2472,7 +2472,7 @@ parse_backend (void *call_data, void *section_data)
 static int
 parse_use_backend (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
 
@@ -2487,7 +2487,7 @@ parse_use_backend (void *call_data, void *section_data)
   be->priority = 5;
   pthread_mutex_init (&be->mut, NULL);
 
-  backend_list_add (backend_meta_list_get_normal (bml), be);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -2495,7 +2495,7 @@ parse_use_backend (void *call_data, void *section_data)
 static int
 parse_emergency (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   BACKEND *be;
   POUND_DEFAULTS dfl = *(POUND_DEFAULTS*)section_data;
 
@@ -2507,7 +2507,7 @@ parse_emergency (void *call_data, void *section_data)
   if (!be)
     return PARSER_FAIL;
 
-  backend_list_add (backend_meta_list_get_emerg (bml), be);
+  balancer_add_backend (balancer_list_get_emerg (bml), be);
 
   return PARSER_OK;
 }
@@ -2515,14 +2515,14 @@ parse_emergency (void *call_data, void *section_data)
 static int
 parse_metrics (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   BACKEND *be;
 
   XZALLOC (be);
   be->be_type = BE_METRICS;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
-  backend_list_add (backend_meta_list_get_normal (bml), be);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
   return PARSER_OK;
 }
 
@@ -3025,7 +3025,7 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   struct token *tok;
   int code = 302;
   BACKEND *be;
@@ -3086,7 +3086,7 @@ parse_redirect_backend (void *call_data, void *section_data)
     /* the path is a single '/', so remove it */
     be->v.redirect.url[matches[3].rm_so] = '\0';
 
-  backend_list_add (backend_meta_list_get_normal (bml), be);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return PARSER_OK;
 }
@@ -3094,7 +3094,7 @@ parse_redirect_backend (void *call_data, void *section_data)
 static int
 parse_error_backend (void *call_data, void *section_data)
 {
-  BACKEND_META_LIST *bml = call_data;
+  BALANCER_LIST *bml = call_data;
   struct token *tok;
   int n, status;
   char *text = NULL;
@@ -3143,7 +3143,7 @@ parse_error_backend (void *call_data, void *section_data)
   be->v.error.status = status;
   be->v.error.text = text;
 
-  backend_list_add (backend_meta_list_get_normal (bml), be);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return rc;
 }
@@ -3823,15 +3823,15 @@ parse_header_remove (void *call_data, void *section_data)
 static int
 parse_balancer (void *call_data, void *section_data)
 {
-  BALANCER *t = call_data;
+  BALANCER_ALGO *t = call_data;
   struct token *tok;
 
   if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
     return PARSER_FAIL;
   if (strcasecmp (tok->str, "random") == 0)
-    *t = BALANCER_RANDOM;
+    *t = BALANCER_ALGO_RANDOM;
   else if (strcasecmp (tok->str, "iwrr") == 0)
-    *t = BALANCER_IWRR;
+    *t = BALANCER_ALGO_IWRR;
   else
     {
       conf_error ("unsupported balancing strategy: %s", tok->str);
@@ -3990,7 +3990,7 @@ static PARSER_TABLE service_parsetab[] = {
   {
     .name = "Balancer",
     .parser = parse_balancer,
-    .off = offsetof (SERVICE, balancer)
+    .off = offsetof (SERVICE, balancer_algo)
   },
   {
     .name = "ForwardedHeader",
@@ -4032,8 +4032,8 @@ find_service_ident (SERVICE_HEAD *svc_head, char const *name)
 }
 
 static int backend_pri_max[] = {
-  [BALANCER_RANDOM] = PRI_MAX_RANDOM,
-  [BALANCER_IWRR]   = PRI_MAX_IWRR
+  [BALANCER_ALGO_RANDOM] = PRI_MAX_RANDOM,
+  [BALANCER_ALGO_IWRR]   = PRI_MAX_IWRR
 };
    
 static int
@@ -4051,7 +4051,7 @@ parse_service (void *call_data, void *section_data)
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, NULL);
-  svc->balancer = dfl->balancer;
+  svc->balancer_algo = dfl->balancer_algo;
 
   tok = gettkn_any ();
 
@@ -4080,7 +4080,7 @@ parse_service (void *call_data, void *section_data)
     return PARSER_FAIL;
   else
     {
-      BACKEND_LIST *be_list;
+      BALANCER *be_list;
       unsigned be_count = 0;
       
       DLIST_FOREACH (be_list, &svc->backends, link)
@@ -4093,7 +4093,7 @@ parse_service (void *call_data, void *section_data)
 			   - (((x)>>3)&0x11111111))
 #         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
 	  int n = 0;
-	  int pri_max = backend_pri_max[svc->balancer];
+	  int pri_max = backend_pri_max[svc->balancer_algo];
 
 	  be_list->tot_pri = 0;
 	  be_list->max_pri = 0;
@@ -4233,7 +4233,7 @@ parse_acme (void *call_data, void *section_data)
   be->v.acme.wd = fd;
 
   /* Register backend in service */
-  backend_list_add (backend_meta_list_get_normal (&svc->backends), be);
+  balancer_add_backend (balancer_list_get_normal (&svc->backends), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
 
   /* Register service in the listener */
@@ -5679,7 +5679,7 @@ parse_control (void *call_data, void *section_data)
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
-  backend_list_add (backend_meta_list_get_normal (&svc->backends), be);
+  balancer_add_backend (balancer_list_get_normal (&svc->backends), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
   
   return PARSER_OK;
@@ -5932,7 +5932,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   {
     .name = "Balancer",
     .parser = parse_balancer,
-    .off = offsetof (POUND_DEFAULTS, balancer)
+    .off = offsetof (POUND_DEFAULTS, balancer_algo)
   },
   {
     .name = "HeaderOption",
@@ -6353,7 +6353,7 @@ parse_config_file (char const *file, int nosyslog)
     .ignore_case = 0,
     .re_type = GENPAT_POSIX,
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
-    .balancer = BALANCER_RANDOM,
+    .balancer_algo = BALANCER_ALGO_RANDOM,
     .resolver = RESOLVER_CONFIG_INITIALIZER
   };
 

@@ -992,6 +992,7 @@ backend_sweep (BACKEND *be, void *data)
 	  abort ();
 	}
 
+      /* If a load balancer stored this backend as current, reset it. */
       service_lb_reset (be->service, be);
       
       /*
@@ -1021,8 +1022,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
   int mark = 1;
   size_t n;
   struct timespec ts;
-  BACKEND_LIST *be_list = backend_meta_list_get (&svc->backends,
-						 mtx->v.mtx.weight);
+  BALANCER *balancer = balancer_list_get (&svc->backends, mtx->v.mtx.weight);
 
   if (!locked)
     {
@@ -1091,18 +1091,18 @@ service_matrix_addr_update_backends (SERVICE *svc,
 	      be->disabled = mtx->disabled;
 	      pthread_mutex_init (&be->mut, NULL);
 	      be->refcount = 1;
-	      be->v.reg.master = mtx;
+	      be->v.reg.parent = mtx;
 	      
 	      /* Add it to the list of service backends and to the hash
 		 table. */
-	      backend_list_add (be_list, be);
+	      balancer_add_backend (balancer, be);
 	      backend_table_insert (mtx->v.mtx.betab, be);
 	    }
 	}
 
       /* Remove all unreferenced backends. */
       backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
-      backend_list_recompute_pri_unlocked (be_list, NULL, NULL);
+      balancer_recompute_pri_unlocked (balancer, NULL, NULL);
 					   
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
@@ -1121,13 +1121,13 @@ compute_priority (SERVICE *svc, struct dns_srv *srv, int total_weight)
 {
   int result;
 
-  switch (svc->balancer)
+  switch (svc->balancer_algo)
     {
-    case BALANCER_RANDOM:
+    case BALANCER_ALGO_RANDOM:
       result = srv->weight * 9 / total_weight;
       break;
 
-    case BALANCER_IWRR:
+    case BALANCER_ALGO_IWRR:
       result = srv->weight;
       break;
 
@@ -1300,7 +1300,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		  be->v.mtx.servername = mtx->v.mtx.servername;
 		  be->v.mtx.betab = backend_table_new ();
 		  be->v.mtx.weight = srv->priority;
-		  be->v.mtx.master = mtx;
+		  be->v.mtx.parent = mtx;
 		  
 		  /*
 		   * Trigger regular backend creation.
@@ -1375,13 +1375,13 @@ thr_backend_remover (void *arg)
     {
     case BE_REGULAR:
       {
-	BACKEND_LIST *be_list = be->be_list;
+	BALANCER *balancer = be->balancer;
 	service_session_remove_by_backend (be->service, be);
-	backend_list_remove (be->be_list, be);
-	if (DLIST_EMPTY (&be_list->backends))
+	balancer_remove_backend (be->balancer, be);
+	if (DLIST_EMPTY (&balancer->backends))
 	  {
-	    DLIST_REMOVE (&be->service->backends, be_list, link);
-	    free (be_list);
+	    DLIST_REMOVE (&be->service->backends, balancer, link);
+	    free (balancer);
 	  }
 	free (be->v.reg.addr.ai_addr);
       }

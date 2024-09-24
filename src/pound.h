@@ -509,7 +509,7 @@ struct be_matrix
 			   matrix. */
   int weight;           /* Weight of the backend list where to allocate
 			   regular backends. */
-  struct _backend *master;  /* Points to matrix backend, if this backend was
+  struct _backend *parent;  /* Points to matrix backend, if this backend was
 			       dynamically generated. */
 };
 
@@ -523,7 +523,7 @@ struct be_regular
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
 
-  struct _backend *master; /* Points to matrix backend, if this backend was
+  struct _backend *parent; /* Points to matrix backend, if this backend was
 			      dynamically generated. */
 };
 
@@ -549,7 +549,7 @@ struct be_error
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
-  struct backend_list *be_list; /* Back pointer to the owning backend list. */
+  struct balancer *balancer;    /* Back pointer to the owning backend list. */
   struct locus_range locus;     /* Location in the config file */
   char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
@@ -754,9 +754,9 @@ typedef struct rewrite_rule
 
 typedef enum
   {
-    BALANCER_RANDOM,
-    BALANCER_IWRR,
-  } BALANCER;
+    BALANCER_ALGO_RANDOM,
+    BALANCER_ALGO_IWRR,
+  } BALANCER_ALGO;
 
 #define PRI_MAX_RANDOM 9
 #define PRI_MAX_IWRR   65535
@@ -769,7 +769,7 @@ enum
 
 #define TOT_PRI_MAX ULONG_MAX
 
-typedef struct backend_list
+typedef struct balancer
 {
   int weight;
   unsigned long tot_pri;	/* total priority of active backends */
@@ -778,10 +778,10 @@ typedef struct backend_list
   int iwrr_round;
   BACKEND *iwrr_cur;
   BACKEND_HEAD backends;
-  DLIST_ENTRY (backend_list) link;
-} BACKEND_LIST;
+  DLIST_ENTRY (balancer) link;
+} BALANCER;
 
-typedef DLIST_HEAD (,backend_list) BACKEND_META_LIST;
+typedef DLIST_HEAD (,balancer) BALANCER_LIST;
 
 /* service definition */
 typedef struct _service
@@ -790,8 +790,8 @@ typedef struct _service
   char *locus_str;              /* Location in the config file, as string. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
-  BACKEND_META_LIST backends;
-  BALANCER balancer;
+  BALANCER_LIST backends;
+  BALANCER_ALGO balancer_algo;
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
   unsigned sess_ttl;		/* session time-to-live */
@@ -1045,43 +1045,43 @@ void kill_be (SERVICE *, BACKEND *, const int);
 
 void service_session_remove_by_backend (SERVICE *svc, BACKEND *be);
 void service_recompute_pri (SERVICE *svc,
-			    BACKEND_LIST *bl,
+			    BALANCER *bl,
 			    void (*cb) (BACKEND *, void *),
 			    void *data);
 void service_recompute_pri_unlocked (SERVICE *svc,
 				     void (*cb) (BACKEND *, void *),
 				     void *data);
-void backend_list_recompute_pri_unlocked (BACKEND_LIST *bl,
+void balancer_recompute_pri_unlocked (BALANCER *bl,
 					  void (*cb) (BACKEND *, void *),
 					  void *data);
 
-static inline void backend_list_add (BACKEND_LIST *bl, BACKEND *be)
+static inline void balancer_add_backend (BALANCER *bl, BACKEND *be)
 {
-  be->be_list = bl;
+  be->balancer = bl;
   DLIST_INSERT_TAIL (&bl->backends, be, link);
 }
 
-static inline void backend_list_remove (BACKEND_LIST *bl, BACKEND *be)
+static inline void balancer_remove_backend (BALANCER *bl, BACKEND *be)
 {
-  be->be_list = NULL;
+  be->balancer = NULL;
   DLIST_REMOVE (&bl->backends, be, link);
 }
 
-BACKEND_LIST *backend_meta_list_alloc (BACKEND_META_LIST *ml);
-BACKEND_LIST *backend_meta_list_get (BACKEND_META_LIST *ml, int n);
+BALANCER *balancer_list_alloc (BALANCER_LIST *ml);
+BALANCER *balancer_list_get (BALANCER_LIST *ml, int n);
 
-#define BACKEND_LIST_WEIGTH_MAX  65535
+#define BALANCER_WEIGTH_MAX  65535
 
-static inline BACKEND_LIST *
-backend_meta_list_get_normal (BACKEND_META_LIST *ml)
+static inline BALANCER *
+balancer_list_get_normal (BALANCER_LIST *ml)
 {
-  return backend_meta_list_get (ml, 0);
+  return balancer_list_get (ml, 0);
 }
 
-static inline BACKEND_LIST *
-backend_meta_list_get_emerg (BACKEND_META_LIST *ml)
+static inline BALANCER *
+balancer_list_get_emerg (BALANCER_LIST *ml)
 {
-  return backend_meta_list_get (ml, BACKEND_LIST_WEIGTH_MAX);
+  return balancer_list_get (ml, BALANCER_WEIGTH_MAX);
 }
 
 /*

@@ -65,7 +65,7 @@ Listeners:
       {{printf "%3d" $bno}}. {{block "default.print_backend" $backend -}}
        {{.type}}
        {{- if exists . "weight" }} ({{.weight}}){{end}}
-       {{- if exists . "master"}} [mtx {{.master}}]{{end}} {{if eq .type "backend" -}}
+       {{- if exists . "parent"}} [mtx {{.parent}}]{{end}} {{if eq .type "backend" -}}
 {{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
      {{- else if eq .type "matrix" -}}
 "{{.hostname}}" {{.resolve_mode}} {{.family}} {{.priority}}

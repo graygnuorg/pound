@@ -618,7 +618,7 @@ random_in_range (unsigned long max)
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (BACKEND_LIST *blist)
+rand_backend (BALANCER *blist)
 {
   BACKEND *be;
   int pri;
@@ -638,14 +638,14 @@ rand_backend (BACKEND_LIST *blist)
 }
 
 static inline void
-iwrr_init (BACKEND_LIST *blist)
+iwrr_init (BALANCER *blist)
 {
   blist->iwrr_round = 0;
   blist->iwrr_cur = DLIST_FIRST (&blist->backends);
 }
 
 static BACKEND *
-iwrr_select (BACKEND_LIST *blist)
+iwrr_select (BALANCER *blist)
 {
   BACKEND *be = NULL;
 
@@ -674,7 +674,7 @@ iwrr_select (BACKEND_LIST *blist)
 }
 
 static BACKEND *
-backend_list_lb_select (BALANCER balancer, BACKEND_LIST *blist)
+balancer_lb_select (BALANCER_ALGO balancer, BALANCER *blist)
 {
   BACKEND *be;
 
@@ -690,25 +690,25 @@ backend_list_lb_select (BALANCER balancer, BACKEND_LIST *blist)
 
   switch (balancer)
     {
-    case BALANCER_RANDOM:
+    case BALANCER_ALGO_RANDOM:
       be = rand_backend (blist);
       break;
 
-    case BALANCER_IWRR:
+    case BALANCER_ALGO_IWRR:
       be = iwrr_select (blist);
     }
   return be;
 }
 
 void
-backend_list_lb_init (BALANCER balancer, BACKEND_LIST *blist)
+balancer_lb_init (BALANCER_ALGO balancer, BALANCER *blist)
 {
   switch (balancer)
     {
-    case BALANCER_RANDOM:
+    case BALANCER_ALGO_RANDOM:
       break;
 
-    case BALANCER_IWRR:
+    case BALANCER_ALGO_IWRR:
       iwrr_init (blist);
       break;
     }
@@ -717,10 +717,10 @@ backend_list_lb_init (BALANCER balancer, BACKEND_LIST *blist)
 BACKEND *
 service_lb_select_backend (SERVICE *svc)
 {
-  BACKEND_LIST *blist;
+  BALANCER *blist;
   DLIST_FOREACH (blist, &svc->backends, link)
     {
-      BACKEND *be = backend_list_lb_select (svc->balancer, blist);
+      BACKEND *be = balancer_lb_select (svc->balancer_algo, blist);
       if (be)
 	return be;
     }
@@ -730,24 +730,24 @@ service_lb_select_backend (SERVICE *svc)
 void
 service_lb_init (SERVICE *svc)
 {
-  BACKEND_LIST *blist;
+  BALANCER *blist;
   DLIST_FOREACH (blist, &svc->backends, link)
     {
-      backend_list_lb_init (svc->balancer, blist);
+      balancer_lb_init (svc->balancer_algo, blist);
     }
 }
 
 void
 service_lb_reset (SERVICE *svc, BACKEND *be)
 {
-  if (svc->balancer == BALANCER_IWRR)
+  if (svc->balancer_algo == BALANCER_ALGO_IWRR)
     {
-      BACKEND_LIST *blist;
+      BALANCER *blist;
       DLIST_FOREACH (blist, &svc->backends, link)
 	{
 	  if (blist->iwrr_cur == be)
 	    {
-	      backend_list_lb_init (svc->balancer, blist);
+	      balancer_lb_init (svc->balancer_algo, blist);
 	      break;
 	    }
 	}
@@ -897,7 +897,7 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
 static int
 service_has_backends (SERVICE *svc)
 {
-  BACKEND_LIST *bl;
+  BALANCER *bl;
   DLIST_FOREACH (bl, &svc->backends, link)
     {
       if (bl->tot_pri > 0)
@@ -1023,7 +1023,7 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
  *     dynamic backends, this should be ensured when allocating them.
  */
 void
-backend_list_recompute_pri_unlocked (BACKEND_LIST *bl,
+balancer_recompute_pri_unlocked (BALANCER *bl,
 				     void (*cb) (BACKEND *, void *),
 				     void *data)
 {
@@ -1049,10 +1049,10 @@ service_recompute_pri_unlocked (SERVICE *svc,
 				void (*cb) (BACKEND *, void *),
 				void *data)
 {
-  BACKEND_LIST *bl;
+  BALANCER *bl;
   DLIST_FOREACH (bl, &svc->backends, link)
     {
-      backend_list_recompute_pri_unlocked (bl, cb, data);
+      balancer_recompute_pri_unlocked (bl, cb, data);
     }
 }  
 
@@ -1064,21 +1064,21 @@ service_recompute_pri_unlocked (SERVICE *svc,
  * If bl == NULL, recompute all backend lists.
  *
  * Locks the svc mutex prior to use.  See second notice to
- * backend_list_recompute_pri_unlocked, above.
+ * balancer_recompute_pri_unlocked, above.
  */
 void
-service_recompute_pri (SERVICE *svc, BACKEND_LIST *bl,
+service_recompute_pri (SERVICE *svc, BALANCER *bl,
 		       void (*cb) (BACKEND *, void *),
 		       void *data)
 {
   pthread_mutex_lock (&svc->mut);
   if (bl)
-    backend_list_recompute_pri_unlocked (bl, cb, data);
+    balancer_recompute_pri_unlocked (bl, cb, data);
   else
     {
       DLIST_FOREACH (bl, &svc->backends, link)
 	{
-	  backend_list_recompute_pri_unlocked (bl, cb, data);
+	  balancer_recompute_pri_unlocked (bl, cb, data);
 	}
     }
   pthread_mutex_unlock (&svc->mut);
@@ -1160,8 +1160,8 @@ kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
       struct disable_closure clos;
       clos.be = be;
       clos.disable_mode = disable_mode;
-      assert (be->be_list != NULL);
-      service_recompute_pri (svc, be->be_list, cb_backend_disable, &clos);
+      assert (be->balancer != NULL);
+      service_recompute_pri (svc, be->balancer, cb_backend_disable, &clos);
     }
 }
 
@@ -1603,9 +1603,9 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 	  if (!be->disabled)
 	    {
 	      pthread_mutex_lock (&be->service->mut);
-	      be->be_list->tot_pri += be->priority;
-	      if (be->be_list->max_pri < be->priority)
-		be->be_list->max_pri = be->priority;
+	      be->balancer->tot_pri += be->priority;
+	      if (be->balancer->max_pri < be->priority)
+		be->balancer->max_pri = be->priority;
 	      pthread_mutex_unlock (&be->service->mut);
 	    }
 	}
@@ -1802,7 +1802,7 @@ static int
 session_backend_index (SESSION *sess)
 {
   int n = 0;
-  BACKEND_LIST *blist;
+  BALANCER *blist;
 
   DLIST_FOREACH (blist, &sess->backend->service->backends, link)
     {
@@ -1979,11 +1979,11 @@ static int
 find_backend_index (BACKEND *be)
 {
   int i = 0;
-  BACKEND_LIST *be_list;
-  DLIST_FOREACH (be_list, &be->service->backends, link)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &be->service->backends, link)
     {
       BACKEND *b;
-      DLIST_FOREACH (b, &be_list->backends, link)
+      DLIST_FOREACH (b, &balancer->backends, link)
 	{
 	  if (b == be)
 	    return i;
@@ -1999,44 +1999,44 @@ find_backend_index (BACKEND *be)
  *  attribute "expire".
  *  If it is a regular dynamically created backend, the index of
  *  the matrix backend that created it is stored in attribute
- *  "master".
+ *  "parent".
  *  For any other backend types, do nothing.
  */
 static int
 backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
 {
-  BACKEND *up = be, *master;
+  BACKEND *up = be, *parent;
   int err = 0;
 
   while (up)
     {
-      master = up;
+      parent = up;
       switch (up->be_type)
 	{
 	case BE_MATRIX:
-	  up = up->v.mtx.master;
+	  up = up->v.mtx.parent;
 	  break;
 
 	case BE_REGULAR:
-	  up = up->v.reg.master;
+	  up = up->v.reg.parent;
 	  break;
 
 	default:
 	  return 0;
 	}
     }
-  if (master == NULL)
+  if (parent == NULL)
     return 0;
-  if (master != be)
+  if (parent != be)
     {
-      err = json_object_set (obj, "master",
-			     json_new_number (find_backend_index (master)));
+      err = json_object_set (obj, "parent",
+			     json_new_number (find_backend_index (parent)));
     }
   else if (err == 0 && be->be_type == BE_MATRIX)
     {
       struct timespec ts;
       
-      if (job_get_timestamp (master->v.mtx.jid, &ts) == 0)
+      if (job_get_timestamp (parent->v.mtx.jid, &ts) == 0)
 	err = json_object_set (obj, "expire", timespec_serialize (&ts));
     }
   return err;
@@ -2067,9 +2067,9 @@ backend_serialize (BACKEND *be)
 	    }
 	  else
 	    {
-	      if (be->be_list) 
+	      if (be->balancer) 
 		err = json_object_set (obj, "weight",
-				       json_new_integer (be->be_list->weight));
+				       json_new_integer (be->balancer->weight));
 	      if (err == 0)
 		switch (be->be_type)
 		  {
@@ -2123,7 +2123,7 @@ backend_serialize (BACKEND *be)
 					  be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
 		    break;
 		  }
-	      if (enable_backend_stats)
+	      if (enable_backend_stats && be->be_type != BE_MATRIX)
 		err |= json_object_set (obj, "stats", backend_stats_serialize (be));
 	    }
 	}
@@ -2137,7 +2137,7 @@ backend_serialize (BACKEND *be)
 }
 
 static struct json_value *
-backends_serialize (BACKEND_META_LIST *meta)
+backends_serialize (BALANCER_LIST *meta)
 {
   struct json_value *obj;
 
@@ -2145,13 +2145,13 @@ backends_serialize (BACKEND_META_LIST *meta)
     obj = json_new_null ();
   else
     {
-      BACKEND_LIST *be_list;
+      BALANCER *balancer;
       obj = json_new_array ();
-      DLIST_FOREACH (be_list, meta, link)
+      DLIST_FOREACH (balancer, meta, link)
 	{
 	  BACKEND *be;
 
-	  DLIST_FOREACH (be, &be_list->backends, link)
+	  DLIST_FOREACH (be, &balancer->backends, link)
 	    {
 	      if (json_array_append (obj, backend_serialize (be)))
 		{
@@ -2526,11 +2526,11 @@ locate_backend (SERVICE *svc, IDENT id)
   if (id.type == IDTYPE_NUM)
     {
       long n = 0;
-      BACKEND_LIST *be_list;
-      DLIST_FOREACH (be_list, &svc->backends, link)
+      BALANCER *balancer;
+      DLIST_FOREACH (balancer, &svc->backends, link)
 	{
 	  BACKEND *be;
-	  DLIST_FOREACH (be, &be_list->backends, link)
+	  DLIST_FOREACH (be, &balancer->backends, link)
 	    {
 	      if (n == id.n)
 		return be;
@@ -2687,10 +2687,10 @@ listener_is_control (LISTENER *lstn)
 
       if (svc && SLIST_NEXT (svc, next) == NULL)
 	{
-	  BACKEND_LIST *be_list = DLIST_FIRST (&svc->backends);
-	  if (be_list && DLIST_NEXT (be_list, link) == NULL)
+	  BALANCER *balancer = DLIST_FIRST (&svc->backends);
+	  if (balancer && DLIST_NEXT (balancer, link) == NULL)
 	    {
-	      BACKEND *be = DLIST_FIRST (&be_list->backends);
+	      BACKEND *be = DLIST_FIRST (&balancer->backends);
 	      return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
 	    }
 	}
@@ -3033,11 +3033,11 @@ static int
 itr_service_backends (SERVICE *svc, void *data)
 {
   struct service_backends_iterator *itp = data;
-  BACKEND_LIST *be_list;
-  DLIST_FOREACH (be_list, &svc->backends, link)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
     {
       BACKEND *be;
-      DLIST_FOREACH (be, &be_list->backends, link)
+      DLIST_FOREACH (be, &balancer->backends, link)
 	{
 	  int rc;
 	  if ((rc = itp->itr (be, itp->data)) != 0)
@@ -3057,10 +3057,10 @@ foreach_backend (BACKEND_ITERATOR itr, void *data)
   return foreach_service (itr_service_backends, &bitr);
 }
 
-BACKEND_LIST *
-backend_meta_list_get (BACKEND_META_LIST *ml, int weight)
+BALANCER *
+balancer_list_get (BALANCER_LIST *ml, int weight)
 {
-  BACKEND_LIST *bl, *new_list;
+  BALANCER *bl, *new_list;
   DLIST_FOREACH (bl, ml, link)
     {
       if (weight == bl->weight)
@@ -3083,7 +3083,7 @@ backend_meta_list_get (BACKEND_META_LIST *ml, int weight)
 }
 
 void
-backend_meta_list_remove (BACKEND_META_LIST *ml, BACKEND_LIST *bl)
+balancer_list_remove (BALANCER_LIST *ml, BALANCER *bl)
 {
   DLIST_REMOVE (ml, bl, link);
 }
