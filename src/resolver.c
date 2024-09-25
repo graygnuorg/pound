@@ -1383,8 +1383,8 @@ thr_backend_remover (void *arg)
 	  pthread_mutex_unlock (&be->mut);
 	  if (refcount == 0)
 	    {
-	      backend_release (be);
 	      DLIST_REMOVE (&svc->be_rem_head, be, link);
+	      backend_release (be);
 	    }
 	}
 
