@@ -798,11 +798,20 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
   ACL *trusted_ips;             /* Trusted IP addresses */
   int log_suppress_mask;        /* Suppress HTTP logging for these status
 				   codes.  A bitmask. */
+
+  /* Backend removal */
+  BACKEND_HEAD be_rem_head;     /* List of backends scheduled for removal. */
+  pthread_cond_t be_rem_cond;   /* Condition through which the removal thread
+				   is notified that a backend from the list is
+				   ready for removal.
+				 */
+  
   SLIST_ENTRY (_service) next;
 } SERVICE;
 

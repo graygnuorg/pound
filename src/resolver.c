@@ -16,6 +16,7 @@
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
 #include "pound.h"
+#include "extern.h"
 #include <adns.h>
 #include <assert.h>
 #include "resolver.h"
@@ -588,8 +589,11 @@ dns_addr_lookup (char const *name, int family, struct dns_response **presp)
 	    resp->addr[i] = r4->addr[j];
 	  for (j = 0; j < r6->count; i++, j++)
 	    resp->addr[i] = r6->addr[j];
+
+	  *presp = resp;
 	}
-      *presp = resp;
+      else
+	rc = dns_failure;
 
       dns_response_free (r4);
       dns_response_free (r6);
@@ -693,6 +697,7 @@ static void service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 						struct dns_response *resp);
 static void job_resolver (enum job_ctl ctl, void *arg,
 			  const struct timespec *ts);
+static void start_backend_removal (SERVICE *svc);
 
 int
 backend_matrix_addr_init (BACKEND *be, int locked)
@@ -705,6 +710,11 @@ backend_matrix_addr_init (BACKEND *be, int locked)
     {
     case dns_not_found:
       resp = dns_not_found_response_alloc (dns_resp_addr, be);
+      if (!resp)
+	{
+	  rc = 1;
+	  break;
+	}
       /* fall through */
     case dns_success:
       service_matrix_addr_update_backends (be->service, be, resp, locked);
@@ -734,6 +744,11 @@ backend_matrix_srv_init (BACKEND *be)
     {
     case dns_not_found:
       resp = dns_not_found_response_alloc (dns_resp_srv, be);
+      if (!resp)
+	{
+	  rc = 1;
+	  break;
+	}
       /* fall through */
     case dns_success:
       service_matrix_srv_update_backends (be->service, be, resp);
@@ -903,14 +918,28 @@ backend_sweep (BACKEND *be, void *data)
   pthread_mutex_lock (&be->mut);
   if (be->mark)
     {
+      SERVICE *svc = be->service;
+      
       assert (be->refcount > 0);
       /* Mark backend as disabled so it won't get more requests. */
       be->disabled = 1;
       switch (be->be_type)
 	{
 	case BE_REGULAR:
-	  /* Remove any sessions associated with it. */
-	  service_session_remove_by_backend (be->service, be);
+	  {
+	    BALANCER *balancer;
+	    
+	    /* Remove any sessions associated with it. */
+	    service_session_remove_by_backend (svc, be);
+	    /* Remove it from the balancer. */
+	    balancer = be->balancer;
+	    balancer_remove_backend (balancer, be);
+	    if (DLIST_EMPTY (&balancer->backends))
+	      {
+		DLIST_REMOVE (&svc->backends, balancer, link);
+		free (balancer);
+	      }
+	  }
 	  break;
 
 	case BE_MATRIX:
@@ -930,20 +959,17 @@ backend_sweep (BACKEND *be, void *data)
 	}
 
       /* If a load balancer stored this backend as current, reset it. */
-      service_lb_reset (be->service, be);
+      service_lb_reset (svc, be);
       
       /*
-       * Remove backend from the hash table, but don't schedule removal from
-       * the list unless its decremented refcount is 0.  If not (that means
-       * the backend is in use by one or more sessions), removal will be
-       * scheduled later by backend_unref, when its refcount reaches zero.
+       * Remove backend from the hash table and decrement its refcount.
        */
       backend_table_delete (tab, be);
       be->refcount--;
-      if (be->refcount == 0)
-	{
-	  backend_schedule_removal (be);
-	}
+
+      /* Add it to the list of removed backends. */
+      DLIST_INSERT_TAIL (&svc->be_rem_head, be, link);
+      
       be->mark = 0;
     }
   pthread_mutex_unlock (&be->mut);
@@ -1040,7 +1066,10 @@ service_matrix_addr_update_backends (SERVICE *svc,
       /* Remove all unreferenced backends. */
       backend_table_foreach (mtx->v.mtx.betab, backend_sweep, mtx->v.mtx.betab);
       balancer_recompute_pri_unlocked (balancer, NULL, NULL);
-					   
+
+      if (!DLIST_EMPTY (&svc->be_rem_head))
+	start_backend_removal (svc);
+      
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
@@ -1236,6 +1265,12 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		  be->v.mtx.ctx = mtx->v.mtx.ctx;
 		  be->v.mtx.servername = mtx->v.mtx.servername;
 		  be->v.mtx.betab = backend_table_new ();
+		  if (!be->v.mtx.betab)
+		    {
+		      lognomem ();
+		      free (be);
+		      break;
+		    }
 		  be->v.mtx.weight = srv->priority;
 		  be->v.mtx.parent = mtx;
 		  
@@ -1302,26 +1337,20 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
     }
 }
 
-void *
-thr_backend_remover (void *arg)
+static void
+backend_remover_cleanup (void *ptr)
 {
-  BACKEND *be = arg;
-  SERVICE *svc = be->service;
-  pthread_mutex_lock (&svc->mut);
+  SERVICE *svc = ptr;
+  pthread_mutex_unlock (&svc->mut);
+}
+
+static void
+backend_release (BACKEND *be)
+{
   switch (be->be_type)
     {
     case BE_REGULAR:
-      {
-	BALANCER *balancer = be->balancer;
-	service_session_remove_by_backend (be->service, be);
-	balancer_remove_backend (be->balancer, be);
-	if (DLIST_EMPTY (&balancer->backends))
-	  {
-	    DLIST_REMOVE (&be->service->backends, balancer, link);
-	    free (balancer);
-	  }
-	free (be->v.reg.addr.ai_addr);
-      }
+      free (be->v.reg.addr.ai_addr);
       break;
 
     case BE_MATRIX:
@@ -1334,20 +1363,45 @@ thr_backend_remover (void *arg)
     }
   pthread_mutex_destroy (&be->mut);
   free (be);
-  pthread_mutex_unlock (&svc->mut);
+}
+
+static void *
+thr_backend_remover (void *arg)
+{
+  SERVICE *svc = arg;
+  pthread_mutex_lock (&svc->mut);
+  pthread_cleanup_push (backend_remover_cleanup, svc);
+  for (;;)
+    {
+      BACKEND *be, *tmp;
+
+      DLIST_FOREACH_SAFE (be, tmp, &svc->be_rem_head, link)
+	{
+	  int refcount;
+	  pthread_mutex_lock (&be->mut);
+	  refcount = be->refcount;
+	  pthread_mutex_unlock (&be->mut);
+	  if (refcount == 0)
+	    {
+	      backend_release (be);
+	      DLIST_REMOVE (&svc->be_rem_head, be, link);
+	    }
+	}
+
+      if (DLIST_EMPTY (&svc->be_rem_head))
+	break;
+
+      pthread_cond_wait (&svc->be_rem_cond, &svc->mut);
+    }
+  pthread_cleanup_pop (1);
   return NULL;
 }
 
-void
-backend_schedule_removal (BACKEND *be)
+static void
+start_backend_removal (SERVICE *svc)
 {
-  pthread_attr_t attr;
   pthread_t tid;
-
-  pthread_attr_init (&attr);
-  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-  pthread_create (&tid, &attr, thr_backend_remover, be);
-  pthread_attr_destroy (&attr);
+  pthread_create (&tid, &thread_attr_detached, thr_backend_remover, svc);
 }
 
 void
@@ -1370,7 +1424,7 @@ backend_unref (BACKEND *be)
       assert (be->refcount > 0);
       be->refcount--;
       if (be->refcount == 0)
-	backend_schedule_removal (be);
+	pthread_cond_signal (&be->service->be_rem_cond);
       pthread_mutex_unlock (&be->mut);
     }
 }

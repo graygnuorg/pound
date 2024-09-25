@@ -58,11 +58,7 @@ static pthread_mutex_t _job_mutex = PTHREAD_MUTEX_INITIALIZER;
 static void
 job_mutex_init (void)
 {
-  pthread_mutexattr_t attr;
-  pthread_mutexattr_init (&attr);
-  pthread_mutexattr_settype (&attr, PTHREAD_MUTEX_RECURSIVE);
-  pthread_mutex_init (&_job_mutex, &attr);
-  pthread_mutexattr_destroy (&attr);
+  pthread_mutex_init (&_job_mutex, &mutex_attr_recursive);
 }
 
 static pthread_mutex_t *

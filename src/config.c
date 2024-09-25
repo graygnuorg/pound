@@ -4031,6 +4031,26 @@ find_service_ident (SERVICE_HEAD *svc_head, char const *name)
   return 0;
 }
 
+static SERVICE *
+new_service (BALANCER_ALGO algo)
+{
+  SERVICE *svc;
+
+  XZALLOC (svc);
+
+  service_cond_init (&svc->cond, COND_BOOL);
+  DLIST_INIT (&svc->backends);
+
+  svc->sess_type = SESS_NONE;
+  pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
+  svc->balancer_algo = algo;
+
+  DLIST_INIT (&svc->be_rem_head);
+  pthread_cond_init (&svc->be_rem_cond, NULL);
+  
+  return svc;
+}
+
 static int backend_pri_max[] = {
   [BALANCER_ALGO_RANDOM] = PRI_MAX_RANDOM,
   [BALANCER_ALGO_IWRR]   = PRI_MAX_IWRR
@@ -4045,14 +4065,8 @@ parse_service (void *call_data, void *section_data)
   SERVICE *svc;
   struct locus_range range;
 
-  XZALLOC (svc);
-  service_cond_init (&svc->cond, COND_BOOL);
-  DLIST_INIT (&svc->backends);
-
-  svc->sess_type = SESS_NONE;
-  pthread_mutex_init (&svc->mut, NULL);
-  svc->balancer_algo = dfl->balancer_algo;
-
+  svc = new_service (dfl->balancer_algo);
+  
   tok = gettkn_any ();
 
   if (!tok)
@@ -4204,10 +4218,9 @@ parse_acme (void *call_data, void *section_data)
       return PARSER_FAIL;
     }
 
-  /* Create service */
-  XZALLOC (svc);
-  service_cond_init (&svc->cond, COND_BOOL);
-  DLIST_INIT (&svc->backends);
+  /* Create service; there'll be only one backend so the balancing algorithm
+     doesn't really matter. */
+  svc = new_service (BALANCER_ALGO_RANDOM);
 
   /* Create a URL matcher */
   cond = service_cond_append (&svc->cond, COND_URL);
@@ -4217,9 +4230,6 @@ parse_acme (void *call_data, void *section_data)
       conf_regcomp_error (rc, cond->re, NULL);
       return PARSER_FAIL;
     }
-
-  svc->sess_type = SESS_NONE;
-  pthread_mutex_init (&svc->mut, NULL);
 
   range.end = last_token_locus_range ()->beg;
   svc->locus_str = format_locus_str (&range);
@@ -5661,12 +5671,10 @@ parse_control (void *call_data, void *section_data)
   /* Register listener in the global listener list */
   SLIST_PUSH (&listeners, lst, next);
 
-  /* Create service */
-  XZALLOC (svc);
+  /* Create service; there'll be only one backend so the balancing algorithm
+     doesn't really matter. */
+  svc = new_service (BALANCER_ALGO_RANDOM);
   lst->locus_str = format_locus_str (&range);
-  DLIST_INIT (&svc->backends);
-  svc->sess_type = SESS_NONE;
-  pthread_mutex_init (&svc->mut, NULL);
 
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);

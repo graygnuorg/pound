@@ -53,6 +53,10 @@ ACL *trusted_ips;               /* Trusted IP addresses */
 char *syslog_tag;               /* Tag to mark syslog messages with.
 				   If NULL, progname will be used. */
 
+pthread_mutexattr_t mutex_attr_recursive;
+pthread_attr_t thread_attr_detached;
+static pthread_attr_t thread_attr_worker;
+
 #ifndef  SOL_TCP
 /* for systems without the definition */
 int SOL_TCP;
@@ -209,7 +213,6 @@ static unsigned active_threads; /* Number of threads currently active,
 				   i.e processing requests. */
 
 static unsigned worker_count = 0;
-static pthread_attr_t attr;
 
 unsigned worker_min_count = DEFAULT_WORKER_MIN;
 unsigned worker_max_count = DEFAULT_WORKER_MAX;
@@ -249,7 +252,7 @@ worker_start (void)
   pthread_t thr;
   int rc;
 
-  if ((rc = pthread_create (&thr, &attr, thr_http, NULL)) != 0)
+  if ((rc = pthread_create (&thr, &thread_attr_worker, thr_http, NULL)) != 0)
     abend ("can't create worker thread: %s", strerror (rc));
   worker_count++;
 }
@@ -709,15 +712,9 @@ server (void)
   pthread_sigmask (SIG_BLOCK, &sigs, NULL);
 
   /* thread stuff */
-  pthread_attr_init (&attr);
-  pthread_attr_setdetachstate (&attr, PTHREAD_CREATE_DETACHED);
-
-  /* set new stack size  */
-  if (pthread_attr_setstacksize (&attr, 1 << 18))
-    abend ("can't set stack size");
 
   /* start timer */
-  if (pthread_create (&thr, &attr, thr_timer, NULL))
+  if (pthread_create (&thr, &thread_attr_detached, thr_timer, NULL))
     abend ("can't create timer thread: %s", strerror (errno));
 
   /*
@@ -1009,6 +1006,19 @@ main (const int argc, char **argv)
   SOL_TCP = pe->p_proto;
 #endif
 
+  pthread_mutexattr_init (&mutex_attr_recursive);
+  pthread_mutexattr_settype (&mutex_attr_recursive, PTHREAD_MUTEX_RECURSIVE);
+
+  pthread_attr_init (&thread_attr_detached);
+  pthread_attr_setdetachstate (&thread_attr_detached, PTHREAD_CREATE_DETACHED);
+
+  pthread_attr_init (&thread_attr_worker);
+  pthread_attr_setdetachstate (&thread_attr_worker, PTHREAD_CREATE_DETACHED);
+  /* set new stack size  */
+  if (pthread_attr_setstacksize (&thread_attr_worker, 1 << 18))
+    abend ("can't set stack size");
+
+  
   json_memabrt = lognomem;
 
   /* read config */
