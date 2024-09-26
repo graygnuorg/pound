@@ -1100,8 +1100,6 @@ compute_priority (SERVICE *svc, struct dns_srv *srv, int total_weight)
     default:
       abort ();
     }
-  if (result <= 0)
-    result = 1;
   return result;
 }
 

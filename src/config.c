@@ -2191,7 +2191,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
 static int
 backend_assign_priority (void *call_data, void *section_data)
 {
-  return assign_int_range (call_data, 1, -1);
+  return assign_int_range (call_data, 0, -1);
 }
 
 static int
