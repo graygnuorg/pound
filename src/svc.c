@@ -196,6 +196,15 @@ timer_cleanup (void *ptr)
   pthread_mutex_unlock (job_mutex ());
 }
 
+void *
+thr_job_runner (void *arg)
+{
+  JOB *job = arg;
+  job->func (job_ctl_run, job->data, &job->ts);
+  free (job);
+  return NULL;
+}
+
 /*
  * run periodic functions:
  */
@@ -238,15 +247,17 @@ thr_timer (void *arg)
 	  continue;
 	}
       else if (rc == ETIMEDOUT)
-	{
+	{	  
 	  if (job != DLIST_FIRST (&job_head))
 	    /* Job was removed or its time changed */
 	    continue;
-
-	  DLIST_SHIFT (&job_head, link);
-
-	  job->func (job_ctl_run, job->data, &job->ts);
-	  free (job);
+	  else
+	    {
+	      pthread_t tid;
+	      DLIST_SHIFT (&job_head, link);
+	      pthread_create (&tid, &thread_attr_detached, thr_job_runner,
+			      job);
+	    }
 	}
       else
 	abend ("unexpected error from pthread_cond_timedwait: %s",
@@ -317,8 +328,8 @@ expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
     }
 
   if (!DLIST_EMPTY (&tab->head))
-    job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire,
-			  expire_sessions, svc);
+    job_enqueue (&DLIST_FIRST (&tab->head)->expire,
+		 expire_sessions, svc);
   pthread_mutex_unlock (&svc->mut);
 }
 
@@ -1130,6 +1141,7 @@ cb_backend_disable (BACKEND *b, void *data)
 	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
 		  POUND_TID (), buf);
 	  service_session_remove_by_backend (b->service, b);
+	  backend_ref (b);
 	  job_enqueue_after (alive_to, touch_be, b);
 	  break;
 
@@ -1584,32 +1596,32 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
   BACKEND *be = data;
   char buf[MAXBUF];
 
-  if (ctl != job_ctl_run)
-    return;
-  
-  /* This function operates on regular backends only. */
-  if (be->be_type != BE_REGULAR)
-    return;
-
-  if (!be->v.reg.alive)
+  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && be->refcount > 1)
     {
-      if (backend_probe (be) == BACKEND_OK)
+      if (!be->v.reg.alive)
 	{
-	  be->v.reg.alive = 1;
-	  str_be (buf, sizeof (buf), be);
-	  logmsg (LOG_NOTICE, "Backend %s resurrected", buf);
-	  if (!be->disabled)
+	  if (backend_probe (be) == BACKEND_OK)
 	    {
-	      pthread_mutex_lock (&be->service->mut);
-	      be->balancer->tot_pri += be->priority;
-	      if (be->balancer->max_pri < be->priority)
-		be->balancer->max_pri = be->priority;
-	      pthread_mutex_unlock (&be->service->mut);
+	      be->v.reg.alive = 1;
+	      str_be (buf, sizeof (buf), be);
+	      logmsg (LOG_NOTICE, "Backend %s resurrected", buf);
+	      if (!be->disabled)
+		{
+		  pthread_mutex_lock (&be->service->mut);
+		  be->balancer->tot_pri += be->priority;
+		  if (be->balancer->max_pri < be->priority)
+		    be->balancer->max_pri = be->priority;
+		  pthread_mutex_unlock (&be->service->mut);
+		}
+	    }
+	  else
+	    {
+	      job_enqueue_after (alive_to, touch_be, be);
+	      return;
 	    }
 	}
-      else
-	job_enqueue_after_unlocked (alive_to, touch_be, be);
     }
+  backend_unref (be);
 }
 
 #if ! SET_DH_AUTO
@@ -1672,7 +1684,7 @@ do_RSAgen (enum job_ctl ctl, void *unused1, const struct timespec *unused2)
     return;
   
   /* Re-arm the job */
-  job_enqueue_after_unlocked (T_RSA_KEYS, do_RSAgen, NULL);
+  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 
   for (n = 0; n < N_RSA_KEYS; n++)
     {
@@ -2496,23 +2508,31 @@ locate_listener (IDENT id)
 static SERVICE *
 locate_service (LISTENER *lstn, IDENT id)
 {
-  SERVICE *svc = 0;
-
   if (id.type != IDTYPE_ERR)
     {
       int n = 0;
       SERVICE_HEAD *head = lstn ? &lstn->services : &services;
+      SERVICE *svc;
 
       SLIST_FOREACH (svc, head, next)
 	{
-	  if ((id.type == IDTYPE_NUM && n == id.n) ||
-	      (svc->name && strlen (svc->name) == id.s.len &&
-	       memcmp (svc->name, id.s.name, id.s.len) == 0))
-	    break;
+	  switch (id.type)
+	    {
+	    case IDTYPE_NUM:
+	      if (n == id.n)
+		return svc;
+	      break;
+
+	    case IDTYPE_STR:
+	      if (svc->name && strlen (svc->name) == id.s.len &&
+		  memcmp (svc->name, id.s.name, id.s.len) == 0)
+		return svc;
+	      break;
+	    }
 	  n++;
 	}
     }
-  return svc;
+  return NULL;
 }
 
 /*

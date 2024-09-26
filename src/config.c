@@ -1410,9 +1410,9 @@ assign_int_range (int *dst, int min, int max)
   if ((min >= 0 && n < min) || (max > 0 && n > max))
     {
       if (min < 0)
-	conf_error ("value out of allowed range (< %d)", min);
+	conf_error ("value out of allowed range (<= %d)", max);
       else if (max < 0)
-	conf_error ("value out of allowed range (> %d)", max);
+	conf_error ("value out of allowed range (>= %d)", min);
       else
 	conf_error ("value out of allowed range (%d..%d)", min, max);
       return PARSER_FAIL;
@@ -2191,7 +2191,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
 static int
 backend_assign_priority (void *call_data, void *section_data)
 {
-  return assign_int_range (call_data, 0, -1);
+  return assign_int_range (call_data, 1, -1);
 }
 
 static int
