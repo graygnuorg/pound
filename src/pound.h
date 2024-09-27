@@ -160,6 +160,8 @@ typedef long CONTENT_LENGTH;
 #define NO_CONTENT_LENGTH ((CONTENT_LENGTH) -1)
 
 int strtoclen (char const *arg, int base, CONTENT_LENGTH *retval, char **endptr);
+unsigned long strhash_ci (const char *c, size_t len);
+
 
 #ifndef DEFAULT_WORKER_MIN
 # define DEFAULT_WORKER_MIN 5

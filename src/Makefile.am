@@ -42,7 +42,7 @@ if COND_PCRE2
   pound_SOURCES += regex_pcre2.c
 endif
 if COND_RESOLVER
-  pound_SOURCES += resolver.c
+  pound_SOURCES += resolver.c dynbe.c
 endif
 
 noinst_LIBRARIES = libpound.a

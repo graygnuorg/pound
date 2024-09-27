@@ -68,6 +68,11 @@ struct dns_response
 };
 
 int dns_lookup (char const *name, int family, struct dns_response **presp);
+int dns_addr_lookup (char const *name, int family, struct dns_response **presp);
+int dns_srv_lookup (char const *name, struct dns_response **presp);
 void dns_response_free (struct dns_response *resp);
 void resolver_set_config (struct resolver_config *);
+void get_negative_expire_time (struct timespec *ts, BACKEND *be);
+
 int sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr);
+
