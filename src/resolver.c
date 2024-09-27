@@ -93,7 +93,8 @@ dns_log_cb (adns_state ads, void *logfndata, const char *fmt, va_list ap)
       while ((p = memchr (stringbuf_value (sb), '\n', stringbuf_len (sb))))
 	{
 	  *p++ = 0;
-	  logmsg (LOG_ERR, "%s", stringbuf_value (sb));
+	  logmsg (LOG_ERR, "(%"PRItid") %s", POUND_TID (),
+		  stringbuf_value (sb));
 	  stringbuf_consume (sb, p - stringbuf_value (sb));
 	}
     }

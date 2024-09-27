@@ -116,6 +116,19 @@ generic configure options, refer to [Autoconf documentation](https://www.gnu.org
 Apart from the generic ones, there are also several *pound-specific*
 configuration options:
 
+* `--enable-dynamic-backends` or `--disable-dynamic-backends`
+
+  Enable or disable support for DNS-based dynamic backends.  You will
+  need the [GNU adns](http://www.gnu.org/software/adns) library to be able
+  to use it.  On debian-based systems, it can be installed by
+
+     ```sh
+     apt-get install libadns1-dev
+     ```
+     
+  By default, dynamic backends are enabled whenever this library is
+  present.
+
 * `--enable-pcre` or `--disable-pcre`
 
   Enable or disable use of the `libpcre2` or `libpcre`
@@ -450,6 +463,42 @@ the configuration above:
 
 Notice double-slashes: a slash is an escape character and must be escaped
 if intended to be used literally.
+
+### Dynamic backends
+
+Dynamic backends are created and updated on the fly based on the
+information from DNS, such as `A` (`AAAA`) or `SRV` records.  The
+following dynamic backend types are defined:
+
+* `first`
+  Resolve the symbolic host name from the `Address` directive and use
+  first IP from the DNS response as the address of the created dynamic
+  backend.  Thus, at most one dynamic backend will be created.
+
+* `all`
+  Resolve the symbolic host name and create one backend for each address
+  from the DNS response.  This enables load balancing between created
+  backends.  Each backend will be assigned the same priority.
+
+* `srv`
+  Obtain SRV records for the host name and use them to generate dynamic
+  backends.  Each record produces new dynamic backend of `Resolve all`
+  type, which in turn creates regular backends as described above.  The
+  weight field of the SRV record is mapped to the priority field of each
+  generated backend.  The SRV priority field determines the balancer group
+  where the backend will be hosted.
+
+An example of a dynamic backend definition:
+
+```
+	Service
+		Backend
+			Address "_proxy._tcp.example.org"
+			Resolve srv
+			Family any
+		End
+	End
+```
 
 ### Sessions
 

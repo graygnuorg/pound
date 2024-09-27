@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-09-24
+Pound -- history of user-visible changes. 2024-09-27
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -12,7 +12,7 @@ Version 4.13.?? (git,resolver)
 * Dynamic backends
 
 Dynamic backends are created and updated on the fly based on the
-information from DNS.  To declare a backend as dynamic, use a
+information from DNS.  To declare backend as dynamic, use a
 symbolic host name in its "Address" statement and add the "Resolve"
 statement with one of the following values:
 

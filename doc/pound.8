@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 21, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "September 27, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -199,6 +199,27 @@ is the number of backends,
 and
 .B S(P)
 as discussed above.
+.PP
+Within each \fBService\fR, multiple backends are grouped in
+.IR "balancer groups" .
+Each such group is assigned a unique integer \fIpriority\fR, which
+defines the order in which the groups are tried.  When selecting a
+backend, a group with the numerically lesser priority is selected and
+a suitable backend is looked up among backends defined in the group,
+using one of the balancing strategies discussed above.  If no backend
+can be selected (e.g. all backends are unavailable), next group is
+tried.  The process continues until either a backend is chosen or
+the list of balancer groups is exhausted.
+.PP
+By default, backends declared using the \fBBackend\fR keyword are
+assigned to the balancer group 0.  These are backends used during
+normal operation.  Backends declared using the \fBEmergency\fR keyword
+are assigned to the balancer group 65535.  These backends form a pull
+of \fIhigh availability\fR backends, which will be tried only if all
+of the normal backends fail. 
+.PP
+More backend groups can be added using dynamic backends, discussed
+below.
 .SH WORKER MODEL
 Each incoming request is processed by a specific \fIworker\fR, i.e. a
 thread in the running program.  The number of running workers is
@@ -1887,6 +1908,51 @@ Start
 with this backend disabled (1) or enabled (0). If started as disabled, the
 backend can be later enabled with
 .BR poundctl (8).
+.SS Dynamic backends
+Dynamic backends are created and updated on the fly based on the
+information from DNS.  A backend is declared as dynamic by the
+.B Resolve
+statement.  Its value defines what type of DNS record is used to
+generate dynamic backends:
+.TP
+.B first
+Resolve the symbolic host name from the \fBAddress\fR directive and
+use first IP from the DNS response as the address of the created dynamic
+backend.  Thus, at most one dynamic backend will be produced.
+.TP
+.B all
+Resolve the symbolic host name from the \fBAddress\fR directive and
+create one backend for each address from the DNS response.  This
+enables load balancing between created backends.  Each backend will be 
+assigned the same priority.
+.TP
+.B srv
+Obtain SRV records for the host name and use them to generate
+backends.  Each record produces new dynamic backend of the
+.B Resolve all
+type, which produces regular backends as described above.  The weight field
+of the SRV record is mapped to the priority field of each generated
+backend.  The SRV priority field identifies the balancer group where
+the backend will be hosted.
+.PP
+The following directives further configure dynamic backends:
+.TP
+\fBFamily any \fR|\fB inet \fR|\fB inet6
+Selects the family of the addresses to look for:
+.RS
+.TP
+.B any
+Use all address families available.  This is the default.
+.TP
+.B inet
+Use only IPv4 addresses (\fBA\fR DNS RRs).
+.TP
+.B inet6
+Use only IPv6 addresses (\fBAAAA\fR DNS RRs).
+.RE
+.TP
+.BI RetryInterval " N"
+Retry failed DNS queries each \fIN\fR seconds.  Default is 600.
 .SS Global and per-service backends
 A
 .B Backend
@@ -1963,8 +2029,44 @@ it to this service.
 .PP
 The actual global definition may appear before as well as after
 service or services it is used in.
+.SH "Resolver"
+The \fBResolver\fR section controls DNS lookups for dynamic backend
+generation (see above).  It can contain the following directives:
+.TP
+.BI CNAMEChain " N"
+Maximum allowed length of a \fICNAME chain\fR.  CNAME chains are
+formed by DNS CNAME records pointing to another CNAME.  Although
+prohibited by the RFC, such usage does occur sometimes.  By default,
+.B pound
+does not accept CNAME chains.  If you work with nameserver that
+returns them, set this statement to a small integer value, defining
+maximum number of CNAMEs in the chain that can be accepted.  The value
+of 2 or 3 should suffice in most cases.
+.TP
+\fBConfigFile\fR "\fIFILE\fR"
+Read the resolver configuration from \fIFILE\fR, instead of the
+default \fB/etc/resolv.conf\fR.
+.TP
+\fBConfigText\fR ... \fBEnd\fR
+Alternative way to supply resolver configuration.  The material within
+this section is read verbatim and used as the content of the resolver
+configuration file.
+.IP
+If both
+.B ConfigFile
+and
+.B ConfigText
+are used, the last used statement wins.
+.TP
+.BI debug " bool"
+Whether to enable DNS debugging info.
+.TP
+.BI RetryInterval " N"
+Interval in seconds, after which to retry failed DNS queries or queries that
+returned no RRs.  This value is used unless the backend defines its
+own retry interval value.
 .SH "Emergency"
-The emergency server will be used once all existing backends are "dead".
+Emergency servers will be used once all existing backends are "dead".
 All configuration directives enclosed between
 .B Emergency
 and

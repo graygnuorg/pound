@@ -1477,6 +1477,166 @@ End
 @end example
 @end table
 
+@node Balancer groups
+@section Balancer groups
+@cindex balancer group
+  Backends within each service are grouped in @dfn{balancer groups}.
+Each such group is assigned a unique integer @dfn{priority}, which
+defines the order in which the groups are tried.  When selecting a
+backend, a group with the numerically lesser priority is selected and
+a suitable backend is looked up among backends defined in the group,
+using one of the balancing strategies discussed above.  If no backend
+can be selected (e.g. all backends are unavailable), next group is
+tried.  The process continues until either a backend is chosen or
+the list of balancer groups is exhausted.
+
+@cindex high availability
+  By default, backends declared using the @code{Backend} keyword are
+assigned to the balancer group 0.  These are backends used during
+normal operation.  Backends declared using the @code{Emergency} keyword
+(@pxref{Emergency}) are assigned to the balancer group 65535.  These
+backends form a pull of @dfn{high availability} backends, which will
+be used if all of the normal backends fail.
+
+  More backend groups can be added using dynamic backends, discussed
+in the next section.
+
+@node Dynamic backends
+@section Dynamic backends
+  Normally, when a backend is declared in configuration file, the
+value supplied with its @code{Address} statement is resolved at once
+and the resulting IP is associated with the backend.  Such backends
+are @dfn{static}.  You can also instruct @command{pound} to resolve
+the hostname and create as many backends as are the IP addresses it
+resolves to.  Such backends are called @dfn{dynamic}.  When a dynamic
+backend is requested, the @code{Backend} statement defines a
+@dfn{matrix} which will be used as a template to generate actual
+backends from the data in DNS.  The TTL value of the DNS record (or
+records) will define the time to live of the generated backends.  When
+it expires, DNS will be queried again and backends recreated
+according to the changes in its responses.@footnote{Support for
+dynamic backends is enabled at compile time and requires the
+@uref{http://www.gnu.org/software/adns, GNU adns library}.  If unsure
+whether your @command{pound} binary includes it, inspect the
+@command{pound -V} output.}
+
+  In the simplest case, a dynamic backend can be created using
+@code{A} or @code{AAAA} DNS records.  If several records correspond to
+the hostname defined in the @code{Address} statement, @command{pound}
+can either create a single backend for each of them, or select one of
+them in round-robin fashion and use it to create a backend.  Rest of
+backend parameters (port value, priority, etc.) will be taken from its
+matrix declaration.
+
+  A more advanced way to create dynamic backends is using @code{SRV}
+records.  Each @code{SRV} record has four associated parameters: priority,
+weight, target and port.  The priority value defines the @command{pound}
+balancer group where to put generated backends.  Weight is assigned
+as the priority for each generated backend.  Finally, target is used
+as hostname to obtain IP addresses for the backends.  For example,
+suppose the following DNS records are defined:
+
+@example
+@group
+$ORIGIN _tcp.example.org.
+; _srv  TTL     SRV     prio    weight  port target.
+_proxy  60      SRV     10      40      8081 be0.example.org.
+_proxy  60      SRV     10      70      8082 be1.example.org.
+_proxy  60      SRV     20      10      8081 ha1.example.org.
+_proxy  60      SRV     20      10      8081 ha2.example.org.
+@end group
+@end example
+
+Assuming each of the target hostnames resolves to one IP address,
+these records will produce two balancer groups of two backends each,
+and will be roughly equivalent to the following statements:
+
+@example
+Backend
+        Address "be0.example.org"
+        Port 8081
+        Priority 40
+End
+Backend
+        Address "be1.example.org"
+        Port 8082
+        Priority 70
+End
+
+Emergency
+        Address "ha1.example.org"
+        Port 8081
+        Priority 10
+End
+Emergency
+        Address "ha2.example.org"
+        Port 8081
+        Priority 10
+End
+@end example
+
+  To declare backend as dynamic, use a symbolic host name in its
+@code{Address} statement and add the @code{Resolve} statement with one
+of the following values:
+
+@deffn {Dynamic Resolve} first
+Resolve the symbolic host name and use first IP from the DNS response
+as the address of the created dynamic backend.  Thus, this type will
+produce at most one dynamic backend.
+@end deffn
+
+@deffn {Dynamic Resolve} all
+Resolve the symbolic host name and create one backend for each address
+from the DNS response.  This enables load balancing between created
+backends.  Each backend will be assigned the same priority.
+@end deffn
+
+@deffn {Dynamic Resolve} srv
+Obtain @code{SRV} records for the host name and use them to generate
+dynamic backends.  Each record produces new  dynamic backend of
+@code{Resolve all} type, which creates regular backends as described
+above.  The weight field of the @code{SRV} record is mapped to the priority
+field of each generated backend.  The priority field determines the
+balancer group where the backend will be hosted.
+@end deffn
+
+When resolving hostnames, both IPv4 and IPv6 addresses are looked for.
+You can select the specific address family using the @code{Family}
+statement.  Its allowed values are:
+
+@table @code
+@item any
+Use all address families available.  This is the default.
+
+@item inet
+Use only IPv4 addresses (@code{A} DNS records).
+
+@item inet6
+Use only IPv6 addresses (@code{AAAA} DNS records).
+@end table
+
+  For example:
+
+@example
+@group
+Backend
+        Address "_proxy._tcp.example.org"
+	Resolve srv
+	Family any
+End
+@end group
+@end example
+
+Notice, that you need not supply @code{Port} or @code{Priority} values
+for the dynamic backends of @code{srv} resolve type.
+
+Dynamic backends will be updated periodically, when the TTL of the
+corresponding DNS records expires.  If the hostname cannot be resolved
+or a DNS failure occurs, next update will be scheduled in 600
+seconds after the failure.  This interval can be configured using the
+@code{RetryInterval} statement in the @code{Backend} section, or
+globally, in the @code{Resolver} section (@pxref{resolver}).
+
 @node Worker model
 @chapter Worker model
 @kwindex WorkerMinCount
@@ -3788,11 +3948,6 @@ represents a path to a Unix-domain socket.
 This directive is mandatory.
 @end deffn
 
-@deffn {Backend directive} Port @var{n}
-Sets the port number to connect to.  This directive must be present if
-the @code{Address} statement contains an IP address.
-@end deffn
-
 @deffn {Backend directive} Disabled @var{bool}
 Mark this backend as disabled.
 
@@ -3801,6 +3956,11 @@ Backends can be enabled or disabled at runtime using the
 
 @emph{Note:} not to be confused with the @code{Disable} statement,
 described below.
+@end deffn
+
+@deffn {Backend directive} Port @var{n}
+Sets the port number to connect to.  This directive must be present if
+the @code{Address} statement contains an IP address.
 @end deffn
 
 @deffn {Backend directive} Priority @var{n}
@@ -3813,17 +3973,67 @@ For random balancing, allowed values are 0 to 9.  For @sc{iwrr},
 allowed values are between 0 and 65535.
 @end deffn
 
+Following directives configure @dfn{dynamic backends}.  @pxref{Dynamic
+backends}, for a detailed discussion:
+
+@deffn {Backend directive} Family @var{name}
+Defines the address family to look for when resolving hostnames:
+
+@table @code
+@item any
+Use all address families available.  This is the default.
+
+@item inet
+Use only IPv4 addresses.
+
+@item inet6
+Use only IPv6 addresses.
+@end table
+@end deffn
+
+@deffn {Backend directive} Resolve @var{type}
+Declares a dynamic backend.  Valid values
+for @var{type} are
+
+@table @code
+@item first
+Resolve the symbolic host name and use first IP from the DNS response
+as the address of the created dynamic backend.  Thus, this type will
+produce at most one dynamic backend.
+
+@item all
+Resolve the symbolic host name and create one backend for each address
+from the DNS response.  This enables load balancing between created
+backends.  Each backend will be assigned the same priority.
+
+@item srv
+Obtain @code{SRV} records for the host name and use them to generate
+dynamic backends.  Each record produces new  dynamic backend of
+@code{Resolve all} type, which creates regular backends as described
+above.  The weight field of the @code{SRV} record is mapped to the priority
+field of each generated backend.  The priority field determines the
+balancer group where the backend will be hosted.
+@end table
+@end deffn
+
+@deffn {Backend directive} RetryInterval @var{n}
+Retry failed DNS lookups in @var{n} seconds.  Default is 600.
+
+See also the @code{RetryInterval} statement in @code{Resolver} section
+(@pxref{resolver}).
+@end deffn
+
 The following three directives set various timeout parameters for
 backend operations:
-
-@deffn {Backend directive} TimeOut @var{n}
-Sets the @dfn{response timeout}, i.e. time to wait for a response from
-the backend (in seconds).  Default is 15.
-@end deffn
 
 @deffn {Backend directive} ConnTO @var{n}
 Sets @dfn{connection timeout}, i.e. time to wait for establishing
 connection with the backend (in seconds).
+@end deffn
+
+@deffn {Backend directive} TimeOut @var{n}
+Sets the @dfn{response timeout}, i.e. time to wait for a response from
+the backend (in seconds).  Default is 15.
 @end deffn
 
 @deffn {Backend directive} WSTimeOut @var{n}
@@ -3836,14 +4046,6 @@ following directives configure HTTPS backends:
 
 @deffn {Backend directive} HTTPS
 This directive indicates that the remote server speaks HTTPS.
-@end deffn
-
-@anchor{ServerName}
-@deffn {Backend directive} ServerName "@var{name}"
-This directive specifies the name to use for server name
-identification (@dfn{SNI}).  It also rewrites the @code{Host:} header
-for this particular backend.  This means you don't have to use
-@code{SetHeader} in addition to it.
 @end deffn
 
 @deffn {Backend directive} Cert "@var{filename}"
@@ -3870,6 +4072,14 @@ Allowed values for @var{proto} are: @code{SSLv2}, @code{SSLv3},
 
 @emph{Note:} not to be confused with the @code{Disabled} statement,
 described above.
+@end deffn
+
+@anchor{ServerName}
+@deffn {Backend directive} ServerName "@var{name}"
+This directive specifies the name to use for server name
+identification (@dfn{SNI}).  It also rewrites the @code{Host:} header
+for this particular backend.  This means you don't have to use
+@code{SetHeader} in addition to it.
 @end deffn
 
 @node UseBackend
@@ -3974,6 +4184,7 @@ End
 The metrics output is discussed in @ref{Metric Families}.
 @end deffn
 
+@anchor{Emergency}
 @deffn {Service directive} Emergency ... End
 Defines an @dfn{emergency backend}, which will be used only if all
 other backends become unavailable.  @xref{Backend}, for a discussion
@@ -4089,6 +4300,60 @@ modification directive.
 This statement is deprecated and will be removed in future versions.
 Please, use the @option{-icase} option to the matching directive
 instead (@pxref{conditional-option}).
+@end deffn
+
+@node resolver
+@section Resolver
+  The @code{Resolver} section controls DNS lookups for dynamic backend
+generation (@pxref{Dynamic backends}).  It can contain the following
+directives:
+
+@deffn {Resolver} CNAMEChain @var{n}
+@cindex CNAME chains
+Maximum allowed length of a @dfn{CNAME chain}.  CNAME chains are
+formed by DNS CNAME records pointing to another CNAME.  Although
+prohibited by the RFC, such usage occurs sometimes in the wild.
+By default, @command{pound} does not accept CNAME chains.  If you work
+with nameservers that declare such chains, set this statement to a
+small integer value, defining maximum number of CNAME records in the
+chain that @command{pound} will accept.  The value of 2 or 3 should
+suffice in most cases.
+@end deffn
+
+@deffn {Resolver} ConfigFile @var{file}
+@findex resolv.conf
+Read resolver configuration from @var{file}.  Default is
+@file{/etc/resolv.conf}.
+@end deffn
+
+@deffn {Resolver} ConfigText ... End
+The material within this section is read verbatim and used as the
+content of the resolver configuration file.  E.g.:
+
+@example
+@group
+Resolver
+        ConfigText
+                domain example.org
+                nameserver 192.0.2.1
+                nameserver 192.0.2.4
+        End
+End        
+@end group
+@end example
+
+If both @code{ConfigFile} and @code{ConfigText} are used, the last
+statement used wins.
+@end deffn
+
+@deffn {Resolver} Debug @var{bool}
+If set to @code{true}, enables DNS debugging info.
+@end deffn
+
+@deffn {Resolver} RetryInterval @var{n}
+Interval in seconds, after which to retry failed DNS queries or
+queries that returned no RRs.  This value is used unless the backend
+defines its own retry interval value.
 @end deffn
 
 @node poundctl
@@ -4760,9 +5025,6 @@ Symbolic name of this service.
 
 @item enabled
 Boolean.  Whether this service is enabled or not.
-
-@item tot_pri
-Sum of priority values of active backends in this service.
 
 @item session_type
 Name of the session handling algorithm for this service.  One of:
