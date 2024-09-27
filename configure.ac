@@ -121,16 +121,6 @@ AC_ARG_WITH([maxbuf],
 AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
  [Max. buffer size])
 
-AC_SUBST(I_OWNER)
-AC_ARG_WITH([owner],
- [AS_HELP_STRING([--with-owner=name],[The account that will own the files installed by Pound])],
- [I_OWNER="${with_owner}"])
-
-AC_SUBST(I_GRP)
-AC_ARG_WITH([group],
- [AS_HELP_STRING([--with-group=name],[The group that will own the files installed by Pound])],
- [I_GRP="${with_group}"])
-
 AC_ARG_ENABLE([tcmalloc],
  [AS_HELP_STRING([--enable-tcmalloc],[enable or disable using the tcmalloc library (default: enabled if available)])],
  [status_tcmalloc=${enableval}],
@@ -195,33 +185,6 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
-AC_MSG_CHECKING([for default pound owner user name])
-if test -z "${I_OWNER}"; then
-    for u in proxy www daemon bin sys root
-    do
-	if id $u >/dev/null 2>&1; then
-	    I_OWNER=$u
-	    break
-	fi
-    done
-fi
-AC_MSG_RESULT([$I_OWNER])
-
-AC_MSG_CHECKING([for default pound owner group name])
-if test -z "${I_GRP}"; then
-    I_GRP=$(id -n -g $I_OWNER)
-    if test -z $I_GRP; then
-	for g in proxy www daemon bin sys root
-	do
-	    if grep "^$g:" /etc/group >/dev/null 2>&1; then
-		I_GRP=$g
-		break
-	    fi
-	done
-    fi
-fi
-AC_MSG_RESULT([$I_GRP])
-
 AC_MSG_CHECKING([if building from git clone])
 if test -d .git; then
     build_from_git=yes
@@ -244,8 +207,6 @@ cat <<EOF
 Pound configuration parameters:
 
 Buffer size ................................... $bufsize
-Owner user .................................... $owner_user
-Owner group ................................... $owner_group
 Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
@@ -255,8 +216,6 @@ Dynamic backends .............................. $status_dynamic_backends
 EOF
 ],
 [bufsize=$MAXBUF
-owner_user=$I_OWNER
-owner_group=$I_GRP
 if test $status_pcre != no; then
   status_pcre=", PCRE$status_pcre"
 else

@@ -162,20 +162,6 @@ configuration options:
   used internally by __pound__ for various needs.  The default is 4096.
   You will probably not want to change it.
 
-* `--with-owner=`*user*
-
-  Name of the system user who will own the __pound__ executable file.  When
-  not supplied, the first name from the following list that exists in
-  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-  `sys`, `root`.
-
-* `--with-group=`*group*
-
-  Name of the system group who will own the __pound__ executable.  When
-  not supplied, the first name from the following list that exists in
-  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-  `sys`, `root`.
-
 * `--with-dh=`*n*
 
   Default DH parameter length.  Allowed values for *n* are 2048 (the

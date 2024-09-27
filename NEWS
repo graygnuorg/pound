@@ -154,6 +154,11 @@ balancing algorightm applies when selecting an emergency backend.
 
 All statements valid within a "Backend" section are also valid within
 an emergency backend declaration.
+
+* configure
+
+Removed historic "--with-owner" and "--with-group" options.
+
 
 Version 4.13, 2024-08-24
 
