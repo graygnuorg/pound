@@ -687,7 +687,7 @@ balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
 {
   BACKEND *be;
 
-  if (balancer->max_pri == 0)
+  if (DLIST_EMPTY (&balancer->backends))
     return NULL;
   if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
@@ -909,7 +909,7 @@ service_has_backends (SERVICE *svc)
   BALANCER *bl;
   DLIST_FOREACH (bl, &svc->backends, link)
     {
-      if (bl->tot_pri > 0)
+      if (!DLIST_EMPTY (&bl->backends))
 	return 1;
     }
   return 0;
