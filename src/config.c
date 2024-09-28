@@ -6350,7 +6350,6 @@ backend_finalize (BACKEND *be, void *data)
 #ifdef ENABLE_DYNAMIC_BACKENDS
 	  if (feature_is_set (FEATURE_DNS))
 	    {
-	      be->v.mtx.betab = backend_table_new ();
 	      backend_matrix_init (be);
 	    }
 	  else

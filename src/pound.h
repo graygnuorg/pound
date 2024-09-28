@@ -1022,11 +1022,8 @@ void backend_unref (BACKEND *be);
 
 void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 				struct be_regular *reg);
-int backend_matrix_init (BACKEND *be);
+void backend_matrix_init (BACKEND *be);
 void backend_matrix_disable (BACKEND *be, int disable_mode);
-BACKEND_TABLE backend_table_new (void);
-void backend_table_free (BACKEND_TABLE bt);
-void backend_schedule_removal (BACKEND *be);
 
 /* Search for a host name, return the addrinfo for it */
 int get_host (char const *, struct addrinfo *, int);

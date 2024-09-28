@@ -60,16 +60,15 @@ dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
 }
 
 static void service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
-						 struct dns_response *resp,
-						 int locked);
+						 struct dns_response *resp);
 static void service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 						struct dns_response *resp);
 static void job_resolver (enum job_ctl ctl, void *arg,
 			  const struct timespec *ts);
 static void start_backend_removal (SERVICE *svc);
 
-int
-backend_matrix_addr_init (BACKEND *be, int locked)
+static int
+backend_matrix_addr_update (BACKEND *be)
 {
   int rc = 0;
   struct dns_response *resp;
@@ -86,7 +85,7 @@ backend_matrix_addr_init (BACKEND *be, int locked)
 	}
       /* fall through */
     case dns_success:
-      service_matrix_addr_update_backends (be->service, be, resp, locked);
+      service_matrix_addr_update_backends (be->service, be, resp);
       dns_response_free (resp);
       break;
 
@@ -102,8 +101,8 @@ backend_matrix_addr_init (BACKEND *be, int locked)
   return rc;
 }
 
-int
-backend_matrix_srv_init (BACKEND *be)
+static int
+backend_matrix_srv_update (BACKEND *be)
 {
   int rc = 0;
   struct dns_response *resp;
@@ -136,8 +135,8 @@ backend_matrix_srv_init (BACKEND *be)
   return rc;
 }
 
-int
-backend_matrix_init (BACKEND *be)
+static int
+backend_matrix_update (BACKEND *be)
 {
   int rc = -1;
 
@@ -145,11 +144,11 @@ backend_matrix_init (BACKEND *be)
     {
     case bres_first:
     case bres_all:
-      rc = backend_matrix_addr_init (be, 0);
+      rc = backend_matrix_addr_update (be);
       break;
 
     case bres_srv:
-      rc = backend_matrix_srv_init (be);
+      rc = backend_matrix_srv_update (be);
       break;
 
     default:
@@ -159,14 +158,25 @@ backend_matrix_init (BACKEND *be)
 }
 
 static void
+backend_matrix_schedule_update (BACKEND *be)
+{
+  if (be->be_type == BE_MATRIX)
+    {
+      struct timespec ts;
+      clock_gettime (CLOCK_REALTIME, &ts);
+      job_enqueue (&ts, job_resolver, be);
+    }
+}
+
+static void
 job_resolver (enum job_ctl ctl, void *arg, const struct timespec *ts)
 {
   BACKEND *be = arg;
   if (ctl == job_ctl_run)
-    backend_matrix_init (be);
+    backend_matrix_update (be);
 }
 
-unsigned long
+static unsigned long
 djb_hash (const unsigned char *str, int length)
 {
   unsigned long hash = 5381;
@@ -217,7 +227,7 @@ struct backend_table
   BACKEND_HASH *hash;
 };
 
-BACKEND_TABLE
+static BACKEND_TABLE
 backend_table_new (void)
 {
   BACKEND_TABLE bt = malloc (sizeof (*bt));
@@ -228,14 +238,14 @@ backend_table_new (void)
   return bt;
 }
 
-void
+static void
 backend_table_free (BACKEND_TABLE bt)
 {
   BACKEND_HASH_FREE (bt->hash);
   free (bt);
 }
 
-BACKEND *
+static BACKEND *
 backend_table_addr_lookup (BACKEND_TABLE bt, union dns_addr *addr)
 {
   BACKEND key;
@@ -244,7 +254,7 @@ backend_table_addr_lookup (BACKEND_TABLE bt, union dns_addr *addr)
   return BACKEND_RETRIEVE (bt->hash, &key);
 }
 
-BACKEND *
+static BACKEND *
 backend_table_hostname_lookup (BACKEND_TABLE bt, char const *hostname)
 {
   BACKEND key;
@@ -253,13 +263,13 @@ backend_table_hostname_lookup (BACKEND_TABLE bt, char const *hostname)
   return BACKEND_RETRIEVE (bt->hash, &key);
 }
 
-BACKEND *
+static BACKEND *
 backend_table_delete (BACKEND_TABLE bt, BACKEND *be)
 {
   return BACKEND_DELETE (bt->hash, be);
 }
 
-void
+static void
 backend_table_insert (BACKEND_TABLE bt, BACKEND *be)
 {
   BACKEND_INSERT (bt->hash, be);
@@ -347,20 +357,18 @@ backend_sweep (BACKEND *be, void *data)
 static void
 service_matrix_addr_update_backends (SERVICE *svc,
 				     BACKEND *mtx,
-				     struct dns_response *resp,
-				     int locked)
+				     struct dns_response *resp)
 {
   int i;
   int mark = 1;
   size_t n;
   struct timespec ts;
-  BALANCER *balancer = balancer_list_get (&svc->backends, mtx->v.mtx.weight);
+  BALANCER *balancer;
 
-  if (!locked)
-    {
-      pthread_mutex_lock (&svc->mut);
-      pthread_mutex_lock (&mtx->mut);
-    }
+  pthread_mutex_lock (&svc->mut);
+  pthread_mutex_lock (&mtx->mut);
+
+  balancer = balancer_list_get (&svc->backends, mtx->v.mtx.weight);
   if (!mtx->disabled)
     {
       /* Mark all generated backends. */
@@ -444,11 +452,9 @@ service_matrix_addr_update_backends (SERVICE *svc,
       ts.tv_nsec = 0;
       mtx->v.mtx.jid = job_enqueue (&ts, job_resolver, mtx);
     }
-  if (!locked)
-    {
-      pthread_mutex_unlock (&mtx->mut);
-      pthread_mutex_unlock (&svc->mut);
-    }
+
+  pthread_mutex_unlock (&mtx->mut);
+  pthread_mutex_unlock (&svc->mut);
 }
 
 static int
@@ -651,7 +657,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		      /*
 		       * Trigger regular backend creation.
 		       */
-		      backend_matrix_addr_init (be, 1);
+		      backend_matrix_schedule_update (be);
 		      
 		      /* Add new matrix to the hash table. */
 		      backend_table_insert (mtx->v.mtx.betab, be);
@@ -686,6 +692,13 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 }
 
 void
+backend_matrix_init (BACKEND *be)
+{
+  be->v.mtx.betab = backend_table_new ();
+  backend_matrix_schedule_update (be);
+}
+
+void
 backend_matrix_disable (BACKEND *be, int disable_mode)
 {
   if (disable_mode == BE_ENABLE)
@@ -693,7 +706,7 @@ backend_matrix_disable (BACKEND *be, int disable_mode)
       if (be->disabled)
 	{
 	  be->disabled = 0;
-	  backend_matrix_init (be);
+	  backend_matrix_update (be);
 	}
     }
   else
