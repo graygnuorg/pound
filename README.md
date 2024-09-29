@@ -223,6 +223,14 @@ To install these on a debian-based system, run:
  apt-get install libio-socket-ssl-perl libnet-ssleay-perl
 ```
 
+Additionally, to test DNS-based dynamic backends functionality, the
+`Net::DNS::Nameserver` module is needed.  On debian-based systems it is
+installed using the following command:
+
+```sh
+ apt-get install libnet-dns-perl
+``` 
+
 To run tests, type
 
 ```sh

@@ -18,7 +18,7 @@ SUBDIRS = src tests doc
 
 EXTRA_DIST = ChangeLog.apsis
 
-ACLOCAL_AMFLAGS = -I am
+ACLOCAL_AMFLAGS = -I m4 -I am
 
 if FROM_GIT
 README: README.md

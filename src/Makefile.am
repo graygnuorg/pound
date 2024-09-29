@@ -41,7 +41,7 @@ endif
 if COND_PCRE2
   pound_SOURCES += regex_pcre2.c
 endif
-if COND_RESOLVER
+if COND_DYNAMIC_BACKENDS
   pound_SOURCES += resolver.c dynbe.c
 endif
 

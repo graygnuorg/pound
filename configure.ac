@@ -20,12 +20,13 @@ AC_INIT([pound],[4.13],[gray@gnu.org],
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar])
 AC_CANONICAL_HOST
 
 # Checks for programs.
 AC_PROG_CC
-AC_PROG_RANLIB
+LT_INIT
 
 # Checks for libraries.
 AX_PTHREAD([CC="$PTHREAD_CC"],
@@ -61,7 +62,7 @@ if test $status_dynamic_backends != no; then
     status_dynamic_backends=no
   fi
 fi
-AM_CONDITIONAL([COND_RESOLVER], [test $status_dynamic_backends = yes])
+AM_CONDITIONAL([COND_DYNAMIC_BACKENDS], [test $status_dynamic_backends = yes])
 
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)

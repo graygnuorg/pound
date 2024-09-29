@@ -124,6 +124,7 @@ TESTSUITE_AT = \
  sessparm.at\
  sessurl.at\
  set.at\
+ srv.at\
  stringmatch.at\
  template.at\
  url.at\
@@ -135,3 +136,9 @@ noinst_PROGRAMS = tmplrun
 tmplrun_SOURCES = tmplrun.c
 AM_CPPFLAGS = -I$(top_srcdir)/src
 tmplrun_LDADD = ../src/libpound.a
+
+if COND_DYNAMIC_BACKENDS
+noinst_LTLIBRARIES = libfakedns.la
+libfakedns_la_SOURCES = fakedns.c
+libfakedns_la_LDFLAGS = -module -export-dynamic -avoid-version -rpath '/lib'
+endif

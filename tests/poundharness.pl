@@ -38,6 +38,7 @@ my $backends = ListenerList->new(0);
 my $pound_pid;
 my $startup_timeout = 2;
 my $statistics;
+my $fakedns;
 
 use constant {
     EX_SUCCESS => 0,
@@ -68,7 +69,7 @@ if ($@) {
 sub cleanup {
     if ($pound_pid) {
 	if ($verbose) {
-	    print "Stopping pound ($pound_pid)\n";
+	    print "$$ Stopping pound ($pound_pid)\n";
 	}
 	kill 'HUP', $pound_pid;
     }
@@ -102,6 +103,9 @@ sub handle_pound_status {
 
 sub sigchild {
     my $pid = waitpid(-1, 0);
+    if ($pid == -1) {
+	return
+    }
     if ($pid != $pound_pid) {
 	$status_codes{$pid} = $?;
 	$SIG{CHLD} = \&sigchild;
@@ -115,18 +119,25 @@ sub sigchild {
     exit(EX_ERROR);
 };
 $SIG{CHLD} = \&sigchild;
+
+my $nameserver;
+my $zonefile = 'fakedns.zone';
 
-END {
-    if ($pound_pid > 0) {
-	cleanup;
-	if (waitpid($pound_pid, 0) == $pound_pid) {
-	    if (handle_pound_status() == 0) {
-		$? = EX_ERROR;
-	    }
-	}
-    }
+sub dns_reply_handler {
+    my $sb = stat($zonefile) or die "can't stat $zonefile: $!";
+    $nameserver->ReadZoneFile($zonefile);
+    $nameserver->{ReplyHandler} = \&dns_reply_handler;
+    return $nameserver->ReplyHandler(@_);
 }
 
+sub write_zone_file {
+    my $text = join("\n", @_);
+    open(my $fh, '>', $zonefile) or die "can't open $zonefile: $!";
+    print $fh $text;
+    close $fh;
+}
+
+
 ## Start the program
 ## -----------------
 sub usage_error {
@@ -142,11 +153,46 @@ GetOptions('config|f=s' => \$config,
 	   'transcript|x=s' => \$transcript_file,
 	   'statistics|s' => \$statistics,
 	   'startup-timeout|t=n' => \$startup_timeout,
-	   'include-dir=s' => \$include_dir)
+	   'include-dir=s' => \$include_dir,
+	   'fakedns=s' => \$fakedns)
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
 usage_error "too many arguments\n" if @ARGV;
+
+if ($fakedns) {
+    eval "require Net::DNS::Nameserver";
+    if ($@) {
+	print STDERR "required module Net::DNS::Nameserver not present\n";
+	exit(EX_SKIP);
+    }
+    if ($fakedns =~ /^(\d+):(.+)/) {
+	$ENV{FAKEDNS_PORT} = $1;
+	$fakedns = $2;
+    } else {
+	$ENV{FAKEDNS_PORT} = 15353;
+    }
+
+    unless (-e $fakedns) {
+	print STDERR "$fakedns: file not found\n";
+	exit(EX_SKIP);
+    }
+    if (!File::Spec->file_name_is_absolute($fakedns)) {
+	$fakedns = File::Spec->rel2abs($fakedns);
+    }
+
+    write_zone_file <<\EOT
+$ORIGIN example.org.
+@   IN SOA  mname rname 1 2h 1h 2w 1h
+EOT
+	;
+    $nameserver = Net::DNS::Nameserver->new(
+	LocalAddr       => '127.0.0.1',
+	LocalPort       => $ENV{FAKEDNS_PORT},
+	ReplyHandler    => \&dns_reply_handler,
+    ) or die "can't create nameserver";
+    $nameserver->start_server();
+}
 
 foreach my $file (@preproc_files) {
     if ($file =~ m{(?<src>.+):(?<dst>.+)}) {
@@ -180,6 +226,9 @@ my $ps = PoundScript->new($script_file, $transcript_file);
 $ps->parse;
 
 # Terminate
+if ($nameserver) {
+    $nameserver->stop_server();
+}
 
 if ($statistics) {
     print "Total tests: ".$ps->tests. "\n";
@@ -187,6 +236,17 @@ if ($statistics) {
 } elsif ($ps->failures) {
     print STDERR $ps->failures . " from " . $ps->tests . " tests failed\n";
 }
+
+if (defined($pound_pid) && $pound_pid > 0) {
+    $SIG{CHLD} = sub { };
+    cleanup;
+    if (waitpid($pound_pid, 0) == $pound_pid) {
+	if (handle_pound_status() == 0) {
+	    exit(EX_ERROR);
+	}
+    }
+}
+
 exit ($ps->failures ? EX_FAILURE : EX_SUCCESS);
 
 ## Configuration file processing
@@ -235,8 +295,10 @@ sub preproc {
 	ST_LISTENER => 1,
 	ST_SERVICE => 2,
 	ST_BACKEND => 3,
-	ST_SESSION => 4,
-	ST_SECTION => 5
+	ST_BACKEND_STAT => 4,
+	ST_BACKEND_DYN => 5,
+	ST_SESSION => 6,
+	ST_SECTION => 7
     };
     my @state;
     unshift @state, $initstate // ST_INIT;
@@ -250,8 +312,19 @@ EOT
 	if ($log_level >= 0) {
 	    print $out "LogLevel $log_level\n";
 	}
+	if ($fakedns) {
+	    print $out <<EOT;
+Resolver
+    ConfigText
+	nameserver 192.0.2.24
+    End
+    RetryInterval 10
+End
+EOT
+    ;
+	}
     }
-    my $be;
+    my $be_loc;
     while (<$in>) {
 	chomp;
 	if (/^\s*(?:#.)?$/) {
@@ -281,21 +354,40 @@ EOT
 	} elsif (/^\s*Session/i) {
 	    unshift @state, ST_SESSION;
 	} elsif (/^\s*(Backend|Emergency)/i) {
+	    $be_loc = "$infile:$.";
 	    unshift @state, ST_BACKEND;
-	    $be = $backends->create("$infile:$.");
-	    if ($verbose) {
-		print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
-	    }
-	} elsif (/^s*(TrustedIP|ACL|CombineHeaders)\b/) {
+	} elsif (/^\s*((Match)|(Rewrite)|(TrustedIP)|(ACL)|(CombineHeaders))\b/i) {
 	    unshift @state, ST_SECTION
-	} elsif (/^\s*End/i) {
+	} elsif (/^(\s*)End/i) {
+	    if ($state[0] == ST_BACKEND) {
+		my $be = $backends->create($be_loc);
+		if ($verbose) {
+		    print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
+		}
+		print $out "# Inserted by $0\n";
+		print $out "$1\tAddress ".$be->host."\n";
+		print $out "$1\tPort ".$be->port."\n";
+	    }
 	    shift @state
 	} elsif ($state[0] == ST_BACKEND) {
-	    if (/^(\s*Address)/i) {
-		$_ = $1 . ' ' . $be->host;
-	    } elsif (/^(\s*Port)/i) {
-		$_ = $1 . ' ' . $be->port;
+	    shift @state;
+	    if (/^\s*Resolve/) {
+		unshift @state, ST_BACKEND_DYN;
+	    } else {
+		unshift @state, ST_BACKEND_STAT;
+		my $be = $backends->create($be_loc);
+		if ($verbose) {
+		    print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
+		}
+		/^(\s*)([\S]+)/;
+		my ($indent, $kw) = ($1, $2);
+		print $out "# Inserted by $0\n";
+		print $out "${indent}Address ".$be->host."\n";
+		print $out "${indent}Port ".$be->port."\n";
+		next if ($kw =~ /^Address/i || $kw =~ /^Port/i);
 	    }
+	} elsif ($state[0] == ST_BACKEND_STAT) {
+	    next if (/^\s*Address/i || /^\s*Port/i);
 	} elsif ($state[0] == ST_LISTENER) {
 	    if (/^\s*(Address|Port|SocketFrom)/i) {
 		    $_ = "# Commented out: $_";
@@ -367,9 +459,16 @@ sub runner {
     }
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
-    exec 'pound', '-p', $pid_file, '-f', $config, '-v', '-W', 'no-dns', '-W',
-	  $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
-	or exit(EX_EXEC);
+    my @cmd = (
+	'pound', '-p', $pid_file, '-f', $config, '-v',
+	 '-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
+    );
+    if ($fakedns) {
+	$ENV{LD_PRELOAD} = $fakedns;
+    } else {
+	push @cmd, '-W', 'no-dns';
+    }
+    exec @cmd or exit(EX_EXEC);
 }
 
 package PoundScript;
@@ -607,6 +706,22 @@ sub parse_req {
 	    $self->{server} = $1;
 	    next;
 	}
+	if (/^mkbackend\s+(127(\.\d+){3})/) {
+	    $backends->create("$self->{filename}:$self->{line}", 'HTTP', $1);
+	    next;
+	}
+	if (/^sleep\s+(\d+)/) {
+	    sleep $1;
+	    next;
+	}
+	if (/^zonefile/) {
+	    $self->parse_zonefile;
+	    next;
+	}
+	if (/^control/) {
+	    $self->parse_control;
+	    next;
+	}
 	if (s/^stats//) {
 	    foreach my $k (qw(samples min max avg stddev index)) {
 		if (s{\s+$k = (?:
@@ -681,6 +796,90 @@ sub parse_req {
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file") if $self->{REQ}{BEG};
+}
+
+sub parse_zonefile {
+    my $self = shift;
+    my $fh = $self->{fh};
+
+    my @zonetext;
+    while (<$fh>) {
+	$self->{line}++;
+	chomp;
+	last if /^end$/;
+	push @zonetext, $self->expandvars($_)
+    }
+
+    ::write_zone_file @zonetext;
+}
+
+sub parse_control {
+    my $self = shift;
+    my $fh = $self->{fh};
+    while (<$fh>) {
+	$self->{line}++;
+	chomp;
+	last if /^end$/;
+	if (/^list(?:\s+(.+))?/) {
+	    my @args;
+	    if ($1) {
+		@args = split /\s+/, $1
+	    }
+	    my $res = PoundControl->new->list(@args);
+	    print STDERR Dumper([$res]);
+	} elsif (m{^backends\s+(\d+)\s+(\d+)(?:\s+(.+))?}) {
+	    $self->parse_control_backends($1, $2);
+	} else {
+	    $self->syntax_error("unrecognized statement");
+	}
+    }
+}
+
+sub jsoncmp {
+    my ($a, $b) = @_;
+
+    my $rtype = ref($a);
+    return 0 if $rtype ne ref($b);
+    if ($rtype eq '') {
+	return $a eq $b;
+    } elsif ($rtype eq 'ARRAY') {
+	return 0 if @{$a} != @{$b};
+	for (my $i = 0; $i <= $#{$a}; $i++) {
+	    return 0 unless jsoncmp($a->[$i], $b->[$i]);
+	}
+    } elsif ($rtype eq 'HASH') {
+	foreach my $k (keys %$a) {
+	    return 0 unless jsoncmp($a->{$k}, $b->{$k});
+	}
+    } else {
+	return 0
+    }
+    return 1
+}
+
+sub parse_control_backends {
+    my ($self, $ls, $sv) = @_;
+    my $fh = $self->{fh};
+    my @exp;
+    while (<$fh>) {
+	$self->{line}++;
+	chomp;
+	last if /^end$/;
+	push @exp, $self->expandvars($_)
+    }
+    my $ctl = PoundControl->new();
+    my $belist = $ctl->backends($ls, $sv, sort => 1);
+    my $json = JSON->new->boolean_values(0,1);
+    my $exp = $json->decode(join(' ', @exp));
+
+    unless (jsoncmp($exp, $belist)) {
+	$self->{failures}++;
+	if (my $fh = $self->{xscript}) {
+	    print $fh "backend listings don't match\n";
+	    print $fh "exp: " . $json->pretty->encode($exp) . "\n";
+	    print $fh "got: " . $json->pretty->encode($belist) . "\n";
+	}
+    }
 }
 
 sub parse_headers {
@@ -1118,12 +1317,12 @@ if ($@) {
 }
 
 sub new {
-    my ($class, $number, $ident, $keepopen, $proto) = @_;
+    my ($class, $number, $ident, $keepopen, $proto, $ip) = @_;
     my $socket;
     socket($socket, PF_INET, SOCK_STREAM, 0)
 	or croak "socket: $!";
     setsockopt($socket, SOL_SOCKET, SO_REUSEADDR, 1);
-    bind($socket, pack_sockaddr_in(0, inet_aton('127.0.0.1')))
+    bind($socket, pack_sockaddr_in(0, inet_aton($ip // '127.0.0.1')))
 	or die "bind: $!";
     if ($keepopen) {
 	listen($socket, 128);
@@ -1133,12 +1332,12 @@ sub new {
 	    or croak "fcntl F_SETFD: $!";
     }
     my $sa = getsockname($socket);
-    my ($port, $ip) = sockaddr_in($sa);
+    my ($port, $ipaddr) = sockaddr_in($sa);
     bless {
 	number => $number,
 	ident => $ident,
 	socket => $socket,
-	host => inet_ntoa($ip),
+	host => inet_ntoa($ipaddr),
 	port => $port,
 	proto => lc($proto // "http")
     }, $class;
@@ -1200,7 +1399,7 @@ sub new {
 sub keepopen { shift->{keepopen} }
 sub count { scalar @{shift->{listeners}} }
 sub create {
-    my ($self, $ident, $proto) = @_;
+    my ($self, $ident, $proto, $ip) = @_;
     if (defined($proto) && lc($proto) eq 'HTTPS') {
 	my ($ok, $why) = HTTP::Tiny->can_ssl;
 	unless ($ok) {
@@ -1208,7 +1407,7 @@ sub create {
 	    exit(main::EX_SKIP);
 	}
     }
-    my $lst = Listener->new($self->count(), $ident, $self->keepopen, $proto);
+    my $lst = Listener->new($self->count(), $ident, $self->keepopen, $proto, $ip);
     if ($self->keepopen) {
 	$lst->set_pass_fd("lst".$self->count().".sock");
     }
@@ -1444,6 +1643,96 @@ sub reply {
 	print $fh $opt{body};
     }
 }
+
+package PoundControl;
+use strict;
+use warnings;
+use Carp;
+use IPC::Open3;
+use IO::Select;
+use Symbol 'gensym';
+use JSON;
+use Data::Dumper;
+
+sub new {
+    my ($class, $config) = @_;
+    return bless {
+	config => $config//'pound.cfg',
+    }, $class
+}
+
+sub request {
+    my ($self, $command, $arg) = @_;
+
+    local $SIG{CHLD} = sub {};
+    my ($child_stdin, $child_stdout, $child_stderr);
+    $child_stderr = gensym();
+    %status_codes = ();
+    my $pid = open3($child_stdin, $child_stdout, $child_stderr,
+		    'poundctl', '-f', $self->{config}, '-j', $command, $arg);
+    close $child_stdin;
+
+    my $sel = IO::Select->new();
+    $sel->add($child_stdout, $child_stderr);
+    my $CHUNK_SIZE = 1000;
+    my @ready;
+    my %data = ( $child_stdout => '', $child_stderr => '' );
+
+    while (@ready = $sel->can_read) {
+	foreach my $fh (@ready) {
+	    my $data;
+	    while (1) {
+		my $len = sysread($fh, $data{$fh}, $CHUNK_SIZE,
+				  length($data{$fh}));
+		croak "sysread: $!" unless defined($len);
+		if ($len == 0) {
+		    $sel->remove($fh);
+		    $fh->close;
+		    last;
+		}
+	    }
+	}
+    }
+
+    waitpid($pid, 0);
+
+    my $code;
+    if ($? == -1) {
+	croak "failed to run poundctl: $!";
+    } elsif ($? & 127) {
+	croak "poundctl terminated on signal ".($? & 127);
+    } elsif ($? >> 8) {
+	croak "poundctl failed: " . $data{$child_stderr};
+    }
+    return JSON->new->boolean_values(0,1)->decode($data{$child_stdout});
+}
+
+sub list {
+    my $self = shift;
+    my $arg;
+    if (@_) {
+	$arg .= '/' . join('/', @_)
+    }
+    return $self->request('list', $arg);
+}
+
+sub backends {
+    my ($self, $lst, $srv, %opts) = @_;
+    my $res = $self->list($lst, $srv);
+    if ($opts{sort}) {
+	$res->{backends} = [sort {
+	    if ($a->{weight} != $b->{weight}) {
+		$a->{weight} <=> $b->{weight}
+	    } elsif ($a->{priority} != $b->{priority}) {
+		$a->{priority} <=> $b->{priority}
+	    } else {
+		$a->{address} cmp $b->{address}
+	    }
+	} @{$res->{backends}}];
+    }
+    return $res->{backends};
+}
+
 1;
 __END__
 
@@ -1460,7 +1749,10 @@ B<poundharness>
 [B<-t I<N>>]
 [B<-x I<FILE>>]
 [B<--config=>I<SRC>[B<:>I<DST>]]
+[B<--fakedns=>[I<PORT>:]I<LIB>]
+[B<--include-dir=>I<DIR>]
 [B<--log-level=>I<N>]
+[B<--preproc=>I<FILE>[:I<DST>]]
 [B<--startup-timeout=>I<N>]
 [B<--statistics>]
 [B<--transcript=>I<FILE>]
@@ -1530,10 +1822,38 @@ to I<DST> and use it as configuration file when running B<pound>.  If
 I<DST> is omitted, F<pound.cfg> is assumed.  If this option is not given,
 I<SRC> defaults to F<pound.cfi>.
 
+=item B<--fakedns=>[I<PORT>:]I<LIB>
+
+Start a mock DNS server listening at localhost, port I<PORT> (default: 15535)
+and preload the library I<LIB> before exec'ing B<pound>.  I<LIB> must be the
+absolute pathname of the B<libfakedns.so> file.  See B<fakedns.c> for details
+about this library.
+
+This option also instructs B<poundharness> to emit a B<Resolv> section to
+the created B<pound.cfg> file and to extend the script file syntax with
+the statements described in the B<DNS Statements> section (see below).
+
+This option requires the B<Net::DNS::Nameserver> library.  If it is not
+available, B<poundharness> will exit immediately with the status code 77.
+
+=item B<--include-dir=>I<DIR>
+
+Look for relative file names in I<DIR>.  In particular, relative file names
+given as arguments to the B<--preproc> option or appearing in B<Include>
+statements in B<pound> configuration file will be searched in I<DIR>.
+This directory is also passed to B<pound> via the B<-Winclude-dir=I<DIR>>
+option.
+
 =item B<-l>, B<--log-level=> I<N>
 
 Set B<pound> I<LogLevel> configuration parameter.  If I<N> is B<-1>,
 I<LogLevel> set in the configuration file is used.
+
+=item B<--preproc=>I<FILE>[:I<DST>]
+
+Preprocess I<FILE> as described in the B<DESCRIPTION>.  Write the resulting
+material to I<DST>.  If the latter is omitted, the destination file will be
+named I<FILE>B<.cfg>.
 
 =item B<-s>, B<--statistics>
 
@@ -1676,6 +1996,116 @@ it with a backslash.
 
 Expect text on stderr.  See the description of B<stdout> above for
 its syntax.
+
+=back
+
+=head2 Backend Usage Analysis
+
+The statement
+
+=over 4
+
+=item B<stats> B<samples>=I<N> I<K>=I<V>...
+
+=back
+
+causes the following send/expect statements to be executed I<N> times in
+turn.  After this, backend usage statistics will be computed and the
+resulting values compared with the expected values supplied by I<K>=I<V>
+pairs.  Allowed values for I<K> are:
+
+=over 4
+
+=item B<samples>
+
+Number of samples to run.
+
+=item B<min>
+
+Minimum number of requests served by a backend.
+
+=item B<max>
+
+Maximum number of requests served by a backend.
+
+=item B<avg>
+
+Average number of requests served by a backend.
+
+=item B<stddev>
+
+Standard deviation of the number of requests served by a backend.
+
+=item B<index>
+
+Apply the above values to this backend (0-based index).
+
+=back
+
+=head2 Querying thr Control Interface
+
+The B<control> statement queries the B<pound> control interface and matches
+its responses with the expected values.  It is followed by one or more
+query statements and terminates with the keyword B<end> on a line by itself.
+
+=over 4
+
+=item backends I<LN> I<SN>
+
+Query for backends in service I<SN> of listener I<LN>.  This keyword is
+followed by the expected response in JSON format, which ends with the
+keyword B<end> on a line by itself.
+
+The returned backend array is sorted by weight, priority and address.  Only
+attributes present in the expectation are compared.
+
+=back
+
+=head2 Additional Directives
+
+=over 4
+
+=item B<mkbackend> I<IP>
+
+Declares new backend with the given IP address.  I<IP> must fall within
+127.0.0.0/8.
+
+Normally backends are created automatically and this statement is not needed.
+Use it for testing dynamic backends.
+
+=item B<sleep> I<N>
+
+Pause execution for I<N> seconds.
+
+=head2 DNS Statements
+
+The following keywords are designed for testing dynamic DNS-based backends.
+They become available if the following two conditions are met:
+
+=over 4
+
+=item *
+
+The module B<Net::DNS::Nameserver> is available.
+
+=item *
+
+Full pathname of the B<libfakedns.so> library is given using the
+B<--fakedns> option.
+
+=back
+
+When these conditions are met, B<poundharness> will start a subsidiary DNS
+server and modify the produced B<pound.cfg> file to use it.  The following
+extended keywords can then be used:
+
+=over 4
+
+=item zonefile
+
+This statement defines the DNS zone (or zones) served by the subsidiary
+DNS.  The zone definition follows the keyword and ends with the keyword
+B<end> on a line by itself.  Zone file syntax is defined by RFC1035.
 
 =back
 
