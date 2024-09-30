@@ -15,6 +15,8 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 
 package PoundNS;
+use strict;
+use warnings;
 use parent 'Net::DNS::Nameserver';
 use Carp;
 use threads;
@@ -111,6 +113,7 @@ EOT
     }
     my $self = $class->SUPER::new(ZoneFile => $zonefile);
     $self->{PoundZoneFile} = $zonefile;
+    $self->{PoundZoneTime} = 0;
     return $self;
 }
 
