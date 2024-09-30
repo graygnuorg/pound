@@ -16,6 +16,7 @@
 
 package PoundNS;
 use parent 'Net::DNS::Nameserver';
+use Net::DNS::Nameserver 1990;
 use Carp;
 use threads;
 use IO::Socket::IP;

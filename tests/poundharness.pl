@@ -145,7 +145,6 @@ my $script_file = shift @ARGV or usage_error "required parameter missing";
 usage_error "too many arguments\n" if @ARGV;
 
 if ($fakedns) {
-    require PoundNS;
     eval "require PoundNS";
     if ($@) {
 	print STDERR "required module PoundNS not present\n";

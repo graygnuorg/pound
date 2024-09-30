@@ -229,7 +229,9 @@ installed with the following command:
 
 ```sh
  apt-get install libnet-dns-perl
-``` 
+```
+
+You will need `Net::DNS::Nameserver` version 1.47 or newer.
 
 To run tests, type
 
