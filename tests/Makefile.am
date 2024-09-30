@@ -72,6 +72,8 @@ TESTSUITE_AT = \
  chunked2.at\
  config.at\
  disable.at\
+ dyn_a.at\
+ dyn_srv.at\
  echo.at\
  err503.at\
  errfile.at\
@@ -124,7 +126,6 @@ TESTSUITE_AT = \
  sessparm.at\
  sessurl.at\
  set.at\
- srv.at\
  stringmatch.at\
  template.at\
  url.at\

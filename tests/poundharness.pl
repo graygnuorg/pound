@@ -49,6 +49,23 @@ use constant {
     EX_EXEC => 127
 };
 
+my $nameserver;
+my $zonefile = 'fakedns.zone';
+
+sub dns_reply_handler {
+    my $sb = stat($zonefile) or die "can't stat $zonefile: $!";
+    $nameserver->ReadZoneFile($zonefile);
+    $nameserver->{ReplyHandler} = \&dns_reply_handler;
+    return $nameserver->ReplyHandler(@_);
+}
+
+sub write_zone_file {
+    my $text = join("\n", @_);
+    open(my $fh, '>', $zonefile) or die "can't open $zonefile: $!";
+    print $fh $text;
+    close $fh;
+}
+
 ## Early checks
 ## ------------
 
@@ -73,6 +90,9 @@ sub cleanup {
 	}
 	kill 'HUP', $pound_pid;
     }
+    if ($nameserver) {
+	$nameserver->stop_server();
+    }
 }
 
 ## Signal handling and program cleanup
@@ -80,7 +100,7 @@ sub cleanup {
 
 my %status_codes;
 
-$SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
+$SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = $SIG{__DIE__} = \&cleanup;
 
 sub handle_pound_status {
     if (WIFEXITED($?)) {
@@ -119,24 +139,6 @@ sub sigchild {
     exit(EX_ERROR);
 };
 $SIG{CHLD} = \&sigchild;
-
-my $nameserver;
-my $zonefile = 'fakedns.zone';
-
-sub dns_reply_handler {
-    my $sb = stat($zonefile) or die "can't stat $zonefile: $!";
-    $nameserver->ReadZoneFile($zonefile);
-    $nameserver->{ReplyHandler} = \&dns_reply_handler;
-    return $nameserver->ReplyHandler(@_);
-}
-
-sub write_zone_file {
-    my $text = join("\n", @_);
-    open(my $fh, '>', $zonefile) or die "can't open $zonefile: $!";
-    print $fh $text;
-    close $fh;
-}
-
 
 ## Start the program
 ## -----------------
@@ -228,6 +230,7 @@ $ps->parse;
 # Terminate
 if ($nameserver) {
     $nameserver->stop_server();
+    $nameserver = undef;
 }
 
 if ($statistics) {
@@ -1726,7 +1729,7 @@ sub backends {
 	    } elsif ($a->{priority} != $b->{priority}) {
 		$a->{priority} <=> $b->{priority}
 	    } else {
-		$a->{address} cmp $b->{address}
+		($a->{address}//'') cmp ($b->{address}//'')
 	    }
 	} @{$res->{backends}}];
     }
