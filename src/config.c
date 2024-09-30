@@ -6331,7 +6331,7 @@ backend_finalize (BACKEND *be, void *data)
 
       if (be->v.mtx.port == 0)
 	{
-	  be->v.mtx.port = be->v.mtx.ctx == NULL ? 80 : 443;
+	  be->v.mtx.port = htons (be->v.mtx.ctx == NULL ? 80 : 443);
 	}
       else if (be->v.mtx.hostname[0] == '/')
 	{
