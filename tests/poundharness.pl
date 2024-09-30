@@ -309,6 +309,7 @@ sub preproc {
 	print $out <<EOT;
 # Initial settings by $0
 Daemon 0
+Control "pound.ctl"	    
 LogFacility -
 EOT
     ;
@@ -721,10 +722,12 @@ sub parse_req {
 	    $self->parse_zonefile;
 	    next;
 	}
-	if (/^control/) {
-	    $self->parse_control;
+
+	if (m{^backends\s+(\d+)\s+(\d+)(?:\s+(.+))?}) {
+	    $self->parse_control_backends($1, $2);
 	    next;
 	}
+	
 	if (s/^stats//) {
 	    foreach my $k (qw(samples min max avg stddev index)) {
 		if (s{\s+$k = (?:
@@ -814,28 +817,6 @@ sub parse_zonefile {
     }
 
     ::write_zone_file @zonetext;
-}
-
-sub parse_control {
-    my $self = shift;
-    my $fh = $self->{fh};
-    while (<$fh>) {
-	$self->{line}++;
-	chomp;
-	last if /^end$/;
-	if (/^list(?:\s+(.+))?/) {
-	    my @args;
-	    if ($1) {
-		@args = split /\s+/, $1
-	    }
-	    my $res = PoundControl->new->list(@args);
-	    print STDERR Dumper([$res]);
-	} elsif (m{^backends\s+(\d+)\s+(\d+)(?:\s+(.+))?}) {
-	    $self->parse_control_backends($1, $2);
-	} else {
-	    $self->syntax_error("unrecognized statement");
-	}
-    }
 }
 
 sub jsoncmp {
@@ -1779,6 +1760,9 @@ socket information is stored in the B<Address> and B<Port> statements that
 replace the removed ones and a backend HTTP server is started listening
 on that socket.
 
+A B<Control> statement is inserted at the beginning of the file, enabling
+the control interface via the F<pound.ctl> socket.
+
 B<Include> statements are processed in the following manner: the file
 supplied as the argument is preprocessed and the result is written to
 a file with the name obtained by appending suffix C<.pha> to the original
@@ -2045,22 +2029,19 @@ Apply the above values to this backend (0-based index).
 
 =back
 
-=head2 Querying thr Control Interface
+=head2 Querying the Control Interface
 
-The B<control> statement queries the B<pound> control interface and matches
-its responses with the expected values.  It is followed by one or more
-query statements and terminates with the keyword B<end> on a line by itself.
+The following statement query the B<pound> control interface and verify
+if the response matches the expectation.  The latter is supplied after the
+statement, in JSON format, and ends with the keyword B<end> on a line by
+itself.  Only attributes present in the expectation are compared.
 
 =over 4
 
 =item backends I<LN> I<SN>
 
-Query for backends in service I<SN> of listener I<LN>.  This keyword is
-followed by the expected response in JSON format, which ends with the
-keyword B<end> on a line by itself.
-
-The returned backend array is sorted by weight, priority and address.  Only
-attributes present in the expectation are compared.
+Query for backends in service I<SN> of listener I<LN>.
+The returned backend array is sorted by weight, priority and address. 
 
 =back
 

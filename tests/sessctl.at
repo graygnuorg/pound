@@ -77,8 +77,7 @@ Global services:
 ])
 
 PT_CHECK(
-[Control "pound.ctl"
-ListenHTTP
+[ListenHTTP
 	Service
 		Session
 			Type Header
