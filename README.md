@@ -225,7 +225,7 @@ To install these on a debian-based system, run:
 
 Additionally, to test DNS-based dynamic backends functionality, the
 `Net::DNS::Nameserver` module is needed.  On debian-based systems it is
-installed using the following command:
+installed with the following command:
 
 ```sh
  apt-get install libnet-dns-perl

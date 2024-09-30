@@ -50,21 +50,6 @@ use constant {
 };
 
 my $nameserver;
-my $zonefile = 'fakedns.zone';
-
-sub dns_reply_handler {
-    my $sb = stat($zonefile) or die "can't stat $zonefile: $!";
-    $nameserver->ReadZoneFile($zonefile);
-    $nameserver->{ReplyHandler} = \&dns_reply_handler;
-    return $nameserver->ReplyHandler(@_);
-}
-
-sub write_zone_file {
-    my $text = join("\n", @_);
-    open(my $fh, '>', $zonefile) or die "can't open $zonefile: $!";
-    print $fh $text;
-    close $fh;
-}
 
 ## Early checks
 ## ------------
@@ -89,9 +74,6 @@ sub cleanup {
 	    print "$$ Stopping pound ($pound_pid)\n";
 	}
 	kill 'HUP', $pound_pid;
-    }
-    if ($nameserver) {
-	$nameserver->stop_server();
     }
 }
 
@@ -163,37 +145,23 @@ my $script_file = shift @ARGV or usage_error "required parameter missing";
 usage_error "too many arguments\n" if @ARGV;
 
 if ($fakedns) {
-    eval "require Net::DNS::Nameserver";
+    require PoundNS;
+    eval "require PoundNS";
     if ($@) {
-	print STDERR "required module Net::DNS::Nameserver not present\n";
+	print STDERR "required module PoundNS not present\n";
 	exit(EX_SKIP);
     }
-    if ($fakedns =~ /^(\d+):(.+)/) {
-	$ENV{FAKEDNS_PORT} = $1;
-	$fakedns = $2;
-    } else {
-	$ENV{FAKEDNS_PORT} = 15353;
-    }
-
     unless (-e $fakedns) {
 	print STDERR "$fakedns: file not found\n";
 	exit(EX_SKIP);
     }
+
     if (!File::Spec->file_name_is_absolute($fakedns)) {
 	$fakedns = File::Spec->rel2abs($fakedns);
     }
 
-    write_zone_file <<\EOT
-$ORIGIN example.org.
-@   IN SOA  mname rname 1 2h 1h 2w 1h
-EOT
-	;
-    $nameserver = Net::DNS::Nameserver->new(
-	LocalAddr       => '127.0.0.1',
-	LocalPort       => $ENV{FAKEDNS_PORT},
-	ReplyHandler    => \&dns_reply_handler,
-    ) or die "can't create nameserver";
-    $nameserver->start_server();
+    $nameserver = PoundNS->new or die "can't create nameserver";
+    ($ENV{FAKEDNS_UDP_PORT}, $ENV{FAKEDNS_TCP_PORT}) = $nameserver->start_server();
 }
 
 foreach my $file (@preproc_files) {
@@ -224,14 +192,10 @@ $backends->read_and_process;
 runner();
 
 # Parse and run the script file
-my $ps = PoundScript->new($script_file, $transcript_file);
+my $ps = PoundScript->new($script_file, $transcript_file, $nameserver);
 $ps->parse;
 
 # Terminate
-if ($nameserver) {
-    $nameserver->stop_server();
-    $nameserver = undef;
-}
 
 if ($statistics) {
     print "Total tests: ".$ps->tests. "\n";
@@ -486,8 +450,8 @@ use IPC::Open3;
 use Symbol 'gensym';
 
 sub new {
-    my ($class, $file, $xscript) = @_;
-    my $self = bless { tests => 0, failures => 0 }, $class;
+    my ($class, $file, $xscript, $ns) = @_;
+    my $self = bless { tests => 0, failures => 0, ns => $ns }, $class;
     if ($file ne '-') {
 	open(my $fh, '<', $file)
 	    or croak "can't open script $file: $!";
@@ -816,7 +780,7 @@ sub parse_zonefile {
 	push @zonetext, $self->expandvars($_)
     }
 
-    ::write_zone_file @zonetext;
+    $self->{ns}->ZoneUpdate(@zonetext);
 }
 
 sub jsoncmp {
@@ -844,6 +808,7 @@ sub jsoncmp {
 sub parse_control_backends {
     my ($self, $ls, $sv) = @_;
     my $fh = $self->{fh};
+    $self->{tests}++;
     my @exp;
     while (<$fh>) {
 	$self->{line}++;
@@ -1809,19 +1774,20 @@ to I<DST> and use it as configuration file when running B<pound>.  If
 I<DST> is omitted, F<pound.cfg> is assumed.  If this option is not given,
 I<SRC> defaults to F<pound.cfi>.
 
-=item B<--fakedns=>[I<PORT>:]I<LIB>
+=item B<--fakedns=>I<LIB>
 
-Start a mock DNS server listening at localhost, port I<PORT> (default: 15535)
-and preload the library I<LIB> before exec'ing B<pound>.  I<LIB> must be the
-absolute pathname of the B<libfakedns.so> file.  See B<fakedns.c> for details
-about this library.
+Start a mock DNS server listening on arbitrary free ports (UDP and TCP),
+initialize environment variables B<FAKEDNS_UDP_PORT> and B<FAKEDNS_TCP_PORT>
+to these port numbers, and preload the library I<LIB> before exec'ing
+B<pound>.  I<LIB> must be the absolute pathname of the B<libfakedns.so> file.
+See B<fakedns.c> for details about this library.
 
 This option also instructs B<poundharness> to emit a B<Resolv> section to
 the created B<pound.cfg> file and to extend the script file syntax with
 the statements described in the B<DNS Statements> section (see below).
 
-This option requires the B<Net::DNS::Nameserver> library.  If it is not
-available, B<poundharness> will exit immediately with the status code 77.
+If B<Net::DNS::Nameserver> perl module is not available and B<poundharness>
+is given this option, it will exit with status code 77.
 
 =item B<--include-dir=>I<DIR>
 

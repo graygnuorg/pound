@@ -14,7 +14,8 @@
 ##
 ## You should have received a copy of the GNU General Public License
 ## along with pound.  If not, see <http://www.gnu.org/licenses/>.
-EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4 poundharness.pl
+EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4 poundharness.pl\
+ perllib/PoundNS.pm
 DISTCLEANFILES       = atconfig $(check_SCRIPTS)
 MAINTAINERCLEANFILES = Makefile.in $(TESTSUITE)
 
