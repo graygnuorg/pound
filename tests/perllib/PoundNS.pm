@@ -16,11 +16,16 @@
 
 package PoundNS;
 use parent 'Net::DNS::Nameserver';
-use Net::DNS::Nameserver 1990;
 use Carp;
 use threads;
 use IO::Socket::IP;
 use File::stat;
+
+# This module modifies internals of Net::DNS::Nameserver, therefore it
+# is not guaranteed that it will work with any other version than that
+# for which it has been written.
+croak 'unsupported version of Net::DNS::Nameserver'
+    unless $Net::DNS::Nameserver::VERSION == 1990;
 
 sub TCP_server {
     my ($self, $listen) = @_;

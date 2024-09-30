@@ -147,7 +147,7 @@ usage_error "too many arguments\n" if @ARGV;
 if ($fakedns) {
     eval "require PoundNS";
     if ($@) {
-	print STDERR "required module PoundNS not present\n";
+	print STDERR "PoundNS: $@\n";
 	exit(EX_SKIP);
     }
     unless (-e $fakedns) {
