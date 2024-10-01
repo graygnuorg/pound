@@ -24,6 +24,8 @@ AT_CHECK([pound -c -Wno-dns -Wno-include-dir -f pound.cfg],m4_shift($@))])
 
 m4_define([PT_PREREQ_PERL],[perl -v >/dev/null 2>&1 || exit 77])
 m4_define([PT_PREREQ_PCRE],[test "$PCRE_AVAILABLE" = "1" || exit 77])
+m4_define([PT_PREREQ_DYNAMIC_BACKENDS],[test "$DYNAMIC_BACKENDS" = 1 || exit 77])
+m4_define([PT_PREREQ_FAKEDNS],[test -f $LIBFAKEDNS || exit 77])
 
 m4_pushdef([HARNESS_OPTIONS])
 
@@ -149,3 +151,6 @@ m4_include([list.at])
 m4_include([disable.at])
 m4_include([sessctl.at])
 
+AT_BANNER([Dynamic backends])
+m4_include([dyn_a.at])
+m4_include([dyn_srv.at])

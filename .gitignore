@@ -32,3 +32,5 @@ TAGS
 /tmp
 INSTALL
 README
+/m4
+libtool

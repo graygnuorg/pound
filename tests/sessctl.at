@@ -36,7 +36,7 @@ Listeners:
  {{block "default.print_services" .services}}
  {{- range $sno,$svc = .}}
    {{printf "%3d" $sno}}: {{block "default.print_service" $svc -}}
-   Service {{if .name}}"{{.name}}" {{end}}{{template "print_status" .}}, {{.tot_pri}}
+   Service {{if .name}}"{{.name}}" {{end}}{{template "print_status" .}}
   {{- /* List each backend in service */ -}}
   {{- range $bno,$backend = .backends}}
       {{printf "%3d" $bno}}: {{block "default.print_backend" $backend -}}
@@ -77,8 +77,7 @@ Global services:
 ])
 
 PT_CHECK(
-[Control "pound.ctl"
-ListenHTTP
+[ListenHTTP
 	Service
 		Session
 			Type Header
@@ -127,7 +126,7 @@ run poundctl -f ./pound.cfg -t ./test.tmpl list /1
 status 0
 stdout
 Listener http://127\.0\.0\.1:\d+ enabled
-     0: Service enabled, 10
+     0: Service enabled
         0: backend http 127\.0\.0\.1:\d+ 5 alive enabled
         1: backend http 127\.0\.0\.1:\d+ 5 alive enabled
      Session type: HEADER
@@ -149,7 +148,7 @@ run poundctl -f ./pound.cfg -t ./test.tmpl list /1
 status 0
 stdout
 Listener http://127\.0\.0\.1:\d+ enabled
-     0: Service enabled, 10
+     0: Service enabled
         0: backend http 127\.0\.0\.1:\d+ 5 alive enabled
         1: backend http 127\.0\.0\.1:\d+ 5 alive enabled
      Session type: HEADER
@@ -170,7 +169,7 @@ run poundctl -f ./pound.cfg -t ./test.tmpl list /1
 status 0
 stdout
 Listener http://127\.0\.0\.1:\d+ enabled
-     0: Service enabled, 10
+     0: Service enabled
         0: backend http 127\.0\.0\.1:\d+ 5 alive enabled
         1: backend http 127\.0\.0\.1:\d+ 5 alive enabled
      Session type: HEADER

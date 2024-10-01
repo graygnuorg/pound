@@ -1743,7 +1743,7 @@ typedef struct
 /*
  * A modified version of strhash function from OpenSSL.
  */
-static unsigned long
+unsigned long
 strhash_ci (const char *c, size_t len)
 {
   unsigned long ret = 0;
@@ -4224,7 +4224,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        * (HTTP/1.1 only)
        */
       int rc = copy_chunks (phttp->cl, phttp->be, NULL,
-			    phttp->backend->be_type != BE_BACKEND,
+			    phttp->backend->be_type != BE_REGULAR,
 			    phttp->lstn->max_req_size);
       if (rc != HTTP_STATUS_OK)
 	{
@@ -4238,7 +4238,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        * had Content-length, so do raw reads/writes for the length
        */
       int rc = copy_bin (phttp->cl, phttp->be, content_length, NULL,
-			 phttp->backend->be_type != BE_BACKEND);
+			 phttp->backend->be_type != BE_REGULAR);
       switch (rc)
 	{
 	case COPY_OK:
@@ -4355,15 +4355,18 @@ select_backend (POUND_HTTP *phttp)
       if (phttp->be != NULL)
 	{
 	  if (backend == phttp->backend)
-	    /* Same backend as before: nothing to do */
-	    return 0;
+	    {
+	      /* Same backend as before: nothing to do */
+	      backend_unref (backend);
+	      return 0;
+	    }
 	  else
 	    close_backend (phttp);
 	}
 
       do
 	{
-	  if (backend->be_type == BE_BACKEND)
+	  if (backend->be_type == BE_REGULAR)
 	    {
 	      /*
 	       * Try to open connection to this backend.
@@ -4385,6 +4388,7 @@ select_backend (POUND_HTTP *phttp)
 		  break;
 
 		default:
+		  backend_unref (backend);
 		  log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
 			     "backend: unknown family %d",
 			     backend->v.reg.addr.ai_family);
@@ -4393,6 +4397,7 @@ select_backend (POUND_HTTP *phttp)
 
 	      if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
 		{
+		  backend_unref (backend);
 		  log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, errno,
 			     "backend %s: socket create",
 			     str_be (caddr, sizeof (caddr), backend));
@@ -4415,6 +4420,7 @@ select_backend (POUND_HTTP *phttp)
 		      return res;
 		    }
 		  /* New backend selected. */
+		  backend_unref (phttp->backend);
 		  phttp->backend = backend;
 		  return 0;
 		}
@@ -4433,10 +4439,12 @@ select_backend (POUND_HTTP *phttp)
 	       */
 	      kill_be (phttp->svc, backend, BE_KILL);
 	      /* Try next backend now. */
+	      backend_unref (backend);
 	    }
 	  else
 	    {
 	      /* New backend selected. */
+	      backend_unref (phttp->backend);
 	      phttp->backend = backend;
 	      return 0;
 	    }
@@ -4812,9 +4820,9 @@ do_http (POUND_HTTP *phttp)
 	}
 
       /*
-       * if we have anything but a BACK_END we close the channel
+       * if we have anything but a regular backend we close the channel
        */
-      if (phttp->be != NULL && phttp->backend->be_type != BE_BACKEND)
+      if (phttp->be != NULL && phttp->backend->be_type != BE_REGULAR)
 	close_backend (phttp);
 
       if (force_http_10 (phttp))
@@ -4848,7 +4856,7 @@ do_http (POUND_HTTP *phttp)
 	  res = metrics_response (phttp);
 	  break;
 
-	case BE_BACKEND:
+	case BE_REGULAR:
 	  /* Send the request. */
 	  res = send_to_backend (phttp,
 				 cl_11 && (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
@@ -4858,6 +4866,7 @@ do_http (POUND_HTTP *phttp)
 	    res = backend_response (phttp);
 	  break;
 
+	case BE_MATRIX:
 	case BE_BACKEND_REF:
 	  /* shouldn't happen */
 	  abort ();

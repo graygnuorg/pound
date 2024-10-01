@@ -116,6 +116,19 @@ generic configure options, refer to [Autoconf documentation](https://www.gnu.org
 Apart from the generic ones, there are also several *pound-specific*
 configuration options:
 
+* `--enable-dynamic-backends` or `--disable-dynamic-backends`
+
+  Enable or disable support for DNS-based dynamic backends.  You will
+  need the [GNU adns](http://www.gnu.org/software/adns) library to be able
+  to use it.  On debian-based systems, it can be installed by
+
+     ```sh
+     apt-get install libadns1-dev
+     ```
+     
+  By default, dynamic backends are enabled whenever this library is
+  present.
+
 * `--enable-pcre` or `--disable-pcre`
 
   Enable or disable use of the `libpcre2` or `libpcre`
@@ -148,20 +161,6 @@ configuration options:
   Sets the value of `MAXBUF` parameter - the size of a generic buffer
   used internally by __pound__ for various needs.  The default is 4096.
   You will probably not want to change it.
-
-* `--with-owner=`*user*
-
-  Name of the system user who will own the __pound__ executable file.  When
-  not supplied, the first name from the following list that exists in
-  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-  `sys`, `root`.
-
-* `--with-group=`*group*
-
-  Name of the system group who will own the __pound__ executable.  When
-  not supplied, the first name from the following list that exists in
-  the `/etc/passwd` file will be used: `proxy`, `www`, `daemon`, `bin`,
-  `sys`, `root`.
 
 * `--with-dh=`*n*
 
@@ -223,6 +222,17 @@ To install these on a debian-based system, run:
 ```sh
  apt-get install libio-socket-ssl-perl libnet-ssleay-perl
 ```
+
+Additionally, to test DNS-based dynamic backends functionality, the
+`Net::DNS::Nameserver` module is needed.  On debian-based systems it is
+installed with the following command:
+
+```sh
+ apt-get install libnet-dns-perl
+```
+
+You will need version 1.47 of `libnet-dns-perl`, which corresponds to
+version 1990 of `Net::DNS::Nameserver`.
 
 To run tests, type
 
@@ -450,6 +460,42 @@ the configuration above:
 
 Notice double-slashes: a slash is an escape character and must be escaped
 if intended to be used literally.
+
+### Dynamic backends
+
+Dynamic backends are created and updated on the fly based on the
+information from DNS, such as `A` (`AAAA`) or `SRV` records.  The
+following dynamic backend types are defined:
+
+* `first`
+  Resolve the symbolic host name from the `Address` directive and use
+  first IP from the DNS response as the address of the created dynamic
+  backend.  Thus, at most one dynamic backend will be created.
+
+* `all`
+  Resolve the symbolic host name and create one backend for each address
+  from the DNS response.  This enables load balancing between created
+  backends.  Each backend will be assigned the same priority.
+
+* `srv`
+  Obtain SRV records for the host name and use them to generate dynamic
+  backends.  Each record produces new dynamic backend of `Resolve all`
+  type, which in turn creates regular backends as described above.  The
+  weight field of the SRV record is mapped to the priority field of each
+  generated backend.  The SRV priority field determines the balancer group
+  where the backend will be hosted.
+
+An example of a dynamic backend definition:
+
+```
+	Service
+		Backend
+			Address "_proxy._tcp.example.org"
+			Resolve srv
+			Family any
+		End
+	End
+```
 
 ### Sessions
 

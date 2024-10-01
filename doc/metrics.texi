@@ -121,35 +121,6 @@ pound_service_enabled@{service="0"@} 1
 @end example
 @end deftypevr
 
-@deftypevr {Metric family} gauge pound_service_pri
-Service priority value.  This is the sum of priorities of all
-backends defined in the service (@pxref{Balancer}).  Indexes:
-
-@table @code
-@item listener
-Listener ordinal number.  This index is absent for globally defined
-services.
-
-@item service
-Index of the service in listener (or in global configuration, for
-globally defined services).
-
-@item entity
-If @samp{total}, the metrics contains the sum of priorities of all
-currently active backends, if @samp{absolute}, the sum of priorities
-of all backends, both active and inactive.
-@end table
-
-@example
-@group
-pound_service_pri@{listener="0",service="0",entity="total"@} 10
-pound_service_pri@{listener="0",service="0",entity="absolute"@} 15
-pound_service_pri@{service="0",entity="total"@} 1
-pound_service_pri@{service="0",entity="absolute"@} 1
-@end group
-@end example
-@end deftypevr
-
 @deftypevr {Metric family} gauge pound_backends
 Number of backends per service: total, alive, enabled, and active
 (both alive and enabled).  Indices:

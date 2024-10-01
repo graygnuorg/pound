@@ -41,6 +41,9 @@ extern int SOL_TCP;
 extern LISTENER_HEAD listeners;	/* all available listeners */
 extern SERVICE_HEAD services;	/* global services (if any) */
 
+extern pthread_mutexattr_t mutex_attr_recursive;
+extern pthread_attr_t thread_attr_detached;
+
 enum
   {
     FEATURE_DNS,

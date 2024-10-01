@@ -15,22 +15,54 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.13],[gray@gnu.org],
+AC_INIT([pound],[4.13.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
+AC_CONFIG_MACRO_DIR([m4])
 AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar])
 AC_CANONICAL_HOST
 
 # Checks for programs.
 AC_PROG_CC
-AC_PROG_RANLIB
+LT_INIT
 
 # Checks for libraries.
 AX_PTHREAD([CC="$PTHREAD_CC"],
 	   [AC_MSG_ERROR([No suitable pthread library found])])
 AC_CHECK_LIB(crypt, crypt)
+
+# Checks for headers
+AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
+
+AC_TYPE_UID_T
+AC_TYPE_PID_T
+AC_TYPE_UNSIGNED_LONG_LONG_INT
+AC_TYPE_LONG_LONG_INT
+
+# Check whether they want dynamic backends
+AC_ARG_ENABLE([dynamic-backends],
+ [AS_HELP_STRING([--enable-dynamic-backends],
+                 [enable dynamic backend support (default)])],
+ [status_dynamic_backends=${enableval}],
+ [status_dynamic_backends=probe])
+
+if test $status_dynamic_backends != no; then
+  # Check for adns library
+  AC_CHECK_HEADERS([adns.h])
+  AC_CHECK_LIB([adns], [adns_init])
+  if test "$ac_cv_lib_adns_adns_init$ac_cv_header_adns_h" = yesyes; then
+    AC_DEFINE([ENABLE_DYNAMIC_BACKENDS], [1],
+              [Define if dynamic backends are supported])
+    status_dynamic_backends=yes
+  elif $status_dynamic_backends = yes; then
+    AC_MSG_FAILURE([required library adns not found; install it or use --disable-resolver to disable])
+  else
+    status_dynamic_backends=no
+  fi
+fi
+AM_CONDITIONAL([COND_DYNAMIC_BACKENDS], [test $status_dynamic_backends = yes])
 
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
@@ -89,16 +121,6 @@ AC_ARG_WITH([maxbuf],
 
 AC_DEFINE_UNQUOTED([MAXBUF],[$MAXBUF],
  [Max. buffer size])
-
-AC_SUBST(I_OWNER)
-AC_ARG_WITH([owner],
- [AS_HELP_STRING([--with-owner=name],[The account that will own the files installed by Pound])],
- [I_OWNER="${with_owner}"])
-
-AC_SUBST(I_GRP)
-AC_ARG_WITH([group],
- [AS_HELP_STRING([--with-group=name],[The group that will own the files installed by Pound])],
- [I_GRP="${with_group}"])
 
 AC_ARG_ENABLE([tcmalloc],
  [AS_HELP_STRING([--enable-tcmalloc],[enable or disable using the tcmalloc library (default: enabled if available)])],
@@ -164,41 +186,6 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
-
-AC_CHECK_HEADERS([getopt.h pthread.h crypt.h openssl/ssl.h openssl/engine.h])
-
-AC_TYPE_UID_T
-AC_TYPE_PID_T
-AC_TYPE_UNSIGNED_LONG_LONG_INT
-AC_TYPE_LONG_LONG_INT
-
-AC_MSG_CHECKING([for default pound owner user name])
-if test -z "${I_OWNER}"; then
-    for u in proxy www daemon bin sys root
-    do
-	if id $u >/dev/null 2>&1; then
-	    I_OWNER=$u
-	    break
-	fi
-    done
-fi
-AC_MSG_RESULT([$I_OWNER])
-
-AC_MSG_CHECKING([for default pound owner group name])
-if test -z "${I_GRP}"; then
-    I_GRP=$(id -n -g $I_OWNER)
-    if test -z $I_GRP; then
-	for g in proxy www daemon bin sys root
-	do
-	    if grep "^$g:" /etc/group >/dev/null 2>&1; then
-		I_GRP=$g
-		break
-	    fi
-	done
-    fi
-fi
-AC_MSG_RESULT([$I_GRP])
-
 AC_MSG_CHECKING([if building from git clone])
 if test -d .git; then
     build_from_git=yes
@@ -221,18 +208,15 @@ cat <<EOF
 Pound configuration parameters:
 
 Buffer size ................................... $bufsize
-Owner user .................................... $owner_user
-Owner group ................................... $owner_group
 Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
+Dynamic backends .............................. $status_dynamic_backends
 *******************************************************************
 
 EOF
 ],
 [bufsize=$MAXBUF
-owner_user=$I_OWNER
-owner_group=$I_GRP
 if test $status_pcre != no; then
   status_pcre=", PCRE$status_pcre"
 else
@@ -244,6 +228,7 @@ if test "$early_pthread_cancel_probe" = 1; then
 else
   status_pthread_cancel_probe=no
 fi
+status_dynamic_backends=$status_dynamic_backends
 ])
 
 AC_CONFIG_TESTDIR(tests)

@@ -20,17 +20,17 @@
 #include "pound.h"
 #include "extern.h"
 #include "json.h"
+#include <assert.h>
 
 #if ! SET_DH_AUTO
 static void init_rsa (void);
-static void do_RSAgen (void *, const struct timespec *);
+static void do_RSAgen (enum job_ctl, void *, const struct timespec *);
 #endif
 
 /* Periodic jobs */
-typedef void (*JOB_FUNC) (void *, const struct timespec *);
-
 typedef struct job
 {
+  JOB_ID id;
   struct timespec ts;
   JOB_FUNC func;
   void *data;
@@ -38,9 +38,35 @@ typedef struct job
 } JOB;
 
 typedef DLIST_HEAD (,job) JOB_HEAD;
+
+typedef struct jobcancel
+{
+  JOB_ID id;
+  DLIST_ENTRY (jobcancel) link;
+} JOBCNCL;
+
+typedef DLIST_HEAD (,jobcancel) JOBCNCL_HEAD;
+
 static JOB_HEAD job_head = DLIST_HEAD_INITIALIZER (job_head);
-static pthread_mutex_t job_mutex = PTHREAD_MUTEX_INITIALIZER;
+static JOBCNCL_HEAD jobcncl_head = SLIST_HEAD_INITIALIZER (jobcncl_head);
+static JOB_ID job_next_id;
 static pthread_cond_t job_cond = PTHREAD_COND_INITIALIZER;
+
+static pthread_once_t job_key_once = PTHREAD_ONCE_INIT;
+static pthread_mutex_t _job_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void
+job_mutex_init (void)
+{
+  pthread_mutex_init (&_job_mutex, &mutex_attr_recursive);
+}
+
+static pthread_mutex_t *
+job_mutex (void)
+{
+  pthread_once (&job_key_once, job_mutex_init);
+  return &_job_mutex;
+}
 
 static JOB *
 job_alloc (struct timespec const *ts, JOB_FUNC func, void *data)
@@ -54,11 +80,14 @@ job_alloc (struct timespec const *ts, JOB_FUNC func, void *data)
   return job;
 }
 
-static void
+static JOB_ID
 job_arm_unlocked (JOB *job)
 {
   JOB *t;
-
+  JOB_ID jid = job_next_id++;
+  
+  job->id = jid;
+  
   DLIST_FOREACH (t, &job_head, link)
     {
       if (timespec_cmp (&job->ts, &t->ts) < 0)
@@ -72,43 +101,108 @@ job_arm_unlocked (JOB *job)
 
   if (DLIST_PREV (job, link) == NULL)
     pthread_cond_broadcast (&job_cond);
+
+  return jid;
 }
 
-static void
+static JOB_ID
 job_enqueue_unlocked (struct timespec const *ts, JOB_FUNC func, void *data)
 {
-  job_arm_unlocked (job_alloc (ts, func, data));
+  return job_arm_unlocked (job_alloc (ts, func, data));
 }
 
-static void
+JOB_ID
 job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
 {
-  pthread_mutex_lock (&job_mutex);
-  job_enqueue_unlocked (ts, func, data);
-  pthread_mutex_unlock (&job_mutex);
+  JOB_ID jid;
+  
+  pthread_mutex_lock (job_mutex ());
+  jid = job_enqueue_unlocked (ts, func, data);
+  pthread_mutex_unlock (job_mutex ());
+  return jid;
 }
 
-static void
+static JOB_ID
 job_enqueue_after_unlocked (unsigned t, JOB_FUNC func, void *data)
 {
   struct timespec ts;
   clock_gettime (CLOCK_REALTIME, &ts);
   ts.tv_sec += t;
-  job_enqueue_unlocked (&ts, func, data);
+  return job_enqueue_unlocked (&ts, func, data);
+}
+
+static JOB_ID
+job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
+{
+  JOB_ID jid;
+  pthread_mutex_lock (job_mutex ());
+  jid = job_enqueue_after_unlocked (t, func, data);
+  pthread_mutex_unlock (job_mutex ());
+  return jid;
 }
 
 static void
-job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
+job_remove (JOB_ID jid)
 {
-  pthread_mutex_lock (&job_mutex);
-  job_enqueue_after_unlocked (t, func, data);
-  pthread_mutex_unlock (&job_mutex);
+  JOB *job, *tmp;
+  DLIST_FOREACH_SAFE (job, tmp, &job_head, link)
+    {
+      if (job->id == jid)
+	{
+	  struct timespec ts;
+	  clock_gettime (CLOCK_REALTIME, &ts);
+	  job->func (job_ctl_cancel, job->data, &ts);
+	  DLIST_REMOVE (&job_head, job, link);
+	  free (job);
+	  break;
+	}
+    }
+}
+
+int
+job_get_timestamp (JOB_ID jid, struct timespec *ts)
+{
+  int rc = 1;
+  JOB *job;
+  pthread_mutex_lock (job_mutex ());
+  DLIST_FOREACH (job, &job_head, link)
+    {
+      if (job->id == jid)
+	{
+	  *ts = job->ts;
+	  rc = 0;
+	  break;
+	}
+    }
+  pthread_mutex_unlock (job_mutex ());
+  return rc;
+}
+
+void
+job_cancel (JOB_ID id)
+{
+  JOBCNCL *jc;
+  XZALLOC (jc);
+  jc->id = id;
+  pthread_mutex_lock (job_mutex ());
+  DLIST_PUSH (&jobcncl_head, jc, link);
+  pthread_cond_broadcast (&job_cond);
+  pthread_mutex_unlock (job_mutex ());
 }
 
 static void
 timer_cleanup (void *ptr)
 {
-  pthread_mutex_unlock (&job_mutex);
+  pthread_mutex_unlock (job_mutex ());
+}
+
+void *
+thr_job_runner (void *arg)
+{
+  JOB *job = arg;
+  job->func (job_ctl_run, job->data, &job->ts);
+  free (job);
+  return NULL;
 }
 
 /*
@@ -123,7 +217,7 @@ thr_timer (void *arg)
   job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 #endif
 
-  pthread_mutex_lock (&job_mutex);
+  pthread_mutex_lock (job_mutex ());
   pthread_cleanup_push (timer_cleanup, NULL);
 
   for (;;)
@@ -131,29 +225,43 @@ thr_timer (void *arg)
       int rc;
       JOB *job;
 
+      while (!DLIST_EMPTY (&jobcncl_head))
+	{
+	  JOBCNCL *jc = DLIST_FIRST (&jobcncl_head);
+	  job_remove (jc->id);
+	  DLIST_SHIFT (&jobcncl_head, link);
+	  free (jc);
+	}
+      
       if (DLIST_EMPTY (&job_head))
 	{
-	  pthread_cond_wait (&job_cond, &job_mutex);
+	  pthread_cond_wait (&job_cond, job_mutex ());
 	  continue;
 	}
 
       job = DLIST_FIRST (&job_head);
 
-      rc = pthread_cond_timedwait (&job_cond, &job_mutex, &job->ts);
+      rc = pthread_cond_timedwait (&job_cond, job_mutex (), &job->ts);
       if (rc == 0)
-	continue;
-      if (rc != ETIMEDOUT)
+	{
+	  continue;
+	}
+      else if (rc == ETIMEDOUT)
+	{	  
+	  if (job != DLIST_FIRST (&job_head))
+	    /* Job was removed or its time changed */
+	    continue;
+	  else
+	    {
+	      pthread_t tid;
+	      DLIST_SHIFT (&job_head, link);
+	      pthread_create (&tid, &thread_attr_detached, thr_job_runner,
+			      job);
+	    }
+	}
+      else
 	abend ("unexpected error from pthread_cond_timedwait: %s",
 	       strerror (errno));
-
-      if (job != DLIST_FIRST (&job_head))
-	/* Job was removed or its time changed */
-	continue;
-
-      DLIST_SHIFT (&job_head, link);
-
-      job->func (job->data, &job->ts);
-      free (job);
     }
   pthread_cleanup_pop (1);
 }
@@ -199,12 +307,15 @@ session_free (SESSION *sess)
  * Before returning, the function rearms the periodic job if necessary.
  */
 static void
-expire_sessions (void *data, const struct timespec *now)
+expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
 {
   SERVICE *svc = data;
   SESSION_TABLE *tab;
   SESSION *sess;
 
+  if (ctl != job_ctl_run)
+    return;
+  
   pthread_mutex_lock (&svc->mut);
 
   tab = svc->sessions;
@@ -217,7 +328,8 @@ expire_sessions (void *data, const struct timespec *now)
     }
 
   if (!DLIST_EMPTY (&tab->head))
-    job_enqueue_unlocked (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
+    job_enqueue (&DLIST_FIRST (&tab->head)->expire,
+		 expire_sessions, svc);
   pthread_mutex_unlock (&svc->mut);
 }
 
@@ -318,7 +430,7 @@ service_session_remove_by_key (SERVICE *svc, char const *key)
  *
  * The service mutex must be locked.
  */
-static void
+void
 service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 {
   SESSION_TABLE *tab = svc->sessions;
@@ -406,8 +518,12 @@ str_be (char *buf, size_t size, BACKEND *be)
 {
   switch (be->be_type)
     {
-    case BE_BACKEND:
+    case BE_REGULAR:
       addr2str (buf, size, &be->v.reg.addr, 0);
+      break;
+
+    case BE_MATRIX:
+      snprintf (buf, size, "matrix:%s", be->v.mtx.hostname);
       break;
 
     case BE_REDIRECT:
@@ -509,11 +625,16 @@ random_in_range (unsigned long max)
  * Pick a random back-end from a candidate list
  */
 static BACKEND *
-rand_backend (SERVICE *svc)
+rand_backend (BALANCER *balancer)
 {
   BACKEND *be;
-  int pri = random_in_range (svc->tot_pri);
-  SLIST_FOREACH (be, &svc->backends, next)
+  int pri;
+
+  if (DLIST_EMPTY (&balancer->backends))
+    return NULL;
+  
+  pri = random_in_range (balancer->tot_pri);
+  DLIST_FOREACH (be, &balancer->backends, link)
     {
       if (!backend_is_alive (be) || be->disabled)
 	continue;
@@ -523,22 +644,38 @@ rand_backend (SERVICE *svc)
   return be;
 }
 
+static inline void
+iwrr_init (BALANCER *balancer)
+{
+  balancer->iwrr_round = 0;
+  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
+}
+
 static BACKEND *
-iwrr_select (SERVICE *svc)
+iwrr_select (BALANCER *balancer)
 {
   BACKEND *be = NULL;
 
+  if (balancer->iwrr_cur == NULL)
+    {
+      iwrr_init (balancer);
+      if (balancer->iwrr_cur == NULL)
+	return NULL;
+    }
+  
   do
     {
-      if (!svc->iwrr_cur->disabled && backend_is_alive (svc->iwrr_cur))
+      if (!balancer->iwrr_cur->disabled &&
+	  backend_is_alive (balancer->iwrr_cur))
 	{
-	  if (svc->iwrr_round <= svc->iwrr_cur->priority)
-	    be = svc->iwrr_cur;
+	  if (balancer->iwrr_round <= balancer->iwrr_cur->priority)
+	    be = balancer->iwrr_cur;
 	}
-      if ((svc->iwrr_cur = SLIST_NEXT (svc->iwrr_cur, next)) == NULL)
+      if ((balancer->iwrr_cur = DLIST_NEXT (balancer->iwrr_cur, link)) == NULL)
 	{
-	  svc->iwrr_cur = SLIST_FIRST (&svc->backends);
-	  svc->iwrr_round = (svc->iwrr_round + 1) % (svc->max_pri + 1);
+	  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
+	  balancer->iwrr_round = (balancer->iwrr_round + 1) %
+	                            (balancer->max_pri + 1);
 	}
     }
   while (be == NULL);
@@ -546,44 +683,83 @@ iwrr_select (SERVICE *svc)
 }
 
 static BACKEND *
-service_lb_select_backend (SERVICE *svc)
+balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
 {
   BACKEND *be;
 
-  if (svc->max_pri == 0)
+  if (DLIST_EMPTY (&balancer->backends))
     return NULL;
-  if (SLIST_NEXT (SLIST_FIRST (&svc->backends), next) == NULL)
+  if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
-      be = SLIST_FIRST (&svc->backends);
+      be = DLIST_FIRST (&balancer->backends);
       if (!be->disabled && backend_is_alive (be))
 	return be;
       return NULL;
     }
 
-  switch (svc->balancer)
+  switch (algo)
     {
-    case BALANCER_RANDOM:
-      be = rand_backend (svc);
+    case BALANCER_ALGO_RANDOM:
+      be = rand_backend (balancer);
       break;
 
-    case BALANCER_IWRR:
-      be = iwrr_select (svc);
+    case BALANCER_ALGO_IWRR:
+      be = iwrr_select (balancer);
     }
   return be;
 }
 
 void
-service_lb_init (SERVICE *svc)
+balancer_init (BALANCER_ALGO algo, BALANCER *balancer)
 {
-  switch (svc->balancer)
+  switch (algo)
     {
-    case BALANCER_RANDOM:
+    case BALANCER_ALGO_RANDOM:
       break;
 
-    case BALANCER_IWRR:
-      svc->iwrr_round = 0;
-      svc->iwrr_cur = SLIST_FIRST (&svc->backends);
+    case BALANCER_ALGO_IWRR:
+      iwrr_init (balancer);
       break;
+    }
+}
+
+BACKEND *
+service_lb_select_backend (SERVICE *svc)
+{
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
+    {
+      BACKEND *be = balancer_select_backend (svc->balancer_algo, balancer);
+      if (be)
+	return be;
+    }
+  return NULL;
+}
+
+void
+service_lb_init (SERVICE *svc)
+{
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
+    {
+      balancer_init (svc->balancer_algo, balancer);
+    }
+}
+
+void
+service_lb_reset (SERVICE *svc, BACKEND *be)
+{
+  if (svc->balancer_algo == BALANCER_ALGO_IWRR)
+    {
+      BALANCER *balancer;
+      DLIST_FOREACH (balancer, &svc->backends, link)
+	{
+	  if (balancer->iwrr_cur == be)
+	    {
+	      balancer_init (svc->balancer_algo, balancer);
+	      break;
+	    }
+	}
     }
 }
 
@@ -727,6 +903,18 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
   return 1;
 }
 
+static int
+service_has_backends (SERVICE *svc)
+{
+  BALANCER *bl;
+  DLIST_FOREACH (bl, &svc->backends, link)
+    {
+      if (!DLIST_EMPTY (&bl->backends))
+	return 1;
+    }
+  return 0;
+}
+
 /*
  * Find the right back-end for a request
  */
@@ -740,7 +928,7 @@ get_backend (POUND_HTTP *phttp)
 
   pthread_mutex_lock (&svc->mut);
 
-  if (svc->tot_pri > 0)
+  if (service_has_backends (svc))
     {
       switch (svc->sess_type)
 	{
@@ -785,11 +973,9 @@ get_backend (POUND_HTTP *phttp)
 
       if (!res)
 	res = service_lb_select_backend (svc);
+      backend_ref (res);
     }
   
-  if (!res)
-    res = svc->emergency;
-
   pthread_mutex_unlock (&svc->mut);
 
   return res;
@@ -834,83 +1020,186 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
     }
   pthread_mutex_unlock (&svc->mut);
 }
+
+/*
+ * Recompute max. backend priority and sum of priorities for the backend list.
+ * If call-back function cb is supplied, call it for each backend.
+ *
+ * NOTICE:
+ *  1. The service should be locked prior to calling this function.
+ *  2. Sum of priorities of all the backends should not overflow the type
+ *     of svc->tot_pri.  For static backends, this is always true.  For
+ *     dynamic backends, this should be ensured when allocating them.
+ */
+void
+balancer_recompute_pri_unlocked (BALANCER *bl,
+				     void (*cb) (BACKEND *, void *),
+				     void *data)
+{
+  BACKEND *b;
+  
+  bl->tot_pri = 0;
+  bl->max_pri = 0;
+  DLIST_FOREACH (b, &bl->backends, link)
+    {
+      if (cb)
+	cb (b, data);
+      if (backend_is_alive (b) && !b->disabled)
+	{
+	  bl->tot_pri += b->priority;
+	  if (bl->max_pri < b->priority)
+	    bl->max_pri = b->priority;
+	}
+    }
+}
 
-static void touch_be (void *data, const struct timespec *ts);
+void
+service_recompute_pri_unlocked (SERVICE *svc,
+				void (*cb) (BACKEND *, void *),
+				void *data)
+{
+  BALANCER *bl;
+  DLIST_FOREACH (bl, &svc->backends, link)
+    {
+      balancer_recompute_pri_unlocked (bl, cb, data);
+    }
+}  
+
+/*
+ * Recompute max. backend priority and sum of priorities for the given
+ * backend list of the service.  If call-back function cb is supplied,
+ * call it for each backend.
+ *
+ * If bl == NULL, recompute all backend lists.
+ *
+ * Locks the svc mutex prior to use.  See second notice to
+ * balancer_recompute_pri_unlocked, above.
+ */
+void
+service_recompute_pri (SERVICE *svc, BALANCER *bl,
+		       void (*cb) (BACKEND *, void *),
+		       void *data)
+{
+  pthread_mutex_lock (&svc->mut);
+  if (bl)
+    balancer_recompute_pri_unlocked (bl, cb, data);
+  else
+    {
+      DLIST_FOREACH (bl, &svc->backends, link)
+	{
+	  balancer_recompute_pri_unlocked (bl, cb, data);
+	}
+    }
+  pthread_mutex_unlock (&svc->mut);
+}  
+
+struct disable_closure
+{
+  BACKEND *be;
+  int disable_mode;
+};
+
+static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
+
+/*
+ * NOTE:
+ * Changing the disabled state of a backend cannot be done separately from
+ * the service where that backend is hosted, because service priorities
+ * depend on it.  Updating priorities after state change would create a
+ * race condition.  Therefore, state change is done as part of priority
+ * recalculation, while service mutex is being locked.  It is thus guaranteed
+ * that the disabled field of any backend is safe to be accessed for
+ * reading while the hosting service of that backend is locked.
+ *
+ * The convention of using service mutex for locking access to the
+ * disabled field of a backend (instead of that of the backend itself) is
+ * used throughout the code.  In particular, it is used in backend
+ * serialization code below as well as in matrix backend manuipulations
+ * (see resolver.c).
+ */
+static void
+cb_backend_disable (BACKEND *b, void *data)
+{
+  struct disable_closure *c = data;
+  char buf[MAXBUF];
+  
+  if (b == c->be)
+    {
+      switch (c->disable_mode)
+	{
+	case BE_DISABLE:
+	  b->disabled = 1;
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
+		  POUND_TID (),
+		  buf);
+	  break;
+
+	case BE_KILL:
+	  b->v.reg.alive = 0;
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
+		  POUND_TID (), buf);
+	  service_session_remove_by_backend (b->service, b);
+	  backend_ref (b);
+	  job_enqueue_after (alive_to, touch_be, b);
+	  break;
+
+	case BE_ENABLE:
+	  str_be (buf, sizeof (buf), b);
+	  logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
+		  POUND_TID (),
+		  buf);
+	  b->disabled = 0;
+	  break;
+	}
+    }
+}  
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
- *  disable_only == 1:  mark as disabled
- *  disable_only == 0:  mark as dead, remove sessions
- *  disable_only == -1:  mark as enabled
+ *  disable_only == BE_DISABLE:  mark as disabled
+ *  disable_only == BE_KILL:     mark as dead, remove sessions
+ *  disable_only == BE_ENABLE:   mark as enabled
  */
 void
 kill_be (SERVICE *svc, BACKEND *be, const int disable_mode)
 {
-  BACKEND *b;
-  int ret_val;
-  char buf[MAXBUF];
-
-  /* This function operates on regular backends only. */
-  if (be->be_type != BE_BACKEND)
-    return;
-
-  if ((ret_val = pthread_mutex_lock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "kill_be() lock: %s", strerror (ret_val));
-  svc->tot_pri = 0;
-  svc->max_pri = 0;
-  SLIST_FOREACH (b, &svc->backends, next)
+  if (be->be_type == BE_REGULAR)
     {
-      if (b == be)
-	{
-	  switch (disable_mode)
-	    {
-	    case BE_DISABLE:
-	      b->disabled = 1;
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s disabled",
-		      POUND_TID (),
-		      buf);
-	      break;
-
-	    case BE_KILL:
-	      b->v.reg.alive = 0;
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s dead (killed)",
-		      POUND_TID (), buf);
-	      service_session_remove_by_backend (svc, be);
-	      job_enqueue_after (alive_to, touch_be, be);
-	      break;
-
-	    case BE_ENABLE:
-	      str_be (buf, sizeof (buf), b);
-	      logmsg (LOG_NOTICE, "(%"PRItid") Backend %s enabled",
-		      POUND_TID (),
-		      buf);
-	      b->disabled = 0;
-	      break;
-
-	    default:
-	      logmsg (LOG_WARNING, "kill_be(): unknown mode %d", disable_mode);
-	      break;
-	    }
-	}
-      if (backend_is_alive (b) && !b->disabled)
-	{
-	  svc->tot_pri += b->priority;
-	  if (svc->max_pri < be->priority)
-	    svc->max_pri = be->priority;
-	}
+      struct disable_closure clos;
+      clos.be = be;
+      clos.disable_mode = disable_mode;
+      assert (be->balancer != NULL);
+      service_recompute_pri (svc, be->balancer, cb_backend_disable, &clos);
     }
-  if ((ret_val = pthread_mutex_unlock (&svc->mut)) != 0)
-    logmsg (LOG_WARNING, "kill_be() unlock: %s", strerror (ret_val));
-  return;
+}
+
+static void
+backend_disable (SERVICE *svc, BACKEND *be, const int disable_mode)
+{
+  switch (be->be_type)
+    {
+    case BE_REGULAR:
+      kill_be (svc, be, disable_mode);
+      break;
+
+#if ENABLE_DYNAMIC_BACKENDS
+    case BE_MATRIX:
+      backend_matrix_disable (be, disable_mode);
+      break;
+#endif
+
+    default:
+      break;
+    }
 }
 
 /*
  * Search for a host name, return the addrinfo for it
  */
 int
-get_host (char *const name, struct addrinfo *res, int ai_family)
+get_host (char const *name, struct addrinfo *res, int ai_family)
 {
   struct addrinfo *chain, *ap;
   struct addrinfo hints;
@@ -1302,34 +1591,37 @@ backend_probe (BACKEND *be)
  * itself for alive_to seconds later.
  */
 static void
-touch_be (void *data, const struct timespec *ts)
+touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 {
   BACKEND *be = data;
   char buf[MAXBUF];
 
-  /* This function operates on regular backends only. */
-  if (be->be_type != BE_BACKEND)
-    return;
-
-  if (!be->v.reg.alive)
+  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && be->refcount > 1)
     {
-      if (backend_probe (be) == BACKEND_OK)
+      if (!be->v.reg.alive)
 	{
-	  be->v.reg.alive = 1;
-	  str_be (buf, sizeof (buf), be);
-	  logmsg (LOG_NOTICE, "Backend %s resurrected", buf);
-	  if (!be->disabled)
+	  if (backend_probe (be) == BACKEND_OK)
 	    {
-	      pthread_mutex_lock (&be->service->mut);
-	      be->service->tot_pri += be->priority;
-	      if (be->service->max_pri < be->priority)
-		be->service->max_pri = be->priority;
-	      pthread_mutex_unlock (&be->service->mut);
+	      be->v.reg.alive = 1;
+	      str_be (buf, sizeof (buf), be);
+	      logmsg (LOG_NOTICE, "Backend %s resurrected", buf);
+	      if (!be->disabled)
+		{
+		  pthread_mutex_lock (&be->service->mut);
+		  be->balancer->tot_pri += be->priority;
+		  if (be->balancer->max_pri < be->priority)
+		    be->balancer->max_pri = be->priority;
+		  pthread_mutex_unlock (&be->service->mut);
+		}
+	    }
+	  else
+	    {
+	      job_enqueue_after (alive_to, touch_be, be);
+	      return;
 	    }
 	}
-      else
-	job_enqueue_after_unlocked (alive_to, touch_be, be);
     }
+  backend_unref (be);
 }
 
 #if ! SET_DH_AUTO
@@ -1382,14 +1674,17 @@ generate_key (RSA ** ret_rsa, unsigned long bits)
  * runs every T_RSA_KEYS seconds
  */
 static void
-do_RSAgen (void *unused1, const struct timespec *unused2)
+do_RSAgen (enum job_ctl ctl, void *unused1, const struct timespec *unused2)
 {
   int n, ret_val;
   RSA *t_RSA512_keys[N_RSA_KEYS];
   RSA *t_RSA1024_keys[N_RSA_KEYS];
 
+  if (ctl != job_ctl_run)
+    return;
+  
   /* Re-arm the job */
-  job_enqueue_after_unlocked (T_RSA_KEYS, do_RSAgen, NULL);
+  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 
   for (n = 0; n < N_RSA_KEYS; n++)
     {
@@ -1517,13 +1812,17 @@ static int
 session_backend_index (SESSION *sess)
 {
   int n = 0;
-  BACKEND *be;
+  BALANCER *balancer;
 
-  SLIST_FOREACH (be, &sess->backend->service->backends, next)
+  DLIST_FOREACH (balancer, &sess->backend->service->backends, link)
     {
-      if (be == sess->backend)
-	break;
-      n++;
+      BACKEND *be;
+      DLIST_FOREACH (be, &balancer->backends, link)
+	{
+	  if (be == sess->backend)
+	    break;
+	  n++;
+	}
     }
   return n;
 }
@@ -1596,7 +1895,10 @@ backend_type_str (BACKEND_TYPE t)
 {
   switch (t)
     {
-    case BE_BACKEND:
+    case BE_MATRIX:
+      return "matrix";
+
+    case BE_REGULAR:
       return "backend";
 
     case BE_REDIRECT:
@@ -1614,7 +1916,7 @@ backend_type_str (BACKEND_TYPE t)
     case BE_METRICS:
       return "metrics";
 
-    default: /* BE_BACKEND_REF can't happen at this stage. */
+    default: /* BE_REGULAR_REF can't happen at this stage. */
       break;
     }
 
@@ -1679,6 +1981,77 @@ backend_stats_serialize (BACKEND *be)
   return obj;
 }
 
+/*
+ * Find index of the backend in the list.
+ * FIXME: Grossly ineffective.  Think how to cache this info.
+ */
+static int
+find_backend_index (BACKEND *be)
+{
+  int i = 0;
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &be->service->backends, link)
+    {
+      BACKEND *b;
+      DLIST_FOREACH (b, &balancer->backends, link)
+	{
+	  if (b == be)
+	    return i;
+	  i++;
+	}
+    }
+  return -1;
+}
+
+/*
+ * Add information about dynamic backend generation:
+ *  If be is a matrix backend, its expiration time is stored in
+ *  attribute "expire".
+ *  If it is a regular dynamically created backend, the index of
+ *  the matrix backend that created it is stored in attribute
+ *  "parent".
+ *  For any other backend types, do nothing.
+ */
+static int
+backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
+{
+  BACKEND *up = be, *parent;
+  int err = 0;
+
+  while (up)
+    {
+      parent = up;
+      switch (up->be_type)
+	{
+	case BE_MATRIX:
+	  up = up->v.mtx.parent;
+	  break;
+
+	case BE_REGULAR:
+	  up = up->v.reg.parent;
+	  break;
+
+	default:
+	  return 0;
+	}
+    }
+  if (parent == NULL)
+    return 0;
+  if (parent != be)
+    {
+      err = json_object_set (obj, "parent",
+			     json_new_number (find_backend_index (parent)));
+    }
+  else if (err == 0 && be->be_type == BE_MATRIX)
+    {
+      struct timespec ts;
+      
+      if (job_get_timestamp (parent->v.mtx.jid, &ts) == 0)
+	err = json_object_set (obj, "expire", timespec_serialize (&ts));
+    }
+  return err;
+}
+
 static struct json_value *
 backend_serialize (BACKEND *be)
 {
@@ -1703,41 +2076,66 @@ backend_serialize (BACKEND *be)
 	      err = 1;
 	    }
 	  else
-	    switch (be->be_type)
-	      {
-	      case BE_BACKEND:
-		err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
-		  || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
-		  || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
-		  || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-		  || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"));
-		break;
+	    {
+	      if (be->balancer) 
+		err = json_object_set (obj, "weight",
+				       json_new_integer (be->balancer->weight));
+	      if (err == 0)
+		switch (be->be_type)
+		  {
+		  case BE_MATRIX:
+		    err = json_object_set (obj, "hostname",
+					   json_new_string (be->v.mtx.hostname))
+		      || json_object_set (obj, "resolve_mode",
+					  json_new_string (resolve_mode_str (be->v.mtx.resolve_mode)))
+		      || json_object_set (obj, "family",
+					  json_new_integer (be->v.mtx.family))
+		      || json_object_set (obj, "servername",
+					  be->v.reg.servername
+					  ? json_new_string (be->v.reg.servername)
+					  : json_new_null ())
+		      || backend_serialize_dyninfo (obj, be);
+		    break;
 
-	      case BE_REDIRECT:
-		err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
-		  || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
-		  || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
-		break;
+		  case BE_REGULAR:
+		    err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
+		      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
+		      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
+		      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
+		      || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"))
+		      || json_object_set (obj, "servername",
+					  be->v.reg.servername
+					  ? json_new_string (be->v.reg.servername)
+					  : json_new_null ())
+		      || backend_serialize_dyninfo (obj, be);
+		    break;
 
-	      case BE_ACME:
-	      case BE_CONTROL:
-	      case BE_METRICS:
-		/* FIXME */
-		break;
-
-	      case BE_BACKEND_REF:
-		/* Can't happen */
-		break;
-
-	      case BE_ERROR:
-		err = json_object_set (obj, "status",
-				       json_new_integer (pound_to_http_status (be->v.error.status)))
-		  || json_object_set (obj, "text",
-				      be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
-		break;
-	      }
-	  if (enable_backend_stats)
-	    err |= json_object_set (obj, "stats", backend_stats_serialize (be));
+		  case BE_REDIRECT:
+		    err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
+		      || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
+		      || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
+		    break;
+		    
+		  case BE_ACME:
+		  case BE_CONTROL:
+		  case BE_METRICS:
+		    /* FIXME */
+		    break;
+		    
+		  case BE_BACKEND_REF:
+		    /* Can't happen */
+		    break;
+		    
+		  case BE_ERROR:
+		    err = json_object_set (obj, "status",
+					   json_new_integer (pound_to_http_status (be->v.error.status)))
+		      || json_object_set (obj, "text",
+					  be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
+		    break;
+		  }
+	      if (enable_backend_stats && be->be_type != BE_MATRIX)
+		err |= json_object_set (obj, "stats", backend_stats_serialize (be));
+	    }
 	}
     }
   if (err)
@@ -1749,24 +2147,28 @@ backend_serialize (BACKEND *be)
 }
 
 static struct json_value *
-backends_serialize (BACKEND_HEAD *head)
+backends_serialize (BALANCER_LIST *meta)
 {
   struct json_value *obj;
 
-  if (SLIST_EMPTY (head))
+  if (DLIST_EMPTY (meta))
     obj = json_new_null ();
   else
     {
-      BACKEND *be;
-
+      BALANCER *balancer;
       obj = json_new_array ();
-      SLIST_FOREACH (be, head, next)
+      DLIST_FOREACH (balancer, meta, link)
 	{
-	  if (json_array_append (obj, backend_serialize (be)))
+	  BACKEND *be;
+
+	  DLIST_FOREACH (be, &balancer->backends, link)
 	    {
-	      json_value_free (obj);
-	      obj = NULL;
-	      break;
+	      if (json_array_append (obj, backend_serialize (be)))
+		{
+		  json_value_free (obj);
+		  obj = NULL;
+		  break;
+		}
 	    }
 	}
     }
@@ -1787,12 +2189,9 @@ service_serialize (SERVICE *svc)
       if (json_object_set (obj, "name",
 			   svc->name ? json_new_string (svc->name) : json_new_null ())
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
-	  || json_object_set (obj, "tot_pri", json_new_integer (svc->tot_pri))
-	  || json_object_set (obj, "max_pri", json_new_integer (svc->max_pri))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
-	  || json_object_set (obj, "backends", backends_serialize (&svc->backends))
-	  || json_object_set (obj, "emergency", backend_serialize (svc->emergency)))
+	  || json_object_set (obj, "backends", backends_serialize (&svc->backends)))
 	{
 	  json_value_free (obj);
 	  obj = NULL;
@@ -2109,23 +2508,31 @@ locate_listener (IDENT id)
 static SERVICE *
 locate_service (LISTENER *lstn, IDENT id)
 {
-  SERVICE *svc = 0;
-
   if (id.type != IDTYPE_ERR)
     {
       int n = 0;
       SERVICE_HEAD *head = lstn ? &lstn->services : &services;
+      SERVICE *svc;
 
       SLIST_FOREACH (svc, head, next)
 	{
-	  if ((id.type == IDTYPE_NUM && n == id.n) ||
-	      (svc->name && strlen (svc->name) == id.s.len &&
-	       memcmp (svc->name, id.s.name, id.s.len) == 0))
-	    break;
+	  switch (id.type)
+	    {
+	    case IDTYPE_NUM:
+	      if (n == id.n)
+		return svc;
+	      break;
+
+	    case IDTYPE_STR:
+	      if (svc->name && strlen (svc->name) == id.s.len &&
+		  memcmp (svc->name, id.s.name, id.s.len) == 0)
+		return svc;
+	      break;
+	    }
 	  n++;
 	}
     }
-  return svc;
+  return NULL;
 }
 
 /*
@@ -2134,19 +2541,22 @@ locate_service (LISTENER *lstn, IDENT id)
 static BACKEND *
 locate_backend (SERVICE *svc, IDENT id)
 {
-  BACKEND *be = NULL;
-
   if (id.type == IDTYPE_NUM)
     {
       long n = 0;
-      SLIST_FOREACH (be, &svc->backends, next)
+      BALANCER *balancer;
+      DLIST_FOREACH (balancer, &svc->backends, link)
 	{
-	  if (n == id.n)
-	    break;
-	  n++;
+	  BACKEND *be;
+	  DLIST_FOREACH (be, &balancer->backends, link)
+	    {
+	      if (n == id.n)
+		return be;
+	      n++;
+	    }
 	}
     }
-  return be;
+  return NULL;
 }
 
 enum object_type
@@ -2229,7 +2639,14 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   switch (obj->type)
     {
     case OBJ_BACKEND:
+      /*
+       * backend_serialize needs to access the backend disabled field.
+       * To do it safely, the holdiing service must be locked.  See the
+       * NOTE to cb_backend_disable, above.
+       */
+      pthread_mutex_lock (&obj->be->service->mut);
       val = backend_serialize (obj->be);
+      pthread_mutex_unlock (&obj->be->service->mut);
       break;
 
     case OBJ_SERVICE:
@@ -2288,8 +2705,12 @@ listener_is_control (LISTENER *lstn)
 
       if (svc && SLIST_NEXT (svc, next) == NULL)
 	{
-	  BACKEND *be = SLIST_FIRST (&svc->backends);
-	  return SLIST_NEXT (be, next) == NULL && be->be_type == BE_CONTROL;
+	  BALANCER *balancer = DLIST_FIRST (&svc->backends);
+	  if (balancer && DLIST_NEXT (balancer, link) == NULL)
+	    {
+	      BACKEND *be = DLIST_FIRST (&balancer->backends);
+	      return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
+	    }
 	}
     }
   return 0;
@@ -2311,7 +2732,7 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   switch (obj->type)
     {
     case OBJ_BACKEND:
-      kill_be (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
+      backend_disable (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
       break;
 
     case OBJ_SERVICE:
@@ -2630,12 +3051,16 @@ static int
 itr_service_backends (SERVICE *svc, void *data)
 {
   struct service_backends_iterator *itp = data;
-  BACKEND *be;
-  SLIST_FOREACH (be, &svc->backends, next)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
     {
-      int rc;
-      if ((rc = itp->itr (be, itp->data)) != 0)
-	return rc;
+      BACKEND *be;
+      DLIST_FOREACH (be, &balancer->backends, link)
+	{
+	  int rc;
+	  if ((rc = itp->itr (be, itp->data)) != 0)
+	    return rc;
+	}
     }
   return 0;
 }
@@ -2649,3 +3074,37 @@ foreach_backend (BACKEND_ITERATOR itr, void *data)
   bitr.data = data;
   return foreach_service (itr_service_backends, &bitr);
 }
+
+BALANCER *
+balancer_list_get (BALANCER_LIST *ml, int weight)
+{
+  BALANCER *bl, *new_list;
+  DLIST_FOREACH (bl, ml, link)
+    {
+      if (weight == bl->weight)
+	return bl;
+      if (weight < bl->weight)
+	break;
+    }
+
+  if ((new_list = calloc (1, sizeof (*bl))) == NULL)
+    return NULL;
+  new_list->weight = weight;
+  DLIST_INIT (&new_list->backends);
+  
+  if (bl)
+    DLIST_INSERT_BEFORE (ml, bl, new_list, link);
+  else
+    DLIST_INSERT_TAIL (ml, new_list, link);
+
+  return new_list;
+}
+
+void
+balancer_list_remove (BALANCER_LIST *ml, BALANCER *bl)
+{
+  DLIST_REMOVE (ml, bl, link);
+}
+
+
+  

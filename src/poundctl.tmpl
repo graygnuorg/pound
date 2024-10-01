@@ -59,15 +59,20 @@ Listeners:
  {{block "default.print_services" .services}}
  {{- range $sno,$svc = .}}
    {{printf "%3d" $sno}}. {{block "default.print_service" $svc -}}
-   Service {{if .name}}"{{.name}}" {{end}}{{if .enabled}}active{{else}}disabled{{end}} ({{.tot_pri}})
+   Service {{if .name}}"{{.name}}" {{end}}{{if .enabled}}active{{else}}disabled{{end}}
   {{- /* List each backend in service */ -}}
   {{- range $bno,$backend = .backends}}
       {{printf "%3d" $bno}}. {{block "default.print_backend" $backend -}}
-       {{.type}} {{if eq .type "backend" -}}
+       {{.type}}
+       {{- if exists . "weight" }} ({{.weight}}){{end}}
+       {{- if exists . "parent"}} [mtx {{.parent}}]{{end}} {{if eq .type "backend" -}}
 {{.protocol}} {{.address}} {{.priority}} {{if .alive}}alive{{else}}dead{{end}}
+     {{- else if eq .type "matrix" -}}
+"{{.hostname}}" {{.resolve_mode}} {{.family}} {{.priority}}
      {{- else if eq .type "redirect" -}}
 {{.code}} {{.url}}{{if .redir_req}} (redirect request){{end}}
      {{- end}} {{if .enabled}}active{{else}}disabled{{end}}
+     {{- if exists . "expire"}} [expires {{.expire}}]{{end}}
      {{- if exists . "stats"}} - {{with .stats -}}
        {{.request_count}} requests{{if gt .request_count 0}}, {{template "milliseconds" .request_time_avg}} ms avg, {{template "milliseconds" .request_time_stddev}} stddev{{end}}
        {{- end}}

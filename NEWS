@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-08-24
+Pound -- history of user-visible changes. 2024-09-30
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,159 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.13.90 (git,resolver)
+
+* Dynamic backends
+
+Dynamic backends are created and updated on the fly based on the
+information from DNS.  To declare backend as dynamic, use a
+symbolic host name in its "Address" statement and add the "Resolve"
+statement with one of the following values:
+
+  first     Resolve the symbolic host name and use first IP from
+            the DNS response as the address of the created dynamic
+	    backend.  Thus, at most one dynamic backend will be
+            created.
+
+  all       Resolve the symbolic host name and create one backend for
+            each address from the DNS response.  This enables load
+            balancing between created backends.  Each backend will be
+	    assigned the same priority.
+
+  srv       Obtain SRV records for the host name and use them to
+            generate regular backends.  Each record produces new
+	    dynamic backend of "Resolve all" type, which creates
+	    regular backends as described above.  The weight field
+	    of the SRV record is mapped to the priority field of each
+	    generated backend.  The SRV priority field determines
+	    the balancing group (see below) where the backend will
+	    be hosted.
+  
+By default, both IPv4 and IPv6 addresses are looked for.  You can
+select the specific address family using the "Family" statement.  Its
+allowed values are:
+
+  any       Use all address families available.  This is the default.
+
+  inet      Use only IPv4 addresses.
+
+  inet6     Use only IPv6 addresses.
+
+For example:
+
+  Backend
+      Address "be0.example.net"
+      Port 8080
+      Resolve first
+      Family inet
+  End
+
+Dynamic backends will be updated periodically, when the TTL of the
+corresponding DNS records expires.  If the hostname cannot be resolved
+or a DNS failure occurs, next update will be scheduled in 600
+seconds after the failure.  This interval can be configured using the
+"RetryInterval" statement in the "Backend" section, or globally, in
+the "Resolver" section.
+
+The "Resolver" section allows you to control how DNS lookups are
+performed.  It can contain the following directives:
+
+  CNAMEChain          (integer) Maximum allowed length of a "CNAME
+                      chain".  CNAME chains are formed by DNS CNAME
+                      records pointing to another CNAME.  Although
+		      prohibited by the RFC, such usage occurs
+                      sometimes in the wild.  By default, pound does
+		      not accept CNAME chains.  If you work with a
+		      nameserver that uses them, set this statement
+		      to a small integer value, defining maximum
+                      number of CNAMEs in the chain that pound will
+		      accept.  The value of 2 or 3 should suffice in
+		      most cases.
+
+  ConfigFile          (string) Name of the resolver configuration file.
+                      Default is "/etc/resolv.conf".
+
+  ConfigText
+    ...
+  End                 The material within this section is read
+                      verbatim and used as the content of the resolver
+		      configuration file.
+
+                      If both ConfigFile and ConfigText are used, the
+		      last statement used wins.
+
+  Debug               (boolean) Whether to enable DNS debugging info.
+
+  RetryInterval       (integer) Interval in seconds, after which to
+                      retry failed DNS queries or queries that
+                      returned no RRs.  This value is used unless the
+		      backend defines its own retry interval value.
+
+Dynamic backends can be controlled using poundctl.  For example,
+consider the following output from "poundctl list":
+
+  1. Listener http://192.0.2.1:80 enabled
+      0. Service active (5)
+          0. matrix "be0.example.com" 2 0 active
+          1. backend http 198.51.100.15:8081 5 alive active
+	  2. backend http 203.0.113.121:8081 5 alive active
+          3. backend http 192.0.2.203:8081 5 alive active
+	       
+The backend 0 ("matrix") refers to the "Backend" statement in the
+configuration file that produced the other three dynamic backends.
+Disabling it (poundctl disable /1/0/0) causes the dynamic ones to
+be removed.  Enabling it will create them again.  In a pinch, this
+can be used to force backend re-creation prior to TTL expiration.
+
+** Compiling
+
+To enable dynamic backend support, you will need the adns library.  On
+debian-based systems, it is installed by the following command
+
+  apt-get install libadns1-dev
+
+If all preconditions necessary for enabling dynamic backends are met,
+the output from configure will end with the following status line:
+
+  Dynamic backends .............................. yes
+  *******************************************************************
+
+When compiled with the dynamic backend support, output of "pound -V"
+will contain the following line in the "Built-in defaults" section: 
+
+  Dynamic backends:           enabled
+
+* Backend groups
+
+Backend groups are a new pound feature, that extends the idea of
+regular and emergency backends used in previous versions.  Any number
+of backend groups can be associated with a service.  Each group
+is assigned an integer number (weight).  The groups are ordered by
+weight (in ascending order) and are tried in that order when looking
+for a backend to serve the request.  The look up starts with the first
+group.  The balancing algorithm configured for the service is applied.
+If no backend can be selected, next group will be tried, and so on.
+
+In the static configuration, regular backends are hosted in backend
+group of weight 0 and emergency (high availability) backends are
+stored in group of weight 65535.  One consequence of this is that
+any number of Emergency backend declarations are now allowed in
+a service.  More backend groups can be allocated when using dynamic
+backends of "srv" resolve type (see above).
+
+* Emergency backends
+
+Any number of emergency backends can be defined.  Usual request
+balancing algorightm applies when selecting an emergency backend.
+
+All statements valid within a "Backend" section are also valid within
+an emergency backend declaration.
+
+* configure
+
+Removed historic "--with-owner" and "--with-group" options.
+
 
 Version 4.13, 2024-08-24
 

@@ -650,7 +650,7 @@ be_service_name (BACKEND *be)
 {
   switch (be->be_type)
     {
-    case BE_BACKEND:
+    case BE_REGULAR:
       if (be->service->name)
        return be->service->name;
       break;
@@ -664,6 +664,7 @@ be_service_name (BACKEND *be)
       return "(error)";
     case BE_METRICS:
       return "(metrics)";
+    case BE_MATRIX:
     case BE_BACKEND_REF:
       /* shouldn't happen */
       break;
@@ -710,21 +711,21 @@ static void
 i_backend_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->backend->locus);
+  print_str (sb, phttp->backend->locus_str);
 }
 
 static void
 i_service_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->svc->locus);
+  print_str (sb, phttp->svc->locus_str);
 }
 
 static void
 i_listener_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->lstn->locus);
+  print_str (sb, phttp->lstn->locus_str);
 }
 
 static struct argprt locprt[] = {

@@ -41,6 +41,9 @@ endif
 if COND_PCRE2
   pound_SOURCES += regex_pcre2.c
 endif
+if COND_DYNAMIC_BACKENDS
+  pound_SOURCES += resolver.c dynbe.c
+endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
@@ -48,17 +51,7 @@ libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
 pkgdata_DATA = poundctl.tmpl mvh.inc
 EXTRA_DIST = poundctl.tmpl mvh.inc
 
-install-exec-hook:
-	-@if test "$${EUID:-65535}" -eq 0; then \
-		for program in $(sbin_PROGRAMS); do \
-			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(sbindir)/$$program$(EXEEXT); \
-		done; \
-		for program in $(bin_PROGRAMS); do \
-			chown @I_OWNER@:@I_GRP@ $(DESTDIR)$(bindir)/$$program$(EXEEXT); \
-		done; \
-	fi
-
-noinst_HEADERS=pound.h extern.h list.h ht.h
+noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h
 
 if SET_DH_AUTO
 DHSRC =

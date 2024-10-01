@@ -160,6 +160,8 @@ typedef long CONTENT_LENGTH;
 #define NO_CONTENT_LENGTH ((CONTENT_LENGTH) -1)
 
 int strtoclen (char const *arg, int base, CONTENT_LENGTH *retval, char **endptr);
+unsigned long strhash_ci (const char *c, size_t len);
+
 
 #ifndef DEFAULT_WORKER_MIN
 # define DEFAULT_WORKER_MIN 5
@@ -430,6 +432,18 @@ typedef SLIST_HEAD (,acl) ACL_HEAD;
 
 int acl_match (ACL *acl, struct sockaddr *sa);
 
+enum job_ctl
+  {
+    job_ctl_run,
+    job_ctl_cancel
+  };
+typedef void (*JOB_FUNC) (enum job_ctl, void *, const struct timespec *);
+typedef unsigned long JOB_ID;
+
+JOB_ID job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+void job_cancel (JOB_ID id);
+int job_get_timestamp (JOB_ID jid, struct timespec *ts);
+
 /* matcher chain */
 typedef struct _matcher
 {
@@ -454,7 +468,8 @@ typedef enum
 
 typedef enum
   {
-    BE_BACKEND,
+    BE_REGULAR,
+    BE_MATRIX,
     BE_REDIRECT,
     BE_ACME,
     BE_CONTROL,
@@ -463,6 +478,42 @@ typedef enum
     BE_BACKEND_REF,     /* See be_name in BACKEND */
   }
   BACKEND_TYPE;
+
+enum backend_resolve_mode
+  {
+    bres_immediate,
+    bres_first,
+    bres_all,
+    bres_srv
+  };
+
+char const *resolve_mode_str (int mode);
+
+typedef struct backend_table *BACKEND_TABLE;
+
+struct be_matrix
+{
+  char *hostname;       /* Hostname or IP address. */
+  int port;             /* Port number (network order). */
+  int family;           /* Address family for resolving hostname. */
+  int resolve_mode;     /* Mode for resolving hostname. */
+  unsigned retry_interval; /* Retry interval for failed queries. */
+
+  unsigned to;		/* read/write time-out */
+  unsigned conn_to;	/* connection time-out */
+  unsigned ws_to;	/* websocket time-out */
+  SSL_CTX *ctx;		/* CTX for SSL connections */
+  char *servername;     /* SNI */
+  
+  BACKEND_TABLE betab;  /* Table of regular backends generated from this
+			   matrix. */
+  JOB_ID jid;           /* ID of the periodic job scheduled to update this
+			   matrix. */
+  int weight;           /* Weight of the backend list where to allocate
+			   regular backends. */
+  struct _backend *parent;  /* Points to matrix backend, if this backend was
+			       dynamically generated. */
+};
 
 struct be_regular
 {
@@ -473,6 +524,9 @@ struct be_regular
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
+
+  struct _backend *parent; /* Points to matrix backend, if this backend was
+			      dynamically generated. */
 };
 
 struct be_redirect
@@ -497,14 +551,22 @@ struct be_error
 typedef struct _backend
 {
   struct _service *service;     /* Back pointer to the owning service */
-  char *locus;                  /* Location in the config file */
+  struct balancer *balancer;    /* Back pointer to the owning backend list. */
+  struct locus_range locus;     /* Location in the config file */
+  char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
-  SLIST_ENTRY (_backend) next;
+  DLIST_ENTRY (_backend) link;
 
+  /* Auxiliary fields. */
+  int mark;                     /* If set, this backend is a candidate for
+				   deletion. */
+
+  
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
+  unsigned long refcount;       /* reference counter */
   double numreq;		/* number of requests seen */
   double avgtime;		/* Avg. time per request */
   double avgsqtime;             /* Avg. squared time per request */
@@ -513,6 +575,7 @@ typedef struct _backend
   union
   {
     struct be_regular reg;
+    struct be_matrix mtx;
     struct be_acme acme;
     struct be_redirect redirect;
     struct be_error error;
@@ -521,17 +584,20 @@ typedef struct _backend
 
 } BACKEND;
 
-typedef SLIST_HEAD (,_backend) BACKEND_HEAD;
+typedef DLIST_HEAD (,_backend) BACKEND_HEAD;
 
 static inline int backend_is_https (BACKEND *be)
 {
-  return be->be_type == BE_BACKEND && be->v.reg.ctx != NULL;
+  return be->be_type == BE_REGULAR && be->v.reg.ctx != NULL;
 }
 
 static inline int backend_is_alive (BACKEND *be)
 {
-  /* Redirects, ACME, and control backends are always alive */
-  return be->be_type != BE_BACKEND || be->v.reg.alive;
+  /* Matrix backends are special, they are never alive. */
+  if (be->be_type == BE_MATRIX)
+    return 0;
+  /* Redirects, ACME, and control backends are always alive. */
+  return be->be_type != BE_REGULAR || be->v.reg.alive;
 }
 
 typedef struct session
@@ -690,9 +756,12 @@ typedef struct rewrite_rule
 
 typedef enum
   {
-    BALANCER_RANDOM,
-    BALANCER_IWRR,
-  } BALANCER;
+    BALANCER_ALGO_RANDOM,
+    BALANCER_ALGO_IWRR,
+  } BALANCER_ALGO;
+
+#define PRI_MAX_RANDOM 9
+#define PRI_MAX_IWRR   65535
 
 enum
   {
@@ -700,32 +769,51 @@ enum
     REWRITE_RESPONSE
   };
 
+#define TOT_PRI_MAX ULONG_MAX
+
+typedef struct balancer
+{
+  int weight;
+  unsigned long tot_pri;	/* total priority of active backends */
+  int max_pri;                  /* maximum priority */
+  /* For IWRR balancer */
+  int iwrr_round;
+  BACKEND *iwrr_cur;
+  BACKEND_HEAD backends;
+  DLIST_ENTRY (balancer) link;
+} BALANCER;
+
+typedef DLIST_HEAD (,balancer) BALANCER_LIST;
+
 /* service definition */
 typedef struct _service
 {
   char *name;			/* symbolic name */
-  char *locus;                  /* Location in the config file */
+  char *locus_str;              /* Location in the config file, as string. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
-  BACKEND_HEAD backends;
-  BACKEND *emergency;
-  int tot_pri;			/* total priority for current back-ends */
-  int max_pri;                  /* maximum priority */
-  BALANCER balancer;
-  /* For IWRR balancer */
-  int iwrr_round;
-  BACKEND *iwrr_cur;
+  BALANCER_LIST backends;
+  BALANCER_ALGO balancer_algo;
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
   unsigned sess_ttl;		/* session time-to-live */
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
   ACL *trusted_ips;             /* Trusted IP addresses */
   int log_suppress_mask;        /* Suppress HTTP logging for these status
 				   codes.  A bitmask. */
+
+  /* Backend removal */
+  BACKEND_HEAD be_rem_head;     /* List of backends scheduled for removal. */
+  pthread_cond_t be_rem_cond;   /* Condition through which the removal thread
+				   is notified that a backend from the list is
+				   ready for removal.
+				 */
+  
   SLIST_ENTRY (_service) next;
 } SERVICE;
 
@@ -762,7 +850,7 @@ int http_log_format_check (int n);
 typedef struct _listener
 {
   char *name;			/* symbolic name */
-  char *locus;                  /* Location in the config file */
+  char *locus_str;              /* Location in the config file, as string. */
   struct addrinfo addr;		/* Socket address */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
@@ -924,8 +1012,21 @@ SERVICE *get_service (POUND_HTTP *);
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
 
+#ifdef ENABLE_DYNAMIC_BACKENDS
+void backend_ref (BACKEND *be);
+void backend_unref (BACKEND *be);
+#else
+# define backend_ref(be)
+# define backend_unref(be)
+#endif
+
+void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
+				struct be_regular *reg);
+void backend_matrix_init (BACKEND *be);
+void backend_matrix_disable (BACKEND *be, int disable_mode);
+
 /* Search for a host name, return the addrinfo for it */
-int get_host (char *const, struct addrinfo *, int);
+int get_host (char const *, struct addrinfo *, int);
 
 /*
  * Find if a redirect needs rewriting
@@ -950,10 +1051,46 @@ void upd_session (SERVICE *, HTTP_HEADER_LIST *, BACKEND *);
  */
 void kill_be (SERVICE *, BACKEND *, const int);
 
-/*
- * Update the number of requests and time to answer for a given back-end
- */
-void upd_be (SERVICE * const svc, BACKEND * const be, const double);
+void service_session_remove_by_backend (SERVICE *svc, BACKEND *be);
+void service_recompute_pri (SERVICE *svc,
+			    BALANCER *bl,
+			    void (*cb) (BACKEND *, void *),
+			    void *data);
+void service_recompute_pri_unlocked (SERVICE *svc,
+				     void (*cb) (BACKEND *, void *),
+				     void *data);
+void balancer_recompute_pri_unlocked (BALANCER *bl,
+					  void (*cb) (BACKEND *, void *),
+					  void *data);
+
+static inline void balancer_add_backend (BALANCER *bl, BACKEND *be)
+{
+  be->balancer = bl;
+  DLIST_INSERT_TAIL (&bl->backends, be, link);
+}
+
+static inline void balancer_remove_backend (BALANCER *bl, BACKEND *be)
+{
+  be->balancer = NULL;
+  DLIST_REMOVE (&bl->backends, be, link);
+}
+
+BALANCER *balancer_list_alloc (BALANCER_LIST *ml);
+BALANCER *balancer_list_get (BALANCER_LIST *ml, int n);
+
+#define BALANCER_WEIGTH_MAX  65535
+
+static inline BALANCER *
+balancer_list_get_normal (BALANCER_LIST *ml)
+{
+  return balancer_list_get (ml, 0);
+}
+
+static inline BALANCER *
+balancer_list_get_emerg (BALANCER_LIST *ml)
+{
+  return balancer_list_get (ml, BALANCER_WEIGTH_MAX);
+}
 
 /*
  * Non-blocking version of connect(2). Does the same as connect(2) but
@@ -1040,6 +1177,17 @@ static inline char *stringbuf_value (struct stringbuf *sb)
 static inline size_t stringbuf_len (struct stringbuf *sb)
 {
   return sb->len;
+}
+
+static inline void stringbuf_consume (struct stringbuf *sb, size_t len)
+{
+  if (len < sb->len)
+    {
+      memmove (sb->base, sb->base + len, sb->len - len);
+      sb->len -= len;
+    }
+  else
+    sb->len = 0;
 }
 
 extern void xnomem (void);
@@ -1146,6 +1294,7 @@ int http_request_get_basic_auth (struct http_request *req,
 				 char **u_name, char **u_pass);
 
 void service_lb_init (SERVICE *svc);
+void service_lb_reset (SERVICE *svc, BACKEND *be);
 
 FILE *fopen_wd (WORKDIR *wd, const char *filename);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
@@ -1164,3 +1313,4 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
+

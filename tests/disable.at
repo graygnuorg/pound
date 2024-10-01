@@ -50,8 +50,7 @@ Listeners:
 ])
 
 PT_CHECK(
-[Control "pound.ctl"
-ListenHTTP
+[ListenHTTP
 	Service "one"
 		Backend
 			Address
