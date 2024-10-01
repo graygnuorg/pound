@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-09-30
+Pound -- history of user-visible changes. 2024-10-02
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.13.90 (git,resolver)
+Version 4.13.90 (git)
 
 * Dynamic backends
 
@@ -154,6 +154,37 @@ balancing algorightm applies when selecting an emergency backend.
 
 All statements valid within a "Backend" section are also valid within
 an emergency backend declaration.
+
+* Remote access to the management interface
+
+A new backend type "Control" is introduced to make it possible to
+access the management interface remotely.  The example below shows
+how to configure pound to expose the management interface on
+http://192.0.2.1:3434:
+
+  ListenHTTP
+      Address 192.0.2.1
+      Port 3434
+      Service
+          ACL "secure"
+	  Control
+      End
+  End
+
+* poundctl
+
+Changes in poundctl functionality reflect those in the management
+interface.  First of all, the -s option accepts URL as its argument:
+
+  -s https://user:password@hostname:8080/path
+
+Additionally, the following new options are implemented:
+
+  -C FILE      Load CA certificates from FILE.  If FILE is a
+               directory, all PEM files will be loaded from it.
+  -K FILE      Load client certificate and key from FILE.  During TLS
+               handshake, send them to the peer for authentication.
+  -k           Insecure mode: disable peer verification.	       
 
 * configure
 

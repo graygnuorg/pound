@@ -762,6 +762,16 @@ expand_url (char const *url, POUND_HTTP *phttp, int has_uri)
 static int rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
 			  struct http_request *request, POUND_HTTP *phttp);
 
+static int
+control_response (POUND_HTTP *phttp)
+{
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp)
+      || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+			phttp))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  return control_response_basic (phttp);
+}
 /*
  * Reply with a redirect
  */
@@ -4536,6 +4546,8 @@ do_http (POUND_HTTP *phttp)
       phttp->cl = bb;
       if (BIO_do_handshake (phttp->cl) <= 0)
 	{
+	  logmsg (LOG_ERR, "(%"PRItid") handshake failed: %s",
+		  POUND_TID (), ERR_error_string (ERR_get_error (), NULL));
 	  return;
 	}
       else

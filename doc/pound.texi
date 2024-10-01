@@ -972,7 +972,7 @@ authentication are declared after that service.  This way, any request
 that does not convey an @code{Authentication} header with credentials
 matching an entry from your password file will match this service, and
 will be replied to with a properly formatted 401 response, which will
-prompt the remote user to authenticate himself.  On the other hand,
+prompt the remote user to authenticate themselves.  On the other hand,
 authorized requests will not match this service and will eventually be
 handled by one of the services declared after it.
 
@@ -2587,15 +2587,15 @@ When logging, replace the last byte of client IP addresses with 0.
 Default: log the client address in full.
 @end deffn
 
-@node Control socket
-@section Control socket settings
-@cindex control socket
-@command{Pound} can be instructed to listen on a UNIX socket for management
-requests, which will allow you to obtain information about the running
-instance, change state of configured listeners, services, and backends,
-etc.  These requests are normally issued by the poundctl utility
-(@pxref{poundctl}).
+@node Management interface
+@section Management Interface
+@command{Pound} provides a management interface, which allows one to
+obtain information about the running instance, change state of
+configured listeners, services, and backends, etc.  These requests are
+normally issued by the poundctl utility (@pxref{poundctl}).
 
+@cindex control socket
+The management interface is usually made available via a UNIX socket.
 Properties of this @dfn{control socket} are configured via the
 @code{Control} statement.  It has two forms: @dfn{directive} and
 @dfn{section}.
@@ -2637,6 +2637,73 @@ Control
 End
 @end group
 @end example
+
+@node Service Control
+@subsection Remote Access to Management Interface
+@kwindex Control
+  To make the management interface available remotely, use the
+@code{Control} statement in a @code{Service} section:
+
+@example
+@group
+ListenHTTP
+    Address 192.0.2.1
+    Port 80
+    Service
+        Control
+    End
+End
+@end group
+@end example
+
+  This configuration makes management interface accessible via
+@indicateurl{http://192.0.2.1/}.  Due to obvious security
+implications, you'd be better off protecting the @code{Control}
+endpoint using HTTPS, ACLs and/or basic authorization.  The example
+below illustrates all these techniques:
+
+@example
+ListenHTTPS
+    Address 192.0.2.1
+    Port 443
+    Cert "/etc/ssl/priv/example.pem"
+    Disable TLSv1
+    
+    Service
+        Not BasicAuth "pound/htpasswd"
+        Rewrite response
+            SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+        End
+        Error 401
+    End
+    
+    Service
+        ACL "secure"
+        Control
+    End
+End
+@end example
+
+@xref{Authentication}, for a discussion of @code{BasicAuth} statement,
+and see @ref{ACL} for a discussion of access control lists (this
+example assumes that the ACL @samp{secure} is defined elsewhere in the
+configuration file).
+
+If you wish to make management interface available under a special
+path, make sure the path prefix is stripped off, e.g.:
+
+@example
+@group
+Service
+    URL -re "^/control(/.+)"
+    SetURL "$1"
+    Control
+End
+@end group
+@end example
+
+@xref{Service Request and Response Modification}, for details about
+@code{SetURL} statement and request modification in general.
 
 @node Timeouts
 @section Timeouts
@@ -3511,6 +3578,7 @@ certificates after host-specific certificates).
 @code{Cert} directives must precede all other SSL-specific directives.
 @end deffn
 
+@anchor{ClientCert}
 @deffn {ListenHTTPS} ClientCert @var{mode} @var{depth}
 Specifies whether the listener must ask for the client's HTTPS
 certificate.  Allowed values for @var{mode} are:
@@ -4150,6 +4218,12 @@ then the request path is ignored.
 @xref{Redirects}, for a detailed discussion of this backend and its use.
 @end deffn
 
+@deffn {Service directive} Control
+Defines a special backend that serves @dfn{pound management
+interface}.  @xref{Service Control}, for a detailed discussion of this
+feature.
+@end deffn
+
 @anchor{Metrics}
 @deffn {Service directive} Metrics
 This directive defines a special backend that generates Openmetric
@@ -4362,17 +4436,22 @@ defines its own retry interval value.
 the running instance and allows you to change some of them.
 
   The program communicates with the running @command{pound} daemon via
-a UNIX socket.  For this to work, @command{pound} configuration file
-must contain a @code{Control} statement (@pxref{Control statement}).
-When started, @command{poundctl} opens the default @file{pound.cfg}
-file, looks up for this statement and then uses the pathname defined
-in it as the control socket file.
+a UNIX socket or remotely, via HTTP or HTTPS.  To use UNIX socket,
+@command{pound} configuration file must contain a @code{Control}
+statement (@pxref{Control statement}).  When started,
+@command{poundctl} opens the default @file{pound.cfg} file, looks up
+for this statement and then uses the pathname defined in it as the
+control socket file.
 
   This behavior can be altered in two ways.  First, if the
 configuration file is in a non-standard location, the pathname
 of this file can be given to the program using the @option{-f}
 command line option.  Secondly, the socket name can be supplied in the
 command line explicitly, using the @option{-s} option.
+
+  To access remote @command{pound} daemon via HTTP or HTTPS, supply
+its URL as argument to the @option{-s} option.  @xref{poundctl
+remote}, for a detailed discussion.
 
   The program invocation syntax is:
 
@@ -4479,11 +4558,46 @@ be specified.
 Add a session with the given @var{key}.
 @end deffn
 
+@node poundctl remote
+@section Using @command{poundctl} for remote access
+  Starting from version 4.14, @command{pound} is able to provide its
+management interface via HTTP (@pxref{Service Control}).  To use
+remote management interface, supply its URL with the @option{-s}
+command line option.  The URL syntax is:
+
+@example
+@var{scheme}://[@var{user}[:@var{password}]@@]@var{hostname}[:@var{port}][/@var{path}]
+@end example
+
+@noindent
+where @samp{[]} denote optional parts.  Valid @var{scheme} values are
+@samp{http} and @samp{https}.  Use @var{user} and @var{password} if
+the interface is protected by basic authentication (@pxref{Authentication}).
+
+When using @samp{https} protocol, you may need to supply the
+@dfn{certificate authority} file using the @option{-C @var{file}}
+option, where @var{file} is the name of the file in PEM format.  This
+option can also take a directory name as its argument.  In this case
+all PEM files from that directory will be loaded.
+
+To disable peer certificate verification, use the @option{-k} option.
+
+If @command{pound} configuration requires the client to send its
+certificate for authentication (@pxref{ClientCert}), use the
+@option{-K @var{file}} option to supply it.  Its argument, @var{file},
+is the name of the file with the certificate and key in PEM format.
+
 @node poundctl options
 @section @command{poundctl} options
   The following options are understood by @command{poundctl}:
 
 @table @option
+@kwindex -C, poundctl
+@item -C @var{file}
+@itemx -C @var{dir}
+Read certificate authority files from @var{file} or from files in
+@var{dir}.  @xref{poundctl remote}.
+
 @kwindex -f, poundctl
 @item -f @var{file}
 Read @command{pound} configuration from @var{file}, instead of the
@@ -4497,13 +4611,24 @@ Sets indentation level for JSON output to @var{n} columns.
 @item -j
 Use JSON output format.
 
+@kwindex -K, poundctl
+@item -K @var{file}
+Read client certificate and private key from @var{file}.
+@xref{poundctl remote}.
+
+@kwindex -k
+@item -k
+Disable peer certificate verification.  @xref{poundctl remote}.
+
 @kwindex -h, poundctl
 @item -h
 Shows a short help output and exits.
 
 @kwindex -s, poundctl
 @item -s @var{socket}
-Sets pathname of the control socket.
+@itemx -s @var{url}
+Sets pathname of the control socket, or its URL (for remote access,
+@pxref{poundctl remote}).
 
 @kwindex -T, poundctl
 @item -T @var{file}

@@ -20,14 +20,61 @@
 #include "json.h"
 #include <assert.h>
 
+typedef struct
+{
+  int tls;
+  char *path;
+  char *host;
+  char *user;
+  char *pass;
+  socklen_t addrlen;
+  union
+  {
+    struct sockaddr sa;
+    struct sockaddr_in in4;
+    struct sockaddr_in6 in6;
+    struct sockaddr_un un;
+  } addr;
+} URL;
+
 char *conf_name = POUND_CONF;
 char *socket_name;
+URL *url;
 int json_option;
 int indent_option;
 int verbose_option;
 char *tmpl_path;
 char *tmpl_file = "poundctl.tmpl";
 char *tmpl_name = "default";
+
+char *ca_file;
+char *ca_path;
+int disable_peer_verify;
+char *client_cert_file;
+
+static void
+openssl_errormsg (int code, char const *fmt, ...)
+{
+  va_list ap;
+  unsigned long n = ERR_get_error ();
+
+  fprintf (stderr, "%s: ", progname);
+  va_start (ap, fmt);
+  vfprintf (stderr, fmt, ap);
+  fprintf (stderr, ": %s", ERR_error_string (n, NULL));
+
+  if ((n = ERR_get_error ()) != 0)
+    {
+      do
+	{
+	  fprintf (stderr, ": %s", ERR_error_string (n, NULL));
+	}
+      while ((n = ERR_get_error ()) != 0);
+    }
+  fputc ('\n', stderr);
+  if (code)
+    exit (code);
+}
 
 struct keyword
 {
@@ -177,28 +224,124 @@ get_socket_name (void)
   return socket_name;
 }
 
-BIO *
-open_socket (void)
+static void
+url_parse_host (char *str, URL *url)
 {
-  struct sockaddr_un ctrl;
-  int fd;
-  BIO *bio;
+  struct addrinfo *addr;
+  struct addrinfo hints;
+  int n = strcspn (str, "/");
+  char *host = xstrndup (str, n);
+  char *p;
+  int rc;
 
-  if (verbose_option)
-    errormsg (0, 0, "connecting to %s", socket_name);
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_socktype = SOCK_STREAM;
 
-  if (strlen (socket_name) > sizeof (ctrl.sun_path))
+  if (host[0] == '[' && host[n-1] == ']')
+    hints.ai_family = AF_INET6;
+  else
+    hints.ai_family = AF_UNSPEC;
+
+  if ((p = strchr (host, ':')) != NULL)
+    *p++ = 0;
+  else
+    p = 0;
+
+  if ((rc = getaddrinfo (host, p, &hints, &addr)) == 0)
     {
-      errormsg (1, 0, "socket name too long");
+      if (addr->ai_family == AF_INET || addr->ai_family == AF_INET6)
+	{
+	  url->addrlen = addr->ai_addrlen;
+	  memcpy (&url->addr, addr->ai_addr, addr->ai_addrlen);
+	}
+      else
+	errormsg (1, 0, "unexpected address family");
+      freeaddrinfo (addr);
     }
+  else
+    errormsg (1, 0, "can't resolve %s: %s", host, gai_strerror (rc));
 
-  ctrl.sun_family = AF_UNIX;
-  strncpy (ctrl.sun_path, socket_name, sizeof (ctrl.sun_path));
-  if ((fd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
+  url->host = host;
+  url->path = xstrdup (str + n);
+}
+
+static void
+url_parse_creds (char *str, URL *url)
+{
+  int n, j;
+  char **dst = &url->user;
+
+  switch (str[n = strcspn (str, ":@")])
+    {
+    case ':':
+      j = strcspn (str + n + 1, "@");
+      if (str[n + 1 + j] != '@')
+	break;
+      url->user = xstrndup (str, n);
+      str += n + 1;
+      n = j;
+      dst = &url->pass;
+      /* fall through */
+    case '@':
+      *dst = xstrndup (str, n);
+      str += n + 1;
+      /* fall through */
+    }
+  url_parse_host (str, url);
+}
+
+static void
+url_parse_scheme (char *str, URL *url)
+{
+  char *p;
+  int len;
+
+  if ((p = strchr (str, ':')) != NULL && p[1] == '/' && p[2] == '/')
+    {
+      if ((len = (p - str)) == 4 && memcmp (str, "http", len) == 0)
+	url->tls = 0;
+      else if (len == 5 && memcmp (str, "https", len) == 0)
+	url->tls = 1;
+      else
+	errormsg (1, 0, "unsupported URL scheme: %s", str);
+      str = p + 3;
+
+      url_parse_creds (str, url);
+    }
+  else
+    {
+      url->tls = 0;
+      url->path = xstrdup ("");
+      url->host = xstrdup ("localhost");
+      url->user = NULL;
+      url->pass = NULL;
+      url->addrlen = sizeof (struct sockaddr_un);
+      url->addr.un.sun_family = AF_UNIX;
+      if (strlen (str) > sizeof (url->addr.un.sun_path))
+	errormsg (1, 0, "socket name too long");
+      strncpy (url->addr.un.sun_path, str, sizeof (url->addr.un.sun_path));
+    }
+}
+
+static URL *
+url_parse (char *str)
+{
+  URL *url = xzalloc (sizeof (*url));
+  url_parse_scheme (str, url);
+  return url;
+}
+
+BIO *
+open_socket (URL *url)
+{
+  int fd;
+  BIO *bio, *bb;
+
+  if ((fd = socket (url->addr.sa.sa_family, SOCK_STREAM, 0)) < 0)
     {
       errormsg (1, errno, "socket");
     }
-  if (connect (fd, (struct sockaddr *) &ctrl, sizeof (ctrl)) < 0)
+  if (connect (fd, &url->addr.sa, url->addrlen) < 0)
     {
       errormsg (1, errno, "connect");
       exit (1);
@@ -208,6 +351,66 @@ open_socket (void)
     {
       errormsg (1, 0, "BIO_new_fd failed");
     }
+  BIO_set_close (bio,  BIO_CLOSE);
+
+  if (url->tls)
+    {
+      SSL_CTX *ctx;
+      SSL *ssl;
+      X509 *x509;
+      int verify_result;
+      
+      if ((ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
+	errormsg (1, 0, "SSL_CTX_new");
+      SSL_CTX_set_verify (ctx, SSL_VERIFY_NONE, NULL);
+      SSL_CTX_set_mode (ctx, SSL_MODE_AUTO_RETRY);
+
+      if (!disable_peer_verify)
+	{
+	  if (!SSL_CTX_load_verify_locations (ctx, ca_file, ca_path))
+	    openssl_errormsg (1, "SSL_CTX_load_verify_locations");
+	}
+      
+      if (client_cert_file)
+	{
+	  if (SSL_CTX_use_certificate_chain_file (ctx, client_cert_file) != 1)
+	    openssl_errormsg (1, "SSL_CTX_use_certificate_chain_file");
+	  if (SSL_CTX_use_PrivateKey_file (ctx, client_cert_file, SSL_FILETYPE_PEM) != 1)
+	    openssl_errormsg (1, "SSL_CTX_use_PrivateKey_file");
+	  if (SSL_CTX_check_private_key (ctx) != 1)
+	    openssl_errormsg (1, "SSL_CTX_check_private_key failed");
+	}
+      
+      if ((ssl = SSL_new (ctx)) == NULL)
+	errormsg (1, 0, "SSL_new");
+      SSL_set_tlsext_host_name (ssl, url->host);
+      SSL_set_bio (ssl, bio, bio);
+
+      if ((bb = BIO_new (BIO_f_ssl ())) == NULL)
+	errormsg (1, 0, "BIO_new");
+      BIO_set_ssl (bb, ssl, BIO_CLOSE);
+      BIO_set_ssl_mode (bb, 1);
+
+      if (BIO_do_handshake (bb) <= 0)
+	errormsg (1, 0, "BIO_do_handshake failed: %s",
+		  ERR_error_string (ERR_get_error (), NULL));
+
+      if (!disable_peer_verify &&
+	  (x509 = SSL_get_peer_certificate (ssl)) != NULL &&
+	  (verify_result = SSL_get_verify_result (ssl)) != X509_V_OK)
+	{
+	  errormsg (1, 0, "certificate verification failed: %s",
+		    X509_verify_cert_error_string (verify_result));
+	}
+      
+      bio = bb;
+    }
+
+  if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
+    errormsg (1, 0, "BIO_f_buffer failed");
+  BIO_set_buffer_size (bb, MAXBUF);
+  BIO_set_close (bb, BIO_CLOSE);
+  bio = BIO_push (bb, bio);
 
   return bio;
 }
@@ -469,6 +672,50 @@ print_json (struct json_value *val, FILE *fp)
   json_value_format (val, &format, 0);
 }
 
+static void
+send_request (BIO *bio, char const *method, char const *fmt, ...)
+{
+  va_list ap;
+
+  BIO_printf (bio, "%s %s/", method, url->path);
+  va_start (ap, fmt);
+  BIO_vprintf (bio, fmt, ap);
+  va_end (ap);
+  BIO_printf (bio, " HTTP/1.1\r\n"
+		   "Host: %s\r\n",
+	      url->host);
+  if (url->pass)
+    {
+      size_t len = strlen (url->user) + strlen (url->pass) + 1;
+      char *buf = xmalloc (len);
+      char iobuf[MAXBUF];
+      int inlen;
+      BIO *bb, *b64;
+
+      strcat (strcat (strcpy (buf, url->user), ":"), url->pass);
+
+      if ((b64 = BIO_new (BIO_f_base64 ())) == NULL)
+	errormsg (1, errno, "BIO_f_base64");
+
+      if ((bb = BIO_new (BIO_s_mem ())) == NULL)
+	errormsg (1, errno, "BIO_s_mem");
+
+      b64 = BIO_push (b64, bb);
+      BIO_write (b64, buf, len);
+      BIO_flush (b64);
+      inlen = BIO_read (bb, iobuf, sizeof (iobuf));
+      if (inlen == -1)
+	errormsg (1, errno, "failed to encode credentials");
+      BIO_free_all (b64);
+
+      BIO_printf (bio, "Authorization: Basic ");
+      BIO_write (bio, iobuf, inlen-1);
+      BIO_printf (bio, "\r\n");
+    }
+  BIO_printf (bio, "\r\n");
+  BIO_flush (bio);
+}
+
 int
 command_list (BIO *bio, int argc, char **argv)
 {
@@ -481,9 +728,7 @@ command_list (BIO *bio, int argc, char **argv)
     {
       errormsg (1, 0, "too many arguments");
     }
-  BIO_printf (bio, "GET /listener%s HTTP/1.1\r\n"
-		   "Host: localhost\r\n\r\n",
-	      uri);
+  send_request (bio, "GET", "listener%s", uri);
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -517,9 +762,7 @@ command_on_off (BIO *bio, int argc, char **argv, char const *verb)
       errormsg (1, 0, "too many arguments");
     }
   uri = argv[0];
-  BIO_printf (bio, "%s /listener%s HTTP/1.1\r\n"
-		   "Host: localhost\r\n\r\n",
-	      verb, uri);
+  send_request (bio, verb, "listener%s", uri);
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -579,9 +822,7 @@ command_delete_session (BIO *bio, int argc, char **argv)
     }
 
   key = argv[1];
-  BIO_printf (bio, "DELETE /session%s?key=%s HTTP/1.1\r\n"
-		   "Host: localhost\r\n\r\n",
-	      uri, key);
+  send_request (bio, "DELETE", "session%s?key=%s", uri, key);
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -626,9 +867,7 @@ command_add_session (BIO *bio, int argc, char **argv)
     }
 
   key = argv[1];
-  BIO_printf (bio, "PUT /session%s?key=%s HTTP/1.1\r\n"
-		   "Host: localhost\r\n\r\n",
-	      uri, key);
+  send_request (bio, "PUT", "session%s?key=%s", uri, key);
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -699,10 +938,13 @@ static char *usage_text[] = {
   "   del               same as delete",
   "",
   "OPTIONS:",
+  "   -C FILE           load CA certificates from FILE (or directory)",
   "   -f FILE           location of pound configuration file",
   "   -i N              indentation level for JSON output",
   "   -j                JSON output format",
-  "   -s SOCKET         sets control socket pathname",
+  "   -K FILE           load client certificate and key from FILE",
+  "   -k                disable peer verification",
+  "   -s SOCKET         sets control socket pathname or URL",
   "   -t FILE           read templates from this file",
   "   -T NAME           name of the default template",
   "   -v                verbose output",
@@ -935,14 +1177,24 @@ main (int argc, char **argv)
   int c;
   BIO *bio;
   COMMAND command;
-
+  struct stat sb;
+  
   set_progname (argv[0]);
   json_memabrt = xnomem;
 
-  while ((c = getopt (argc, argv, "f:i:jhs:T:t:vV")) != EOF)
+  while ((c = getopt (argc, argv, "C:f:i:jK:khs:T:t:vV")) != EOF)
     {
       switch (c)
 	{
+	case 'C':
+	  if (stat (optarg, &sb))
+	    errormsg (1, errno, "can't stat %s", optarg);
+	  else if (S_ISDIR (sb.st_mode))
+	    ca_path = optarg;
+	  else
+	    ca_file = optarg;
+	  break;
+	  
 	case 'f':
 	  conf_name = optarg;
 	  break;
@@ -962,6 +1214,14 @@ main (int argc, char **argv)
 	  json_option = 1;
 	  break;
 
+	case 'K':
+	  client_cert_file = optarg;
+	  break;
+
+	case 'k':
+	  disable_peer_verify = 1;
+	  break;
+	  
 	case 'T':
 	  tmpl_name = optarg;
 	  break;
@@ -1007,7 +1267,13 @@ main (int argc, char **argv)
     }
 
   read_template ();
-  bio = open_socket ();
+
+  url = url_parse (socket_name);
+
+  if (verbose_option)
+    errormsg (0, 0, "connecting to %s", socket_name);
+
+  bio = open_socket (url);
 
   return command (bio, argc, argv);
 }

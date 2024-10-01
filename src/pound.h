@@ -1204,7 +1204,7 @@ static inline void stringbuf_init_log (struct stringbuf *sb)
 }
 
 char const *sess_type_to_str (int type);
-int control_response (POUND_HTTP *arg);
+int control_response_basic (POUND_HTTP *arg);
 void pound_atexit (void (*func) (void *), void *arg);
 int unlink_at_exit (char const *file_name);
 

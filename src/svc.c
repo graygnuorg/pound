@@ -2951,7 +2951,7 @@ find_endpoint (int method, const char *uri, int *errcode)
 }
 
 int
-control_response (POUND_HTTP *arg)
+control_response_basic (POUND_HTTP *arg)
 {
   struct endpoint *ep;
   int code;

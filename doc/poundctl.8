@@ -14,15 +14,17 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "February 21, 2024" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "October 2, 2024" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
 .B poundctl
-[\fB\-Vvh\fR]
+[\fB\-kVvh\fR]
+[\fB\-C \fIFILE\fR]
 [\fB\-f \fIFILE\fR]
 [\fB\-i \fIN\fR]
 [\fB\-j\fR]
+[\fB\-K \fIFILE\fR]
 [\fB\-s \fISOCKET\fR]
 [\fB\-T \fITEMPLATE-FILE\fR]
 [\fB\-t \fITEMPLATE-NAME\fR]
@@ -54,6 +56,16 @@ command line option.  Secondly, the socket name can be supplied in the
 command line explicitly, using the
 .B \-s
 option.
+.PP
+The management interface of a remote
+.B pound
+server can be accessed by giving its full URL as argument to the
+.B \-s
+option, e.g.
+.PP
+.EX
+poundctl -s https://proxy.example.org/control
+.EE
 .PP
 The \fICOMMAND\fR argument instructs the program what action it
 is supposed to perform.  Missing \fICOMMAND\fR is equivalent to
@@ -168,6 +180,10 @@ The default
 file defines two templates: \fBdefault\fR and \fBxml\fR.
 .SH OPTIONS
 .TP
+\fB\-C \fIFILE\fR
+Load certificate authority files from \fIFILE\fR.  \fIFILE\fR can also
+be a directory containing CA certificates in PEM format.
+.TP
 \fB\-f \fIFILE\fR
 Location of \fBpound\fR configuration file.
 .TP
@@ -177,11 +193,23 @@ Sets indentation level for JSON output.
 \fB\-j\fR
 JSON output format.
 .TP
+\fB\-K \fIFILE\fR
+Load client certificate and key from \fIFILE\fR and send them to the
+server during handshake for authentication.
+.TP
+.B \-k
+Disable peer verification.
+.TP
 \fB\-h\fR
 Shows a short help output and exit.
 .TP
 \fB\-s \fISOCKET\fR
-Sets control socket pathname.
+Sets control socket pathname.  \fISOCKET\fR can aslo be a URL in the
+form:
+.IP
+{\fBhttp\fR|\fBhttps\fR}\fB://\fR[\fIUSER\fR[\fB:\fIPASS\fR]\fB@\fR]\fIHOSTNAME\fR[\fB:\fIPORT\fT][\fB/\fIPATH\fR]
+.IP
+where \fB{|}\fR denote alternative forms and \fB[]\fR enclose optional parts.
 .TP
 \fB\-T \fITEMPLATE-FILE\fR
 Sets the name of the template file to use.

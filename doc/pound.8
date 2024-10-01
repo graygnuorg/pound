@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 27, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 1, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -769,16 +769,15 @@ effect until next
 statement or end of the configuration file, whichever occurs first.
 .SS Control socket
 .B Pound
-can be instructed to listen on a UNIX socket for management requests,
+can be instructed to listen for management requests,
 which will allow you to obtain information about the running
 instance, change state of configured listeners, services, and
 backends, etc.  These requests may be issued by using the
 .BR poundctl (8)
 utility.
 .PP
-The use of this
-.I control socket
-is configured via the
+Usually, a UNIX socket is used to communicate with the management interface.
+It is configured via the
 .B Control
 statement.  This statement has two forms.  In
 .I inline
@@ -822,6 +821,15 @@ global statements is used.  When set to
 .B true
 it will change the owner of the socket file to that specified by
 those two statements.
+.PP
+It is also possible to have
+.B pound
+listen for management requests on an INET or INET6 address.  See
+below, the section
+.BR "Backend definitions" ,
+description of the
+.B Control
+statement.
 .SH "HTTP Listener"
 An HTTP listener defines an address and port that
 .B pound
@@ -1594,6 +1602,41 @@ directives define a single backend server (see below for details). You
 may define multiple backends per service, in which case
 .B pound
 will attempt to load-balance between them.
+.TP
+.B Control
+Enables a special \fBcontrol backend\fR -- a management interface that
+returns information about the running \fBpound\fR server, makes it
+possible to change state of configured listeners, services and
+backends, and provides other management facilities.  The management
+interface is discussed in detail in 
+section
+.BR "Control socket" ,
+above.  The \fBControl\fR backend provides remote access to this
+interface.  Be careful to properly protect the control interface
+by use of HTTPS, ACLs and/or basic authorization, e.g.:
+.IP
+.RS
+.EX
+ListenHTTPS
+    Address 192.0.2.1
+    Port 443
+    Cert "/etc/ssl/priv/example.pem"
+        
+    Service
+        Not BasicAuth "pound/htpasswd"
+        Rewrite response
+            SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+        End
+        Error 401
+    End
+
+    Service
+        ACL "secure"
+        Control
+    End
+End
+.EE
+.RE
 .TP
 \fBRedirect\fR [\fIcode\fR] "\fIurl\fR"
 This is a special type of backend. Instead of sending the request to a backend

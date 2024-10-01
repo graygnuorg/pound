@@ -2513,6 +2513,20 @@ parse_emergency (void *call_data, void *section_data)
 }
 
 static int
+parse_control_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  BACKEND *be;
+
+  XZALLOC (be);
+  be->be_type = BE_CONTROL;
+  be->priority = 1;
+  pthread_mutex_init (&be->mut, NULL);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+  return PARSER_OK;
+}
+
+static int
 parse_metrics (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
@@ -3981,6 +3995,11 @@ static PARSER_TABLE service_parsetab[] = {
   {
     .name = "Metrics",
     .parser = parse_metrics,
+    .off = offsetof (SERVICE, backends)
+  },
+  {
+    .name = "Control",
+    .parser = parse_control_backend,
     .off = offsetof (SERVICE, backends)
   },
   {
@@ -5624,7 +5643,7 @@ static PARSER_TABLE control_parsetab[] = {
 };
 
 static int
-parse_control (void *call_data, void *section_data)
+parse_control_listener (void *call_data, void *section_data)
 {
   struct token *tok;
   LISTENER *lst;
@@ -6090,7 +6109,7 @@ static PARSER_TABLE top_level_parsetab[] = {
   },
   {
     .name = "Control",
-    .parser = parse_control
+    .parser = parse_control_listener
   },
   {
     .name = "Anonymise",
