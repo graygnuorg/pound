@@ -46,7 +46,15 @@ if COND_DYNAMIC_BACKENDS
 endif
 
 noinst_LIBRARIES = libpound.a
-libpound_a_SOURCES = json.c json.h mem.c progname.c tmpl.c
+libpound_a_SOURCES = \
+ cfgparser.c\
+ cfgparser.h\
+ json.c\
+ json.h\
+ mem.c\
+ mem.h\
+ progname.c\
+ tmpl.c
 
 pkgdata_DATA = poundctl.tmpl mvh.inc
 EXTRA_DIST = poundctl.tmpl mvh.inc
