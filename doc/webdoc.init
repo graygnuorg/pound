@@ -5,7 +5,9 @@ set_from_init_file('EXTRA_HEAD', qq{
 });
 set_from_init_file('CSS_LINES', '');
 set_from_init_file('SHOW_TITLE',undef);
-set_from_init_file('SHOW_MENU',undef);
+if ($Texinfo::Convert::HTML::VERSION < 6.8) {
+    set_from_init_file('SHOW_MENU',undef);
+}
 # set_from_init_file('TOP_FILE','Pound.html');
 # set_from_init_file('TOP_BUTTONS', undef);
 
@@ -33,7 +35,11 @@ sub gray_node_direction($$)
  	              '</span>';
         }
     }
-    return $result;
+    if ($Texinfo::Convert::HTML::VERSION < 6.8) {
+	return $result;
+    } else {
+	return ($result,0);
+    }
 }
 
 my @gray_buttons = ( [ 'Back', \&gray_node_direction ],

@@ -80,6 +80,152 @@ This edition of the @cite{Pound Manual}, last updated
 @end ifnottex
 @contents
 
+@menu
+* Overview::
+* Introduction::
+* Usage::
+* Simple Proxy::
+* HTTPS::
+* Balancer::
+* Worker model::
+* Logging::
+* Configuration::
+* poundctl::
+* Metric Families::
+* Time and Date Formats::
+* GNU Free Documentation License::
+* Index::
+
+@detailmenu
+ --- The Detailed Node Listing ---
+
+Simple Proxy
+
+* Service selection::
+* Request modifications::
+* Conditional branches::
+* Modifying responses::
+* Authentication::
+* Redirects::
+* Error responses::
+
+Service Selection
+
+* Regular Expressions::
+* ACL::
+
+HTTPS
+
+* ACME::
+* Redirect HTTP to HTTPS::
+* HTTPS backends::
+
+Request balancing
+
+* Sessions::
+* Balancer groups::
+* Dynamic backends::
+
+Configuration
+
+* Lexical structure::
+* Syntax::
+* String Expansions::
+* Global directives::
+* File inclusion::
+* Logging configuration::
+* Management interface::
+* Timeouts::
+* ListenHTTP::
+* ListenHTTPS::
+* Service::
+* resolver::
+
+String Expansions
+
+* Backreference Expansion::
+* Request Accessors::
+
+Global directives
+
+* Runtime directives::
+* Worker Settings::
+* Proxy Tuning::
+* SSL Settings::
+* Regexp Settings::
+* ACL definition::
+
+Management Interface
+
+* Service Control::
+
+ListenHTTP
+
+* Listener address::
+* Listener-specific limits::
+* Error definitions::
+* Listener logging::
+* Request Modification::
+* Response Modification::
+* Service definitions::
+
+Request Modification
+
+* Rewrite::
+
+Response Modification
+
+* rewrite response::
+
+Service
+
+* Service Selection Statements::
+* Service Request and Response Modification::
+* Service Logging::
+* Backends::
+* Session::
+* Other Statements::
+
+Backends
+
+* Backend::
+* UseBackend::
+* Special Backends::
+
+poundctl
+
+* poundctl commands::
+* poundctl remote::
+* poundctl config::
+* poundctl options::
+* poundctl template::
+
+Configuring @command{poundctl}
+
+* multiple servers::
+
+@command{poundctl} template
+
+* Template syntax::
+* Pipelines::
+* Variables::
+* Input object::
+
+Template syntax
+
+* Actions::
+* Arguments::
+
+Input object
+
+* Full listing::
+* Listener object::
+* Service object::
+* Backend object::
+
+@end detailmenu
+@end menu
+
 @node Overview
 @chapter Overview
 
@@ -396,6 +542,16 @@ requests are to be forwarded.
 The @code{Service} section has no matching conditions, so it will
 match all requests.
 
+@menu
+* Service selection::
+* Request modifications::
+* Conditional branches::
+* Modifying responses::
+* Authentication::
+* Redirects::
+* Error responses::
+@end menu
+
 @node Service selection
 @section Service Selection
 @cindex matching rules
@@ -594,6 +750,11 @@ Service
     End
 End
 @end example
+
+@menu
+* Regular Expressions::
+* ACL::
+@end menu
 
 @node Regular Expressions
 @subsection Regular Expressions
@@ -1139,6 +1300,12 @@ directive.  Its argument is a colon-delimited list of OpenSSL ciphers,
 as described in @xref{ciphers,,,ciphers(1)}.  The cipher selection
 shown in the example above provides for excellent encryption strength.
 
+@menu
+* ACME::
+* Redirect HTTP to HTTPS::
+* HTTPS backends::
+@end menu
+
 @node ACME
 @section ACME
 @cindex LetsEncrypt
@@ -1361,6 +1528,12 @@ Use interleaved weighted round robin balancing.
 The @code{Balancer} statement appearing in the global scope defines
 balancing strategy for all services that don't have @code{Balancer}
 statement on their own.
+
+@menu
+* Sessions::
+* Balancer groups::
+* Dynamic backends::
+@end menu
 
 @node Sessions
 @section Sessions
@@ -1998,6 +2171,21 @@ definitions:
 necessary for performing its tasks.  Some configuration file
 statements can be overridden from the command line.
 
+@menu
+* Lexical structure::
+* Syntax::
+* String Expansions::
+* Global directives::
+* File inclusion::
+* Logging configuration::
+* Management interface::
+* Timeouts::
+* ListenHTTP::
+* ListenHTTPS::
+* Service::
+* resolver::
+@end menu
+
 @node Lexical structure
 @section Lexical structure
 @cindex lexical structure of the configuration file
@@ -2130,6 +2318,11 @@ inserts some fragments of the request URL into the string.
 
 These expansions are discussed in detail below.
 
+@menu
+* Backreference Expansion::
+* Request Accessors::
+@end menu
+
 @node Backreference Expansion
 @subsection Backreference expansion
 Backreference is a construct that refers to a @dfn{parenthesized
@@ -2222,6 +2415,15 @@ character.  Otherwise, it expands to empty string.
  Global directives configure the program operation as a whole.  They
 may appear anywhere at the global scope of the configuration file,
 although it is customary for them to be at its start.
+
+@menu
+* Runtime directives::
+* Worker Settings::
+* Proxy Tuning::
+* SSL Settings::
+* Regexp Settings::
+* ACL definition::
+@end menu
 
 @node Runtime directives
 @subsection Runtime directives
@@ -2638,6 +2840,10 @@ End
 @end group
 @end example
 
+@menu
+* Service Control::
+@end menu
+
 @node Service Control
 @subsection Remote Access to Management Interface
 @kwindex Control
@@ -2782,6 +2988,16 @@ The symbolic name can be used in log messages (@pxref{log format,
 (@pxref{poundctl}) requests to identify that listener.  If the
 name is not supplied, the listener can be identified by its ordinal
 number (0-based) in the configuration file.
+
+@menu
+* Listener address::
+* Listener-specific limits::
+* Error definitions::
+* Listener logging::
+* Request Modification::
+* Response Modification::
+* Service definitions::
+@end menu
 
 @node Listener address
 @subsection Listener address
@@ -3161,6 +3377,10 @@ DeleteHeader -icase "@var{pattern}"
 @end example
 @end deffn
 
+@menu
+* Rewrite::
+@end menu
+
 @node Rewrite
 @subsubsection The @code{rewrite} statement
 @kwindex Rewrite
@@ -3457,6 +3677,10 @@ value of the @code{ServerName} setting of that backend
 (@pxref{ServerName}), if any.
 @end deffn
 
+@menu
+* rewrite response::
+@end menu
+
 @node rewrite response
 @subsubsection The @code{Rewrite response} statement.
 
@@ -3703,6 +3927,15 @@ is used as its identifier.  Service numbers start at 0.
 
   Following subsections discuss statements that can be used in
 @code{Service} sections.
+
+@menu
+* Service Selection Statements::
+* Service Request and Response Modification::
+* Service Logging::
+* Backends::
+* Session::
+* Other Statements::
+@end menu
 
 @node Service Selection Statements
 @subsection Service Selection Statements
@@ -3983,6 +4216,12 @@ as e.g. Openmetric  services.  @xref{Metrics}, for an example.
 
 @node Backends
 @subsection Backends
+
+@menu
+* Backend::
+* UseBackend::
+* Special Backends::
+@end menu
 
 @node Backend
 @subsubsection Backend
@@ -4517,6 +4756,14 @@ the following disables service 1 defined in the global scope of
 poundctl disable /-/1
 @end example
 
+@menu
+* poundctl commands::
+* poundctl remote::
+* poundctl config::
+* poundctl options::
+* poundctl template::
+@end menu
+
 @node poundctl commands
 @section @command{poundctl} commands
 
@@ -4656,6 +4903,10 @@ Search path for template files (@pxref{poundctl template}).
 @deffn {poundctl config} TemplateName "@var{name}"
 Name of the template to use (@pxref{poundctl template}).
 @end deffn
+
+@menu
+* multiple servers::
+@end menu
 
 @node multiple servers
 @subsection Multiple Servers Configuration
@@ -4843,6 +5094,13 @@ line option.
 The default @file{poundctl.tmpl} file defines two templates:
 @samp{default} and @samp{xml}.
 
+@menu
+* Template syntax::
+* Pipelines::
+* Variables::
+* Input object::
+@end menu
+
 @node Template syntax
 @subsection Template syntax
   The syntax of @command{poundctl} templates is modelled after and mostly
@@ -4871,6 +5129,11 @@ presence of the whitespace in these trim markers is mandatory:
 @samp{@{@{- 3@}@}} trims the immediately preceding text and outputs
 @samp{3}, while "@samp{@{@{-3@}@}} parses as an action containing the
 number @samp{-3}.
+
+@menu
+* Actions::
+* Arguments::
+@end menu
 
 @node Actions
 @subsubsection Actions
@@ -5207,6 +5470,13 @@ fragment:
 @end example
 
 Structures of each object are discussed in subsections that follow.
+
+@menu
+* Full listing::
+* Listener object::
+* Service object::
+* Backend object::
+@end menu
 
 @node Full listing
 @subsubsection Full listing
