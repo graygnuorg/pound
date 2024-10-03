@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-10-02
+Pound -- history of user-visible changes. 2024-10-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -185,6 +185,24 @@ Additionally, the following new options are implemented:
   -K FILE      Load client certificate and key from FILE.  During TLS
                handshake, send them to the peer for authentication.
   -k           Insecure mode: disable peer verification.	       
+  -S NAME      Take settings for server NAME from the poundctl
+               configuration file (see below).
+	       
+** .poundctl
+
+The file ".poundctl" in user home directory provides configuration
+settings for the poundctl command.  Syntactically, it is similar to
+pound.cfg.  Upon startup, poundctl first checks if "~/.poundctl"
+exists and reads it if so.  If the program cannot determine the URL of
+the control socket from it (possibly using the argument to the -S
+option, if given), it scans the pound configuration file (if it
+exists), looking for Control statement.  Finally, if neither method
+determines the URL, poundctl requires the user to supply the -s
+option.
+
+The default name and location of the poundctl configuration file can
+be changed using the environment variable POUNDCTL_CONF.  Setting it
+to empty string disables the configuration mechanism altogether.
 
 * configure
 
