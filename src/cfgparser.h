@@ -204,9 +204,10 @@ int cfg_assign_log_facility (void *call_data, void *section_data);
 
 #define cfg_assign_timeout cfg_assign_unsigned
 
-int cfgparser_open (char const *filename);
+int cfgparser_open (char const *filename, char const *wd);
 int cfgparser_finish (int keepwd);
-int cfgparser_parse (char const *filename, CFGPARSER_TABLE *tab,
+int cfgparser_parse (char const *filename, char const *wd,
+		     CFGPARSER_TABLE *tab,
 		     void *section_data,
 		     enum deprecation_mode handle_deprecated, int keepwd);
 struct cfginput;

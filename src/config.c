@@ -5108,7 +5108,7 @@ parse_config_file (char const *file, int nosyslog)
   named_backend_table_init (&pound_defaults.named_backend_table);
   compile_canned_formats ();
 
-  if (cfgparser_open (file))
+  if (cfgparser_open (file, NULL))
     return -1;
   
   res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);

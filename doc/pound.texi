@@ -4436,22 +4436,20 @@ defines its own retry interval value.
 the running instance and allows you to change some of them.
 
   The program communicates with the running @command{pound} daemon via
-a UNIX socket or remotely, via HTTP or HTTPS.  To use UNIX socket,
-@command{pound} configuration file must contain a @code{Control}
-statement (@pxref{Control statement}).  When started,
-@command{poundctl} opens the default @file{pound.cfg} file, looks up
-for this statement and then uses the pathname defined in it as the
-control socket file.
+a UNIX socket or remotely, via HTTP or HTTPS.  The URL of the
+communication socket can be given explicitely by the @option{-s}
+command line option, or obtained from @command{poundctl} or
+@command{pound} configuration files.
 
-  This behavior can be altered in two ways.  First, if the
-configuration file is in a non-standard location, the pathname
-of this file can be given to the program using the @option{-f}
-command line option.  Secondly, the socket name can be supplied in the
-command line explicitly, using the @option{-s} option.
-
-  To access remote @command{pound} daemon via HTTP or HTTPS, supply
-its URL as argument to the @option{-s} option.  @xref{poundctl
-remote}, for a detailed discussion.
+  If the @file{.poundctl} exists in the home directory, the
+configuration will be obtained from it.  Otherwise, if
+@command{poundctl} runs on the same machine as the @command{pound}
+daemon and communicates with it via the UNIX socket, the program will
+scan the @file{pound.cfg} file for the @code{Control} statement
+(@pxref{Control statement}) and read the socket file name from it.
+These ways of configuring @command{poundctl} are discussed below,
+in @ref{poundctl config}.  In examples below, it is assumed that the
+socket URL is obtained from one of configuration files.
 
   The program invocation syntax is:
 
@@ -4587,6 +4585,132 @@ certificate for authentication (@pxref{ClientCert}), use the
 @option{-K @var{file}} option to supply it.  Its argument, @var{file},
 is the name of the file with the certificate and key in PEM format.
 
+@node poundctl config
+@section Configuring @command{poundctl}
+@findex .poundctl
+@kwindex POUNDCTL_CONF
+  Upon startup, the program checks if the file @file{.poundctl} exists
+in the user's home directory.  If so, it reads its configuration from
+it.  The location of the configuration file can be changed using the
+environment variable @env{POUNDCTL_CONF}.  If it is defined and has a
+non-empty value, its value is taken as the alternative file name to
+use.  It can be either absolute file name, or a file name relative to
+the home directory.  Setting @env{POUNDCTL_CONF} to an empty value
+disables reading the configuration.
+
+  If the program cannot determine the socket URL from
+@file{.poundctl}, it will attempt to scan @command{pound}
+configuration file, on the assumption that it runs on the same machine
+as the daemon and that its @file{pound.cfg} file contains a
+@code{Control} statement (@pxref{Control statement}).  If so, the
+socket name is determined from it.
+
+  Otherwise, the control URL has to be given explicitly using the
+@option{-s} command line option.
+
+  The @file{.poundctl} file has the same syntax as @file{pound.cfg}:
+it is a sequence of @dfn{statements} and @dfn{sections}, separated by
+arbitrary amount of empty lines and comments.  A @dfn{simple
+statement} occupies a single line and consists of a keyword
+(@dfn{directive}) and one or more values separated by whitespace.  A
+@dfn{section} is a compound statement that encloses other statements
+and sections.  Sections begin with a keyword, optionally followed by
+arguments, and end with a word @code{End} on a line by itself.  All
+keywords are case-insensitive. 
+
+The following keywords are available in the global scope:
+
+@deffn {poundctl config} URL "@var{url}"
+Sets the URL of the @command{pound} management socket.  The value is
+either the file name of the UNIX socket file, or a remote URL, as
+described in @ref{poundctl remote}.
+@end deffn
+
+@deffn {poundctl config} CAFile "@var{file}"
+Name of the certificate authority file.  See also the @option{-C}
+option, below.
+@end deffn
+
+@deffn {poundctl config} CAPath "@var{dir}"
+Read certificate authority files from the directory @var{dir}.
+@end deffn
+
+@deffn {poundctl config} ClientCert "@var{file}"
+Supplies the name of the file with client certificate and private key,
+for client authentication.  See also the @option{-K} option, below.
+@end deffn
+
+@deffn {poundctl config} Verify @var{bool}
+Enables or disables peer certificate verification.  The default is
+@code{on}.  See also the @option{-k} command line option.
+@end deffn
+
+@deffn {poundctl config} TemplateFile "@var{file}"
+Name of the template file (@pxref{poundctl template}).
+@end deffn
+
+@deffn {poundctl config} TemplatePath "@var{file}"
+Search path for template files (@pxref{poundctl template}).
+@end deffn
+
+@deffn {poundctl config} TemplateName "@var{name}"
+Name of the template to use (@pxref{poundctl template}).
+@end deffn
+
+@node multiple servers
+@subsection Multiple Servers Configuration
+@kwindex Server, @command{poundctl} configuration
+@kwindex -S, @command{poundctl} option
+  The @code{Server} section provides a way to organize management
+of multiple @command{pound} servers.  The idea is that you define
+the configuration for each particular @command{pound} installation
+in a separate @code{Server} section, and then use the name of that
+section to identify the server of interest in the command line, using
+the @option{-S} option:
+
+@example
+poundctl -S web list
+@end example
+
+  The syntax of the @code{Server} section is:
+
+@example
+@group
+Server "@var{name}"
+  ...
+End
+@end group
+@end example
+
+@noindent
+where @var{name} is a unique name assigned to that server.  It will be
+used as argument to the @option{-S} option to identify it.  The
+ellipsis denotes one or more of the following statements:
+  
+@deffn {poundctl Server} URL @var{url}
+Sets the URL of the @command{pound} management socket for that server.
+The value is either the file name of the UNIX socket file, or a remote
+URL, as described in @ref{poundctl remote}.
+@end deffn
+
+@deffn {poundctl Server} CAFile @var{file}
+Name of the certificate authority file.
+@end deffn
+
+@deffn {poundctl Server} CAPath @var{dir}
+Read certificate authority files from the directory @var{dir}.
+@end deffn
+
+@deffn {poundctl Server} ClientCert @var{file}
+Supplies the name of the file with client certificate and private key,
+for client authentication to that server.
+@end deffn
+
+@deffn {poundctl Server} Verify @var{bool}
+Enables or disables peer certificate verification.  The default is
+@code{on}.
+@end deffn
+
 @node poundctl options
 @section @command{poundctl} options
   The following options are understood by @command{poundctl}:
@@ -4596,7 +4720,8 @@ is the name of the file with the certificate and key in PEM format.
 @item -C @var{file}
 @itemx -C @var{dir}
 Read certificate authority files from @var{file} or from files in
-@var{dir}.  @xref{poundctl remote}.
+@var{dir}.  @xref{poundctl remote}.  This overrides the @code{CAFile}
+or @code{CAPath} configuration settings (@pxref{poundctl config}).
 
 @kwindex -f, poundctl
 @item -f @var{file}
@@ -4614,29 +4739,42 @@ Use JSON output format.
 @kwindex -K, poundctl
 @item -K @var{file}
 Read client certificate and private key from @var{file}.
-@xref{poundctl remote}.
+@xref{poundctl remote}.  This option overrides the @code{ClientCert}
+configuration setting (@pxref{poundctl config}).
 
 @kwindex -k
 @item -k
 Disable peer certificate verification.  @xref{poundctl remote}.
+This overrides the @code{Verify} configuration setting
+(@pxref{poundctl config}).
 
 @kwindex -h, poundctl
 @item -h
 Shows a short help output and exits.
 
+@kwindex -S, poundctl
+@item -S @var{name}
+Operate on server defined by @code{Section "@var{name}"} in the
+@file{.poundctl} file.  @xref{multiple servers}, for a detailed
+discussion.
+
 @kwindex -s, poundctl
 @item -s @var{socket}
 @itemx -s @var{url}
 Sets pathname of the control socket, or its URL (for remote access,
-@pxref{poundctl remote}).
+@pxref{poundctl remote}).  This overrides the @code{URL} configuration
+setting (@pxref{poundctl config}).
 
 @kwindex -T, poundctl
 @item -T @var{file}
-Sets the name of the template file to use.
+Sets the name of the template file to use.  Overrides the
+@code{TemplateFile} configuration setting (@pxref{poundctl config}).
 
 @kwindex -t, poundctl
 @item -t @var{name}
-Defines the name of the template to use, instead of the @samp{default}.
+Defines the name of the template to use, instead of the
+@samp{default}.  This overrides the @code{TemplateName} configuration
+setting (@pxref{poundctl config}).
 
 @kwindex -V, poundctl
 @item -V
@@ -4685,19 +4823,22 @@ then the file @file{poundctl.tmpl} (without the leading dot) is looked
 up in the program data directory.
 
 @kwindex POUND_TMPL_PATH
-The default search path can be changed by setting the environment variable
-@env{POUND_TMPL_PATH}.
+The default search path can be changed in the configuration file,
+using the @code{TemplatePath} statement (@pxref{poundctl config}), or
+by setting the environment variable @env{POUND_TMPL_PATH}.
 
 To examine the default value of the search path, use the @option{-V}
 command line option.
 
 The template file to use can be requested from the command line using the
-@option{-t} option.  In this case, template search path in not searched and the
-supplied file is used verbatim.
+@option{-t} option (or @code{TemplateFile} configuration setting).  In
+this case, template search path in not searched and the supplied file
+is used verbatim.
 
 Unless instructed otherwise, @command{poundctl} uses the template
 @samp{default}.  You can request another template name using the
-@option{-T} command line option.
+@code{TemplateName} configuration setting or the @option{-T} command
+line option.
 
 The default @file{poundctl.tmpl} file defines two templates:
 @samp{default} and @samp{xml}.

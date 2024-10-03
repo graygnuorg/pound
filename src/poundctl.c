@@ -37,9 +37,18 @@ typedef struct
   } addr;
 } URL;
 
+typedef struct server_defn
+{
+  char *name;
+  char *url;
+  char *ca_file;
+  char *ca_path;
+  char *cert;
+  int verify;
+  struct locus_range locus;
+} SERVER;
+
 char *conf_name = POUND_CONF;
-char *socket_name;
-URL *url;
 int json_option;
 int indent_option;
 int verbose_option;
@@ -47,11 +56,162 @@ char *tmpl_path;
 char *tmpl_file = "poundctl.tmpl";
 char *tmpl_name = "default";
 
-char *ca_file;
-char *ca_path;
-int disable_peer_verify;
-char *client_cert_file;
+SERVER default_server_defn = {
+  .verify = 1
+};
+SERVER *server = &default_server_defn;
+URL *url;
 
+#define HT_TYPE SERVER
+#define HT_NO_HASH_FREE
+#define HT_NO_DELETE
+#define HT_NO_FOREACH
+#define HT_NO_FOREACH_SAFE
+#include "ht.h"
+
+SERVER_HASH *server_hash;
+
+static CFGPARSER_TABLE server_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "URL",
+    .parser = cfg_assign_string,
+    .off = offsetof (struct server_defn, url)
+  },
+  {
+    .name = "CAFile",
+    .parser = cfg_assign_string,
+    .off = offsetof (struct server_defn, ca_file)
+  },
+  {
+    .name = "CAPath",
+    .parser = cfg_assign_string,
+    .off = offsetof (struct server_defn, ca_path)
+  },
+  {
+    .name = "ClientCert",
+    .parser = cfg_assign_string,
+    .off = offsetof (struct server_defn, cert)
+  },
+  {
+    .name = "Verify",
+    .parser = cfg_assign_bool,
+    .off = offsetof (struct server_defn, verify)
+  },
+  { NULL }
+};
+
+static int
+parse_server (void *call_data, void *section_data)
+{
+  struct token *tok;
+  SERVER *srv, *old;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  XZALLOC (srv);
+  srv->name = xstrdup (tok->str);
+  if ((old = SERVER_INSERT (server_hash, srv)) != NULL)
+    {
+      conf_error ("redefinition of %s", srv->name);
+      conf_error_at_locus_range (&old->locus, "previously defined here");
+      return CFGPARSER_FAIL;
+    }
+  return cfgparser_loop (server_parsetab, srv, NULL, DEPREC_OK, &srv->locus);
+}
+
+static CFGPARSER_TABLE toplevel_parsetab[] = {
+  {
+    .name = "URL",
+    .parser = cfg_assign_string,
+    .data = &default_server_defn.url
+  },
+  {
+    .name = "CAFile",
+    .parser = cfg_assign_string,
+    .data = &default_server_defn.ca_file
+  },
+  {
+    .name = "CAPath",
+    .parser = cfg_assign_string,
+    .data = &default_server_defn.ca_path
+  },
+  {
+    .name = "ClientCert",
+    .parser = cfg_assign_string,
+    .data = &default_server_defn.cert
+  },
+  {
+    .name = "Verify",
+    .parser = cfg_assign_bool,
+    .data = &default_server_defn.verify
+  },
+  {
+    .name = "TemplateFile",
+    .parser = cfg_assign_string,
+    .data = &tmpl_file,
+  },
+  {
+    .name = "TemplatePath",
+    .parser = cfg_assign_string,
+    .data = &tmpl_path
+  },
+  {
+    .name = "TemplateName",
+    .parser = cfg_assign_string,
+    .data = &tmpl_name
+  },    
+  {
+    .name = "Server",
+    .parser = parse_server
+  },
+  { NULL }
+};
+
+#define DOT_POUNDCTL_NAME ".poundctl"
+
+static void
+read_config (void)
+{
+  char *poundctl_conf;
+  char *homedir = getenv ("HOME");
+  if (!homedir)
+    {
+      struct passwd *pwd = getpwuid (getuid ());
+      if (!pwd)
+	errormsg (1, errno, "can't get passwd entry for uid %ld",
+		  (long) getuid ());
+      homedir = pwd->pw_dir;
+    }
+
+  server_hash = SERVER_HASH_NEW ();
+  
+  if ((poundctl_conf = getenv ("POUNDCTL_CONF")) != NULL)
+    {
+      if (poundctl_conf[0])
+	{
+	  if (cfgparser_parse (poundctl_conf, homedir, toplevel_parsetab, NULL,
+			       DEPREC_OK, 0))
+	    exit (1);
+	}
+    }
+  else
+    {
+      char *buf = xmalloc (strlen (homedir) + 1 + sizeof (DOT_POUNDCTL_NAME));
+      strcat (strcat (strcpy (buf, homedir), "/"), DOT_POUNDCTL_NAME);
+      if (access (buf, X_OK) == 0)
+	{
+	  if (cfgparser_parse (".poundctl", homedir, toplevel_parsetab, NULL,
+			       DEPREC_OK, 0))
+	    exit (1);
+	}
+      free (buf);
+    }
+}
+
 static void
 openssl_errormsg (int code, char const *fmt, ...)
 {
@@ -75,7 +235,7 @@ openssl_errormsg (int code, char const *fmt, ...)
   if (code)
     exit (code);
 }
-
+
 struct keyword
 {
   char const *name;
@@ -218,12 +378,9 @@ get_socket_name (void)
     }
   fclose (fp);
 
-  if (name)
-    socket_name = xstrdup (name);
-
-  return socket_name;
+  return name ? xstrdup (name) : NULL;
 }
-
+
 static void
 url_parse_host (char *str, URL *url)
 {
@@ -365,17 +522,18 @@ open_socket (URL *url)
       SSL_CTX_set_verify (ctx, SSL_VERIFY_NONE, NULL);
       SSL_CTX_set_mode (ctx, SSL_MODE_AUTO_RETRY);
 
-      if (!disable_peer_verify)
+      if (server->verify)
 	{
-	  if (!SSL_CTX_load_verify_locations (ctx, ca_file, ca_path))
+	  if (!SSL_CTX_load_verify_locations (ctx, server->ca_file,
+					      server->ca_path))
 	    openssl_errormsg (1, "SSL_CTX_load_verify_locations");
 	}
       
-      if (client_cert_file)
+      if (server->cert)
 	{
-	  if (SSL_CTX_use_certificate_chain_file (ctx, client_cert_file) != 1)
+	  if (SSL_CTX_use_certificate_chain_file (ctx, server->cert) != 1)
 	    openssl_errormsg (1, "SSL_CTX_use_certificate_chain_file");
-	  if (SSL_CTX_use_PrivateKey_file (ctx, client_cert_file, SSL_FILETYPE_PEM) != 1)
+	  if (SSL_CTX_use_PrivateKey_file (ctx, server->cert, SSL_FILETYPE_PEM) != 1)
 	    openssl_errormsg (1, "SSL_CTX_use_PrivateKey_file");
 	  if (SSL_CTX_check_private_key (ctx) != 1)
 	    openssl_errormsg (1, "SSL_CTX_check_private_key failed");
@@ -395,7 +553,7 @@ open_socket (URL *url)
 	errormsg (1, 0, "BIO_do_handshake failed: %s",
 		  ERR_error_string (ERR_get_error (), NULL));
 
-      if (!disable_peer_verify &&
+      if (server->verify &&
 	  (x509 = SSL_get_peer_certificate (ssl)) != NULL &&
 	  (verify_result = SSL_get_verify_result (ssl)) != X509_V_OK)
 	{
@@ -687,7 +845,7 @@ send_request (BIO *bio, char const *method, char const *fmt, ...)
   if (url->pass)
     {
       size_t len = strlen (url->user) + strlen (url->pass) + 1;
-      char *buf = xmalloc (len);
+      char *buf = xmalloc (len + 1);
       char iobuf[MAXBUF];
       int inlen;
       BIO *bb, *b64;
@@ -944,6 +1102,7 @@ static char *usage_text[] = {
   "   -j                JSON output format",
   "   -K FILE           load client certificate and key from FILE",
   "   -k                disable peer verification",
+  "   -S SERVER         connect to SERVER defined in ~/.poundctl file",
   "   -s SOCKET         sets control socket pathname or URL",
   "   -t FILE           read templates from this file",
   "   -T NAME           name of the default template",
@@ -1166,7 +1325,9 @@ read_template (void)
 }
 
 static struct string_value poundctl_settings[] = {
-  { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
+  { "Configuration file", STRING_CONSTANT,
+    { .s_const = "~/" DOT_POUNDCTL_NAME } },
+  { "Pound configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
   { "Template search path",STRING_CONSTANT, { .s_const = POUND_TMPL_PATH } },
   { NULL }
 };
@@ -1182,7 +1343,8 @@ main (int argc, char **argv)
   set_progname (argv[0]);
   json_memabrt = xnomem;
 
-  while ((c = getopt (argc, argv, "C:f:i:jK:khs:T:t:vV")) != EOF)
+  read_config ();
+  while ((c = getopt (argc, argv, "C:f:i:jK:khS:s:T:t:vV")) != EOF)
     {
       switch (c)
 	{
@@ -1190,17 +1352,27 @@ main (int argc, char **argv)
 	  if (stat (optarg, &sb))
 	    errormsg (1, errno, "can't stat %s", optarg);
 	  else if (S_ISDIR (sb.st_mode))
-	    ca_path = optarg;
+	    server->ca_path = optarg;
 	  else
-	    ca_file = optarg;
+	    server->ca_file = optarg;
 	  break;
 	  
 	case 'f':
 	  conf_name = optarg;
 	  break;
 
+	case 'S':
+	  if (server_hash)
+	    {
+	      SERVER key = { .name = optarg };
+	      server = SERVER_RETRIEVE (server_hash, &key);
+	      if (!server)
+		errormsg (1, 0, "%s: no such server defined in configuration");
+	    }
+	  break;
+	  
 	case 's':
-	  socket_name = optarg;
+	  server->url = optarg;
 	  break;
 
 	case 'h':
@@ -1215,11 +1387,11 @@ main (int argc, char **argv)
 	  break;
 
 	case 'K':
-	  client_cert_file = optarg;
+	  server->cert = optarg;
 	  break;
 
 	case 'k':
-	  disable_peer_verify = 1;
+	  server->verify = 0;
 	  break;
 	  
 	case 'T':
@@ -1246,12 +1418,12 @@ main (int argc, char **argv)
   if ((tmpl_path = getenv ("POUND_TMPL_PATH")) == NULL)
     tmpl_path = POUND_TMPL_PATH;
 
-  if (!socket_name && get_socket_name () == NULL)
+  if (!server->url && (server->url = get_socket_name ()) == NULL)
     {
       errormsg (1, 0, "can't determine control socket name; use the -s option");
     }
   if (verbose_option)
-    errormsg (0, 0, "info: using socket %s", socket_name);
+    errormsg (0, 0, "info: using socket %s", server->url);
 
   argc -= optind;
   argv += optind;
@@ -1268,10 +1440,10 @@ main (int argc, char **argv)
 
   read_template ();
 
-  url = url_parse (socket_name);
+  url = url_parse (server->url);
 
   if (verbose_option)
-    errormsg (0, 0, "connecting to %s", socket_name);
+    errormsg (0, 0, "connecting to %s", server->url);
 
   bio = open_socket (url);
 

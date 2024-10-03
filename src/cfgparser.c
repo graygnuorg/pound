@@ -1086,11 +1086,11 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 }
 
 int
-cfgparser_open (char const *filename)
+cfgparser_open (char const *filename, char const *wd)
 {
   int rc;
   
-  if ((include_wd = workdir_get (NULL)) == NULL)
+  if ((include_wd = workdir_get (wd)) == NULL)
     {
       conf_error ("can't open cwd: %s", strerror (errno));
       return -1;
@@ -1115,12 +1115,13 @@ cfgparser_finish (int keepwd)
 }
 
 int
-cfgparser_parse (char const *filename, CFGPARSER_TABLE *tab, void *data,
+cfgparser_parse (char const *filename, char const *wd,
+		 CFGPARSER_TABLE *tab, void *data,
 		 enum deprecation_mode handle_deprecated, int keepwd)
 {
   int rc;
   
-  if (cfgparser_open (filename))
+  if (cfgparser_open (filename, wd))
     return -1;
   rc = cfgparser_loop (tab, data, data, handle_deprecated, NULL);
   if (rc == 0)

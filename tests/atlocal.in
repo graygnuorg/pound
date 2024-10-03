@@ -11,3 +11,4 @@ export PERL_HTTP_TINY_IPV4_ONLY
 @COND_DYNAMIC_BACKENDS_TRUE@DYNAMIC_BACKENDS=1
 LIBFAKEDNS=@abs_builddir@/.libs/libfakedns.so
 export PERL5LIB="@abs_srcdir@/perllib";
+POUNDCTL_CONF=

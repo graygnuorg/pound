@@ -184,6 +184,8 @@ if ($include_dir) {
     $config = abs_path($config)
 }
 
+$ENV{POUNDCTL_CONF} = "";
+
 # Start HTTP listeners
 $backends->read_and_process;
 
