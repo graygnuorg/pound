@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-10-03
+Pound -- history of user-visible changes. 2024-10-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -154,6 +154,20 @@ balancing algorightm applies when selecting an emergency backend.
 
 All statements valid within a "Backend" section are also valid within
 an emergency backend declaration.
+
+* New request matching conditional: ClientCert
+
+The syntax is:
+
+   ClientCert "FILENAME"
+
+The conditional evaluates to true if the client presented the
+certificate matching that from the given file (PEM format).
+
+It cannot be used in standalone services (i.e. services
+that are defined in global scope).  It also cannot be used if the
+"ListenHTTPS" section that hosts the service has the "ClientCert"
+statement on its own.
 
 * Remote access to the management interface
 

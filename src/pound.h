@@ -632,6 +632,7 @@ enum service_cond_type
 		   Host: header */
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
+    COND_CLIENT_CERT
   };
 
 typedef struct string_ref
@@ -675,6 +676,7 @@ typedef struct _service_cond
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
+    X509 *x509;              /* COND_CLIENT_CERT */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -795,7 +797,7 @@ typedef struct _service
 				   is notified that a backend from the list is
 				   ready for removal.
 				 */
-  
+
   SLIST_ENTRY (_service) next;
 } SERVICE;
 
@@ -861,6 +863,7 @@ typedef struct _listener
   /* Used during configuration parsing */
   int ssl_op_enable;
   int ssl_op_disable;
+  int verify;
 } LISTENER;
 
 typedef SLIST_HEAD(,_listener) LISTENER_HEAD;
@@ -1206,6 +1209,7 @@ FILE *fopen_wd (WORKDIR *wd, const char *filename);
 FILE *fopen_include (const char *filename);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
 		  struct locus_range *loc);
+char *filename_resolve (const char *filename);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);
 int foreach_listener (LISTENER_ITERATOR itr, void *data);

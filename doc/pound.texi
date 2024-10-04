@@ -3976,6 +3976,17 @@ modification time has changed.
 @xref{Authentication}.
 @end deffn
 
+@anchor{ClientCert conditional}
+@deffn {Service Conditional} ClientCert "@var{filename}"
+Evaluates to @samp{true} if the client presents the certificate
+matching that from the file @var{filename} (PEM format).
+
+This conditional cannot be used in standalone services (i.e. services
+that are defined in global scope).  It also cannot be used if the
+@code{ListenHTTPS} section that hosts the service has the
+@code{ClientCert} statement on its own.
+@end deffn
+
 @deffn {Service Conditional} Header [@var{options}] "@var{pattern}"
 Yields @samp{true}, if the request contains at least one header
 matching the given @var{pattern}.  By default, @var{pattern} is treated as
@@ -4828,7 +4839,8 @@ all PEM files from that directory will be loaded.
 To disable peer certificate verification, use the @option{-k} option.
 
 If @command{pound} configuration requires the client to send its
-certificate for authentication (@pxref{ClientCert}), use the
+certificate for authentication (@xref{ClientCert}, or
+@pxref{ClientCert conditional}), use the
 @option{-K @var{file}} option to supply it.  Its argument, @var{file},
 is the name of the file with the certificate and key in PEM format.
 

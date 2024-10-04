@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 1, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 4, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1388,6 +1388,14 @@ changed.
 See the section entitled
 .BR "BASIC AUTHENTICATION" ,
 for a detailed discussion.
+.TP
+\fBClientCert \fR"\fIfilename\fR"
+Evaluates to \fItrue\fR if the client presented the certificate
+matching that from the file \fIfilename\fR (PEM format).
+.IP
+This conditional cannot be used in standalone services (i.e. services
+that are defined in global scope), or if the \fBListenHTTPS\fR section
+that hosts the service has the \fBClientCert\fR statement on its own.
 .TP
 \fBHeader\fR [\fIoptions\fR] "\fIpattern\fR"
 The request must contain at least one header matching the given

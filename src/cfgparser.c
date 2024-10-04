@@ -454,6 +454,24 @@ fopen_include (const char *filename)
   return fopen_wd (wd, filename);
 }
 
+char *
+filename_resolve (const char *filename)
+{
+  char *ret;
+  if (filename[0] == '/')
+    ret = xstrdup (filename);
+  else
+    {
+      WORKDIR *wd = get_include_wd ();
+      if (!wd)
+	return NULL;
+      ret = xmalloc (strlen (wd->name) + strlen (filename) + 2);
+      strcat (strcat (strcpy (ret, wd->name), "/"), filename);
+      workdir_unref (wd);
+    }
+  return ret;
+}
+
 void
 fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
 	     struct locus_range *loc)

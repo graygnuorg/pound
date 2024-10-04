@@ -3130,6 +3130,11 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    }
 	}
       break;
+
+    case COND_CLIENT_CERT:
+      res = (phttp->x509 != NULL &&
+	     X509_cmp (phttp->x509, cond->x509) == 0 &&
+	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
     }
 
   return res;
@@ -4564,6 +4569,7 @@ do_http (POUND_HTTP *phttp)
     }
   else
     {
+      X509_free (phttp->x509);
       phttp->x509 = NULL;
     }
   phttp->backend = NULL;

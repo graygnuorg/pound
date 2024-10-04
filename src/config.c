@@ -375,6 +375,32 @@ assign_CONTENT_LENGTH (void *call_data, void *section_data)
   *(CONTENT_LENGTH *)call_data = n;
   return 0;
 }  
+
+static int
+assign_cert (void *call_data, void *section_data)
+{
+  X509 **x509_ptr = call_data, *cert;
+  struct token *tok;
+  FILE *fp;
+  
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if ((fp = fopen_include (tok->str)) == NULL)
+    {
+      fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
+      return CFGPARSER_FAIL;
+    }
+  cert = PEM_read_X509 (fp, NULL, NULL, NULL);
+  fclose (fp);
+  if (cert == NULL)
+    {
+      conf_openssl_error (tok->str, "can't load certificate");
+      return CFGPARSER_FAIL;
+    }
+  *x509_ptr = cert;
+  return CFGPARSER_OK;
+}
 
 /*
  * ACL support
@@ -791,7 +817,8 @@ backend_parse_cert (void *call_data, void *section_data)
 {
   BACKEND *be = call_data;
   struct token *tok;
-
+  char *filename;
+  
   if (be->v.mtx.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
@@ -801,24 +828,28 @@ backend_parse_cert (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
-  if (SSL_CTX_use_certificate_chain_file (be->v.mtx.ctx, tok->str) != 1)
+  if ((filename = filename_resolve (tok->str)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if (SSL_CTX_use_certificate_chain_file (be->v.mtx.ctx, filename) != 1)
     {
-      conf_openssl_error (tok->str, "SSL_CTX_use_certificate_chain_file");
+      conf_openssl_error (filename, "SSL_CTX_use_certificate_chain_file");
       return CFGPARSER_FAIL;
     }
 
-  if (SSL_CTX_use_PrivateKey_file (be->v.mtx.ctx, tok->str, SSL_FILETYPE_PEM) != 1)
+  if (SSL_CTX_use_PrivateKey_file (be->v.mtx.ctx, filename, SSL_FILETYPE_PEM) != 1)
     {
-      conf_openssl_error (tok->str, "SSL_CTX_use_PrivateKey_file");
+      conf_openssl_error (filename, "SSL_CTX_use_PrivateKey_file");
       return CFGPARSER_FAIL;
     }
 
   if (SSL_CTX_check_private_key (be->v.mtx.ctx) != 1)
     {
-      conf_openssl_error (tok->str, "SSL_CTX_check_private_key failed");
+      conf_openssl_error (filename, "SSL_CTX_check_private_key failed");
       return CFGPARSER_FAIL;
     }
-
+  free (filename);
+  
   return CFGPARSER_OK;
 }
 
@@ -1704,6 +1735,13 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 }
 
 static int
+parse_cond_client_cert (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_CLIENT_CERT);
+  return assign_cert (&cond->x509, NULL);
+}
+
+static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
@@ -2047,6 +2085,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "NOT",
     .parser = parse_not_cond
+  },
+  {
+    .name = "ClientCert",
+    .parser = parse_cond_client_cert
   },
   { NULL }
 };
@@ -2588,7 +2630,6 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .name = "End",
     .parser = cfg_parse_end
   },
-
   {
     .name = "",
     .off = offsetof (SERVICE, cond),
@@ -2695,7 +2736,6 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .parser = parse_log_suppress,
     .off = offsetof (SERVICE, log_suppress_mask)
   },
-
   /* Backward compatibility */
   {
     .name = "IgnoreCase",
@@ -3527,6 +3567,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->log_level = dfl->log_level;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
+  lst->clnt_check = -1;
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
   SLIST_INIT (&lst->services);
@@ -3542,6 +3583,52 @@ find_listener_ident (LISTENER_HEAD *list_head, char const *name)
     {
       if (lstn->name && strcmp (lstn->name, name) == 0)
 	return 1;
+    }
+  return 0;
+}
+
+static int
+foreach_client_cert (SERVICE_COND *cond, int (*cb) (X509 *, void *), void *data)
+{
+  int rc = 0;
+
+  switch (cond->type)
+    {
+    case COND_CLIENT_CERT:
+      if (cb)
+	rc = cb (cond->x509, data);
+      else
+	rc = 1;
+      break;
+
+    case COND_BOOL:
+      {
+	SERVICE_COND *subcond;
+	SLIST_FOREACH (subcond, &cond->bool.head, next)
+	  {
+	    if ((rc = foreach_client_cert (subcond, cb, data)) != 0)
+	      break;
+	  }
+      }
+      break;
+
+    default:
+      break;
+    }
+  return rc;
+}
+
+static int
+forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, s_head, next)
+    {
+      if (foreach_client_cert (&svc->cond, NULL, NULL))
+	{
+	  conf_error_at_locus_range (NULL, "%s: %s", svc->locus_str, msg);
+	  return 1;
+	}
     }
   return 0;
 }
@@ -3578,6 +3665,11 @@ parse_listen_http (void *call_data, void *section_data)
   if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
+  if (forbid_ssl_usage (&lst->services,
+			"use of SSL features in ListenHTTP sections"
+			" is forbidden"))
+    return CFGPARSER_FAIL;
+  
   lst->locus_str = format_locus_str (&range);
 
   SLIST_PUSH (list_head, lst, next);
@@ -3738,40 +3830,45 @@ https_parse_cert (void *call_data, void *section_data)
   LISTENER *lst = call_data;
   struct token *tok;
   struct stat st;
-
+  char *certname;
+  
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
-  if (stat (tok->str, &st))
+  if ((certname = filename_resolve (tok->str)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if (stat (certname, &st))
     {
-      conf_error ("%s: stat error: %s", tok->str, strerror (errno));
+      conf_error ("%s: stat error: %s", certname, strerror (errno));
       return CFGPARSER_FAIL;
     }
 
+  int rc = CFGPARSER_OK;
   if (S_ISREG (st.st_mode))
-    return load_cert (tok->str, lst);
-
-  if (S_ISDIR (st.st_mode))
+    {
+      rc = load_cert (certname, lst);
+    }
+  else if (S_ISDIR (st.st_mode))
     {
       DIR *dp;
       struct dirent *ent;
       struct stringbuf namebuf;
       size_t dirlen;
-      int rc = CFGPARSER_OK;
 
-      dirlen = strlen (tok->str);
-      while (dirlen > 0 && tok->str[dirlen-1] == '/')
+      dirlen = strlen (certname);
+      while (dirlen > 0 && certname[dirlen-1] == '/')
 	dirlen--;
 
       xstringbuf_init (&namebuf);
-      stringbuf_add (&namebuf, tok->str, dirlen);
+      stringbuf_add (&namebuf, certname, dirlen);
       stringbuf_add_char (&namebuf, '/');
       dirlen++;
 
-      dp = opendir (tok->str);
+      dp = opendir (certname);
       if (dp == NULL)
 	{
-	  conf_error ("%s: error opening directory: %s", tok->str,
+	  conf_error ("%s: error opening directory: %s", certname,
 		      strerror (errno));
 	  stringbuf_free (&namebuf);
 	  return CFGPARSER_FAIL;
@@ -3801,15 +3898,15 @@ https_parse_cert (void *call_data, void *section_data)
 	}
       closedir (dp);
       stringbuf_free (&namebuf);
-      return rc;
     }
-
-  conf_error ("%s: not a regular file or directory", tok->str);
-  return CFGPARSER_FAIL;
+  else
+    conf_error ("%s: not a regular file or directory", certname);
+  free (certname);
+  return rc;
 }
 
 static int
-verify_OK (int pre_ok, X509_STORE_CTX * ctx)
+verify_OK (int pre_ok, X509_STORE_CTX *ctx)
 {
   return 1;
 }
@@ -4042,7 +4139,7 @@ https_parse_verifylist (void *call_data, void *section_data)
   SLIST_FOREACH (pc, &lst->ctx_head, next)
     if (SSL_CTX_load_verify_locations (pc->ctx, tok->str, NULL) != 1)
       {
-	conf_openssl_error (NULL, "SSL_CTX_load_verify_locations");
+	conf_openssl_error (tok->str, "SSL_CTX_load_verify_locations");
 	return CFGPARSER_FAIL;
       }
 
@@ -4157,6 +4254,60 @@ static CFGPARSER_TABLE https_parsetab[] = {
 };
 
 static int
+client_cert_cb (X509 *x509, void *data)
+{
+  LISTENER *lst = data;
+  POUND_CTX *pc;
+
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
+    {
+      X509_STORE *store = SSL_CTX_get_cert_store (pc->ctx);
+      if (X509_STORE_add_cert (store, x509) != 1)
+	{
+	  //FIXME
+	  openssl_error_at_locus_range (NULL, NULL, "X509_STORE_add_cert");
+	  return -1;
+	}
+    }
+  lst->verify = 1;
+  return 0;
+}
+  
+
+static int
+flush_service_client_cert (LISTENER *lst)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, &lst->services, next)
+    {
+      if (foreach_client_cert (&svc->cond, client_cert_cb, lst))
+	return -1;
+    }
+  if (lst->verify == 1)
+    {
+      if (lst->clnt_check != -1)
+	{
+	  conf_error_at_locus_range (NULL, "%s: ClientCert in ListenHTTPS"
+				     "conflicts with that in Service",
+				     lst->locus_str);
+	  return -1;
+	}
+      else
+	{
+	  POUND_CTX *pc;
+	  SLIST_FOREACH (pc, &lst->ctx_head, next)
+	    {
+	      SSL_CTX_set_verify (pc->ctx,
+				  SSL_VERIFY_PEER | SSL_VERIFY_CLIENT_ONCE,
+				  verify_OK);
+	    }
+	  lst->clnt_check = 3;
+	}
+    }
+  return CFGPARSER_OK;
+}
+
+static int
 parse_listen_https (void *call_data, void *section_data)
 {
   LISTENER *lst;
@@ -4206,6 +4357,9 @@ parse_listen_https (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
+  if (flush_service_client_cert (lst) != CFGPARSER_OK)
+    return CFGPARSER_FAIL;
+  
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (!SLIST_EMPTY (&lst->ctx_head))
     {
@@ -5117,6 +5271,10 @@ parse_config_file (char const *file, int nosyslog)
       if (cur_input)
 	return -1;
 
+      if (forbid_ssl_usage (&services,
+			    "use of SSL features in top-level sections"
+			    " is forbidden"))
+	return -1;
 #ifdef ENABLE_DYNAMIC_BACKENDS
       resolver_set_config (&pound_defaults.resolver);
 #endif
