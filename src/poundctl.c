@@ -202,7 +202,7 @@ read_config (void)
     {
       char *buf = xmalloc (strlen (homedir) + 1 + sizeof (DOT_POUNDCTL_NAME));
       strcat (strcat (strcpy (buf, homedir), "/"), DOT_POUNDCTL_NAME);
-      if (access (buf, X_OK) == 0)
+      if (access (buf, F_OK) == 0)
 	{
 	  if (cfgparser_parse (".poundctl", homedir, toplevel_parsetab, NULL,
 			       DEPREC_OK, 0))
@@ -401,8 +401,10 @@ url_parse_host (char *str, URL *url)
 
   if ((p = strchr (host, ':')) != NULL)
     *p++ = 0;
+  else if (url->tls)
+    p = "443";
   else
-    p = 0;
+    p = "80";
 
   if ((rc = getaddrinfo (host, p, &hints, &addr)) == 0)
     {
@@ -1367,7 +1369,8 @@ main (int argc, char **argv)
 	      SERVER key = { .name = optarg };
 	      server = SERVER_RETRIEVE (server_hash, &key);
 	      if (!server)
-		errormsg (1, 0, "%s: no such server defined in configuration");
+		errormsg (1, 0, "%s: no such server defined in configuration", 
+                          optarg);
 	    }
 	  break;
 	  
