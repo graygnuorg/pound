@@ -1392,9 +1392,9 @@ need_rewrite (const char *location, const char *v_host,
       port = htons (atoi (cp));
     }
   else if (is_proto ("https", proto, matches[1].rm_eo - matches[1].rm_so))
-    port = htons (443);
+    port = htons (PORT_HTTPS);
   else
-    port = htons (80);
+    port = htons (PORT_HTTP);
 
   if ((vhost = strdup (v_host)) == NULL)
     {

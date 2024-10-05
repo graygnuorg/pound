@@ -381,6 +381,12 @@ get_socket_name (void)
   return name ? xstrdup (name) : NULL;
 }
 
+
+#define TS(s) #s
+#define TOSTR(s) TS(s)
+#define PORT_HTTP_STR TOSTR(PORT_HTTP)
+#define PORT_HTTPS_STR TOSTR(PORT_HTTPS)
+
 static void
 url_parse_host (char *str, URL *url)
 {
@@ -402,9 +408,9 @@ url_parse_host (char *str, URL *url)
   if ((p = strchr (host, ':')) != NULL)
     *p++ = 0;
   else if (url->tls)
-    p = "443";
+    p = PORT_HTTPS_STR;
   else
-    p = "80";
+    p = PORT_HTTP_STR;
 
   if ((rc = getaddrinfo (host, p, &hints, &addr)) == 0)
     {

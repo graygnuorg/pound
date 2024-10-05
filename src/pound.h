@@ -69,6 +69,9 @@
 
 #define MAX_ADDR_BUFSIZE (NI_MAXHOST + NI_MAXSERV + 4)
 
+#define PORT_HTTP 80
+#define PORT_HTTPS 443
+
 #if HAVE_OPENSSL_SSL_H
 # define OPENSSL_THREAD_DEFINES
 # include <openssl/ssl.h>
