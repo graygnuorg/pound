@@ -2478,27 +2478,43 @@ ctl_getident (char const **url)
   return retval;
 }
 
+#define LOCATE(obj, head, id)			                        \
+  do						                        \
+    {						                        \
+      long __n = 0;					                \
+      SLIST_FOREACH (obj, head, next)		                        \
+        {						                \
+	  switch (id.type)				                \
+	    {						                \
+	    case IDTYPE_NUM:				                \
+	      if (__n == id.n)				                \
+		return obj;				                \
+	      break;					                \
+	      						                \
+	    case IDTYPE_STR:						\
+	      if (obj->name && strlen (obj->name) == id.s.len &&	\
+		  memcmp (obj->name, id.s.name, id.s.len) == 0)		\
+		return obj;						\
+	      break;							\
+	    }								\
+	  __n++;							\
+	}								\
+      }									\
+    while (0)
+
+
 /*
  * Locate listener identified by ID.
  */
 static LISTENER *
 locate_listener (IDENT id)
 {
-  LISTENER *lstn = NULL;
-
   if (id.type != IDTYPE_ERR)
     {
-      long n = 0;
-      SLIST_FOREACH (lstn, &listeners, next)
-	{
-	  if ((id.type == IDTYPE_NUM && n == id.n) ||
-	      (lstn->name && strlen (lstn->name) == id.s.len &&
-	       memcmp (lstn->name, id.s.name, id.s.len) == 0))
-	    break;
-	  n++;
-	}
+      LISTENER *lstn;
+      LOCATE (lstn, &listeners, id);
     }
-  return lstn;
+  return NULL;
 }
 
 /*
@@ -2510,27 +2526,9 @@ locate_service (LISTENER *lstn, IDENT id)
 {
   if (id.type != IDTYPE_ERR)
     {
-      int n = 0;
       SERVICE_HEAD *head = lstn ? &lstn->services : &services;
       SERVICE *svc;
-
-      SLIST_FOREACH (svc, head, next)
-	{
-	  switch (id.type)
-	    {
-	    case IDTYPE_NUM:
-	      if (n == id.n)
-		return svc;
-	      break;
-
-	    case IDTYPE_STR:
-	      if (svc->name && strlen (svc->name) == id.s.len &&
-		  memcmp (svc->name, id.s.name, id.s.len) == 0)
-		return svc;
-	      break;
-	    }
-	  n++;
-	}
+      LOCATE (svc, head, id);
     }
   return NULL;
 }
@@ -2620,7 +2618,7 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
     }
   else if ((obj.lstn = locate_listener (ctl_getident (&url))) == NULL)
     return HTTP_STATUS_NOT_FOUND;
-
+  
   if (*url && *url != '?')
     return ctl_service (func, data, c, url, obj.lstn);
 
@@ -2687,32 +2685,29 @@ control_list_service (BIO *c, char const *url)
   return HTTP_STATUS_NOT_FOUND;
 }
 
-/*
- * Return 1 if listener is a control one and 0 otherwise.
- * The logic is based on the following premises:
- *  1. Only UNIX sockets can be used for control interface.
- *  2. Control listeners have exactly one service.
- *  3. That service has exactly one backend.
- *  4. Type of that backend is BE_CONTROL.
- * See parse_control_global in config.c
- */
 static int
-listener_is_control (LISTENER *lstn)
+service_has_control (SERVICE *svc)
 {
-  if (lstn && lstn->addr.ai_family == AF_UNIX)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->backends, link)
     {
-      SERVICE *svc = SLIST_FIRST (&lstn->services);
-
-      if (svc && SLIST_NEXT (svc, next) == NULL)
+      BACKEND *be;
+      DLIST_FOREACH (be, &balancer->backends, link)
 	{
-	  BALANCER *balancer = DLIST_FIRST (&svc->backends);
-	  if (balancer && DLIST_NEXT (balancer, link) == NULL)
-	    {
-	      BACKEND *be = DLIST_FIRST (&balancer->backends);
-	      return DLIST_NEXT (be, link) == NULL && be->be_type == BE_CONTROL;
-	    }
+	  if (be->be_type == BE_CONTROL)
+	    return 1;
 	}
     }
+  return 0;
+}
+
+static int
+listener_has_control (LISTENER *lstn)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, &lstn->services, next)
+    if (service_has_control (svc))
+      return 1;
   return 0;
 }
 
@@ -2726,20 +2721,23 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
   if (*url && *url != '?')
     return HTTP_STATUS_NOT_FOUND;
 
-  if (listener_is_control (obj->lstn))
-    return HTTP_STATUS_BAD_REQUEST; // FIXME: 403?
-
   switch (obj->type)
     {
     case OBJ_BACKEND:
+      if (obj->be->be_type == BE_CONTROL)
+	return HTTP_STATUS_BAD_REQUEST;	  
       backend_disable (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
       break;
 
     case OBJ_SERVICE:
+      if (service_has_control (obj->svc))
+	return HTTP_STATUS_BAD_REQUEST;
       obj->svc->disabled = *dis;
       break;
 
     case OBJ_LISTENER:
+      if (listener_has_control (obj->lstn))
+	return HTTP_STATUS_BAD_REQUEST;
       obj->lstn->disabled = *dis;
       break;
     }

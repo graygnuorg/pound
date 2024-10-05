@@ -2965,6 +2965,7 @@ parse_acme (void *call_data, void *section_data)
   /* Create ACME backend */
   XZALLOC (be);
   be->be_type = BE_ACME;
+  be->service = svc;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
 
@@ -4526,6 +4527,7 @@ parse_control_listener (void *call_data, void *section_data)
   XZALLOC (be);
   be->locus = range;
   be->locus_str = format_locus_str (&range);
+  be->service = svc;
   be->be_type = BE_CONTROL;
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
