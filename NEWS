@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-10-04
+Pound -- history of user-visible changes. 2024-10-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -154,6 +154,14 @@ balancing algorightm applies when selecting an emergency backend.
 
 All statements valid within a "Backend" section are also valid within
 an emergency backend declaration.
+
+* Listener address configuration
+
+Both "Address" and "Port" statements are now optional.  If "Address"
+is omitted, pound will listen on all available interfaces.  If "Port"
+is omitted (and not listening on a UNIX socket), default port number
+for this kind of listener will be used: 80, for "ListenHTTP", and 443,
+for "ListenHTTPS".
 
 * New request matching conditional: ClientCert
 

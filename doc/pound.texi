@@ -535,7 +535,9 @@ The first thing that draws attention are @code{Address} and
 @code{Port} statements appearing in both listener and backend sections.
 In @code{ListenHTTP} they specify the IP address and port to listen on
 for incoming requests.  Address @samp{0.0.0.0} stands for all
-available IP addresses.  In @code{Backend} section, these keywords
+available IP addresses@footnote{Strictly speaking, for all available
+@emph{IPv4} addresses.  To bind to all available IPv4 and IPv6
+addresses, use @samp{::0}.}.  In @code{Backend} section, these keywords
 specify the address and port of the remote server, where incoming
 requests are to be forwarded.
 
@@ -3004,21 +3006,21 @@ number (0-based) in the configuration file.
 
 @deffn {ListenHTTP directive} Address @var{address}
 The IP address that @command{pound} will listen on.  This can be a
-numeric IPv4 or IPv6 address, a symbolic host name that must be
-resolvable at runtime (unless the @option{-Wno-dns} option is used),
-or a full pathname of a UNIX socket.  To listen on all available
-interfaces, use @samp{0.0.0.0}.
+numeric IPv4 or IPv6 address, or a full pathname of a UNIX socket.  To
+listen on all available interfaces, use @samp{0.0.0.0} (for IPv4), or
+@samp{::0} (for both IPv4 and IPv6).
 
-Either @code{Address} or @code{SocketFrom} (see  below) must be
-present in each @code{ListenHTTP} section.
+If neither @code{Address} or @code{SocketFrom} are supplied,
+@samp{::0} is assumed.
 @end deffn
 
 @deffn {ListenHTTP directive} Port @var{n}
 @findex /etc/services
 The port number or service name (as per @file{/etc/services} that
 this listener will listen on.
-This directive must be present, unless the @code{Address} directive
-specifies a UNIX socket.
+
+If this directive is not given, the default port number is assumed (80
+for @code{ListenHTTP} and 443 for @code{ListenHTTPS}).
 @end deffn
 
 @deffn {ListenHTTP directive} SocketFrom "@var{pathname}"

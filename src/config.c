@@ -156,67 +156,6 @@ typedef struct
   struct resolver_config resolver;
 } POUND_DEFAULTS;
 
-/*
- * The ai_flags in the struct addrinfo is not used, unless in hints.
- * Therefore it is reused to mark which parts of address have been
- * initialized.
- */
-#define ADDRINFO_SET_ADDRESS(addr) ((addr)->ai_flags = AI_NUMERICHOST)
-#define ADDRINFO_HAS_ADDRESS(addr) ((addr)->ai_flags & AI_NUMERICHOST)
-#define ADDRINFO_SET_PORT(addr) ((addr)->ai_flags |= AI_NUMERICSERV)
-#define ADDRINFO_HAS_PORT(addr) ((addr)->ai_flags & AI_NUMERICSERV)
-
-static int
-resolve_address (char const *node, struct locus_range *locus, int family,
-		 struct addrinfo *addr)
-{
-  if (get_host (node, addr, family))
-    {
-      /* if we can't resolve it assume this is a UNIX domain socket */
-      struct sockaddr_un *sun;
-      size_t len = strlen (node);
-      if (len > UNIX_PATH_MAX)
-	{
-	  conf_error_at_locus_range (locus, "%s", "UNIX path name too long");
-	  return CFGPARSER_FAIL;
-	}
-
-      len += offsetof (struct sockaddr_un, sun_path) + 1;
-      sun = xmalloc (len);
-      sun->sun_family = AF_UNIX;
-      strcpy (sun->sun_path, node);
-
-      addr->ai_socktype = SOCK_STREAM;
-      addr->ai_family = AF_UNIX;
-      addr->ai_protocol = 0;
-      addr->ai_addr = (struct sockaddr *) sun;
-      addr->ai_addrlen = len;
-    }
-  return CFGPARSER_OK;
-}
-
-static int
-assign_address_internal (struct addrinfo *addr, struct token *tok)
-{
-  int res;
-
-  if (!tok)
-    return CFGPARSER_FAIL;
-
-  if (tok->type != T_IDENT && tok->type != T_LITERAL && tok->type != T_STRING)
-    {
-      conf_error_at_locus_range (&tok->locus,
-				 "expected hostname or IP address, but found %s",
-				 token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  res = resolve_address (tok->str, &tok->locus, AF_UNSPEC, addr);
-  if (res == CFGPARSER_OK)
-    ADDRINFO_SET_ADDRESS (addr);
-  return res;
-}
-
 static int
 assign_address_string (void *call_data, void *section_data)
 {
@@ -230,17 +169,16 @@ assign_address_string (void *call_data, void *section_data)
 }
 
 static int
-assign_address (void *call_data, void *section_data)
+assign_port_string (void *call_data, void *section_data)
 {
-  struct addrinfo *addr = call_data;
-
-  if (ADDRINFO_HAS_ADDRESS (addr))
-    {
-      conf_error ("%s", "Duplicate Address statement");
-      return CFGPARSER_FAIL;
-    }
-
-  return assign_address_internal (call_data, gettkn_any ());
+  struct token *tok = gettkn_expect_mask (T_BIT (T_IDENT) |
+					  T_BIT (T_STRING) |
+					  T_BIT (T_LITERAL) |
+					  T_BIT (T_NUMBER));
+  if (!tok)
+    return CFGPARSER_FAIL;
+  *(char**)call_data = xstrdup (tok->str);
+  return CFGPARSER_OK;
 }
 
 static int
@@ -303,52 +241,6 @@ assign_port_generic (struct token *tok, int family, int *port)
     }
   freeaddrinfo (res);
   return CFGPARSER_OK;
-}
-
-static int
-assign_port_internal (struct addrinfo *addr, struct token *tok)
-{
-  int port;
-  int res = assign_port_generic (tok, addr->ai_family, &port);
-
-  if (res == CFGPARSER_OK)
-    {
-      switch (addr->ai_family)
-	{
-	case AF_INET:
-	  ((struct sockaddr_in *)addr->ai_addr)->sin_port = port;
-	  break;
-
-	case AF_INET6:
-	  ((struct sockaddr_in6 *)addr->ai_addr)->sin6_port = port;
-	  break;
-
-	default:
-	  // should not happen: handled by assign_port_generic
-	  abort ();
-	}
-      ADDRINFO_SET_PORT (addr);
-    }
-  return CFGPARSER_OK;
-}
-
-static int
-assign_port_addrinfo (void *call_data, void *section_data)
-{
-  struct addrinfo *addr = call_data;
-
-  if (ADDRINFO_HAS_PORT (addr))
-    {
-      conf_error ("%s", "Duplicate port statement");
-      return CFGPARSER_FAIL;
-    }
-  if (!(ADDRINFO_HAS_ADDRESS (addr)))
-    {
-      conf_error ("%s", "Address statement should precede Port");
-      return CFGPARSER_FAIL;
-    }
-
-  return assign_port_internal (call_data, gettkn_any ());
 }
 
 static int
@@ -1056,29 +948,6 @@ static CFGPARSER_TABLE use_backend_parsetab[] = {
   },
   { NULL }
 };
-
-static int
-check_addrinfo (struct addrinfo const *addr,
-		struct locus_range const *range, char const *name)
-{
-  if (ADDRINFO_HAS_ADDRESS (addr))
-    {
-      if (!ADDRINFO_HAS_PORT (addr) &&
-	  (addr->ai_family == AF_INET || addr->ai_family == AF_INET6))
-	{
-	  conf_error_at_locus_range (range, "%s missing Port declaration",
-				     name);
-	  return CFGPARSER_FAIL;
-	}
-    }
-  else
-    {
-      conf_error_at_locus_range (range, "%s missing Address declaration",
-				 name);
-      return CFGPARSER_FAIL;
-    }
-  return CFGPARSER_OK;
-}
 
 static char *
 format_locus_str (struct locus_range *rp)
@@ -3005,51 +2874,14 @@ listener_parse_checkurl (void *call_data, void *section_data)
 }
 
 static int
-read_fd (int fd)
-{
-  struct msghdr msg;
-  struct iovec iov[1];
-  char base[1];
-  union
-  {
-    struct cmsghdr cm;
-    char control[CMSG_SPACE (sizeof (int))];
-  } control_un;
-  struct cmsghdr *cmptr;
-
-  msg.msg_control = control_un.control;
-  msg.msg_controllen = sizeof (control_un.control);
-
-  msg.msg_name = NULL;
-  msg.msg_namelen = 0;
-
-  iov[0].iov_base = base;
-  iov[0].iov_len = sizeof (base);
-
-  msg.msg_iov = iov;
-  msg.msg_iovlen = 1;
-  if (recvmsg (fd, &msg, 0) > 0)
-    {
-      if ((cmptr = CMSG_FIRSTHDR (&msg)) != NULL
-	  && cmptr->cmsg_len == CMSG_LEN (sizeof (int))
-	  && cmptr->cmsg_level == SOL_SOCKET
-	  && cmptr->cmsg_type == SCM_RIGHTS)
-	return *((int*) CMSG_DATA (cmptr));
-    }
-  return -1;
-}
-
-static int
 listener_parse_socket_from (void *call_data, void *section_data)
 {
   LISTENER *lst = call_data;
-  struct sockaddr_storage ss;
-  socklen_t sslen = sizeof (ss);
   struct token *tok;
-  struct addrinfo addr;
-  int sfd, fd;
-
-  if (ADDRINFO_HAS_ADDRESS (&lst->addr))
+  struct sockaddr_un *sun;
+  size_t len;
+  
+  if (lst->addr_str || lst->port_str)
     {
       conf_error ("%s", "Duplicate Address or SocketFrom statement");
       return CFGPARSER_FAIL;
@@ -3057,60 +2889,26 @@ listener_parse_socket_from (void *call_data, void *section_data)
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
-  memset (&addr, 0, sizeof (addr));
-  if (assign_address_internal (&addr, tok) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
 
-  if ((sfd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
+  len = strlen (tok->str);
+  if (len > UNIX_PATH_MAX)
     {
-      conf_error ("socket: %s", strerror (errno));
+      conf_error ("%s", "UNIX path name too long");
       return CFGPARSER_FAIL;
     }
 
-  if (connect (sfd, addr.ai_addr, addr.ai_addrlen) < 0)
-    {
-      conf_error ("connect %s: %s",
-		  ((struct sockaddr_un*)addr.ai_addr)->sun_path,
-		  strerror (errno));
-      return CFGPARSER_FAIL;
-    }
+  len += offsetof (struct sockaddr_un, sun_path) + 1;
+  sun = xmalloc (len);
+  sun->sun_family = AF_UNIX;
+  strcpy (sun->sun_path, tok->str);
 
-  fd = read_fd (sfd);
+  lst->addr.ai_socktype = SOCK_STREAM;
+  lst->addr.ai_family = AF_UNIX;
+  lst->addr.ai_protocol = 0;
+  lst->addr.ai_addr = (struct sockaddr *) sun;
+  lst->addr.ai_addrlen = len;
 
-  if (fd == -1)
-    {
-      conf_error ("can't get socket: %s", strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-
-  if (getsockname (fd, (struct sockaddr*) &ss, &sslen) == -1)
-    {
-      conf_error ("can't get socket address: %s", strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-
-  free (lst->addr.ai_addr);
-  lst->addr.ai_addr = xmalloc (sslen);
-  memcpy (lst->addr.ai_addr, &ss, sslen);
-  lst->addr.ai_addrlen = sslen;
-  lst->addr.ai_family = ss.ss_family;
-  ADDRINFO_SET_ADDRESS (&lst->addr);
-  ADDRINFO_SET_PORT (&lst->addr);
-
-  {
-    struct stringbuf sb;
-    char tmp[MAX_ADDR_BUFSIZE];
-
-    xstringbuf_init (&sb);
-    stringbuf_format_locus_range (&sb, &tok->locus);
-    stringbuf_add_string (&sb, ": obtained address ");
-    stringbuf_add_string (&sb, addr2str (tmp, sizeof (tmp), &lst->addr, 0));
-    logmsg (LOG_DEBUG, "%s", stringbuf_finish (&sb));
-    stringbuf_free (&sb);
-  }
-
-  lst->sock = fd;
-
+  lst->socket_from = 1;
   return CFGPARSER_OK;
 }
 
@@ -3321,13 +3119,13 @@ parse_header_options (void *call_data, void *section_data)
 static CFGPARSER_TABLE http_common[] = {
   {
     .name = "Address",
-    .parser = assign_address,
-    .off = offsetof (LISTENER, addr)
+    .parser = assign_address_string,
+    .off = offsetof (LISTENER, addr_str)
   },
   {
     .name = "Port",
-    .parser = assign_port_addrinfo,
-    .off = offsetof (LISTENER, addr)
+    .parser = assign_port_string,
+    .off = offsetof (LISTENER, port_str)
   },
   {
     .name = "SocketFrom",
@@ -3635,6 +3433,48 @@ forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
 }
 
 static int
+resolve_listener_address (LISTENER *lst, char *defsrv,
+			  struct locus_range *range)
+{
+  if (lst->addr.ai_addr == NULL)
+    {
+      struct addrinfo hints, *res, *ptr;
+      char *service;
+      int rc;
+      
+      memset (&hints, 0, sizeof (hints));
+      hints.ai_family = AF_UNSPEC;
+      hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+      hints.ai_socktype = SOCK_STREAM;
+      service = lst->port_str ? lst->port_str : defsrv;
+      rc = getaddrinfo (lst->addr_str, service, &hints, &res);
+      if (rc != 0)
+	{
+	  conf_error_at_locus_range (range, "bad listener address: %s",
+				     gai_strerror (rc));
+	  return CFGPARSER_FAIL;
+	}
+
+      ptr = res;
+      /* Prefer in6addr_any over INADDR_ANY. */
+      if (ptr->ai_family == AF_INET &&
+	  ((struct sockaddr_in*)ptr->ai_addr)->sin_addr.s_addr == INADDR_ANY &&
+	  ptr->ai_next != NULL &&
+	  ptr->ai_next->ai_family == AF_INET6 &&
+	  memcmp (&((struct sockaddr_in6*)ptr->ai_next->ai_addr)->sin6_addr,
+		  &in6addr_any, sizeof (in6addr_any)) == 0)
+	ptr = ptr->ai_next;
+
+      lst->addr = *ptr;
+      lst->addr.ai_next = NULL;
+      lst->addr.ai_addr = xmalloc (ptr->ai_addrlen);
+      memcpy (lst->addr.ai_addr, ptr->ai_addr, ptr->ai_addrlen);
+      freeaddrinfo (res);
+    }
+  return CFGPARSER_OK;
+}
+
+static int
 parse_listen_http (void *call_data, void *section_data)
 {
   LISTENER *lst;
@@ -3663,9 +3503,9 @@ parse_listen_http (void *call_data, void *section_data)
   if (parser_loop (http_parsetab, lst, section_data, &range))
     return CFGPARSER_FAIL;
 
-  if (check_addrinfo (&lst->addr, &range, "ListenHTTP") != CFGPARSER_OK)
+  if (resolve_listener_address (lst, PORT_HTTP_STR, &range) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
-
+  
   if (forbid_ssl_usage (&lst->services,
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
@@ -4347,7 +4187,7 @@ parse_listen_https (void *call_data, void *section_data)
   if (parser_loop (https_parsetab, lst, section_data, &range))
     return CFGPARSER_FAIL;
 
-  if (check_addrinfo (&lst->addr, &range, "ListenHTTPS") != CFGPARSER_OK)
+  if (resolve_listener_address (lst, PORT_HTTPS_STR, &range) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
   lst->locus_str = format_locus_str (&range);
@@ -5043,8 +4883,29 @@ backend_resolve (BACKEND *be)
   struct be_regular reg;
   char *hostname = be->v.mtx.hostname;
 
-  if (resolve_address (hostname, &be->locus, be->v.mtx.family, &addr))
-    return -1;
+  if (get_host (hostname, &addr, be->v.mtx.family))
+    {
+      /* if we can't resolve it, assume this is a UNIX domain socket */
+      struct sockaddr_un *sun;
+      size_t len = strlen (hostname);
+      if (len > UNIX_PATH_MAX)
+	{
+	  conf_error_at_locus_range (&be->locus, "%s",
+				     "UNIX path name too long");
+	  return CFGPARSER_FAIL;
+	}
+
+      len += offsetof (struct sockaddr_un, sun_path) + 1;
+      sun = xmalloc (len);
+      sun->sun_family = AF_UNIX;
+      strcpy (sun->sun_path, hostname);
+
+      addr.ai_socktype = SOCK_STREAM;
+      addr.ai_family = AF_UNIX;
+      addr.ai_protocol = 0;
+      addr.ai_addr = (struct sockaddr *) sun;
+      addr.ai_addrlen = len;
+    }
 
   backend_matrix_to_regular (&be->v.mtx, &addr, &reg);
   free (hostname);

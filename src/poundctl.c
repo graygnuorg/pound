@@ -381,12 +381,6 @@ get_socket_name (void)
   return name ? xstrdup (name) : NULL;
 }
 
-
-#define TS(s) #s
-#define TOSTR(s) TS(s)
-#define PORT_HTTP_STR TOSTR(PORT_HTTP)
-#define PORT_HTTPS_STR TOSTR(PORT_HTTPS)
-
 static void
 url_parse_host (char *str, URL *url)
 {

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 4, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 6, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -851,19 +851,22 @@ available:
 \fBAddress\fR \fIaddress\fR
 The address that
 .B pound
-will listen on. This can be a numeric IP address, or a symbolic host name
-that must be resolvable at run-time, or a full pathname of a UNIX
-socket.  Either this parameter or
+will listen on. This can be a numeric IP address, or a full pathname
+of a UNIX socket.  If neither this directive nor
 .B SocketFrom
-(see below) must be present. The address 0.0.0.0 may be used as an
-alias for 'all available addresses on this machine'.
+(see below) is given,
+.I ::0
+is assumed.
 .TP
 \fBPort\fR \fIport\fR
 The port number or service name that
 .B pound
-will listen on.  This parameter must be present if the
-.B Address
-parameter contains an IPv4 or IPv6 address.
+will listen on.  If not given, default port number is assumed, i.e.
+80, for
+.BR ListenHTTP ,
+and 443, for
+.B ListenHTTPS
+(see below).
 .TP
 \fBSocketFrom\fR "\fIpathname\fR"
 Read the socket to listen on from the UNIX socket given as argument.

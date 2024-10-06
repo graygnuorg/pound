@@ -963,6 +963,146 @@ probe_pthread_cancel (void)
 # define probe_pthread_cancel()
 #endif
 
+static int
+read_fd (int fd)
+{
+  struct msghdr msg;
+  struct iovec iov[1];
+  char base[1];
+  union
+  {
+    struct cmsghdr cm;
+    char control[CMSG_SPACE (sizeof (int))];
+  } control_un;
+  struct cmsghdr *cmptr;
+
+  msg.msg_control = control_un.control;
+  msg.msg_controllen = sizeof (control_un.control);
+
+  msg.msg_name = NULL;
+  msg.msg_namelen = 0;
+
+  iov[0].iov_base = base;
+  iov[0].iov_len = sizeof (base);
+
+  msg.msg_iov = iov;
+  msg.msg_iovlen = 1;
+  if (recvmsg (fd, &msg, 0) > 0)
+    {
+      if ((cmptr = CMSG_FIRSTHDR (&msg)) != NULL
+	  && cmptr->cmsg_len == CMSG_LEN (sizeof (int))
+	  && cmptr->cmsg_level == SOL_SOCKET
+	  && cmptr->cmsg_type == SCM_RIGHTS)
+	return *((int*) CMSG_DATA (cmptr));
+    }
+  return -1;
+}
+
+static void
+listener_socket_from (LISTENER *lst)
+{
+  struct sockaddr_storage ss;
+  socklen_t sslen = sizeof (ss);
+  int sfd, fd;
+  struct stringbuf sb;
+  char tmp[MAX_ADDR_BUFSIZE];
+
+  if ((sfd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
+    abend ("%s: socket: %s", lst->locus_str, strerror (errno));
+
+  if (connect (sfd, lst->addr.ai_addr, lst->addr.ai_addrlen) < 0)
+    abend ("%s: connect %s: %s",
+	   lst->locus_str,
+	   ((struct sockaddr_un*)lst->addr.ai_addr)->sun_path,
+	   strerror (errno));
+
+  fd = read_fd (sfd);
+
+  if (fd == -1)
+    abend ("%s: can't get socket: %s", lst->locus_str, strerror (errno));
+
+  if (getsockname (fd, (struct sockaddr*) &ss, &sslen) == -1)
+    abend ("%s: can't get socket address: %s",
+	   lst->locus_str, strerror (errno));
+
+  lst->sock = fd;
+  
+  free (lst->addr.ai_addr);
+  lst->addr.ai_addr = xmalloc (sslen);
+  memcpy (lst->addr.ai_addr, &ss, sslen);
+  lst->addr.ai_addrlen = sslen;
+  lst->addr.ai_family = ss.ss_family;
+
+  xstringbuf_init (&sb);
+  stringbuf_add_string (&sb, lst->locus_str);
+  stringbuf_add_string (&sb, ": obtained address ");
+  stringbuf_add_string (&sb, addr2str (tmp, sizeof (tmp), &lst->addr, 0));
+  logmsg (LOG_DEBUG, "%s", stringbuf_finish (&sb));
+  stringbuf_free (&sb);
+}
+
+static void
+listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
+{
+  int opt;
+  int domain;
+  char abuf[MAX_ADDR_BUFSIZE];
+  mode_t oldmask;
+
+  switch (lst->addr.ai_family)
+    {
+    case AF_INET:
+      domain = PF_INET;
+      break;
+
+    case AF_INET6:
+      domain = PF_INET6;
+      break;
+
+    case AF_UNIX:
+      domain = PF_UNIX;
+      unlink (((struct sockaddr_un*)lst->addr.ai_addr)->sun_path);
+      oldmask = umask (0777 & ~lst->mode);
+      break;
+      
+    default:
+      abort ();
+    }
+
+  if ((lst->sock = socket (domain, SOCK_STREAM, 0)) < 0)
+    abend ("%s: can't create HTTP socket %s: %s",
+	   lst->locus_str,
+	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
+	   strerror (errno));
+
+  opt = 1;
+  setsockopt (lst->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
+  if (bind (lst->sock, lst->addr.ai_addr, lst->addr.ai_addrlen) < 0)
+    abend ("%s: can't bind HTTP socket to %s: %s",
+	   lst->locus_str,
+	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
+	   strerror (errno));
+  
+  if (domain == PF_UNIX)
+    {
+      umask (oldmask);
+      if (lst->chowner)
+	{
+	  char *sname = ((struct sockaddr_un*)lst->addr.ai_addr)->sun_path;
+	  if (chown (sname, user_id, group_id))
+	    logmsg (LOG_ERR, "%s: can't chown socket %s to %d:%d: %s",
+		    lst->locus_str,
+		    sname, user_id, group_id, strerror (errno));
+	}
+    }
+
+  if (listen (lst->sock, 512))
+    abend ("%s: can't listen on %s: %s",
+	   lst->locus_str,
+	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
+	   strerror (errno));
+}
+
 int
 main (const int argc, char **argv)
 {
@@ -1054,60 +1194,10 @@ main (const int argc, char **argv)
   n_listeners = 0;
   SLIST_FOREACH (lstn, &listeners, next)
     {
-      if (lstn->sock == -1)
-	{
-	  /* prepare the socket */
-	  int opt;
-	  int domain;
-	  char abuf[MAX_ADDR_BUFSIZE];
-	  mode_t oldmask;
-
-	  switch (lstn->addr.ai_family)
-	    {
-	    case AF_INET:
-	      domain = PF_INET;
-	      break;
-	    case AF_INET6:
-	      domain = PF_INET6;
-	      break;
-	    case AF_UNIX:
-	      domain = PF_UNIX;
-	      unlink (((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path);
-	      oldmask = umask (0777 & ~lstn->mode);
-	      break;
-	    default:
-	      abort ();
-	    }
-	  if ((lstn->sock = socket (domain, SOCK_STREAM, 0)) < 0)
-	    abend ("can't create HTTP socket %s: %s",
-		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		   strerror (errno));
-
-	  opt = 1;
-	  setsockopt (lstn->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
-	  if (bind (lstn->sock, lstn->addr.ai_addr,
-		    (socklen_t) lstn->addr.ai_addrlen) < 0)
-	    abend ("can't bind HTTP socket to %s: %s",
-		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		   strerror (errno));
-
-	  if (domain == PF_UNIX)
-	    {
-	      umask (oldmask);
-	      if (lstn->chowner)
-		{
-		  char *sname = ((struct sockaddr_un*)lstn->addr.ai_addr)->sun_path;
-		  if (chown (sname, user_id, group_id))
-		    logmsg (LOG_ERR, "can't chown socket %s to %d:%d: %s",
-			    sname, user_id, group_id, strerror (errno));
-		}
-	    }
-
-	  if (listen (lstn->sock, 512))
-	    abend ("can't listen on %s: %s",
-		   addr2str (abuf, sizeof (abuf), &lstn->addr, 0),
-		   strerror (errno));
-	}
+      if (lstn->socket_from)
+	listener_socket_from (lstn);
+      else
+	listener_init (lstn, user_id, group_id);
       n_listeners++;
     }
 

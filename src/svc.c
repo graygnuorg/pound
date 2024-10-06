@@ -1201,32 +1201,23 @@ backend_disable (SERVICE *svc, BACKEND *be, const int disable_mode)
 int
 get_host (char const *name, struct addrinfo *res, int ai_family)
 {
-  struct addrinfo *chain, *ap;
+  struct addrinfo *chain;
   struct addrinfo hints;
   int ret_val;
 
   memset (&hints, 0, sizeof (hints));
   hints.ai_family = ai_family;
   hints.ai_socktype = SOCK_STREAM;
-  hints.ai_flags = AI_CANONNAME |
-		    (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
+  hints.ai_flags = (feature_is_set (FEATURE_DNS) ? 0 : AI_NUMERICHOST);
   if ((ret_val = getaddrinfo (name, NULL, &hints, &chain)) == 0)
     {
-      for (ap = chain; ap != NULL; ap = ap->ai_next)
-	if (ap->ai_socktype == SOCK_STREAM)
-	  break;
-      if (ap == NULL)
-	{
-	  freeaddrinfo (chain);
-	  return EAI_NONAME;
-	}
-      *res = *ap;
-      if ((res->ai_addr = malloc (ap->ai_addrlen)) == NULL)
+      *res = *chain;
+      if ((res->ai_addr = malloc (chain->ai_addrlen)) == NULL)
 	{
 	  freeaddrinfo (chain);
 	  return EAI_MEMORY;
 	}
-      memcpy (res->ai_addr, ap->ai_addr, ap->ai_addrlen);
+      memcpy (res->ai_addr, chain->ai_addr, chain->ai_addrlen);
       freeaddrinfo (chain);
     }
   return ret_val;

@@ -72,6 +72,11 @@
 #define PORT_HTTP 80
 #define PORT_HTTPS 443
 
+#define TS(s) #s
+#define TOSTR(s) TS(s)
+#define PORT_HTTP_STR TOSTR(PORT_HTTP)
+#define PORT_HTTPS_STR TOSTR(PORT_HTTPS)
+
 #if HAVE_OPENSSL_SSL_H
 # define OPENSSL_THREAD_DEFINES
 # include <openssl/ssl.h>
@@ -864,9 +869,12 @@ typedef struct _listener
   SLIST_ENTRY (_listener) next;
 
   /* Used during configuration parsing */
+  char *addr_str;
+  char *port_str;
   int ssl_op_enable;
   int ssl_op_disable;
   int verify;
+  int socket_from;
 } LISTENER;
 
 typedef SLIST_HEAD(,_listener) LISTENER_HEAD;
