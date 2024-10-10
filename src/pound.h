@@ -1175,8 +1175,10 @@ void template_run (TEMPLATE tmpl, struct json_value *val, FILE *outfile);
 char const *template_strerror (int ec);
 void template_free (TEMPLATE tmpl);
 
-void errormsg (int ex, int ec, char const *fmt, ...);
-void json_error (struct json_value *val, char const *fmt, ...);
+void errormsg (int ex, int ec, char const *fmt, ...)
+  ATTR_PRINTFLIKE(3,4);
+void json_error (struct json_value *val, char const *fmt, ...)
+  ATTR_PRINTFLIKE(2,3);
 
 int http_status_to_pound (int status);
 int pound_to_http_status (int err);
