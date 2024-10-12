@@ -56,7 +56,7 @@ if test $status_dynamic_backends != no; then
     AC_DEFINE([ENABLE_DYNAMIC_BACKENDS], [1],
               [Define if dynamic backends are supported])
     status_dynamic_backends=yes
-  elif $status_dynamic_backends = yes; then
+  elif test $status_dynamic_backends = yes; then
     AC_MSG_FAILURE([required library adns not found; install it or use --disable-resolver to disable])
   else
     status_dynamic_backends=no
