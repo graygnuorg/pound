@@ -82,7 +82,7 @@ sub cleanup {
 
 my %status_codes;
 
-$SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = $SIG{__DIE__} = \&cleanup;
+$SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
 
 sub handle_pound_status {
     if (WIFEXITED($?)) {
