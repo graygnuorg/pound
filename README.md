@@ -75,6 +75,11 @@ this support will soon be discontinued.
 If you compile it on a Debian-based system, you need to install the
 `libssl-dev` package prior to building __pound__.
 
+If you plan using Perl-compatible regular expressions, install
+[PCRE2](https://www.pcre.org/) (the `libpcre2-dev` package, on debian).
+
+Additional software is needed for testing.  See [Testing](#user-content-testing), for details.
+
 ## Compilation
 
 If you cloned __pound__ from the repository, you will need the
@@ -82,6 +87,7 @@ following tools in order to build it:
 
 * [GNU Autoconf](http://www.gnu.org/software/automake), version 2.71 or later.
 * [GNU Automake](http://www.gnu.org/software/autoconf), version 1.16.5 or later.
+* [GNU Libtool](http://www.gnu.org/software/libtool), version 2.4.2 or later.
 
 First, run
 
@@ -200,8 +206,8 @@ already helped to discover several important bugs that lurked in the
 code.
 
 To test __pound__ you will need [Perl](https://www.perl.org) version
-5.26.3 or later, and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass)
-module.  To install the latter on a reasonably recent debian-based system,
+5.26.3 or later, with [JSON](https://metacpan.org/pod/JSON) module (it is
+normally part of Perl), and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass) module.  To install the latter on a reasonably recent debian-based system,
 run
 
 ```sh
@@ -217,7 +223,7 @@ running
 
 Testing HTTPS requires additionally Perl modules `IO::Socket::SSL`
 and `Net::SSLeay`.  If these are not installed, HTTPS tests will be skipped.
-To install these on a debian-based system, run:
+To install them on a debian-based system, run:
 
 ```sh
  apt-get install libio-socket-ssl-perl libnet-ssleay-perl
@@ -245,15 +251,24 @@ something like that (ellipsis indicating output omitted for brevity):
 
 ```
 ## -------------------------- ##
-## pound 4.8 test suite.      ##
+## pound 4.14 test suite.     ##
 ## -------------------------- ##
-  1: Configuration file syntax                       ok
-  2: Basic request processing                        ok
-  3: xHTTP                                           ok
-  4: CheckURL                                        ok
-  5: Custom Error Response                           ok
-  6: MaxRequest                                      ok
-  7: RewriteLocation                                 ok
+  1: Configuration file syntax                       ok  
+  2: Traditional log levels (compilation)            ok
+  3: Basic request processing                        ok
+  4: Traditional log levels (output)                 ok
+  5: HTTP log formats                                ok
+  6: Log suppression                                 ok
+  7: xHTTP                                           ok
+  8: CheckURL                                        ok
+  9: Custom Error Response                           ok
+ 10: MaxRequest                                      ok
+ 11: MaxURI                                          ok
+ 12: RewriteLocation                                 ok
+ 13: RewriteLocation (https)                         ok
+ 14: Named backends                                  ok
+ 15: Chunked encoding                                ok
+ 16: Invalid Transfer-Encoding headers               ok
 
 Listener request modification
 
@@ -265,14 +280,14 @@ Listener request modification
 ## Test results. ##
 ## ------------- ##
 
-All 46 tests were successful.
+All 71 tests were successful.
 ```
 
 If a test results in something other than `ok`, it leaves detailed
 diagnostics in directory `tests/testsuite.dir/NN`, where *NN* is the
 ordinal number of the test.  If you encounter such failed tests, please
-tar the contents of `tests/testsuite.dir` and send the resulting tarball
-over to <gray@gnu.org> for investigation.  See also section
+tar the contents of `tests/testsuite.dir` directory and send the resulting
+tarball over to <gray@gnu.org> for investigation.  See also section
 [Bug Reporting](#user-content-bug-reporting) below.
 
 ## Installation
@@ -324,15 +339,22 @@ ListenHTTP
 End
 ```
 
-Notice, that the two statements `Address`, and `Port` are in general
-mandatory both in `ListenHTTP` and in `Backend`.  There are two
-exceptions, however: if `Address` is a file name of a UNIX socket
-file, or if an already opened socket is passed to __pound__ via the
-`SocketFrom` statement.  These two cases are discussed below.
+The `Address`, and `Port` statements are present in both `ListenHTTP`
+and `Backend` sections.  For `ListenHTTP` they specify the IP address
+and port to listen on.  Argument to the `Address` statement can be an
+IPv4 or IPv6 address, or a full pathname of a UNIX socket file.  The
+`Port` statement takes as its argument a port number or its symbolic
+name from `/etc/services`.  Both statements can be omitted: if `Port`
+is missing, the default port number (80 for `HTTP` and 443 for `HTTPS`)
+is assumed.  If `Address` statement is omitted, the program will listen
+on all available interfaces.
 
-Argument to the `Address` statement can be an IPv4 or IPv6 address,
-a hostname, that will be resolved at program startup, or a full
-pathname of a UNIX socket file.
+There is also an alternative way of configuring the socket to listen
+on: the `SocketFrom` statement.  It is described in detail below.
+
+For the `Backend` statement, both `Address` and `Port` are mandatory.
+They specify the IP address and port of the remote backend to which
+all requests received by the listener will be forwarded.
 
 ### HTTPS frontend
 
@@ -382,8 +404,8 @@ their `Host:` headers.  To do so, use the `Host` statement in the
 `Service` section.
 
 The argument to `Host` specifies the host name.  When an incoming request
-arrives, it is compared with this value.  The `Service` section will be
-used only if the value of the `Host:` header from the request matched the
+arrives, its headers are analyzed.  The `Service` section will be used only
+if the value of the `Host:` header from the request matches the
 argument to the `Host` statement.  By default, exact case-insensitive
 comparison is used.
 
@@ -443,7 +465,7 @@ incoming request is matched against each host listed in the `Match OR`
 statement.  If any value compares equal, the match succeeds and the service
 is selected for processing the request.
 
-By default, the `Host` directive uses exact case-insensitive string match.
+By default, the `Host` directive uses exact case-insensitive string comparison.
 This can be altered by supplying one or more options to it.  In the example
 below, we use regular expression matching to achieve the same result as in
 the configuration above:
@@ -459,7 +481,10 @@ the configuration above:
 ```
 
 Notice double-slashes: a slash is an escape character and must be escaped
-if intended to be used literally.
+if intended to be used literally.  By default, the `-re` option assumes
+POSIX extended regular expressions.  If __pound__ is compiled with
+`PCRE2` (or its predecedssor, `PCRE`), Perl-compatible regular expressions
+may be used as well.
 
 ### Dynamic backends
 
@@ -499,8 +524,8 @@ An example of a dynamic backend definition:
 
 ### Sessions
 
-__Pound__ is able to keep track of sessions between a client browser
-and a backend server.  Unfortunately, HTTP is defined as a stateless
+__Pound__ is able to keep track of sessions between client browser
+and backend server.  Unfortunately, HTTP is defined as a stateless
 protocol, which complicates matters: many schemes have been invented
 to allow keeping track of sessions, and none of them works
 perfectly.  What's worse, sessions are critical in order to allow
@@ -511,7 +536,7 @@ be directed to the same backend server.
 Six possible ways of detecting a session have been implemented in
 __pound__ (hopefully the most useful ones): by client address, by Basic
 authentication (user id/password), by URL parameter, by cookie, by
-HTTP parameter and by header value.
+HTTP parameter, and by header value.
 
 Session tracking is declared using the `Session` block in `Service`
 section.  Only one `Session` can be used per `Service`.  The type of
@@ -519,7 +544,7 @@ session tracking is declared with the `Type` statement.
 
 * `Type IP`:  Session tracking by address
 
-  In this scheme __pound__ directs all requests from the same client
+  In this scheme, __pound__ directs all requests from the same client
   IP address to the same backend server. Put the lines
 
   ```
@@ -529,12 +554,13 @@ session tracking is declared with the `Type` statement.
   End
   ```
 
-  in the configuration file to achieve this effect. The value indicates
-  what period of inactivity is allowed before the session is discarded.
+  in the configuration file to achieve this effect. The `TTL` value
+  indicates the period of inactivity that is allowed before the session
+  is discarded.
 
 * `Type Basic`: by Basic Authentication
 
-  In this scheme __pound__ directs all requests from the same user (as
+  In this scheme, __pound__ directs all requests from the same user (as
   identified in the Basic Authentication header) to the same backend
   server. Put the lines
 
@@ -545,8 +571,8 @@ session tracking is declared with the `Type` statement.
   End
   ```
 
-  in configuration file to achieve this effect. The value indicates what
-  period of inactivity is allowed before the session is discarded.
+  in configuration file to achieve this effect.  The meaning of `TTL` is
+  as discussed above.
 
   This type is a special case of the `Type Header`, described below.
 
@@ -626,18 +652,18 @@ Please note the following restrictions on session tracking:
 * There is no default session: if you have not defined any sessions, no
   session tracking will be done.
 * Only one session definition is allowed per `Service`. If your application
-  has alternative methods for sessions you will have to define a separate
+  has alternative methods for sessions, you will have to define a separate
   `Service` for each method.
 
 A note on cookie injection: some applications have no session-tracking
-mechanism at all but would still like to have the client always
+mechanism at all, but would still like to have the client always
 directed to the same backend time after time. Some reverse proxies use
 a mechanism called *cookie injection* in order to achieve this: a
 cookie is added to backend responses and tracked by the reverse proxy.
 
 __Pound__ was designed to be as transparent as possible, therefore this
 mechanism is not supported. If you really need this sort of persistent
-mapping use the client address session mechanism (`Type IP`), which
+mapping, use the client address session mechanism (`Type IP`), which
 achieves the same result without changing the contents in any way.
 
 ### Logging
@@ -651,25 +677,28 @@ By default only error and informative messages are logged.  The amount
 of information logged is controlled by the `LogLevel` configuration
 statement.  Possible settings are:
 
-* `0`
+* `0` or `"null"`
   No logging.
 
-* `1`
+* `1` or `"regular"`
   Regular logging: only error conditions and important informative
   messages are logged.
 
-* `2`
+* `2` or `"extended"`
   Extended logging: show chosen backend servers as well.
 
-* `3`
+* `3` or `"vhost_combined"`
   Log requests using Apache-style Combined Log format.
 
-* `4`
+* `4` or `"combined"`
   Same as 3, but without the virtual host information.
 
-* `5`
-  Same as 4 but with information about the `Service` and `Backend`
+* `5` or `"detailed"`
+  Same as 4, but with information about the `Service` and `Backend`
   used.
+
+You can also define your own logging format using the [LogFormat](https://www.gnu.org.ua/software/pound/manual/Logging.html#log-format) statement, and
+then use its name as the argument to `LogLevel` statement.
 
 The `LogLevel` statement can be global (effective for all listeners),
 as well as per-listener.
@@ -712,7 +741,7 @@ machine that sent the request.
 * `X-Forwarded-Port:` header contains the port on the server that the
 client connected to.
 
-2. Second group contains _ssl_ headers that are added only if the client
+2. The second group contains _ssl_ headers that are added only if the client
 connected using HTTPS.  The `X-SSL-Cipher` header is always present if
 this header group is enabled.  The rest of headers below is added only if
 the client certificate was supplied:
