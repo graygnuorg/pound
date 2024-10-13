@@ -95,6 +95,11 @@ This edition of the @cite{Pound Manual}, last updated
 * Time and Date Formats::
 * GNU Free Documentation License::
 * Index::
+@ifset WEBDOC
+@ifhtml
+* This Manual in Other Formats::
+@end ifhtml
+@end ifset
 
 @detailmenu
  --- The Detailed Node Listing ---

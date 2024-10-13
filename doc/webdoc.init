@@ -5,9 +5,6 @@ set_from_init_file('EXTRA_HEAD', qq{
 });
 set_from_init_file('CSS_LINES', '');
 set_from_init_file('SHOW_TITLE',undef);
-if ($Texinfo::Convert::HTML::VERSION < 6.8) {
-    set_from_init_file('SHOW_MENU',undef);
-}
 # set_from_init_file('TOP_FILE','Pound.html');
 # set_from_init_file('TOP_BUTTONS', undef);
 
