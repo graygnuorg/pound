@@ -16,6 +16,7 @@
 /^82eae3a57cf5d9696e56d91a445a776383ba943a#/,/^[[:xdigit:]]{40}#/s/testsing/testing/
 /^3cd8178c85bcad723446f5ca0340f327dc86d139#/,/^[[:xdigit:]]{40}#/s/synonims/synonyms/
 /^2136f919ac05792f45491a13f696d9b23736c132#/,/^[[:xdigit:]]{40}#/s/signture/signature/
+/^45fb45aa690d7e2cd4ec7d7391beb67610cdb276#/,/^[[:xdigit:]]{40}#/s/woul\b/would/
 
 # Remove commit hashes.  The file must end with this rule.
 s/^[[:xdigit:]]{40}#//

@@ -4689,7 +4689,7 @@ the running instance and allows you to change some of them.
 
   The program communicates with the running @command{pound} daemon via
 a UNIX socket or remotely, via HTTP or HTTPS.  The URL of the
-communication socket can be given explicitely by the @option{-s}
+communication socket can be given explicitly by the @option{-s}
 command line option, or obtained from @command{poundctl} or
 @command{pound} configuration files.
 
