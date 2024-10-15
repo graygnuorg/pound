@@ -68,6 +68,12 @@ if ($@) {
     exit(EX_SKIP);
 }
 
+eval "require JSON";
+if ($@) {
+    print STDERR "required module JSON not present\n";
+    exit(::EX_SKIP);
+}
+
 sub cleanup {
     if ($pound_pid) {
 	if ($verbose) {
@@ -1601,7 +1607,6 @@ use Carp;
 use IPC::Open3;
 use IO::Select;
 use Symbol 'gensym';
-use JSON;
 use Data::Dumper;
 
 sub new {
