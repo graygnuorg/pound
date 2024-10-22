@@ -78,7 +78,7 @@ jobs:
         run: ./bootstrap
 
       - name: Configure
-        run: ./configure
+        run: ./configure --enable-dns-tests
 
       - name: Build
         run: make

@@ -140,7 +140,9 @@ AM_CPPFLAGS = -I$(top_srcdir)/src
 tmplrun_LDADD = ../src/libpound.a
 
 if COND_DYNAMIC_BACKENDS
+if COND_BUILD_FAKEDNS
 noinst_LTLIBRARIES = libfakedns.la
 libfakedns_la_SOURCES = fakedns.c
 libfakedns_la_LDFLAGS = -module -export-dynamic -avoid-version -rpath '/lib'
+endif
 endif

@@ -64,6 +64,30 @@ if test $status_dynamic_backends != no; then
 fi
 AM_CONDITIONAL([COND_DYNAMIC_BACKENDS], [test $status_dynamic_backends = yes])
 
+AC_ARG_ENABLE([dns-tests],
+ [AS_HELP_STRING([--enable-dns-tests],
+                 [enable DNS-based dynamic backend tests])],
+ [if test "${status_dynamic_backends}${enableval}" = yesyes; then
+    status_dns_tests=yes
+  else
+    status_dns_tests=no
+  fi
+ ],
+ [status_dns_tests=no])
+
+if test $status_dns_tests = yes; then
+  AC_COMPILE_IFELSE(
+        [AC_LANG_PROGRAM([
+	      #include <sys/syscall.h>
+	      int x[] = { SYS_connect, SYS_sendto, SYS_recvfrom };
+	   ],
+ 	   [[void main(){}]])],
+	 [],
+	 [status_dns_tests=no])
+fi
+
+AM_CONDITIONAL([COND_BUILD_FAKEDNS], [test "$status_dns_tests" = yes])
+
 AC_SUBST(SSL_CPPFLAGS)
 AC_SUBST(SSL_LDFLAGS)
 AC_ARG_WITH([ssl],
@@ -212,6 +236,7 @@ Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
+Test dynamic backends ......................... $status_dns_tests
 *******************************************************************
 
 EOF
@@ -229,6 +254,7 @@ else
   status_pthread_cancel_probe=no
 fi
 status_dynamic_backends=$status_dynamic_backends
+status_dns_tests=$status_dns_tests
 ])
 
 AC_CONFIG_TESTDIR(tests)
