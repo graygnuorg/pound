@@ -375,6 +375,7 @@ service_session_add (SERVICE *svc, const char *key, BACKEND *be)
   t->expire.tv_sec += svc->sess_ttl;
   if ((old = SESSION_INSERT (tab->hash, t)) != NULL)
     {
+      session_unlink (svc->sessions, old);
       session_free (old);
       logmsg (LOG_WARNING, "service_session_add() DUP");
     }
@@ -782,8 +783,8 @@ find_backend_by_key (SERVICE *svc, char const *key)
   if ((res = service_session_find (svc, keybuf)) == NULL)
     {
       /* no session yet - create one */
-      res = service_lb_select_backend (svc);
-      service_session_add (svc, keybuf, res);
+      if ((res = service_lb_select_backend (svc)) != NULL)
+	service_session_add (svc, keybuf, res);
     }
 
   return res;
