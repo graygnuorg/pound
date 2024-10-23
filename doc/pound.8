@@ -1937,9 +1937,21 @@ This directive may appear only after the
 directive.
 .TP
 \fBPriority\fR \fIn\fR
-The priority of this backend (between 0 and 9, 5 is default). Higher priority
-backends will be used more often than lower priority ones, so you should
-define higher priorities for more capable servers.
+The priority of this backend. Higher priority backends will be used
+more often than lower priority ones, so you should define higher
+priorities for more capable servers. Exact scheduling and allowed
+values for this keyword depend on the load balancing strategy in use
+(see the section
+.BR "REQUEST BALANCING" ,
+above).  For
+.IR "weighted random balancing" ,
+allowed values for
+.B Priority
+are between 0 and 9, inclusive.  For
+.IR "interleaved weighted round robin balancing" ,
+allowed range is 0 to 65535, inclusive.
+.IP
+Default value is 5.
 .TP
 \fBTimeOut\fR \fIn\fR
 Override the global

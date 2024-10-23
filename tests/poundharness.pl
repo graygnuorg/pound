@@ -128,6 +128,30 @@ sub sigchild {
 };
 $SIG{CHLD} = \&sigchild;
 
+sub fakedns_self_check {
+    my $params = 'ns1.example.org. rname@example.org. 42 7200 3600 1209600 3600';
+
+    $nameserver->ZoneUpdate(
+	'$ORIGIN example.org.',
+	'@ IN SOA '.$params
+    );
+
+    local $ENV{LD_PRELOAD} = $fakedns;
+    if (open(my $fh, '-|', 'getsoa', 'example.org', '192.0.2.24')) {
+	chomp(my $s = <$fh>);
+	if ($s ne $params) {
+	    print STDERR "Self-check: got $s\n";
+	    return;
+	}
+	if (<$fh>) {
+	    print STDERR "Self-check: garbage after response: $_\n";
+	    return;
+	}
+	close $fh;
+	return 1;
+    }
+}
+
 ## Start the program
 ## -----------------
 sub usage_error {
@@ -167,6 +191,11 @@ if ($fakedns) {
 
     $nameserver = PoundNS->new or die "can't create nameserver";
     ($ENV{FAKEDNS_UDP_PORT}, $ENV{FAKEDNS_TCP_PORT}) = $nameserver->start_server();
+
+    unless (fakedns_self_check()) {
+	print STDERR "Self-check failed\n";
+	exit(EX_SKIP);
+    }
 }
 
 foreach my $file (@preproc_files) {
@@ -280,7 +309,7 @@ sub preproc {
 	print $out <<EOT;
 # Initial settings by $0
 Daemon 0
-Control "pound.ctl"	    
+Control "pound.ctl"
 LogFacility -
 EOT
     ;
@@ -698,7 +727,7 @@ sub parse_req {
 	    $self->parse_control_backends($1, $2);
 	    next;
 	}
-	
+
 	if (s/^stats//) {
 	    foreach my $k (qw(samples min max avg stddev index)) {
 		if (s{\s+$k = (?:
@@ -1795,6 +1824,12 @@ the statements described in the B<DNS Statements> section (see below).
 If B<Net::DNS::Nameserver> perl module is not available and B<poundharness>
 is given this option, it will exit with status code 77.
 
+To avoid spurious failures, before actually using this functionality
+B<poundharness> performs a self-test, consisting in querying a SOA record of
+a mock DNS zone, using external helper program B<getsoa>.  If the test
+returns the correct data (indicating thereby that the trick with B<fakedns>
+works), B<poundharness> continues.  Otherwise, it exists with status code 77.
+
 =item B<--include-dir=>I<DIR>
 
 Look for relative file names in I<DIR>.  In particular, relative file names
@@ -2013,7 +2048,7 @@ itself.  Only attributes present in the expectation are compared.
 =item backends I<LN> I<SN>
 
 Query for backends in service I<SN> of listener I<LN>.
-The returned backend array is sorted by weight, priority and address. 
+The returned backend array is sorted by weight, priority and address.
 
 =back
 

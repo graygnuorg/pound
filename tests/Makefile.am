@@ -144,5 +144,6 @@ if COND_BUILD_FAKEDNS
 noinst_LTLIBRARIES = libfakedns.la
 libfakedns_la_SOURCES = fakedns.c
 libfakedns_la_LDFLAGS = -module -export-dynamic -avoid-version -rpath '/lib'
+noinst_PROGRAMS += getsoa
 endif
 endif

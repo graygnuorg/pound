@@ -24,7 +24,7 @@ use IO::Socket::IP;
 use File::stat;
 
 # This module modifies internals of Net::DNS::Nameserver, therefore it
-# is not guaranteed that it will work with any other version than that
+# is not guaranteed that it will work with any version other than that
 # for which it has been written.
 croak 'unsupported version of Net::DNS::Nameserver'
     unless $Net::DNS::Nameserver::VERSION == 1990;

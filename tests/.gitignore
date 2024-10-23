@@ -1,5 +1,6 @@
 atconfig
 atlocal
+getsoa
 package.m4
 testsuite
 testsuite.log
