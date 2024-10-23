@@ -765,9 +765,10 @@ enum
 
 typedef struct balancer
 {
-  int weight;
-  unsigned long tot_pri;	/* total priority of active backends */
+  int weight;                   /* relative weight among other balancers */
+  unsigned long tot_pri;	/* sum of priorities of active backends */
   int max_pri;                  /* maximum priority */
+  unsigned act_num;             /* number of active backends */
   /* For IWRR balancer */
   int iwrr_round;
   BACKEND *iwrr_cur;

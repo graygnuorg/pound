@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 6, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 23, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1937,7 +1937,7 @@ This directive may appear only after the
 directive.
 .TP
 \fBPriority\fR \fIn\fR
-The priority of this backend (between 1 and 9, 5 is default). Higher priority
+The priority of this backend (between 0 and 9, 5 is default). Higher priority
 backends will be used more often than lower priority ones, so you should
 define higher priorities for more capable servers.
 .TP

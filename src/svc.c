@@ -688,7 +688,7 @@ balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
 {
   BACKEND *be;
 
-  if (DLIST_EMPTY (&balancer->backends))
+  if (balancer->max_pri == 0)
     return NULL;
   if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
@@ -910,7 +910,7 @@ service_has_backends (SERVICE *svc)
   BALANCER *bl;
   DLIST_FOREACH (bl, &svc->backends, link)
     {
-      if (!DLIST_EMPTY (&bl->backends))
+      if (bl->act_num > 0)
 	return 1;
     }
   return 0;
@@ -1034,13 +1034,14 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
  */
 void
 balancer_recompute_pri_unlocked (BALANCER *bl,
-				     void (*cb) (BACKEND *, void *),
-				     void *data)
+				 void (*cb) (BACKEND *, void *),
+				 void *data)
 {
   BACKEND *b;
   
   bl->tot_pri = 0;
   bl->max_pri = 0;
+  bl->act_num = 0;
   DLIST_FOREACH (b, &bl->backends, link)
     {
       if (cb)
@@ -1050,6 +1051,7 @@ balancer_recompute_pri_unlocked (BALANCER *bl,
 	  bl->tot_pri += b->priority;
 	  if (bl->max_pri < b->priority)
 	    bl->max_pri = b->priority;
+	  bl->act_num++;
 	}
     }
 }
@@ -1603,6 +1605,7 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 		  be->balancer->tot_pri += be->priority;
 		  if (be->balancer->max_pri < be->priority)
 		    be->balancer->max_pri = be->priority;
+		  be->balancer->act_num++;
 		  pthread_mutex_unlock (&be->service->mut);
 		}
 	    }

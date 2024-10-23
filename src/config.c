@@ -266,7 +266,7 @@ assign_CONTENT_LENGTH (void *call_data, void *section_data)
     }
   *(CONTENT_LENGTH *)call_data = n;
   return 0;
-}  
+}
 
 static int
 assign_cert (void *call_data, void *section_data)
@@ -274,7 +274,7 @@ assign_cert (void *call_data, void *section_data)
   X509 **x509_ptr = call_data, *cert;
   struct token *tok;
   FILE *fp;
-  
+
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
@@ -710,7 +710,7 @@ backend_parse_cert (void *call_data, void *section_data)
   BACKEND *be = call_data;
   struct token *tok;
   char *filename;
-  
+
   if (be->v.mtx.ctx == NULL)
     {
       conf_error ("%s", "HTTPS must be used before this statement");
@@ -741,7 +741,7 @@ backend_parse_cert (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
   free (filename);
-  
+
   return CFGPARSER_OK;
 }
 
@@ -2644,15 +2644,10 @@ new_service (BALANCER_ALGO algo)
 
   DLIST_INIT (&svc->be_rem_head);
   pthread_cond_init (&svc->be_rem_cond, NULL);
-  
+
   return svc;
 }
 
-static int backend_pri_max[] = {
-  [BALANCER_ALGO_RANDOM] = PRI_MAX_RANDOM,
-  [BALANCER_ALGO_IWRR]   = PRI_MAX_IWRR
-};
-   
 static int
 parse_service (void *call_data, void *section_data)
 {
@@ -2663,7 +2658,7 @@ parse_service (void *call_data, void *section_data)
   struct locus_range range;
 
   svc = new_service (dfl->balancer_algo);
-  
+
   tok = gettkn_any ();
 
   if (!tok)
@@ -2689,93 +2684,8 @@ parse_service (void *call_data, void *section_data)
 
   if (parser_loop (service_parsetab, svc, dfl, &range))
     return CFGPARSER_FAIL;
-  else
-    {
-      BALANCER *be_list;
-      unsigned be_count = 0;
-      
-      DLIST_FOREACH (be_list, &svc->backends, link)
-	{
-	  BACKEND *be;	  
-	  int be_class = 0;
-#         define BE_MASK(n) (1<<(n))
-#         define  BX_(x)  ((x) - (((x)>>1)&0x77777777)			\
-			   - (((x)>>2)&0x33333333)			\
-			   - (((x)>>3)&0x11111111))
-#         define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
-	  int n = 0;
-	  int pri_max = backend_pri_max[svc->balancer_algo];
 
-	  be_list->tot_pri = 0;
-	  be_list->max_pri = 0;
-	  DLIST_FOREACH (be, &be_list->backends, link)
-	    {
-	      n++;
-	      if (be->priority > pri_max)
-		{
-		  conf_error_at_locus_range (&be->locus,
-					     "backend priority out of allowed"
-					     " range; reset to max. %d",
-					     pri_max);
-		  be->priority = pri_max;
-		}
-	      be_class |= BE_MASK (be->be_type);
-	      be->service = svc;
-	      if (!be->disabled)
-		{
-		  if (TOT_PRI_MAX - be_list->tot_pri > be->priority)
-		    be_list->tot_pri += be->priority;
-		  else
-		    {
-		      conf_error_at_locus_range (&be->locus,
-						 "this backend overflows the"
-						 " sum of priorities");
-		      return CFGPARSER_FAIL;
-		    }
-		  if (be_list->max_pri < be->priority)
-		    be_list->max_pri = be->priority;
-		}
-	    }
-
-	  if (n > 1)
-	    {
-	      if (be_class & ~(BE_MASK (BE_REGULAR) |
-			       BE_MASK (BE_MATRIX) |
-			       BE_MASK (BE_REDIRECT)))
-		{
-		  conf_error_at_locus_range (&range,
-			  "%s",
-			  BITCOUNT (be_class) == 1
-			    ? "multiple backends of this type are not allowed"
-			    : "service mixes backends of different types");
-		  return CFGPARSER_FAIL;
-		}
-
-	       if (be_class & BE_MASK (BE_REDIRECT))
-		{
-		  conf_error_at_locus_range (&range,
-			  "warning: %s",
-			  (be_class & (BE_MASK (BE_REGULAR) |
-				       BE_MASK (BE_MATRIX)))
-			     ? "service mixes regular and redirect backends"
-			     : "service uses multiple redirect backends");
-		  conf_error_at_locus_range (&range,
-			  "see section \"DEPRECATED FEATURES\" in pound(8)");
-		}
-	    }
-	  
-	  be_count += n;
-	}
-
-      if (be_count == 0)
-	{
-	  conf_error_at_locus_range (&range, "warning: no backends defined");
-	}
-      
-      service_lb_init (svc);
-
-      SLIST_PUSH (head, svc, next);
-    }
+  SLIST_PUSH (head, svc, next);
   svc->locus_str = format_locus_str (&range);
   return CFGPARSER_OK;
 }
@@ -2880,7 +2790,7 @@ listener_parse_socket_from (void *call_data, void *section_data)
   struct token *tok;
   struct sockaddr_un *sun;
   size_t len;
-  
+
   if (lst->addr_str || lst->port_str)
     {
       conf_error ("%s", "Duplicate Address or SocketFrom statement");
@@ -3441,7 +3351,7 @@ resolve_listener_address (LISTENER *lst, char *defsrv,
       struct addrinfo hints, *res, *ptr;
       char *service;
       int rc;
-      
+
       memset (&hints, 0, sizeof (hints));
       hints.ai_family = AF_UNSPEC;
       hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
@@ -3505,12 +3415,12 @@ parse_listen_http (void *call_data, void *section_data)
 
   if (resolve_listener_address (lst, PORT_HTTP_STR, &range) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
-  
+
   if (forbid_ssl_usage (&lst->services,
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
     return CFGPARSER_FAIL;
-  
+
   lst->locus_str = format_locus_str (&range);
 
   SLIST_PUSH (list_head, lst, next);
@@ -3672,7 +3582,7 @@ https_parse_cert (void *call_data, void *section_data)
   struct token *tok;
   struct stat st;
   char *certname;
-  
+
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
@@ -4113,7 +4023,7 @@ client_cert_cb (X509 *x509, void *data)
   lst->verify = 1;
   return 0;
 }
-  
+
 
 static int
 flush_service_client_cert (LISTENER *lst)
@@ -4200,7 +4110,7 @@ parse_listen_https (void *call_data, void *section_data)
 
   if (flush_service_client_cert (lst) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
-  
+
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (!SLIST_EMPTY (&lst->ctx_head))
     {
@@ -4374,7 +4284,7 @@ parse_control_listener (void *call_data, void *section_data)
   /* Register backend in service */
   balancer_add_backend (balancer_list_get_normal (&svc->backends), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
-  
+
   return CFGPARSER_OK;
 }
 
@@ -4496,14 +4406,14 @@ read_resolv_conf (void *call_data, void *section_data)
     }
   return cfg_assign_string_from_file (pstr, section_data);
 }
-  
+
 static int
 read_resolv_text (void *call_data, void *section_data)
 {
   char **pstr = call_data;
   char *str;
   struct token *tok;
-  
+
   if (*pstr)
     {
       conf_error ("%s", "ConfigText statement overrides prior ConfigFile");
@@ -4522,7 +4432,7 @@ read_resolv_text (void *call_data, void *section_data)
 		  token_type_str (tok->type));
       return CFGPARSER_FAIL;
     }
-      
+
   if (cfg_read_to_end (cur_input, &str) == EOF)
     return CFGPARSER_FAIL;
   *pstr = xstrdup (str);
@@ -4541,7 +4451,7 @@ static CFGPARSER_TABLE resolver_parsetab[] = {
   {
     .name = "ConfigText",
     .parser = read_resolv_text,
-  },    
+  },
   {
     .name = "Debug",
     .parser = cfg_assign_bool,
@@ -4914,13 +4824,42 @@ backend_resolve (BACKEND *be)
   be->refcount = 1;
   return 0;
 }
+static int backend_pri_max[] = {
+  [BALANCER_ALGO_RANDOM] = PRI_MAX_RANDOM,
+  [BALANCER_ALGO_IWRR]   = PRI_MAX_IWRR
+};
+
+struct be_setup_closure
+{
+  /* Input */
+  NAMED_BACKEND_TABLE *be_tab;
+  SERVICE *svc;        /* Service. */
+  BALANCER *bal;       /* Balancer. */
+  int pri_max;         /* Max. allowed priority. */
+
+  /* Output */
+  int be_count;        /* Number of backends processed. */
+  int be_class;        /* Backend class mask. */
+  int err;             /* Errors encountered or not. */
+};
+
+static void
+be_setup_closure_init (struct be_setup_closure *cp,
+		       NAMED_BACKEND_TABLE *tab,
+		       SERVICE *svc, BALANCER *bal)
+{
+  memset (cp, 0, sizeof *cp);
+  cp->be_tab = tab;
+  cp->svc = svc;
+  cp->bal = bal;
+  cp->pri_max = backend_pri_max[svc->balancer_algo];
+}
 
 static int
-backend_finalize (BACKEND *be, void *data)
+backend_finalize (BACKEND *be, NAMED_BACKEND_TABLE *tab)
 {
   if (be->be_type == BE_BACKEND_REF)
     {
-      NAMED_BACKEND_TABLE *tab = data;
       NAMED_BACKEND *nb;
 
       nb = named_backend_retrieve (tab, be->v.be_name);
@@ -4994,6 +4933,105 @@ backend_finalize (BACKEND *be, void *data)
 #endif
 	}
     }
+  return 0;
+}
+
+#define BE_MASK(n) (1<<(n))
+#define BX_(x)  ((x) - (((x)>>1)&0x77777777)			\
+		 - (((x)>>2)&0x33333333)			\
+		 - (((x)>>3)&0x11111111))
+#define BITCOUNT(x)     (((BX_(x)+(BX_(x)>>4)) & 0x0F0F0F0F) % 255)
+
+static void
+cb_be_setup (BACKEND *be, void *data)
+{
+  struct be_setup_closure *clos = data;
+
+  if (backend_finalize (be, clos->be_tab))
+    {
+      be->disabled = 1;
+      clos->err = 1;
+      return;
+    }
+
+  clos->be_count++;
+  clos->be_class |= BE_MASK (be->be_type);
+  be->service = clos->svc;
+  if (be->priority > clos->pri_max)
+    {
+      conf_error_at_locus_range (&be->locus,
+				 "backend priority out of allowed"
+				 " range; reset to max. %d",
+				 clos->pri_max);
+      be->priority = clos->pri_max;
+    }
+
+  if (TOT_PRI_MAX - clos->bal->tot_pri < be->priority)
+    {
+      conf_error_at_locus_range (&be->locus,
+				 "this backend overflows the"
+				 " sum of priorities");
+      clos->err = 1;
+    }
+}
+
+static int
+service_finalize (SERVICE *svc, void *data)
+{
+  BALANCER *bal;
+  unsigned be_count = 0;
+  NAMED_BACKEND_TABLE *tab = data;
+
+  DLIST_FOREACH (bal, &svc->backends, link)
+    {
+      struct be_setup_closure be_setup;
+      be_setup_closure_init (&be_setup, tab, svc, bal);
+      balancer_recompute_pri_unlocked (bal, cb_be_setup, &be_setup);
+      if (be_setup.err)
+	return -1;
+
+      if (be_setup.be_count > 1)
+	{
+	  if (be_setup.be_class & ~(BE_MASK (BE_REGULAR) |
+				    BE_MASK (BE_MATRIX) |
+				    BE_MASK (BE_REDIRECT)))
+	    {
+	      conf_error_at_locus_range (NULL,
+			  "%s: %s",
+			  svc->locus_str,
+			  BITCOUNT (be_setup.be_class) == 1
+			    ? "multiple backends of this type are not allowed"
+			    : "service mixes backends of different types");
+	      return -1;
+	    }
+
+	  if (be_setup.be_class & BE_MASK (BE_REDIRECT))
+	    {
+	      conf_error_at_locus_range (NULL,
+			  "%s: warning: %s",
+			  svc->locus_str,
+			  (be_setup.be_class & (BE_MASK (BE_REGULAR) |
+						BE_MASK (BE_MATRIX)))
+			     ? "service mixes regular and redirect backends"
+			     : "service uses multiple redirect backends");
+	      conf_error_at_locus_range (NULL,
+			  "%s: %s",
+			  svc->locus_str,
+			  "see section \"DEPRECATED FEATURES\" in pound(8)");
+	    }
+	}
+
+      be_count += be_setup.be_count;
+    }
+
+  if (be_count == 0)
+    {
+      conf_error_at_locus_range (NULL, "%s: warning: no backends defined",
+				 svc->locus_str);
+    }
+
+  service_lb_init (svc);
+
   return 0;
 }
 
@@ -5127,7 +5165,7 @@ parse_config_file (char const *file, int nosyslog)
 
   if (cfgparser_open (file, NULL))
     return -1;
-  
+
   res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
   if (res == 0)
     {
@@ -5141,7 +5179,7 @@ parse_config_file (char const *file, int nosyslog)
 #ifdef ENABLE_DYNAMIC_BACKENDS
       resolver_set_config (&pound_defaults.resolver);
 #endif
-      if (foreach_backend (backend_finalize,
+      if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
       if (worker_min_count > worker_max_count)
