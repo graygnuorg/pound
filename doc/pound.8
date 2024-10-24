@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 23, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 24, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -152,24 +152,18 @@ identified either by 0-based ordinal number within the configuration
 Backends are identified by their ordinal number within service.
 .SH REQUEST BALANCING
 \fILoad balancing strategy\fR defines algorithm used to distribute
-incoming requests between multiple regular backends.  Two such
-strategies are implemented:
-.TP
-.B Weighted Random Balancing
-This is the default strategy.  Each backend is assigned a numeric
+incoming requests between multiple regular backends.  Each backend
+is assigned a
 .I priority
-between 0 and 9 (inclusive).  The backend to use for each request is
-determined at random taking into account backend priorities, so that
-backends with numerically greater priorities have proportionally greater
-chances of being selected than the ones with lesser priorities.  The
-share of requests a backend handles can be estimated as:
+-- a positive number indicating its relative weight among other backends.
+The share of requests a backend handles can be estimated as:
 .IP
 .RS
 .EX
 .BR "Pi / S(P)" ,
 .EE
 .RE
-.IP
+.PP
 where
 .B Pi
 is priority of the backend with index
@@ -177,28 +171,25 @@ is priority of the backend with index
 and
 .B S(P)
 is sum of all priorities.
+.PP
+Two balancing strategies are implemented:
+.TP
+.B Weighted Random Balancing
+This is the default strategy.  The backend to use for each request is
+determined at random taking into account backend priorities, so that
+backends with numerically greater priorities have proportionally
+greater chances of being selected than the ones with lesser priorities.
 .TP
 .B Interleaved Weighted Round Robin Balancing
-Requests are assigned to each backend in turn.  Backend priorities, or
-.I weights
-are used to control the share of requests handled by each backend.
-The greater the weight, the more requests will be sent to this backend.
-In general, the share of requests assigned to a backend is calculated
-by the following relation:
+This strategy cycles over all active backends, considering each one in
+its turn.  An integer ordinal number is assigned to each round, which
+is incremented (modulo number of backends) each time a new round is
+started.  A backend is assigned a request only if its priority is
+greater than the round number.
 .IP
-.RS
-.EX
-.BR "(Pi + 1) / (N + S(P))" ,
-.EE
-.RE
-.IP
-where
-.B N
-is the number of backends,
-.B Pi
-and
-.B S(P)
-as discussed above.
+This strategy offers several advantages compared with the previous
+one.  First, it results in a more even distribution of the
+requests.  Secondly, the resulting distribution is predictable.
 .PP
 Within each \fBService\fR, multiple backends are grouped in
 .IR "balancer groups" .
@@ -216,7 +207,7 @@ assigned to the balancer group 0.  These are backends used during
 normal operation.  Backends declared using the \fBEmergency\fR keyword
 are assigned to the balancer group 65535.  These backends form a pull
 of \fIhigh availability\fR backends, which will be tried only if all
-of the normal backends fail. 
+of the normal backends fail.
 .PP
 More backend groups can be added using dynamic backends, discussed
 below.
@@ -764,7 +755,7 @@ or
 .B perl
 select Perl-compatible regular expressions.  The latter requires
 compile-time support.  The selected regular expression type remains in
-effect until next 
+effect until next
 .B RegexType
 statement or end of the configuration file, whichever occurs first.
 .SS Control socket
@@ -1619,7 +1610,7 @@ Enables a special \fBcontrol backend\fR -- a management interface that
 returns information about the running \fBpound\fR server, makes it
 possible to change state of configured listeners, services and
 backends, and provides other management facilities.  The management
-interface is discussed in detail in 
+interface is discussed in detail in
 section
 .BR "Control socket" ,
 above.  The \fBControl\fR backend provides remote access to this
@@ -1632,7 +1623,7 @@ ListenHTTPS
     Address 192.0.2.1
     Port 443
     Cert "/etc/ssl/priv/example.pem"
-        
+
     Service
         Not BasicAuth "pound/htpasswd"
         Rewrite response
@@ -1989,7 +1980,7 @@ backend.  Thus, at most one dynamic backend will be produced.
 .B all
 Resolve the symbolic host name from the \fBAddress\fR directive and
 create one backend for each address from the DNS response.  This
-enables load balancing between created backends.  Each backend will be 
+enables load balancing between created backends.  Each backend will be
 assigned the same priority.
 .TP
 .B srv

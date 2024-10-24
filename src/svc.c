@@ -691,7 +691,7 @@ iwrr_select (BALANCER *bal)
     {
       if (backend_is_active (bal->iwrr.cur))
 	{
-	  if (bal->iwrr.round <= bal->iwrr.cur->priority)
+	  if (bal->iwrr.round < bal->iwrr.cur->priority)
 	    be = bal->iwrr.cur;
 	}
       if ((bal->iwrr.cur = DLIST_NEXT (bal->iwrr.cur, link)) == NULL)
@@ -3125,9 +3125,9 @@ foreach_backend (BACKEND_ITERATOR itr, void *data)
 }
 
 BALANCER *
-balancer_list_get (BALANCER_LIST *ml, int weight)
+balancer_list_get (BALANCER_LIST *ml, int weight, BALANCER_ALGO algo)
 {
-  BALANCER *bl, *new_list;
+  BALANCER *bl, *new_bl;
   DLIST_FOREACH (bl, ml, link)
     {
       if (weight == bl->weight)
@@ -3136,17 +3136,18 @@ balancer_list_get (BALANCER_LIST *ml, int weight)
 	break;
     }
 
-  if ((new_list = calloc (1, sizeof (*bl))) == NULL)
+  if ((new_bl = calloc (1, sizeof (*new_bl))) == NULL)
     return NULL;
-  new_list->weight = weight;
-  DLIST_INIT (&new_list->backends);
+  new_bl->weight = weight;
+  new_bl->algo = algo;
+  DLIST_INIT (&new_bl->backends);
   
   if (bl)
-    DLIST_INSERT_BEFORE (ml, bl, new_list, link);
+    DLIST_INSERT_BEFORE (ml, bl, new_bl, link);
   else
-    DLIST_INSERT_TAIL (ml, new_list, link);
+    DLIST_INSERT_TAIL (ml, new_bl, link);
 
-  return new_list;
+  return new_bl;
 }
 
 void

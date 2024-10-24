@@ -28,7 +28,7 @@ dns_not_found_response_alloc (enum dns_resp_type type, BACKEND *be)
   if ((resp = calloc (1, sizeof (*resp))) != NULL)
     {
       struct timespec ts;
-      
+
       resp->type = type;
       resp->count = 0;
       get_negative_expire_time (&ts, be);
@@ -298,7 +298,7 @@ backend_sweep (BACKEND *be, void *data)
   if (be->mark)
     {
       SERVICE *svc = be->service;
-      
+
       assert (be->refcount > 0);
       /* Mark backend as disabled so it won't get more requests. */
       be->disabled = 1;
@@ -307,7 +307,7 @@ backend_sweep (BACKEND *be, void *data)
 	case BE_REGULAR:
 	  {
 	    BALANCER *balancer;
-	    
+
 	    /* Remove any sessions associated with it. */
 	    service_session_remove_by_backend (svc, be);
 	    /* Remove it from the balancer. */
@@ -339,7 +339,7 @@ backend_sweep (BACKEND *be, void *data)
 
       /* If a load balancer stored this backend as current, reset it. */
       service_lb_reset (svc, be);
-      
+
       /*
        * Remove backend from the hash table and decrement its refcount.
        */
@@ -348,7 +348,7 @@ backend_sweep (BACKEND *be, void *data)
 
       /* Add it to the list of removed backends. */
       DLIST_INSERT_TAIL (&svc->be_rem_head, be, link);
-      
+
       be->mark = 0;
     }
   pthread_mutex_unlock (&be->mut);
@@ -368,7 +368,8 @@ service_matrix_addr_update_backends (SERVICE *svc,
   pthread_mutex_lock (&svc->mut);
   pthread_mutex_lock (&mtx->mut);
 
-  balancer = balancer_list_get (&svc->balancers, mtx->v.mtx.weight);
+  balancer = balancer_list_get (&svc->balancers, mtx->v.mtx.weight,
+				svc->balancer_algo);
   if (!mtx->disabled)
     {
       /* Mark all generated backends. */
@@ -432,7 +433,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
 	      pthread_mutex_init (&be->mut, NULL);
 	      be->refcount = 1;
 	      be->v.reg.parent = mtx;
-	      
+
 	      /* Add it to the list of service backends and to the hash
 		 table. */
 	      balancer_add_backend (balancer, be);
@@ -446,7 +447,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
 
       if (!DLIST_EMPTY (&svc->be_rem_head))
 	start_backend_removal (svc);
-      
+
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
@@ -455,27 +456,6 @@ service_matrix_addr_update_backends (SERVICE *svc,
 
   pthread_mutex_unlock (&mtx->mut);
   pthread_mutex_unlock (&svc->mut);
-}
-
-static int
-compute_priority (SERVICE *svc, struct dns_srv *srv, unsigned long total_weight)
-{
-  int result;
-
-  switch (svc->balancer_algo)
-    {
-    case BALANCER_ALGO_RANDOM:
-      result = srv->weight * 9 / total_weight;
-      break;
-
-    case BALANCER_ALGO_IWRR:
-      result = srv->weight;
-      break;
-
-    default:
-      abort ();
-    }
-  return result;
 }
 
 static void
@@ -492,7 +472,7 @@ struct srv_stat
   int priority;
   int start;
   int count;
-  unsigned long total_weight;
+  int max_weight;
 };
 
 #define TOT_PRI_MAX ULONG_MAX
@@ -510,7 +490,7 @@ analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)
       *pstat = NULL;
       return 0;
     }
-  
+
   /* Count SRV groups. */
   for (i = 0; i < resp->count; i++)
     if (prio != resp->srv[i].priority)
@@ -535,22 +515,9 @@ analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)
 	  grp[j].priority = prio;
 	  grp[j].start = i;
 	}
-      if (TOT_PRI_MAX - grp[j].total_weight > resp->srv[i].weight)
-	{
-	  grp[j].total_weight += resp->srv[i].weight;
-	  grp[j].count++;
-	}
-      else
-	{
-	  logmsg (LOG_NOTICE,
-		  "SRV record %d %d %d %s overflows total priority",
-		  resp->srv[i].priority, resp->srv[i].weight,
-		  resp->srv[i].port, resp->srv[i].host);
-	  /* Skip rest of records with this priority. */
-	  for (; i + 1 < resp->count; i++)
-	    if (resp->srv[i].priority != prio)
-	      break;
-	}
+      if (grp[j].max_weight < resp->srv[i].weight)
+	grp[j].max_weight = resp->srv[i].weight;
+      grp[j].count++;
     }
 
   *pstat = grp;
@@ -574,11 +541,11 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 	{
 	  get_negative_expire_time (&ts, mtx);
 	}
-      else     
+      else
 	{
 	  int i;
 	  int mark = 1;
-	  
+
 	  /* Mark all generated backends. */
 	  backend_table_foreach (mtx->v.mtx.betab, backend_mark, &mark);
 
@@ -593,10 +560,10 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		  struct dns_srv *srv = &resp->srv[stat[i].start + j];
 		  BACKEND *be = backend_table_hostname_lookup (mtx->v.mtx.betab,
 							       srv->host);
+		  int prio = stat[i].max_weight == 0 ? 1 : srv->weight;
+
 		  if (be)
 		    {
-		      int prio = compute_priority (svc, srv,
-						   stat[i].total_weight);
 		      if (be->priority != prio)
 			{
 			  /* Update priority of the matrix and all backends
@@ -624,12 +591,11 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		      be->locus = mtx->locus;
 		      be->locus_str = mtx->locus_str;
 		      be->be_type = BE_MATRIX;
-		      be->priority = compute_priority (svc, srv,
-						       stat->total_weight);
+		      be->priority = prio;
 		      be->disabled = 0;
 		      pthread_mutex_init (&be->mut, NULL);
 		      be->refcount = 1;
-		      
+
 		      be->v.mtx.hostname = strdup (srv->host);
 		      if (!be->v.mtx.hostname)
 			{
@@ -655,15 +621,15 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 			}
 		      be->v.mtx.weight = srv->priority;
 		      be->v.mtx.parent = mtx;
-		      
+
 		      /*
 		       * Trigger regular backend creation.
 		       */
 		      backend_matrix_schedule_update (be);
-		      
+
 		      /* Add new matrix to the hash table. */
 		      backend_table_insert (mtx->v.mtx.betab, be);
-		      
+
 		      /*
 		       * Notice, that subsidiary matrix backends are not
 		       * added to the service backend list.  That would be
@@ -673,9 +639,9 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		    }
 		}
 	    }
-	  
+
 	  free (stat);
-	  
+
 	  /* Remove all unreferenced backends. */
 	  backend_table_foreach (mtx->v.mtx.betab, backend_sweep,
 				 mtx->v.mtx.betab);

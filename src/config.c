@@ -767,7 +767,7 @@ backend_assign_ciphers (void *call_data, void *section_data)
 static int
 backend_assign_priority (void *call_data, void *section_data)
 {
-  return cfg_assign_int_range (call_data, 0, -1);
+  return cfg_assign_int_range (call_data, 1, -1);
 }
 
 static int
@@ -4824,10 +4824,6 @@ backend_resolve (BACKEND *be)
   be->refcount = 1;
   return 0;
 }
-static int backend_pri_max[] = {
-  [BALANCER_ALGO_RANDOM] = PRI_MAX_RANDOM,
-  [BALANCER_ALGO_IWRR]   = PRI_MAX_IWRR
-};
 
 struct be_setup_closure
 {
@@ -4835,7 +4831,6 @@ struct be_setup_closure
   NAMED_BACKEND_TABLE *be_tab;
   SERVICE *svc;        /* Service. */
   BALANCER *bal;       /* Balancer. */
-  int pri_max;         /* Max. allowed priority. */
 
   /* Output */
   int be_count;        /* Number of backends processed. */
@@ -4852,7 +4847,6 @@ be_setup_closure_init (struct be_setup_closure *cp,
   cp->be_tab = tab;
   cp->svc = svc;
   cp->bal = bal;
-  cp->pri_max = backend_pri_max[svc->balancer_algo];
 }
 
 static int
@@ -4957,13 +4951,13 @@ cb_be_setup (BACKEND *be, void *data)
   clos->be_count++;
   clos->be_class |= BE_MASK (be->be_type);
   be->service = clos->svc;
-  if (be->priority > clos->pri_max)
+  if (be->priority > PRI_MAX)
     {
       conf_error_at_locus_range (&be->locus,
 				 "backend priority out of allowed"
 				 " range; reset to max. %d",
-				 clos->pri_max);
-      be->priority = clos->pri_max;
+				 PRI_MAX);
+      be->priority = PRI_MAX;
     }
 }
 

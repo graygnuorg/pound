@@ -1444,9 +1444,9 @@ End
   When several backends are defined in a service, incoming requests
 will be distributed among them.  This process is called @dfn{balancing}.
 By default, requests are distributed equally.  This can be changed by
-assigning them a @dfn{priority} -- a decimal number which controls a
+assigning them a @dfn{priority} -- a positive integer which assigns a
 relative weight of the given backend in the distribution algorithm.
-The bigger the priority is, the more requests this backend gets from
+The greater the priority is, the more requests this backend gets from
 the total flow.
 
 @cindex balancing strategy
@@ -1460,14 +1460,28 @@ weighted round robin balancing}.
 @cindex Weighted random balancing
 @item Weighted Random Balancing
 
-This is the default strategy.  Each backend is assigned a numeric
-priority between 0 and 9, inclusive.  The backend to use for each
-request is determined at random taking into account backend
+This is the default strategy.  The backend to use for each
+request is determined at random, taking into account backend
 priorities, so that backends with numerically greater priorities have
 proportionally greater chances of being selected than the ones with
 lesser priorities.
 
-The share of requests a backend receives can be estimated as:
+@cindex Interleaved weighted round robin balancing
+@item Interleaved Weighted Round Robin Balancing
+
+This strategy cycles over all active backends, considering each one in
+its turn.  An integer ordinal number is assigned to each round, which
+is incremented (modulo number of backends) each time a new round is
+started.  A backend is assigned a request only if its priority is
+greater than the round number.
+
+This strategy offers several advantages compared with the previous
+one.  First, it results in a more even distribution of the
+requests.  Secondly, the resulting distribution is predictable.
+@end table
+
+  Overall, the share of requests a given backend receives can be
+estimated as:
 
 @example
 @math{P@sub{i} / S(P)}
@@ -1476,24 +1490,6 @@ The share of requests a backend receives can be estimated as:
 @noindent
 where @math{P@sub{i}} is the priority of the backend with index
 @math{i}, and @math{S(P)} is the sum of all priorities.
-
-@cindex Interleaved weighted round robin balancing
-@item Interleaved Weighted Round Robin Balancing
-
-Requests are assigned to each backend in turn.  Backend priorities, or
-weights, are used to control the share of requests received by each
-backend.  The greater the weight, the more requests will be sent to
-this backend.  In general, the share of requests assigned to a backend
-is calculated by the following relation:
-
-@example
-@math{(P@sub{i} + 1) / (N + S(P))}
-@end example
-
-@noindent
-where @math{N} is total number of backends, and @math{P@sub{i}} and
-@math{S(P)} are as discussed above.
-@end table
 
   Weighted random balancing is used by default.  Each backend gets the
 default priority 5, unless another value is expressly assigned using
@@ -1710,11 +1706,18 @@ matrix declaration.
 
   A more advanced way to create dynamic backends is using @code{SRV}
 records.  Each @code{SRV} record has four associated parameters: priority,
-weight, target and port.  The priority value defines the @command{pound}
-balancer group where to put generated backends.  Weight is assigned
-as the priority for each generated backend.  Finally, target is used
-as hostname to obtain IP addresses for the backends.  For example,
-suppose the following DNS records are defined:
+weight, target and port.  The @dfn{priority} value defines the @command{pound}
+balancer group where to put generated backends.  @dfn{Weight} is assigned
+as the priority for each generated backend@footnote{Notice, that the
+@code{SRV} terminology differs from what @command{pound} uses.  What
+is called @i{priority} in @code{SRV} defines the @dfn{weight} of the
+backend group for @command{pound}, whereas what is called @i{weight}
+in @code{SRV} defines the @dfn{priority} of a backend within a group.
+This confusion is due to historical reasons, and it would be hard to
+avoid it without breaking backward compatibility.}.
+Finally, @dfn{target} is used as hostname to obtain IP addresses for
+the backends.  For example, suppose the following DNS records are
+defined:
 
 @example
 @group
@@ -1754,6 +1757,20 @@ Emergency
         Priority 10
 End
 @end example
+
+  @emph{Notice}, that it is possible to have a weight of 0 in a SRV
+record.  This will translate to @command{pound} backend priority 0,
+which is normally not allowed (@pxref{Balancer}).  According to RFC
+2782, this is the preferred way of defining weights where ``there
+isn't any server selection to do'', whereas ``[i]n the presence of
+records containing weights greater than 0, records with weight 0
+should have a very small chance of being selected''.  @command{Pound}
+handles this as follows: if all @code{SRV} records have the weight
+of 0, the resulting backends are assigned weight 1.  This makes sure
+the backend selection algorithm work and give each backend equal
+chance of being selected.  This translation does not take place,
+however, if at least one of @code{SRV} records has a weight greater
+than 0.
 
   To declare backend as dynamic, use a symbolic host name in its
 @code{Address} statement and add the @code{Resolve} statement with one
@@ -1801,8 +1818,8 @@ Use only IPv6 addresses (@code{AAAA} DNS records).
 @group
 Backend
         Address "_proxy._tcp.example.org"
-	Resolve srv
-	Family any
+        Resolve srv
+        Family any
 End
 @end group
 @end example
@@ -2881,7 +2898,7 @@ ListenHTTPS
     Port 443
     Cert "/etc/ssl/priv/example.pem"
     Disable TLSv1
-    
+
     Service
         Not BasicAuth "pound/htpasswd"
         Rewrite response
@@ -2889,7 +2906,7 @@ ListenHTTPS
         End
         Error 401
     End
-    
+
     Service
         ACL "secure"
         Control
@@ -4293,9 +4310,7 @@ Sets numeric priority for this backend.  Priorities are used to
 control probability of receiving a request for handling in case of
 multiple backends.  @xref{Balancer}, for a detailed discussion.
 
-Allowed values for @var{n} depend on the balancing algorithm in use.
-For random balancing, allowed values are 0 to 9.  For @sc{iwrr},
-allowed values are between 0 and 65535.
+Allowed values for @var{n} are 1 to 65535.
 @end deffn
 
 Following directives configure @dfn{dynamic backends}.  @pxref{Dynamic
@@ -4669,7 +4684,7 @@ Resolver
                 nameserver 192.0.2.1
                 nameserver 192.0.2.4
         End
-End        
+End
 @end group
 @end example
 
@@ -4882,7 +4897,7 @@ statement} occupies a single line and consists of a keyword
 @dfn{section} is a compound statement that encloses other statements
 and sections.  Sections begin with a keyword, optionally followed by
 arguments, and end with a word @code{End} on a line by itself.  All
-keywords are case-insensitive. 
+keywords are case-insensitive.
 
 The following keywords are available in the global scope:
 
@@ -4956,7 +4971,7 @@ End
 where @var{name} is a unique name assigned to that server.  It will be
 used as argument to the @option{-S} option to identify it.  The
 ellipsis denotes one or more of the following statements:
-  
+
 @deffn {poundctl Server} URL @var{url}
 Sets the URL of the @command{pound} management socket for that server.
 The value is either the file name of the UNIX socket file, or a remote

@@ -757,8 +757,7 @@ typedef enum
     BALANCER_ALGO_IWRR,
   } BALANCER_ALGO;
 
-#define PRI_MAX_RANDOM 9
-#define PRI_MAX_IWRR   65535
+#define PRI_MAX   65535
 
 enum
   {
@@ -1089,20 +1088,20 @@ static inline void balancer_remove_backend (BALANCER *bl, BACKEND *be)
 }
 
 BALANCER *balancer_list_alloc (BALANCER_LIST *ml);
-BALANCER *balancer_list_get (BALANCER_LIST *ml, int n);
+BALANCER *balancer_list_get (BALANCER_LIST *ml, int n, BALANCER_ALGO algo);
 
 #define BALANCER_WEIGTH_MAX  65535
 
 static inline BALANCER *
 balancer_list_get_normal (BALANCER_LIST *ml)
 {
-  return balancer_list_get (ml, 0);
+  return balancer_list_get (ml, 0, BALANCER_ALGO_RANDOM);
 }
 
 static inline BALANCER *
 balancer_list_get_emerg (BALANCER_LIST *ml)
 {
-  return balancer_list_get (ml, BALANCER_WEIGTH_MAX);
+  return balancer_list_get (ml, BALANCER_WEIGTH_MAX, BALANCER_ALGO_RANDOM);
 }
 
 /*
