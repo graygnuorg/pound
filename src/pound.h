@@ -590,6 +590,11 @@ static inline int backend_is_alive (BACKEND *be)
   return be->be_type != BE_REGULAR || be->v.reg.alive;
 }
 
+static inline int backend_is_active (BACKEND *be)
+{
+  return !be->disabled && backend_is_alive (be);
+}
+
 typedef struct session
 {
   char *key;

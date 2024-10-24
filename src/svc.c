@@ -653,9 +653,7 @@ rand_select (BALANCER *balancer)
   pri = random_in_range (balancer->rand.sum_pri);
   DLIST_FOREACH (be, &balancer->backends, link)
     {
-      if (!backend_is_alive (be) || be->disabled)
-	continue;
-      if ((pri -= be->priority) < 0)
+      if (backend_is_active (be) && (pri -= be->priority) < 0)
 	break;
     }
   return be;
@@ -691,7 +689,7 @@ iwrr_select (BALANCER *bal)
   
   do
     {
-      if (!bal->iwrr.cur->disabled && backend_is_alive (bal->iwrr.cur))
+      if (backend_is_active (bal->iwrr.cur))
 	{
 	  if (bal->iwrr.round <= bal->iwrr.cur->priority)
 	    be = bal->iwrr.cur;
@@ -715,6 +713,10 @@ iwrr_pri_init (BALANCER *bal)
 static int
 iwrr_pri_update (BALANCER *bal, BACKEND *be)
 {
+  if (be->priority == INT_MAX) {
+      logmsg (LOG_ERR, "%s: priority value too big", be->locus_str);
+      return 1;
+  }
   if (bal->iwrr.max_pri < be->priority)
     bal->iwrr.max_pri = be->priority;
   return 0;
@@ -752,7 +754,7 @@ balancer_select_backend (BALANCER *balancer)
   if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
       be = DLIST_FIRST (&balancer->backends);
-      if (!be->disabled && backend_is_alive (be))
+      if (backend_is_active (be))
 	return be;
       return NULL;
     }
@@ -1102,7 +1104,7 @@ balancer_recompute_pri_unlocked (BALANCER *bl,
     {
       if (cb)
 	cb (b, data);
-      if (backend_is_alive (b) && !b->disabled)
+      if (backend_is_active (b))
 	{
 	  if (balancer_pri_update (bl, b))
 	    b->disabled = 1;
