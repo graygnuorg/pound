@@ -622,11 +622,27 @@ random_in_range (unsigned long max)
   return r % max;
 }
 
-/*
- * Pick a random back-end from a candidate list
- */
+static void
+rand_pri_init (BALANCER *bl)
+{
+  bl->rand.sum_pri = 0;
+}
+
+static int
+rand_pri_update (BALANCER *bl, BACKEND *be)
+{
+  if (LONG_MAX - bl->rand.sum_pri < be->priority)
+    {
+      logmsg (LOG_ERR, "%s: this backend overflows the sum of priorities",
+	      be->locus_str);
+      return 1;
+    }
+  bl->rand.sum_pri += be->priority;
+  return 0;
+}
+
 static BACKEND *
-rand_backend (BALANCER *balancer)
+rand_select (BALANCER *balancer)
 {
   BACKEND *be;
   int pri;
@@ -634,7 +650,7 @@ rand_backend (BALANCER *balancer)
   if (DLIST_EMPTY (&balancer->backends))
     return NULL;
   
-  pri = random_in_range (balancer->tot_pri);
+  pri = random_in_range (balancer->rand.sum_pri);
   DLIST_FOREACH (be, &balancer->backends, link)
     {
       if (!backend_is_alive (be) || be->disabled)
@@ -645,51 +661,94 @@ rand_backend (BALANCER *balancer)
   return be;
 }
 
-static inline void
+static void
 iwrr_init (BALANCER *balancer)
 {
-  balancer->iwrr_round = 0;
-  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
+  balancer->iwrr.round = 0;
+  balancer->iwrr.cur = DLIST_FIRST (&balancer->backends);
+}
+
+static void
+iwrr_reset (BALANCER *balancer, BACKEND *be)
+{
+  if (balancer->iwrr.cur == be)
+    {
+      iwrr_init (balancer);
+    }
 }
 
 static BACKEND *
-iwrr_select (BALANCER *balancer)
+iwrr_select (BALANCER *bal)
 {
   BACKEND *be = NULL;
 
-  if (balancer->iwrr_cur == NULL)
+  if (bal->iwrr.cur == NULL)
     {
-      iwrr_init (balancer);
-      if (balancer->iwrr_cur == NULL)
+      iwrr_init (bal);
+      if (bal->iwrr.cur == NULL)
 	return NULL;
     }
   
   do
     {
-      if (!balancer->iwrr_cur->disabled &&
-	  backend_is_alive (balancer->iwrr_cur))
+      if (!bal->iwrr.cur->disabled && backend_is_alive (bal->iwrr.cur))
 	{
-	  if (balancer->iwrr_round <= balancer->iwrr_cur->priority)
-	    be = balancer->iwrr_cur;
+	  if (bal->iwrr.round <= bal->iwrr.cur->priority)
+	    be = bal->iwrr.cur;
 	}
-      if ((balancer->iwrr_cur = DLIST_NEXT (balancer->iwrr_cur, link)) == NULL)
+      if ((bal->iwrr.cur = DLIST_NEXT (bal->iwrr.cur, link)) == NULL)
 	{
-	  balancer->iwrr_cur = DLIST_FIRST (&balancer->backends);
-	  balancer->iwrr_round = (balancer->iwrr_round + 1) %
-	                            (balancer->max_pri + 1);
+	  bal->iwrr.cur = DLIST_FIRST (&bal->backends);
+	  bal->iwrr.round = (bal->iwrr.round + 1) % (bal->iwrr.max_pri + 1);
 	}
     }
   while (be == NULL);
   return be;
 }
 
-static BACKEND *
-balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
+static void
+iwrr_pri_init (BALANCER *bal)
+{
+  bal->iwrr.max_pri = 0;
+}
+
+static int
+iwrr_pri_update (BALANCER *bal, BACKEND *be)
+{
+  if (bal->iwrr.max_pri < be->priority)
+    bal->iwrr.max_pri = be->priority;
+  return 0;
+}
+
+struct balancer_def
+{
+  void (*init) (BALANCER *);
+  void (*reset) (BALANCER *, BACKEND *be);
+  BACKEND *(*select) (BALANCER *);
+  void (*pri_init) (BALANCER *);
+  int (*pri_update) (BALANCER *, BACKEND *);
+};
+
+static struct balancer_def balancer_tab[] = {
+  [BALANCER_ALGO_RANDOM] = {
+    .select = rand_select,
+    .pri_init = rand_pri_init,
+    .pri_update = rand_pri_update
+  },
+  [BALANCER_ALGO_IWRR] = {
+    .init = iwrr_init,
+    .reset = iwrr_reset,
+    .select = iwrr_select,
+    .pri_init = iwrr_pri_init,
+    .pri_update = iwrr_pri_update
+  }
+};
+
+static inline BACKEND *
+balancer_select_backend (BALANCER *balancer)
 {
   BACKEND *be;
 
-  if (balancer->max_pri == 0)
-    return NULL;
   if (DLIST_NEXT (DLIST_FIRST (&balancer->backends), link) == NULL)
     {
       be = DLIST_FIRST (&balancer->backends);
@@ -697,40 +756,45 @@ balancer_select_backend (BALANCER_ALGO algo, BALANCER *balancer)
 	return be;
       return NULL;
     }
-
-  switch (algo)
-    {
-    case BALANCER_ALGO_RANDOM:
-      be = rand_backend (balancer);
-      break;
-
-    case BALANCER_ALGO_IWRR:
-      be = iwrr_select (balancer);
-    }
-  return be;
+  return balancer_tab[balancer->algo].select (balancer);
 }
 
-void
-balancer_init (BALANCER_ALGO algo, BALANCER *balancer)
+static inline void
+balancer_init (BALANCER *balancer)
 {
-  switch (algo)
-    {
-    case BALANCER_ALGO_RANDOM:
-      break;
+  if (balancer_tab[balancer->algo].init)
+    balancer_tab[balancer->algo].init (balancer);
+}
 
-    case BALANCER_ALGO_IWRR:
-      iwrr_init (balancer);
-      break;
-    }
+static inline void
+balancer_reset (BALANCER *balancer, BACKEND *be)
+{
+  if (balancer_tab[balancer->algo].reset)
+    balancer_tab[balancer->algo].reset (balancer, be);
+}
+
+static inline void
+balancer_pri_init (BALANCER *balancer)
+{
+  if (balancer_tab[balancer->algo].pri_init)
+    balancer_tab[balancer->algo].pri_init (balancer);
+}
+
+static inline int
+balancer_pri_update (BALANCER *balancer, BACKEND *be)
+{
+  if (balancer_tab[balancer->algo].pri_update)
+    return balancer_tab[balancer->algo].pri_update (balancer, be);
+  return 0;
 }
 
 BACKEND *
 service_lb_select_backend (SERVICE *svc)
 {
   BALANCER *balancer;
-  DLIST_FOREACH (balancer, &svc->backends, link)
+  DLIST_FOREACH (balancer, &svc->balancers, link)
     {
-      BACKEND *be = balancer_select_backend (svc->balancer_algo, balancer);
+      BACKEND *be = balancer_select_backend (balancer);
       if (be)
 	return be;
     }
@@ -741,26 +805,19 @@ void
 service_lb_init (SERVICE *svc)
 {
   BALANCER *balancer;
-  DLIST_FOREACH (balancer, &svc->backends, link)
+  DLIST_FOREACH (balancer, &svc->balancers, link)
     {
-      balancer_init (svc->balancer_algo, balancer);
+      balancer_init (balancer);
     }
 }
 
 void
 service_lb_reset (SERVICE *svc, BACKEND *be)
 {
-  if (svc->balancer_algo == BALANCER_ALGO_IWRR)
+  BALANCER *balancer;
+  DLIST_FOREACH (balancer, &svc->balancers, link)
     {
-      BALANCER *balancer;
-      DLIST_FOREACH (balancer, &svc->backends, link)
-	{
-	  if (balancer->iwrr_cur == be)
-	    {
-	      balancer_init (svc->balancer_algo, balancer);
-	      break;
-	    }
-	}
+      balancer_reset (balancer, be);
     }
 }
 
@@ -908,7 +965,7 @@ static int
 service_has_backends (SERVICE *svc)
 {
   BALANCER *bl;
-  DLIST_FOREACH (bl, &svc->backends, link)
+  DLIST_FOREACH (bl, &svc->balancers, link)
     {
       if (bl->act_num > 0)
 	return 1;
@@ -1039,19 +1096,18 @@ balancer_recompute_pri_unlocked (BALANCER *bl,
 {
   BACKEND *b;
   
-  bl->tot_pri = 0;
-  bl->max_pri = 0;
   bl->act_num = 0;
+  balancer_pri_init (bl);
   DLIST_FOREACH (b, &bl->backends, link)
     {
       if (cb)
 	cb (b, data);
       if (backend_is_alive (b) && !b->disabled)
 	{
-	  bl->tot_pri += b->priority;
-	  if (bl->max_pri < b->priority)
-	    bl->max_pri = b->priority;
-	  bl->act_num++;
+	  if (balancer_pri_update (bl, b))
+	    b->disabled = 1;
+	  else
+	    bl->act_num++;
 	}
     }
 }
@@ -1062,7 +1118,7 @@ service_recompute_pri_unlocked (SERVICE *svc,
 				void *data)
 {
   BALANCER *bl;
-  DLIST_FOREACH (bl, &svc->backends, link)
+  DLIST_FOREACH (bl, &svc->balancers, link)
     {
       balancer_recompute_pri_unlocked (bl, cb, data);
     }
@@ -1088,7 +1144,7 @@ service_recompute_pri (SERVICE *svc, BALANCER *bl,
     balancer_recompute_pri_unlocked (bl, cb, data);
   else
     {
-      DLIST_FOREACH (bl, &svc->backends, link)
+      DLIST_FOREACH (bl, &svc->balancers, link)
 	{
 	  balancer_recompute_pri_unlocked (bl, cb, data);
 	}
@@ -1602,9 +1658,7 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
 	      if (!be->disabled)
 		{
 		  pthread_mutex_lock (&be->service->mut);
-		  be->balancer->tot_pri += be->priority;
-		  if (be->balancer->max_pri < be->priority)
-		    be->balancer->max_pri = be->priority;
+		  balancer_pri_update (be->balancer, be);
 		  be->balancer->act_num++;
 		  pthread_mutex_unlock (&be->service->mut);
 		}
@@ -1809,7 +1863,7 @@ session_backend_index (SESSION *sess)
   int n = 0;
   BALANCER *balancer;
 
-  DLIST_FOREACH (balancer, &sess->backend->service->backends, link)
+  DLIST_FOREACH (balancer, &sess->backend->service->balancers, link)
     {
       BACKEND *be;
       DLIST_FOREACH (be, &balancer->backends, link)
@@ -1985,7 +2039,7 @@ find_backend_index (BACKEND *be)
 {
   int i = 0;
   BALANCER *balancer;
-  DLIST_FOREACH (balancer, &be->service->backends, link)
+  DLIST_FOREACH (balancer, &be->service->balancers, link)
     {
       BACKEND *b;
       DLIST_FOREACH (b, &balancer->backends, link)
@@ -2186,7 +2240,7 @@ service_serialize (SERVICE *svc)
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
-	  || json_object_set (obj, "backends", backends_serialize (&svc->backends)))
+	  || json_object_set (obj, "backends", backends_serialize (&svc->balancers)))
 	{
 	  json_value_free (obj);
 	  obj = NULL;
@@ -2538,7 +2592,7 @@ locate_backend (SERVICE *svc, IDENT id)
     {
       long n = 0;
       BALANCER *balancer;
-      DLIST_FOREACH (balancer, &svc->backends, link)
+      DLIST_FOREACH (balancer, &svc->balancers, link)
 	{
 	  BACKEND *be;
 	  DLIST_FOREACH (be, &balancer->backends, link)
@@ -2684,7 +2738,7 @@ static int
 service_has_control (SERVICE *svc)
 {
   BALANCER *balancer;
-  DLIST_FOREACH (balancer, &svc->backends, link)
+  DLIST_FOREACH (balancer, &svc->balancers, link)
     {
       BACKEND *be;
       DLIST_FOREACH (be, &balancer->backends, link)
@@ -3045,7 +3099,7 @@ itr_service_backends (SERVICE *svc, void *data)
 {
   struct service_backends_iterator *itp = data;
   BALANCER *balancer;
-  DLIST_FOREACH (balancer, &svc->backends, link)
+  DLIST_FOREACH (balancer, &svc->balancers, link)
     {
       BACKEND *be;
       DLIST_FOREACH (be, &balancer->backends, link)

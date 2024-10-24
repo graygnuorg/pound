@@ -2549,37 +2549,37 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "Redirect",
     .parser = parse_redirect_backend,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Error",
     .parser = parse_error_backend,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Backend",
     .parser = parse_backend,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "UseBackend",
     .parser = parse_use_backend,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Emergency",
     .parser = parse_emergency,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Metrics",
     .parser = parse_metrics,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Control",
     .parser = parse_control_backend,
-    .off = offsetof (SERVICE, backends)
+    .off = offsetof (SERVICE, balancers)
   },
   {
     .name = "Session",
@@ -2636,7 +2636,7 @@ new_service (BALANCER_ALGO algo)
   XZALLOC (svc);
 
   service_cond_init (&svc->cond, COND_BOOL);
-  DLIST_INIT (&svc->backends);
+  DLIST_INIT (&svc->balancers);
 
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
@@ -2751,7 +2751,7 @@ parse_acme (void *call_data, void *section_data)
   be->v.acme.wd = fd;
 
   /* Register backend in service */
-  balancer_add_backend (balancer_list_get_normal (&svc->backends), be);
+  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
 
   /* Register service in the listener */
@@ -4282,7 +4282,7 @@ parse_control_listener (void *call_data, void *section_data)
   be->priority = 1;
   pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
-  balancer_add_backend (balancer_list_get_normal (&svc->backends), be);
+  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
 
   return CFGPARSER_OK;
@@ -4965,14 +4965,6 @@ cb_be_setup (BACKEND *be, void *data)
 				 clos->pri_max);
       be->priority = clos->pri_max;
     }
-
-  if (TOT_PRI_MAX - clos->bal->tot_pri < be->priority)
-    {
-      conf_error_at_locus_range (&be->locus,
-				 "this backend overflows the"
-				 " sum of priorities");
-      clos->err = 1;
-    }
 }
 
 static int
@@ -4982,9 +4974,10 @@ service_finalize (SERVICE *svc, void *data)
   unsigned be_count = 0;
   NAMED_BACKEND_TABLE *tab = data;
 
-  DLIST_FOREACH (bal, &svc->backends, link)
+  DLIST_FOREACH (bal, &svc->balancers, link)
     {
       struct be_setup_closure be_setup;
+      bal->algo = svc->balancer_algo;
       be_setup_closure_init (&be_setup, tab, svc, bal);
       balancer_recompute_pri_unlocked (bal, cb_be_setup, &be_setup);
       if (be_setup.err)

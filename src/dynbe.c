@@ -315,7 +315,7 @@ backend_sweep (BACKEND *be, void *data)
 	    balancer_remove_backend (balancer, be);
 	    if (DLIST_EMPTY (&balancer->backends))
 	      {
-		DLIST_REMOVE (&svc->backends, balancer, link);
+		DLIST_REMOVE (&svc->balancers, balancer, link);
 		free (balancer);
 	      }
 	  }
@@ -368,7 +368,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
   pthread_mutex_lock (&svc->mut);
   pthread_mutex_lock (&mtx->mut);
 
-  balancer = balancer_list_get (&svc->backends, mtx->v.mtx.weight);
+  balancer = balancer_list_get (&svc->balancers, mtx->v.mtx.weight);
   if (!mtx->disabled)
     {
       /* Mark all generated backends. */
@@ -458,7 +458,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
 }
 
 static int
-compute_priority (SERVICE *svc, struct dns_srv *srv, int total_weight)
+compute_priority (SERVICE *svc, struct dns_srv *srv, unsigned long total_weight)
 {
   int result;
 
@@ -494,6 +494,8 @@ struct srv_stat
   int count;
   unsigned long total_weight;
 };
+
+#define TOT_PRI_MAX ULONG_MAX
 
 static int
 analyze_srv_response (struct dns_response *resp, struct srv_stat **pstat)

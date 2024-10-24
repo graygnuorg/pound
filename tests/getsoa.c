@@ -32,7 +32,7 @@
  *
  *   You should have received a copy of the GNU General Public License
  *   along with pound.  If not, see <http://www.gnu.org/licenses/>.
- */ 
+ */
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -69,9 +69,9 @@ main (int argc, char **argv)
   int rc, i;
   char *config_text = NULL;
   adns_answer *ans = NULL;
-  
+
   progname = argv[0];
-  
+
   while ((rc = getopt (argc, argv, "dh")) != EOF)
     {
       switch (rc)
@@ -91,7 +91,7 @@ main (int argc, char **argv)
 
   argc -= optind;
   argv += optind;
-  
+
   switch (argc)
     {
     case 2:
@@ -107,7 +107,7 @@ main (int argc, char **argv)
   config_text = malloc (sizeof (NSSTR) + 1 + strlen (nameserver));
   assert (config_text != NULL);
   strcat (strcpy (config_text, NSSTR), nameserver);
-  
+
   rc = adns_init_strcfg (&state, flags, stderr, config_text);
   if (rc)
     {

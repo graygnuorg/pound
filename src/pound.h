@@ -494,7 +494,7 @@ struct be_matrix
   unsigned ws_to;	/* websocket time-out */
   SSL_CTX *ctx;		/* CTX for SSL connections */
   char *servername;     /* SNI */
-  
+
   BACKEND_TABLE betab;  /* Table of regular backends generated from this
 			   matrix. */
   JOB_ID jid;           /* ID of the periodic job scheduled to update this
@@ -553,7 +553,7 @@ typedef struct _backend
   int mark;                     /* If set, this backend is a candidate for
 				   deletion. */
 
-  
+
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
   unsigned long refcount;       /* reference counter */
@@ -761,19 +761,30 @@ enum
     REWRITE_RESPONSE
   };
 
-#define TOT_PRI_MAX ULONG_MAX
+struct iwrr_balancer
+{
+  int round;
+  int max_pri;                  /* maximum priority */
+  BACKEND *cur;
+};
+
+struct rand_balancer
+{
+  unsigned long sum_pri;	/* sum of priorities of active backends */
+};
 
 typedef struct balancer
 {
+  BALANCER_ALGO algo;
   int weight;                   /* relative weight among other balancers */
-  unsigned long tot_pri;	/* sum of priorities of active backends */
-  int max_pri;                  /* maximum priority */
   unsigned act_num;             /* number of active backends */
-  /* For IWRR balancer */
-  int iwrr_round;
-  BACKEND *iwrr_cur;
   BACKEND_HEAD backends;
   DLIST_ENTRY (balancer) link;
+  union
+  {
+    struct iwrr_balancer iwrr;
+    struct rand_balancer rand;
+  };
 } BALANCER;
 
 typedef DLIST_HEAD (,balancer) BALANCER_LIST;
@@ -785,7 +796,7 @@ typedef struct _service
   char *locus_str;              /* Location in the config file, as string. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
-  BALANCER_LIST backends;
+  BALANCER_LIST balancers;
   BALANCER_ALGO balancer_algo;
   pthread_mutex_t mut;		/* mutex for this service */
   SESS_TYPE sess_type;
@@ -1238,4 +1249,3 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
-
