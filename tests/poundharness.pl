@@ -861,8 +861,8 @@ sub parse_control_backends {
 	$self->{failures}++;
 	if (my $fh = $self->{xscript}) {
 	    print $fh "backend listings don't match\n";
-	    print $fh "exp: " . $json->pretty->encode($exp) . "\n";
-	    print $fh "got: " . $json->pretty->encode($belist) . "\n";
+	    print $fh "exp: " . $json->canonical->pretty->encode($exp) . "\n";
+	    print $fh "got: " . $json->canonical->pretty->encode($belist) . "\n";
 	}
     }
 }
