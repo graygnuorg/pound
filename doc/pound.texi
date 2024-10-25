@@ -1679,6 +1679,8 @@ in the next section.
 
 @node Dynamic backends
 @section Dynamic backends
+@cindex dynamic backends
+@cindex backends, dynamic
   Normally, when a backend is declared in configuration file, the
 value supplied with its @code{Address} statement is resolved at once
 and the resulting IP is associated with the backend.  Such backends
@@ -1696,6 +1698,8 @@ dynamic backends is enabled at compile time and requires the
 whether your @command{pound} binary includes it, inspect the
 @command{pound -V} output.}
 
+@cindex @code{A} record, DNS
+@cindex @code{AAAA} record, DNS
   In the simplest case, a dynamic backend can be created using
 @code{A} or @code{AAAA} DNS records.  If several records correspond to
 the hostname defined in the @code{Address} statement, @command{pound}
@@ -1704,6 +1708,9 @@ them in round-robin fashion and use it to create a backend.  Rest of
 backend parameters (port value, priority, etc.) will be taken from its
 matrix declaration.
 
+@cindex @code{SRV} record, DNS
+@cindex weight, @code{SRV} record
+@cindex priority, @code{SRV} record
   A more advanced way to create dynamic backends is using @code{SRV}
 records.  Each @code{SRV} record has four associated parameters: priority,
 weight, target and port.  The @dfn{priority} value defines the @command{pound}
@@ -1758,20 +1765,23 @@ Emergency
 End
 @end example
 
-  @emph{Notice}, that it is possible to have a weight of 0 in a SRV
-record.  This will translate to @command{pound} backend priority 0,
-which is normally not allowed (@pxref{Balancer}).  According to RFC
-2782, this is the preferred way of defining weights where ``there
-isn't any server selection to do'', whereas ``[i]n the presence of
-records containing weights greater than 0, records with weight 0
-should have a very small chance of being selected''.  @command{Pound}
-handles this as follows: if all @code{SRV} records have the weight
-of 0, the resulting backends are assigned weight 1.  This makes sure
-the backend selection algorithm work and give each backend equal
-chance of being selected.  This translation does not take place,
-however, if at least one of @code{SRV} records has a weight greater
-than 0.
+@cindex @code{SRV} record, 0 weight
+  @emph{Notice}, that an SRV record can have a weight of 0.  This will
+translate to @command{pound} backend priority 0, which is normally not
+allowed (@pxref{Balancer}).  According to RFC 2782, this is the
+preferred way of defining weights where ``there isn't any server
+selection to do'', whereas ``[i]n the presence of records containing
+weights greater than 0, records with weight 0 should have a very small
+chance of being selected''.  @command{Pound} handles this as follows:
+if all @code{SRV} records have zero weight, priority of the resulting
+backends is set to 1.  This makes sure the backend selection algorithm
+works and gives each backend equal chance of being selected. This
+translation does not take place, however, if at least one of
+@code{SRV} records has a weight greater than 0.  Another way to handle
+such records is using the @code{IgnoreSRVWeight} configuration
+statement, which is discussed below.
 
+@kwindex Resolve
   To declare backend as dynamic, use a symbolic host name in its
 @code{Address} statement and add the @code{Resolve} statement with one
 of the following values:
@@ -1797,18 +1807,22 @@ field of each generated backend.  The priority field determines the
 balancer group where the backend will be hosted.
 @end deffn
 
+@kwindex Family
 When resolving hostnames, both IPv4 and IPv6 addresses are looked for.
 You can select the specific address family using the @code{Family}
 statement.  Its allowed values are:
 
 @table @code
 @item any
+@kwindex any, @code{Family} statement
 Use all address families available.  This is the default.
 
 @item inet
+@kwindex inet, @code{Family} statement
 Use only IPv4 addresses (@code{A} DNS records).
 
 @item inet6
+@kwindex inet6, @code{Family} statement
 Use only IPv6 addresses (@code{AAAA} DNS records).
 @end table
 
@@ -1824,9 +1838,50 @@ End
 @end group
 @end example
 
-Notice, that you need not supply @code{Port} or @code{Priority} values
-for the dynamic backends of @code{srv} resolve type.
+@kwindex IgnoreSRVWeight
+@cindex @code{SRV} records, overriding weight
+@cindex weight override, @code{SRV} records
+Notice, that you need not supply @code{Port} statement for dynamic
+backends of @code{srv} resolve type.  Normally, you don't need to
+supply @code{Priority}, either.  However, you may do so, if you wish
+to override the weight settings from @code{SRV} records.  In that
+case, inform @code{pound} about your decision using the following
+statement in @code{Backend} section:
 
+@example
+IgnoreSRVWeight true
+@end example
+
+There are several possible scenarios when this may be needed.  One of
+them is when all @code{SRV} records have weight of 0 (see above) and your
+configuration defines one or more regular backends in the same
+balancer group as backends generated by those records.  In that case,
+the default priority assigned by @command{pound} to those generated
+backends (1) may prove to be too low for adequate balancing.  Using
+@code{IgnoreSRVWeight} allows you to fix that.  For example:
+
+@example
+Service
+        Backend
+                Address 192.0.2.15
+                Port 80
+                Priority 8
+        End
+        Backend
+                Address "_proxy._tcp.example.org"
+                Resolve srv
+                Family any
+                IgnoreSRVWeight true
+                Priority 5
+        End
+End
+@end example
+
+In this example, backends generated by @code{SRV} records for
+domain @samp{_proxy._tcp.example.org} will be assigned priority 5,
+no matter what the actual value of @code{SRV} weight field.
+
+@kwindex RetryInterval
 Dynamic backends will be updated periodically, when the TTL of the
 corresponding DNS records expires.  If the hostname cannot be resolved
 or a DNS failure occurs, next update will be scheduled in 600
@@ -4331,6 +4386,15 @@ Use only IPv6 addresses.
 @end table
 @end deffn
 
+@deffn {Backend directive} IgnoreSRVWeight @var{bool}
+When using @code{SRV} records, ignore their @i{weight} fields.
+Instead, copy priority of the producing backend to generated
+backends.
+
+This directive is valid when used together with @code{Resolve srv}
+(see below).
+@end deffn
+
 @deffn {Backend directive} Resolve @var{type}
 Declares a dynamic backend.  Valid values
 for @var{type} are
@@ -4650,6 +4714,7 @@ instead (@pxref{conditional-option}).
 
 @node resolver
 @section Resolver
+@kwindex Resolver
   The @code{Resolver} section controls DNS lookups for dynamic backend
 generation (@pxref{Dynamic backends}).  It can contain the following
 directives:

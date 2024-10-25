@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 24, 2024" "pound" "System Manager's Manual"
+.TH POUND 8 "October 25, 2024" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1993,6 +1993,14 @@ backend.  The SRV priority field identifies the balancer group where
 the backend will be hosted.
 .PP
 The following directives further configure dynamic backends:
+.TP
+\fBIgnoreSRVWeight \fIbool\fR
+When using \fBSRV\fR records, ignore their \fIweight\fR fields and
+assign priorities for the generated backends from the priority of
+the producing backend.
+
+This directive is valid when used together with
+.BR "Resolve srv" .
 .TP
 \fBFamily any \fR|\fB inet \fR|\fB inet6
 Selects the family of the addresses to look for:

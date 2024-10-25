@@ -75,6 +75,7 @@ TESTSUITE_AT = \
  disable.at\
  dyn_a.at\
  dyn_srv.at\
+ dyn_srv_0.at\
  echo.at\
  err503.at\
  errfile.at\

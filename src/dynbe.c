@@ -560,7 +560,10 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		  struct dns_srv *srv = &resp->srv[stat[i].start + j];
 		  BACKEND *be = backend_table_hostname_lookup (mtx->v.mtx.betab,
 							       srv->host);
-		  int prio = stat[i].max_weight == 0 ? 1 : srv->weight;
+		  int prio = mtx->v.mtx.ignore_srv_weight
+		               ? mtx->priority
+		               : (stat[i].max_weight == 0
+				  ? 1 : srv->weight);
 
 		  if (be)
 		    {

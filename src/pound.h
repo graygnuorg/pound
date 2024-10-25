@@ -488,6 +488,7 @@ struct be_matrix
   int family;           /* Address family for resolving hostname. */
   int resolve_mode;     /* Mode for resolving hostname. */
   unsigned retry_interval; /* Retry interval for failed queries. */
+  int ignore_srv_weight;   /* Ignore weight field in SRV RR. */
 
   unsigned to;		/* read/write time-out */
   unsigned conn_to;	/* connection time-out */

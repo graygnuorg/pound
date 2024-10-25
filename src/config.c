@@ -877,6 +877,11 @@ static CFGPARSER_TABLE backend_parsetab[] = {
     .off = offsetof (BACKEND, v.mtx.resolve_mode)
   },
   {
+    .name = "IgnoreSRVWeight",
+    .parser = cfg_assign_bool,
+    .off = offsetof (BACKEND, v.mtx.ignore_srv_weight)
+  },
+  {
     .name = "RetryInterval",
     .parser = cfg_assign_timeout,
     .off = offsetof (BACKEND, v.mtx.retry_interval)
