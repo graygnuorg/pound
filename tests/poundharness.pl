@@ -683,8 +683,15 @@ sub assert {
 
 sub parse {
     my $self = shift;
-    while (!$self->{eof}) {
-	$self->parse_req;
+    eval {
+	while (!$self->{eof}) {
+	    $self->parse_req;
+	}
+    };
+    if ($@) {
+	print STDERR "$@";
+	print STDERR "Abnormal termination\n";
+	$self->{failures}++;
     }
 }
 
@@ -718,6 +725,11 @@ sub parse_req {
 	    sleep $1;
 	    next;
 	}
+	if (/^echo\s+(.+)/) {
+	    print STDERR "# ".$self->expandvars($1)."\n";
+	    next;
+	}
+
 	if (/^zonefile/) {
 	    $self->parse_zonefile;
 	    next;
@@ -852,6 +864,7 @@ sub parse_control_backends {
 	last if /^end$/;
 	push @exp, $self->expandvars($_)
     }
+
     my $ctl = PoundControl->new();
     my $belist = $ctl->backends($ls, $sv, sort => 1);
     my $json = JSON->new->boolean_values(0,1);
@@ -1117,12 +1130,16 @@ sub parse_expect {
 sub replvar {
     my ($self, $var) = @_;
     if ($var =~ m{(LISTENER|BACKEND)(\d+)?(?::(PORT|IP))?}) {
-	my $var = ($1 eq 'LISTENER') ? $listeners : $backends;
+	my $list = ($1 eq 'LISTENER') ? $listeners : $backends;
 	my $meth = 'address';
 	if (defined($3)) {
 	    $meth = ($3 eq 'PORT') ? 'port' : 'host';
 	}
-	return $var->get($2//0)->${ \$meth };
+	if (my $obj = $list->get($2//0)) {
+	    return $obj->${ \$meth };
+	} else {
+	    $self->syntax_error("unrecognized variable $var");
+	}
     }
     return '${' . $var . '}';
 }
@@ -2067,6 +2084,11 @@ Use it for testing dynamic backends.
 =item B<sleep> I<N>
 
 Pause execution for I<N> seconds.
+
+=item B<echo> I<WORD> [I<WORD>...]
+
+Expand variables (see B<HTTP send/expect> above) in I<WORD>s and output
+the result on standard error, prefixed with the B<#> sign.
 
 =head2 DNS Statements
 
