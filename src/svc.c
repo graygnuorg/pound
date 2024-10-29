@@ -2142,8 +2142,8 @@ backend_serialize (BACKEND *be)
 		      || json_object_set (obj, "family",
 					  json_new_integer (be->v.mtx.family))
 		      || json_object_set (obj, "servername",
-					  be->v.reg.servername
-					  ? json_new_string (be->v.reg.servername)
+					  be->v.mtx.servername
+					  ? json_new_string (be->v.mtx.servername)
 					  : json_new_null ())
 		      || backend_serialize_dyninfo (obj, be);
 		    break;
