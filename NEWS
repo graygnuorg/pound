@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-10-13
+Pound -- history of user-visible changes. 2024-10-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,35 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.14.90 (git)
+
+* New configuration statement: IgnoreSRVWeight
+
+Instructs pound to ignore weight value of an SRV record when
+generating new backend from it.  Priority of the generated backend is
+copied from its matrix backend.
+
+* Load balancing code revisited
+
+Removed arbitrary limit on backend priority value.  The allowed range
+is now 1..65535.
+
+Remove priority mappting for SRV-generated backends.  SRV weights are
+assigned to backend priorities verbatim.
+
+* Fix access to freed memory in session handling code.
+
+* Improve testsuite
+
+Check for missing perl modules and skip tests if needed.
+
+DNS-based tests are disabled by default, due to their experimental
+nature.  Use --enable-dns-tests to enable them.
+
+The poundharness.pl script runs a self-test when invoked with the
+--fakedns option, to avoid spurious test failures.
+
 
 Version 4.14, 2024-10-13
 
@@ -17,24 +46,24 @@ symbolic host name in its "Address" statement and add the "Resolve"
 statement with one of the following values:
 
   first     Resolve the symbolic host name and use first IP from
-            the DNS response as the address of the created dynamic
+	    the DNS response as the address of the created dynamic
 	    backend.  Thus, at most one dynamic backend will be
-            created.
+	    created.
 
   all       Resolve the symbolic host name and create one backend for
-            each address from the DNS response.  This enables load
-            balancing between created backends.  Each backend will be
+	    each address from the DNS response.  This enables load
+	    balancing between created backends.  Each backend will be
 	    assigned the same priority.
 
   srv       Obtain SRV records for the host name and use them to
-            generate regular backends.  Each record produces new
+	    generate regular backends.  Each record produces new
 	    dynamic backend of "Resolve all" type, which creates
 	    regular backends as described above.  The weight field
 	    of the SRV record is mapped to the priority field of each
 	    generated backend.  The SRV priority field determines
 	    the balancing group (see below) where the backend will
 	    be hosted.
-  
+
 By default, both IPv4 and IPv6 addresses are looked for.  You can
 select the specific address family using the "Family" statement.  Its
 allowed values are:
@@ -65,34 +94,34 @@ The "Resolver" section allows you to control how DNS lookups are
 performed.  It can contain the following directives:
 
   CNAMEChain          (integer) Maximum allowed length of a "CNAME
-                      chain".  CNAME chains are formed by DNS CNAME
-                      records pointing to another CNAME.  Although
+		      chain".  CNAME chains are formed by DNS CNAME
+		      records pointing to another CNAME.  Although
 		      prohibited by the RFC, such usage occurs
-                      sometimes in the wild.  By default, pound does
+		      sometimes in the wild.  By default, pound does
 		      not accept CNAME chains.  If you work with a
 		      nameserver that uses them, set this statement
 		      to a small integer value, defining maximum
-                      number of CNAMEs in the chain that pound will
+		      number of CNAMEs in the chain that pound will
 		      accept.  The value of 2 or 3 should suffice in
 		      most cases.
 
   ConfigFile          (string) Name of the resolver configuration file.
-                      Default is "/etc/resolv.conf".
+		      Default is "/etc/resolv.conf".
 
   ConfigText
     ...
   End                 The material within this section is read
-                      verbatim and used as the content of the resolver
+		      verbatim and used as the content of the resolver
 		      configuration file.
 
-                      If both ConfigFile and ConfigText are used, the
+		      If both ConfigFile and ConfigText are used, the
 		      last statement used wins.
 
   Debug               (boolean) Whether to enable DNS debugging info.
 
   RetryInterval       (integer) Interval in seconds, after which to
-                      retry failed DNS queries or queries that
-                      returned no RRs.  This value is used unless the
+		      retry failed DNS queries or queries that
+		      returned no RRs.  This value is used unless the
 		      backend defines its own retry interval value.
 
 Dynamic backends can be controlled using poundctl.  For example,
@@ -100,11 +129,11 @@ consider the following output from "poundctl list":
 
   1. Listener http://192.0.2.1:80 enabled
       0. Service active (5)
-          0. matrix "be0.example.com" 2 0 active
-          1. backend http 198.51.100.15:8081 5 alive active
+	  0. matrix "be0.example.com" 2 0 active
+	  1. backend http 198.51.100.15:8081 5 alive active
 	  2. backend http 203.0.113.121:8081 5 alive active
-          3. backend http 192.0.2.203:8081 5 alive active
-	       
+	  3. backend http 192.0.2.203:8081 5 alive active
+
 The backend 0 ("matrix") refers to the "Backend" statement in the
 configuration file that produced the other three dynamic backends.
 Disabling it (poundctl disable /1/0/0) causes the dynamic ones to
@@ -125,7 +154,7 @@ the output from configure will end with the following status line:
   *******************************************************************
 
 When compiled with the dynamic backend support, output of "pound -V"
-will contain the following line in the "Built-in defaults" section: 
+will contain the following line in the "Built-in defaults" section:
 
   Dynamic backends:           enabled
 
@@ -188,7 +217,7 @@ http://192.0.2.1:3434:
       Address 192.0.2.1
       Port 3434
       Service
-          ACL "secure"
+	  ACL "secure"
 	  Control
       End
   End
@@ -203,13 +232,13 @@ interface.  First of all, the -s option accepts URL as its argument:
 Additionally, the following new options are implemented:
 
   -C FILE      Load CA certificates from FILE.  If FILE is a
-               directory, all PEM files will be loaded from it.
+	       directory, all PEM files will be loaded from it.
   -K FILE      Load client certificate and key from FILE.  During TLS
-               handshake, send them to the peer for authentication.
-  -k           Insecure mode: disable peer verification.	       
+	       handshake, send them to the peer for authentication.
+  -k           Insecure mode: disable peer verification.
   -S NAME      Take settings for server NAME from the poundctl
-               configuration file (see below).
-	       
+	       configuration file (see below).
+
 ** .poundctl
 
 The file ".poundctl" in user home directory provides configuration
