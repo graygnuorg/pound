@@ -114,7 +114,7 @@ sub sigchild {
     if ($pid == -1) {
 	return
     }
-    if ($pid != $pound_pid) {
+    if (!defined($pound_pid) || $pid != $pound_pid) {
 	$status_codes{$pid} = $?;
 	$SIG{CHLD} = \&sigchild;
 	return;
@@ -511,6 +511,30 @@ sub failures { shift->{failures} }
 
 sub http { shift->{http} }
 
+sub transcript {
+    my ($self, $text, %opt) = @_;
+    if (my $fh = $self->{xscript}) {
+	if (my $locus = delete $opt{locus}) {
+	    print $fh "$self->{filename}:$locus->{BEG}-$locus->{END}";
+	} else {
+	    print $fh "$self->{filename}:$self->{line}";
+	}
+	print $fh ": ";
+	print $fh $text;
+	print $fh "\n";
+    }
+}
+
+sub transcript_ml {
+    my $self = shift;
+    if (my $fh = $self->{xscript}) {
+	print $fh join("\n", @_)."\n";
+    }
+}
+
+sub transcript_ok { shift->transcript("OK", @_) }
+sub transcript_fail { shift->transcript("FAIL", @_) }
+
 sub send_and_expect {
     my ($self, $lst, $host, $stats) = @_;
     my $url = $lst->proto . '://' .
@@ -537,14 +561,12 @@ sub send_and_expect {
     if ($verbose) {
 	print "URL $self->{REQ}{METHOD} $url\n";
     }
-    if (my $fh = $self->{xscript}) {
-	print $fh "$self->{filename}:$self->{REQ}{BEG}-$self->{REQ}{END}: sending $self->{REQ}{METHOD} $url to server $self->{server}\n";
-    }
+
+    $self->transcript("sending $self->{REQ}{METHOD} $url to server $self->{server}",
+		      locus => $self->{REQ});
+
     my $response = $self->http->request($self->{REQ}{METHOD}, $url, \%options);
-    if (my $fh = $self->{xscript}) {
-	print $fh "$self->{filename}:$self->{REQ}{BEG}-$self->{REQ}{END}: got:\n";
-	print $fh Dumper([$response]);
-    }
+    $self->transcript("got:\n".Dumper([$response]), locus => $self->{REQ});
 
     $self->{tests}++;
     my $ok = $self->assert($response);
@@ -555,10 +577,7 @@ sub send_and_expect {
     } else {
 	$self->{failures}++;
     }
-    if (my $fh = $self->{xscript}) {
-	print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: " .
-		   ($ok ? "OK" : "FAIL")."\n";
-    }
+    $self->transcript($ok ? "OK" : "FAIL", locus => $self->{EXP});
     return $ok
 }
 
@@ -593,9 +612,8 @@ sub send {
 	    if (exists($self->{stats}{$k})) {
 		unless ($self->check_expect($s->${ \$k }, $self->{stats}{$k})) {
 		    $ok = 0;
-		    if (my $fh = $self->{xscript}) {
-			print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: $k: expected value mismatch\n";
-		    }
+		    $self->transcript("$k: expected value mismatch",
+				      locus => $self->{EXP});
 		}
 	    }
 	}
@@ -607,21 +625,20 @@ sub send {
 		unless ($self->check_expect($s->sample($i),
 					    $self->{stats}{expect}{$i})) {
 		    $ok = 0;
-		    if (my $fh = $self->{xscript}) {
-			print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: element $i: expected value mismatch\n";
-		    }
+		    $self->transcript("element $i: expected value mismatch",
+				      locus => $self->{EXP});
 		}
 	    }
 	}
 
 	$self->{failures}++ unless $ok;
 
-	if (my $fh = $self->{xscript}) {
-	    printf $fh "min=%f, avg=%f, max=%f, stddev=%f\n", $s->min, $s->avg, $s->max, $s->stddev;
+	if ($self->{xscript}) {
+	    $self->transcript(sprintf("min=%f, avg=%f, max=%f, stddev=%f",
+				      $s->min, $s->avg, $s->max, $s->stddev));
 	    local $Data::Dumper::Sortkeys=1;
-	    print $fh Dumper([$s->samples]);
-	    print $fh "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: " .
-		($ok ? "OK" : "FAIL")."\n";
+	    $self->transcript(Dumper([$s->samples]));
+	    $self->transcript($ok ? "OK" : "FAIL", locus => $self->{EXP});
 	}
     } else {
 	$self->send_and_expect($lst, $host);
@@ -855,6 +872,13 @@ sub jsoncmp {
 
 sub parse_control_backends {
     my ($self, $ls, $sv) = @_;
+
+    if ($verbose) {
+	print "querying control interface\n";
+    }
+
+    $self->transcript("querying control interface");
+
     my $fh = $self->{fh};
     $self->{tests}++;
     my @exp;
@@ -870,13 +894,14 @@ sub parse_control_backends {
     my $json = JSON->new->boolean_values(0,1);
     my $exp = $json->decode(join(' ', @exp));
 
-    unless (jsoncmp($exp, $belist)) {
+    if (jsoncmp($exp, $belist)) {
+	$self->transcript_ok;
+    } else {
 	$self->{failures}++;
-	if (my $fh = $self->{xscript}) {
-	    print $fh "backend listings don't match\n";
-	    print $fh "exp: " . $json->canonical->pretty->encode($exp) . "\n";
-	    print $fh "got: " . $json->canonical->pretty->encode($belist) . "\n";
-	}
+	$self->transcript_ml("backend listings don't match",
+			     "exp: " . $json->canonical->pretty->encode($exp),
+			     "got: " . $json->canonical->pretty->encode($belist));
+	$self->transcript_fail;
     }
 }
 
@@ -1049,35 +1074,33 @@ sub runcom {
 	$code = $status_codes{$pid} >> 8;
     }
 
-    if (my $fh = $self->{xscript}) {
-	print $fh "Command: " . $self->{RUNCOM}{command} . "\n";
-	print $fh "Status code: $code\n";
-	print $fh "Stdout:\n";
-	print $fh $data{$child_stdout};
-	print $fh "\nEnd\n";
-	print $fh "Stderr:\n";
-	print $fh $data{$child_stderr};
-	print $fh "\nEnd\n";
-    }
+    $self->transcript_ml(
+	"Command: " . $self->{RUNCOM}{command},
+	"Status code: $code",
+	"Stdout:",
+	$data{$child_stdout},
+	"End",
+	"Stderr:",
+	$data{$child_stderr},
+	"End"
+    );
 
     $self->{tests}++;
+    my $ok = 1;
+
     if (exists($self->{RUNCOM}{status}) && $code != $self->{RUNCOM}{status}) {
 	$self->{failures}++;
-	if (my $fh = $self->{xscript}) {
-	    print $fh "$self->{filename}:$self->{RUNCOM}{BEG}-$self->{RUNCOM}{END}: exit code differs\n";
-	    return 0;
-	}
+	$self->transcript("exit code differs", locus => $self->{RUNCOM});
+	$ok = 0;
     }
 
     if (exists($self->{RUNCOM}{stdout})) {
 	my $s = join("\n", @{$self->{RUNCOM}{stdout}});
 	if ($data{$child_stdout} !~ m{$s}ms) {
 	    $self->{failures}++;
-	    if (my $fh = $self->{xscript}) {
-		print $fh "$self->{filename}:$self->{RUNCOM}{BEG}-$self->{RUNCOM}{END}: stdout differs\n";
-		print $fh "rx: $s\n";
-		return 0;
-	    }
+	    $self->transcript("stdout differs:\nrx: {$s}",
+			      locus => $self->{RUNCOM});
+	    $ok = 0;
 	}
     }
 
@@ -1085,15 +1108,14 @@ sub runcom {
 	my $s = join("\n", @{$self->{RUNCOM}{stderr}});
 	if ($data{$child_stderr} !~ m{$s}ms) {
 	    $self->{failures}++;
-	    if (my $fh = $self->{xscript}) {
-		print $fh "$self->{filename}:$self->{RUNCOM}{BEG}-$self->{RUNCOM}{END}: stderr differs\n";
-		print $fh "rx: $s\n";
-		return 0;
-	    }
+	    $self->transcript("stderr differs:\nrx: {$s}",
+			      locus => $self->{RUNCOM});
+	    $ok = 0;
 	}
     }
 
-    return 1
+    $self->transcript($ok ? "OK" : "FAIL");
+    return $ok
 }
 
 sub parse_expect {
