@@ -67,6 +67,31 @@ openssl_error_at_locus_range (struct locus_range const *loc,
 #define conf_openssl_error(file, msg)				\
   openssl_error_at_locus_range (last_token_locus_range (), file, msg)
 
+BACKEND *
+backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
+{
+  BACKEND *be = calloc (1, sizeof (*be));
+  if (be)
+    {
+      be->be_type = type;
+      be->priority = prio;
+      pthread_mutex_init (&be->mut, &mutex_attr_recursive);
+      if (loc)
+	be->locus = *loc;
+      be->refcount = 1;
+    }
+  return be;
+}
+
+static BACKEND *
+xbackend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
+{
+  BACKEND *be = backend_create (type, prio, loc);
+  if (!be)
+    xnomem ();
+  return be;
+}
+
 /*
  * Named backends
  */
@@ -882,6 +907,11 @@ static CFGPARSER_TABLE backend_parsetab[] = {
     .off = offsetof (BACKEND, v.mtx.ignore_srv_weight)
   },
   {
+    .name = "OverrideTTL",
+    .parser = cfg_assign_timeout,
+    .off = offsetof (BACKEND, v.mtx.override_ttl)
+  },
+  {
     .name = "RetryInterval",
     .parser = cfg_assign_timeout,
     .off = offsetof (BACKEND, v.mtx.retry_interval)
@@ -982,13 +1012,10 @@ parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl,
   BACKEND *be;
   struct locus_range range;
 
-  XZALLOC (be);
-  be->be_type = BE_MATRIX;
+  be = xbackend_create (BE_MATRIX, 5, NULL);
   be->v.mtx.to = dfl->be_to;
   be->v.mtx.conn_to = dfl->be_connto;
   be->v.mtx.ws_to = dfl->ws_to;
-  be->priority = 5;
-  pthread_mutex_init (&be->mut, NULL);
 
   if (parser_loop (table, be, dfl, &range))
     return NULL;
@@ -1017,12 +1044,9 @@ parse_backend (void *call_data, void *section_data)
 
       range.beg = beg;
 
-      XZALLOC (be);
-      be->be_type = BE_BACKEND_REF;
+      be = xbackend_create (BE_BACKEND_REF, -1, NULL);
       be->v.be_name = xstrdup (tok->str);
-      be->priority = -1;
       be->disabled = -1;
-      pthread_mutex_init (&be->mut, NULL);
 
       if (parser_loop (use_backend_parsetab, be, section_data, &range))
 	return CFGPARSER_FAIL;
@@ -1051,13 +1075,9 @@ parse_use_backend (void *call_data, void *section_data)
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
-  XZALLOC (be);
-  be->be_type = BE_BACKEND_REF;
+  be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
   be->v.be_name = xstrdup (tok->str);
-  be->locus = tok->locus;
   be->locus_str = format_locus_str (&tok->locus);
-  be->priority = 5;
-  pthread_mutex_init (&be->mut, NULL);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1088,12 +1108,7 @@ static int
 parse_control_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
-  BACKEND *be;
-
-  XZALLOC (be);
-  be->be_type = BE_CONTROL;
-  be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
+  BACKEND *be = xbackend_create (BE_CONTROL, 1, last_token_locus_range ());
   balancer_add_backend (balancer_list_get_normal (bml), be);
   return CFGPARSER_OK;
 }
@@ -1102,12 +1117,7 @@ static int
 parse_metrics (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
-  BACKEND *be;
-
-  XZALLOC (be);
-  be->be_type = BE_METRICS;
-  be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
+  BACKEND *be = xbackend_create (BE_METRICS, 1, last_token_locus_range ());
   balancer_add_backend (balancer_list_get_normal (bml), be);
   return CFGPARSER_OK;
 }
@@ -1660,12 +1670,8 @@ parse_redirect_backend (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  XZALLOC (be);
+  be = xbackend_create (BE_REDIRECT, 1, &range);
   be->locus_str = format_locus_str (&range);
-  be->be_type = BE_REDIRECT;
-  be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
-
   be->v.redirect.status = code;
   be->v.redirect.url = xstrdup (tok->str);
 
@@ -1726,13 +1732,8 @@ parse_error_backend (void *call_data, void *section_data)
 
   range.end = last_token_locus_range ()->end;
 
-  XZALLOC (be);
-  be->locus = range;
+  be = xbackend_create (BE_ERROR, 1, &range);
   be->locus_str = format_locus_str (&range);
-  be->be_type = BE_ERROR;
-  be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
-
   be->v.error.status = status;
   be->v.error.text = text;
 
@@ -2747,12 +2748,9 @@ parse_acme (void *call_data, void *section_data)
   svc->locus_str = format_locus_str (&range);
 
   /* Create ACME backend */
-  XZALLOC (be);
-  be->be_type = BE_ACME;
+  be = xbackend_create (BE_ACME, 1, &range);
   be->service = svc;
   be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
-
   be->v.acme.wd = fd;
 
   /* Register backend in service */
@@ -4279,13 +4277,9 @@ parse_control_listener (void *call_data, void *section_data)
   SLIST_PUSH (&lst->services, svc, next);
 
   /* Create backend */
-  XZALLOC (be);
-  be->locus = range;
+  be = xbackend_create (BE_CONTROL, 1, &range);
   be->locus_str = format_locus_str (&range);
   be->service = svc;
-  be->be_type = BE_CONTROL;
-  be->priority = 1;
-  pthread_mutex_init (&be->mut, NULL);
   /* Register backend in service */
   balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);

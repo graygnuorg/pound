@@ -328,8 +328,7 @@ expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
     }
 
   if (!DLIST_EMPTY (&tab->head))
-    job_enqueue (&DLIST_FIRST (&tab->head)->expire,
-		 expire_sessions, svc);
+    job_enqueue (&DLIST_FIRST (&tab->head)->expire, expire_sessions, svc);
   pthread_mutex_unlock (&svc->mut);
 }
 
@@ -713,10 +712,11 @@ iwrr_pri_init (BALANCER *bal)
 static int
 iwrr_pri_update (BALANCER *bal, BACKEND *be)
 {
-  if (be->priority == INT_MAX) {
+  if (be->priority == INT_MAX)
+    {
       logmsg (LOG_ERR, "%s: priority value too big", be->locus_str);
       return 1;
-  }
+    }
   if (bal->iwrr.max_pri < be->priority)
     bal->iwrr.max_pri = be->priority;
   return 0;

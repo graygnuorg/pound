@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2024-10-29
+Pound -- history of user-visible changes. 2024-10-30
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -14,6 +14,11 @@ Version 4.14.90 (git)
 Instructs pound to ignore weight value of an SRV record when
 generating new backend from it.  Priority of the generated backend is
 copied from its matrix backend.
+
+* New configuration statement: OverrideTTL
+
+When used with dynamic backends, instructs pound to use the supplied
+value as TTL, instead of the one returned in DNS response.
 
 * Load balancing code revisited
 

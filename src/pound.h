@@ -489,6 +489,7 @@ struct be_matrix
   int resolve_mode;     /* Mode for resolving hostname. */
   unsigned retry_interval; /* Retry interval for failed queries. */
   int ignore_srv_weight;   /* Ignore weight field in SRV RR. */
+  unsigned override_ttl;   /* Use this TTL instead of one returned from DNS. */
 
   unsigned to;		/* read/write time-out */
   unsigned conn_to;	/* connection time-out */
@@ -595,6 +596,8 @@ static inline int backend_is_active (BACKEND *be)
 {
   return !be->disabled && backend_is_alive (be);
 }
+
+BACKEND *backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc);
 
 typedef struct session
 {

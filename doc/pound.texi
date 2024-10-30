@@ -1686,17 +1686,19 @@ value supplied with its @code{Address} statement is resolved at once
 and the resulting IP is associated with the backend.  Such backends
 are @dfn{static}.  You can also instruct @command{pound} to resolve
 the hostname and create as many backends as are the IP addresses it
-resolves to.  Such backends are called @dfn{dynamic}.  When a dynamic
-backend is requested, the @code{Backend} statement defines a
-@dfn{matrix} which will be used as a template to generate actual
-backends from the data in DNS.  The TTL value of the DNS record (or
-records) will define the time to live of the generated backends.  When
-it expires, DNS will be queried again and backends recreated
-according to the changes in its responses.@footnote{Support for
+resolves to.  Such backends are called @dfn{dynamic}.@footnote{Support for
 dynamic backends is enabled at compile time and requires the
 @uref{http://www.gnu.org/software/adns, GNU adns library}.  If unsure
 whether your @command{pound} binary includes it, inspect the
-@command{pound -V} output.}
+@command{pound -V} output.}  When a dynamic
+backend is requested, the @code{Backend} statement defines a
+@dfn{matrix} which will be used as a template to generate actual
+backends from the data in DNS.  The TTL value of the DNS record (or
+records) defines minimum time to live of the generated backends.  When
+it expires, DNS will be queried again and backends recreated
+according to the changes in its responses@footnote{If necessary, the TTL
+value can be changed using the @code{OverrideTTL} configuration
+directive.  @xref{Backend, OverrideTTL}.}.
 
 @cindex @code{A} record, DNS
 @cindex @code{AAAA} record, DNS
@@ -4393,6 +4395,17 @@ backends.
 
 This directive is valid when used together with @code{Resolve srv}
 (see below).
+@end deffn
+
+@deffn {Backend directive} OverrideTTL @var{n}
+This directive configures update interval (in seconds) for dynamic
+backends (@pxref{Dynamic backends}).  At the end of each update
+interval, the DNS be queried and dynamic backends reconfigured (if
+needed) according to its responses.  By default, the TTL value
+obtained from previous DNS response is used.
+
+To configure the interval to retry failed DNS lookups, see
+@code{RetryInterval}, below.
 @end deffn
 
 @deffn {Backend directive} Resolve @var{type}

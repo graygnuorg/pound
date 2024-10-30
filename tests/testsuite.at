@@ -153,5 +153,7 @@ m4_include([sessctl.at])
 
 AT_BANNER([Dynamic backends])
 m4_include([dyn_a.at])
+m4_include([dyn_a_ttl.at])
 m4_include([dyn_srv.at])
 m4_include([dyn_srv_0.at])
+m4_include([dyn_srv_ttl.at])

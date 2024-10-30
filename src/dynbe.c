@@ -58,6 +58,15 @@ dns_addr_to_addrinfo (union dns_addr *da, struct addrinfo *ai)
     }
   ai->ai_addr = (struct sockaddr *) da;
 }
+
+static void
+response_override_ttl (struct dns_response *resp, unsigned ttl)
+{
+  struct timespec ts;
+
+  clock_gettime (CLOCK_REALTIME, &ts);
+  resp->expires = ts.tv_sec + ttl;
+}
 
 static void service_matrix_addr_update_backends (SERVICE *svc, BACKEND *mtx,
 						 struct dns_response *resp);
@@ -66,6 +75,13 @@ static void service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 static void job_resolver (enum job_ctl ctl, void *arg,
 			  const struct timespec *ts);
 static void start_backend_removal (SERVICE *svc);
+
+static JOB_ID
+job_enqueue_resolver (struct timespec *ts, BACKEND *be)
+{
+  backend_ref (be);
+  return job_enqueue (ts, job_resolver, be);
+}
 
 static int
 backend_matrix_addr_update (BACKEND *be)
@@ -85,13 +101,15 @@ backend_matrix_addr_update (BACKEND *be)
 	}
       /* fall through */
     case dns_success:
+      if (be->v.mtx.override_ttl)
+	response_override_ttl (resp, be->v.mtx.override_ttl);
       service_matrix_addr_update_backends (be->service, be, resp);
       dns_response_free (resp);
       break;
 
     case dns_temp_failure:
       get_negative_expire_time (&ts, be);
-      job_enqueue (&ts, job_resolver, be);
+      job_enqueue_resolver (&ts, be);
       break;
 
     case dns_failure:
@@ -119,13 +137,15 @@ backend_matrix_srv_update (BACKEND *be)
 	}
       /* fall through */
     case dns_success:
+      if (be->v.mtx.override_ttl)
+	response_override_ttl (resp, be->v.mtx.override_ttl);
       service_matrix_srv_update_backends (be->service, be, resp);
       dns_response_free (resp);
       break;
 
     case dns_temp_failure:
       get_negative_expire_time (&ts, be);
-      job_enqueue (&ts, job_resolver, be);
+      job_enqueue_resolver (&ts, be);
       break;
 
     case dns_failure:
@@ -164,7 +184,7 @@ backend_matrix_schedule_update (BACKEND *be)
     {
       struct timespec ts;
       clock_gettime (CLOCK_REALTIME, &ts);
-      job_enqueue (&ts, job_resolver, be);
+      job_enqueue_resolver (&ts, be);
     }
 }
 
@@ -174,16 +194,22 @@ job_resolver (enum job_ctl ctl, void *arg, const struct timespec *ts)
   BACKEND *be = arg;
   if (ctl == job_ctl_run)
     backend_matrix_update (be);
+  backend_unref (be);
 }
 
 static unsigned long
-djb_hash (const unsigned char *str, int length)
+djb_hash_add (unsigned long hash, const unsigned char *str, int length)
 {
-  unsigned long hash = 5381;
   int i;
   for (i = 0; i < length; i++, str++)
     hash = ((hash << 5) + hash) + (*str);
   return hash;
+}
+
+static unsigned long
+djb_hash (const unsigned char *str, int length)
+{
+  return djb_hash_add (5381, str, length);
 }
 
 static unsigned long
@@ -197,7 +223,11 @@ BACKEND_hash (const BACKEND *b)
     }
   else /* if (b->be_type == BE_MATRIX) */
     {
-      return strhash_ci (b->v.mtx.hostname, strlen (b->v.mtx.hostname));
+      return djb_hash_add (strhash_ci (b->v.mtx.hostname,
+				       strlen (b->v.mtx.hostname)),
+			   (unsigned char*) &b->v.mtx.port,
+			   sizeof (b->v.mtx.port));
+
     }
 }
 
@@ -214,7 +244,11 @@ BACKEND_cmp (const BACKEND *a, const BACKEND *b)
       return memcmp (ap, bp, al);
     }
   else /* if (a->be_type == BE_MATRIX) */
-    return strcasecmp (a->v.mtx.hostname, b->v.mtx.hostname);
+    {
+      if (strcasecmp (a->v.mtx.hostname, b->v.mtx.hostname) == 0)
+	return a->v.mtx.port - b->v.mtx.port;
+      return 1;
+    }
 }
 
 #define HT_TYPE BACKEND
@@ -255,11 +289,12 @@ backend_table_addr_lookup (BACKEND_TABLE bt, union dns_addr *addr)
 }
 
 static BACKEND *
-backend_table_hostname_lookup (BACKEND_TABLE bt, char const *hostname)
+backend_table_hostname_lookup (BACKEND_TABLE bt, char const *hostname, int port)
 {
   BACKEND key;
   key.be_type = BE_MATRIX;
   key.v.mtx.hostname = (char*) hostname;
+  key.v.mtx.port = htons (port);
   return BACKEND_RETRIEVE (bt->hash, &key);
 }
 
@@ -346,7 +381,7 @@ backend_sweep (BACKEND *be, void *data)
       backend_table_delete (tab, be);
       be->refcount--;
 
-      /* Add it to the list of removed backends. */
+      /* Add it to the list of backends to be removed. */
       DLIST_INSERT_TAIL (&svc->be_rem_head, be, link);
 
       be->mark = 0;
@@ -405,33 +440,28 @@ service_matrix_addr_update_backends (SERVICE *svc,
 	      struct addrinfo ai;
 	      void *p;
 
-	      /* Generate new backend. */
-	      be = calloc (1, sizeof (*be));
-	      if (!be)
-		{
-		  lognomem ();
-		  break;
-		}
-
 	      dns_addr_to_addrinfo (&resp->addr[i], &ai);
 	      p = malloc (ai.ai_addrlen);
 	      if (!p)
 		{
 		  lognomem ();
-		  free (be);
 		  break;
 		}
 	      memcpy (p, ai.ai_addr, ai.ai_addrlen);
 	      ai.ai_addr = p;
+
+	      /* Generate new backend. */
+	      be = backend_create (BE_REGULAR, mtx->priority, &mtx->locus);
+	      if (!be)
+		{
+		  lognomem ();
+		  free (p);
+		  break;
+		}
 	      backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
 	      be->service = mtx->service;
-	      be->locus = mtx->locus;
 	      be->locus_str = mtx->locus_str;
-	      be->be_type = BE_REGULAR;
-	      be->priority = mtx->priority;
 	      be->disabled = mtx->disabled;
-	      pthread_mutex_init (&be->mut, NULL);
-	      be->refcount = 1;
 	      be->v.reg.parent = mtx;
 
 	      /* Add it to the list of service backends and to the hash
@@ -451,7 +481,7 @@ service_matrix_addr_update_backends (SERVICE *svc,
       /* Reschedule next update. */
       ts.tv_sec = resp->expires;
       ts.tv_nsec = 0;
-      mtx->v.mtx.jid = job_enqueue (&ts, job_resolver, mtx);
+      mtx->v.mtx.jid = job_enqueue_resolver (&ts, mtx);
     }
 
   pthread_mutex_unlock (&mtx->mut);
@@ -559,10 +589,11 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		{
 		  struct dns_srv *srv = &resp->srv[stat[i].start + j];
 		  BACKEND *be = backend_table_hostname_lookup (mtx->v.mtx.betab,
-							       srv->host);
+							       srv->host,
+							       srv->port);
 		  int prio = mtx->v.mtx.ignore_srv_weight
-		               ? mtx->priority
-		               : (stat[i].max_weight == 0
+			       ? mtx->priority
+			       : (stat[i].max_weight == 0
 				  ? 1 : srv->weight);
 
 		  if (be)
@@ -584,21 +615,15 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		       * Backend doesn't exist.  Create new matrix backend
 		       * using data from the SRV matrix and SRV RR.
 		       */
-		      be = calloc (1, sizeof (*be));
+		      be = backend_create (BE_MATRIX, prio, &mtx->locus);
 		      if (!be)
 			{
 			  lognomem ();
 			  break;
 			}
 		      be->service = mtx->service;
-		      be->locus = mtx->locus;
 		      be->locus_str = mtx->locus_str;
-		      be->be_type = BE_MATRIX;
-		      be->priority = prio;
 		      be->disabled = 0;
-		      pthread_mutex_init (&be->mut, NULL);
-		      be->refcount = 1;
-
 		      be->v.mtx.hostname = strdup (srv->host);
 		      if (!be->v.mtx.hostname)
 			{
@@ -615,10 +640,12 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 		      be->v.mtx.ws_to = mtx->v.mtx.ws_to;
 		      be->v.mtx.ctx = mtx->v.mtx.ctx;
 		      be->v.mtx.servername = mtx->v.mtx.servername;
+		      be->v.mtx.override_ttl = mtx->v.mtx.override_ttl;
 		      be->v.mtx.betab = backend_table_new ();
 		      if (!be->v.mtx.betab)
 			{
 			  lognomem ();
+			  free (be->v.mtx.hostname);
 			  free (be);
 			  break;
 			}
@@ -656,7 +683,7 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 	  ts.tv_sec = resp->expires;
 	  ts.tv_nsec = 0;
 	}
-      mtx->v.mtx.jid = job_enqueue (&ts, job_resolver, mtx);
+      mtx->v.mtx.jid = job_enqueue_resolver (&ts, mtx);
     }
   pthread_mutex_unlock (&mtx->mut);
   pthread_mutex_unlock (&svc->mut);
@@ -766,7 +793,7 @@ start_backend_removal (SERVICE *svc)
 void
 backend_ref (BACKEND *be)
 {
-  if (be && be->be_type == BE_REGULAR)
+  if (be)
     {
       pthread_mutex_lock (&be->mut);
       be->refcount++;
@@ -777,7 +804,7 @@ backend_ref (BACKEND *be)
 void
 backend_unref (BACKEND *be)
 {
-  if (be && be->be_type == BE_REGULAR)
+  if (be)
     {
       pthread_mutex_lock (&be->mut);
       assert (be->refcount > 0);
