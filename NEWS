@@ -25,7 +25,7 @@ value as TTL, instead of the one returned in DNS response.
 Removed arbitrary limit on backend priority value.  The allowed range
 is now 1..65535.
 
-Remove priority mappting for SRV-generated backends.  SRV weights are
+Remove priority mapping for SRV-generated backends.  SRV weights are
 assigned to backend priorities verbatim.
 
 * Fix access to freed memory in session handling code.

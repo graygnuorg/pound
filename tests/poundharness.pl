@@ -87,6 +87,7 @@ sub cleanup {
 ## -----------------------------------
 
 my %status_codes;
+share(%status_codes);
 
 $SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
 
@@ -1395,7 +1396,8 @@ sub set_pass_fd {
 sub send_fd {
     my $self = shift;
     croak "not applicable" unless $self->pass_fd;
-    accept(my $fh, $self->pass_fd);
+    accept(my $fh, $self->pass_fd)
+	or croak "accept on pass_fd failed: $!";
     IO::FDPass::send(fileno($fh), $self->fd)
 	or croak "failed to pass socket: $!";
     close $self->socket_handle;
@@ -1494,7 +1496,7 @@ sub read_and_process {
 	    $lst->listen;
 	    while (1) {
 		my $fh;
-		accept($fh, $lst->socket_handle);
+		accept($fh, $lst->socket_handle) or threads->exit();
 		process_http_request($fh, $lst)
 	    }
 	}, $lst)->detach;
