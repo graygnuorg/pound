@@ -39,6 +39,7 @@ my $pound_pid;
 my $startup_timeout = 2;
 my $statistics;
 my $fakedns;
+my $valgrind;
 
 use constant {
     EX_SUCCESS => 0,
@@ -169,7 +170,8 @@ GetOptions('config|f=s' => \$config,
 	   'statistics|s' => \$statistics,
 	   'startup-timeout|t=n' => \$startup_timeout,
 	   'include-dir=s' => \$include_dir,
-	   'fakedns=s' => \$fakedns)
+	   'fakedns=s' => \$fakedns,
+           'valgrind=s' => \$valgrind)
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
@@ -468,6 +470,9 @@ sub runner {
 	'pound', '-p', $pid_file, '-f', $config, '-v',
 	 '-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
     );
+    if ($valgrind) {
+	unshift @cmd, 'valgrind', '--log-file=' . $valgrind;
+    }
     if ($fakedns) {
 	$ENV{LD_PRELOAD} = $fakedns;
     } else {
