@@ -557,10 +557,17 @@ str_be (char *buf, size_t size, BACKEND *be)
   return buf;
 }
 
+/*
+ * Match the request obtained via PHTT against conditions from the service
+ * SVC.  Return value:
+ *
+ *  0 request doesn't match or an error occurred;
+ *  1 request matches.
+ */
 static int
 match_service (SERVICE *svc, POUND_HTTP *phttp)
 {
-  return match_cond (&svc->cond, phttp, &phttp->request);
+  return match_cond (&svc->cond, phttp, &phttp->request) == 1;
 }
 
 /*
