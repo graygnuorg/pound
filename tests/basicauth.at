@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2022-2024 Sergey Poznyakoff
+# Copyright (C) 2024 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,32 +13,42 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([StringMatch])
-AT_KEYWORDS([cond stringmatch StringMatch])
+AT_SETUP([BasicAuth])
+AT_KEYWORDS([cond basicauth BasicAuth])
+AT_DATA([htpass],
+[gray:guessMe
+])
 PT_CHECK([ListenHTTP
+	Service "auth"
+		Not BasicAuth "htpass"
+		Rewrite response
+			SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+		End
+		Error 401
+	End
 	Service
-		Path ["/echo/([^/]+)/([^/]+)"]
-		StringMatch "$1" "(.*)_(.*)"
-		SetHeader "X-Match-1: $1"
-		SetHeader "X-Match-2: $2"
-		SetHeader "X-Match-1-1: $1(1)"
-		SetHeader "X-Match-2-1: $2(1)"
 		Backend
 			Address
 			Port
 		End
-	End		
-End
-],
-[GET /echo/foo_bar/baz
+	End
+End	
+],	
+[GET /echo/foo
 Host: example.org
 end
 
+401
+WWW-Authenticate: Basic realm="Restricted access"
+end
+
+GET /echo/foo
+Host: example.org
+Authorization: Basic Z3JheTpndWVzc01l
+end
+
 200
-x-orig-header-x-match-1: foo
-x-orig-header-x-match-2: bar
-x-orig-header-x-match-1-1: foo_bar
-x-orig-header-x-match-2-1: baz
 end
 ])
 AT_CLEANUP
+
