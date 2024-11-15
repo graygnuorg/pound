@@ -2905,6 +2905,12 @@ get_basic_auth (char const *hdrval, char **u_name, char **u_pass)
   return rc;
 }
 
+/*
+ * If the request bears the Authorization header, extract username and
+ * password from it.  Return 0 on success, 1 if no data are available
+ * (either Authorization header is missing, or it is not a Basic auth
+ * header), and -1 on error.
+ */
 int
 http_request_get_basic_auth (struct http_request *req,
 			     char **u_name, char **u_pass)
@@ -2913,10 +2919,13 @@ http_request_get_basic_auth (struct http_request *req,
   char const *val;
 
   if ((hdr = http_header_list_locate (&req->headers,
-				      HEADER_AUTHORIZATION)) != NULL &&
-      (val = http_header_get_value (hdr)) != NULL)
-    return get_basic_auth (val, u_name, u_pass);
-  return -1;
+				      HEADER_AUTHORIZATION)) != NULL)
+    {
+      if ((val = http_header_get_value (hdr)) == NULL)
+	return -1;
+      return get_basic_auth (val, u_name, u_pass);
+    }
+  return 1;
 }
 
 static int
@@ -2988,18 +2997,30 @@ match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
   return 0;
 }
 
+/*
+ * Match request (or response) REQ obtained from PHTTP against condition COND.
+ * Return value:
+ *
+ *  0    request does not satisfy the condition;
+ *  1    request satisfies the condition;
+ * -1    an error occurred; diagnostic message has been issued;
+ */
 int
 match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    struct http_request *req)
 {
   int res = 1;
+  int r;
   SERVICE_COND *subcond;
   char const *str;
 
   switch (cond->type)
     {
     case COND_ACL:
-      res = acl_match (cond->acl, phttp->from_host.ai_addr) == 0;
+      if ((r = acl_match (cond->acl, phttp->from_host.ai_addr)) == -1)
+	res = -1;
+      else
+	res = r == 0;
       break;
 
     case COND_URL:
@@ -3094,7 +3115,10 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_BASIC_AUTH:
-      res = basic_auth (&cond->pwfile, req) == 0;
+      if ((r = basic_auth (&cond->pwfile, req)) == -1)
+	res = -1;
+      else
+	res = r == 0;
       break;
 
     case COND_STRING_MATCH:
@@ -3118,13 +3142,18 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (cond->bool.op == BOOL_NOT)
 	{
 	  subcond = SLIST_FIRST (&cond->bool.head);
-	  res = ! match_cond (subcond, phttp, req);
+	  if ((r = match_cond (subcond, phttp, req)) == -1)
+	    res = -1;
+	  else
+	    res = ! r;
 	}
       else
 	{
 	  SLIST_FOREACH (subcond, &cond->bool.head, next)
 	    {
 	      res = match_cond (subcond, phttp, req);
+	      if (res == -1)
+		break;
 	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
@@ -3442,7 +3471,7 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 
   do
     {
-      if (match_cond (&rule->cond, phttp, request))
+      if (match_cond (&rule->cond, phttp, request) == 1)
 	{
 	  res = rewrite_op_apply (&rule->ophead, request, phttp);
 	  break;
