@@ -23,6 +23,7 @@ use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
 use Cwd qw(abs_path);
 use File::Spec;
+use Socket;
 
 my $config = 'pound.cfi:pound.cfg';
 my @preproc_files;
@@ -40,6 +41,7 @@ my $startup_timeout = 2;
 my $statistics;
 my $fakedns;
 my $valgrind;
+my @source_addr;
 
 use constant {
     EX_SUCCESS => 0,
@@ -154,6 +156,23 @@ sub fakedns_self_check {
     }
 }
 
+sub assert_source_ip {
+    my ($ip) = @_;
+    socket(my $sock, PF_INET, SOCK_STREAM, 0)
+	or do {
+	    warn "socket: $!";
+	    exit 77;
+    };
+    setsockopt($sock, SOL_SOCKET, SO_REUSEADDR, 1);
+    unless (bind($sock, sockaddr_in(0, inet_aton($ip)))) {
+	# FIXME: To be strict, this should check for $!{EADDRNOTAVAIL} and
+	# exit 77 if so.
+	warn "bind($ip): $!";
+	exit(77);
+    }
+    close($sock)
+}
+
 ## Start the program
 ## -----------------
 sub usage_error {
@@ -171,7 +190,12 @@ GetOptions('config|f=s' => \$config,
 	   'startup-timeout|t=n' => \$startup_timeout,
 	   'include-dir=s' => \$include_dir,
 	   'fakedns=s' => \$fakedns,
-           'valgrind=s' => \$valgrind)
+           'valgrind=s' => \$valgrind,
+	   'source-address|a=s@' => sub {
+	       my (undef, $ip) = @_;
+	       assert_source_ip($ip);
+	       push @source_addr, $ip;
+	   })
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
@@ -231,7 +255,8 @@ $backends->read_and_process;
 runner();
 
 # Parse and run the script file
-my $ps = PoundScript->new($script_file, $transcript_file, $nameserver);
+my $ps = PoundScript->new($script_file, $transcript_file, $nameserver,
+			  \@source_addr);
 $ps->parse;
 
 # Terminate
@@ -492,7 +517,7 @@ use IPC::Open3;
 use Symbol 'gensym';
 
 sub new {
-    my ($class, $file, $xscript, $ns) = @_;
+    my ($class, $file, $xscript, $ns, $srcaddr) = @_;
     my $self = bless { tests => 0, failures => 0, ns => $ns }, $class;
     if ($file ne '-') {
 	open(my $fh, '<', $file)
@@ -508,14 +533,35 @@ sub new {
 	    or croak "can't create transcript file $xscript: $!";
     }
     $self->{server} = 0;
-    $self->{http} = HTTP::Tiny->new(max_redirect => 0, verify_SSL => 0);
+    $self->{source_addr} = '127.0.0.1';
+    if ($srcaddr) {
+	unshift @$srcaddr, $self->{source_addr}
+    } else {
+	$srcaddr = [ $self->{source_addr} ]
+    }
+    foreach my $addr (@$srcaddr) {
+	$self->{http}{$addr} = HTTP::Tiny->new(
+			  max_redirect => 0,
+			  verify_SSL => 0,
+			  local_address => $addr
+	    );
+    }
     return $self;
 }
 
 sub tests { shift->{tests} }
 sub failures { shift->{failures} }
 
-sub http { shift->{http} }
+sub http {
+    my ($self) = @_;
+    return $self->{http}{$self->{source_addr}}
+}
+
+sub source_address {
+    my ($self, $addr) = @_;
+    croak "unknown source address" unless exists $self->{http}{$addr};
+    $self->{source_addr} = $addr
+}
 
 sub transcript {
     my ($self, $text, %opt) = @_;
@@ -738,6 +784,10 @@ sub parse_req {
 	}
 	if (/^server\s+(\d+)/) {
 	    $self->{server} = $1;
+	    next;
+	}
+	if (/^source\s+(.+)/) {
+	    $self->source_address($1);
 	    next;
 	}
 	if (/^mkbackend\s+(127(\.\d+){3})/) {
@@ -1774,6 +1824,7 @@ poundharness - run pound tests
 
 B<poundharness>
 [B<-sv>]
+[B<-a> I<IP>]
 [B<-f I<FILE>>]
 [B<-l I<N>>]
 [B<-t I<N>>]
@@ -1783,6 +1834,7 @@ B<poundharness>
 [B<--include-dir=>I<DIR>]
 [B<--log-level=>I<N>]
 [B<--preproc=>I<FILE>[:I<DST>]]
+[B<--source-address=>I<IP>]
 [B<--startup-timeout=>I<N>]
 [B<--statistics>]
 [B<--transcript=>I<FILE>]
@@ -1895,6 +1947,12 @@ Preprocess I<FILE> as described in the B<DESCRIPTION>.  Write the resulting
 material to I<DST>.  If the latter is omitted, the destination file will be
 named I<FILE>B<.cfg>.
 
+=item B<-a>, B<--source-address=> I<IP>
+
+Register I<IP> as a possible source address for HTTP requests.  Argument
+should match C<127.0.0.0/8>.  Registered source addresses can be used in
+B<source> statement in the script file.
+
 =item B<-s>, B<--statistics>
 
 Print short statistics at the end of the run.
@@ -1997,6 +2055,17 @@ correspondingly.
 =back
 
 Numbering of listeners and backends starts from 0.
+
+By default, requests sent by B<poundharness.pl> originate from 127.0.0.1.
+Another source address can be set using the B<source> statement:
+
+  source IP
+
+The IP must have been previously declared as a source using the
+B<--source-address> command line option.  Obviously, the networking
+configuration of the host machine must allow it to be used as a
+source IP, otherwise B<poundharness.pl> issue a diagnostic message and
+exit with code 77.
 
 The B<server> statement can be used to specify the B<pound> listener to
 send the requests to.  It has the form

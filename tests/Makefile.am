@@ -62,6 +62,7 @@ check-local: atconfig atlocal $(TESTSUITE)
 
 TESTSUITE_AT = \
  testsuite.at \
+ acl.at\
  acme.at\
  addheader.at\
  backref.at\
@@ -105,6 +106,7 @@ TESTSUITE_AT = \
  maxrequest.at\
  maxuri.at\
  multival.at\
+ nacl.at\
  nb.at\
  not.at\
  optfwd.at\
