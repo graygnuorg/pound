@@ -411,6 +411,8 @@ pound_http_destroy (POUND_HTTP *arg)
 
   submatch_queue_free (&arg->smq);
 
+  pndlua_destroy (arg);
+
   free (arg);
 }
 
@@ -1026,7 +1028,7 @@ listener_socket_from (LISTENER *lst)
 	   lst->locus_str, strerror (errno));
 
   lst->sock = fd;
-  
+
   free (lst->addr.ai_addr);
   lst->addr.ai_addr = xmalloc (sslen);
   memcpy (lst->addr.ai_addr, &ss, sslen);
@@ -1064,7 +1066,7 @@ listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
       unlink (((struct sockaddr_un*)lst->addr.ai_addr)->sun_path);
       oldmask = umask (0777 & ~lst->mode);
       break;
-      
+
     default:
       abort ();
     }
@@ -1082,7 +1084,7 @@ listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
 	   lst->locus_str,
 	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
 	   strerror (errno));
-  
+
   if (domain == PF_UNIX)
     {
       umask (oldmask);
@@ -1158,7 +1160,8 @@ main (const int argc, char **argv)
   if (pthread_attr_setstacksize (&thread_attr_worker, 1 << 18))
     abend ("can't set stack size");
 
-  
+  pndlua_init ();
+
   json_memabrt = lognomem;
 
   /* read config */

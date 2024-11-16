@@ -1626,6 +1626,13 @@ parse_cond_client_cert (void *call_data, void *section_data)
 }
 
 static int
+parse_lua_match (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_LUA);
+  return pndlua_parse_cond (&cond->clua);
+}
+
+static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
@@ -1952,6 +1959,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "StringMatch",
     .parser = parse_cond_string_matcher
+  },
+  {
+    .name = "Lua",
+    .parser = parse_lua_match
   },
   {
     .name = "Match",
@@ -4670,6 +4681,10 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
   {
     .name = "Resolver",
     .parser = parse_resolver
+  },
+  {
+    .name = "LuaLoad",
+    .parser = pndlua_parse_lua_load
   },
   /* Backward compatibility. */
   {

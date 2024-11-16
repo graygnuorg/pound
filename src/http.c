@@ -2997,6 +2997,37 @@ match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
   return 0;
 }
 
+static int
+match_lua (SERVICE_COND *cond, POUND_HTTP *phttp, struct http_request *req)
+{
+  int i;
+  char **argv;
+  int res = -1;
+
+  argv = calloc (cond->clua.argc, sizeof (argv[0]));
+  if (!argv)
+    {
+      lognomem ();
+      return -1;
+    }
+
+  for (i = 0; i < cond->clua.argc; i++)
+    {
+      argv[i] = expand_string (cond->clua.argv[i], phttp, req, "lua");
+      if (argv[i] == 0)
+	goto err;
+    }
+
+  res = pndlua_match (phttp, cond->clua.func, cond->clua.argc, argv);
+
+ err:
+  for (i = 0; i < cond->clua.argc && argv[i]; i++)
+    free (argv[i]);
+  free (argv);
+
+  return res;
+}
+
 /*
  * Match request (or response) REQ obtained from PHTTP against condition COND.
  * Return value:
@@ -3164,6 +3195,10 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       res = (phttp->x509 != NULL &&
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
+      break;
+
+    case COND_LUA:
+      res = match_lua (cond, phttp, req);
     }
 
   return res;

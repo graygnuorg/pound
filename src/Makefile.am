@@ -44,6 +44,10 @@ endif
 if COND_DYNAMIC_BACKENDS
   pound_SOURCES += resolver.c dynbe.c
 endif
+if COND_LUA
+  pound_SOURCES += pndlua.c
+  LDADD += -llua -lm
+endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = \

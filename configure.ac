@@ -44,7 +44,7 @@ AC_TYPE_LONG_LONG_INT
 # Check whether they want dynamic backends
 AC_ARG_ENABLE([dynamic-backends],
  [AS_HELP_STRING([--enable-dynamic-backends],
-                 [enable dynamic backend support (default)])],
+		 [enable dynamic backend support (default)])],
  [status_dynamic_backends=${enableval}],
  [status_dynamic_backends=probe])
 
@@ -54,7 +54,7 @@ if test $status_dynamic_backends != no; then
   AC_CHECK_LIB([adns], [adns_init])
   if test "$ac_cv_lib_adns_adns_init$ac_cv_header_adns_h" = yesyes; then
     AC_DEFINE([ENABLE_DYNAMIC_BACKENDS], [1],
-              [Define if dynamic backends are supported])
+	      [Define if dynamic backends are supported])
     status_dynamic_backends=yes
   elif test $status_dynamic_backends = yes; then
     AC_MSG_FAILURE([required library adns not found; install it or use --disable-resolver to disable])
@@ -66,7 +66,7 @@ AM_CONDITIONAL([COND_DYNAMIC_BACKENDS], [test $status_dynamic_backends = yes])
 
 AC_ARG_ENABLE([dns-tests],
  [AS_HELP_STRING([--enable-dns-tests],
-                 [enable DNS-based dynamic backend tests])],
+		 [enable DNS-based dynamic backend tests])],
  [if test "${status_dynamic_backends}${enableval}" = yesyes; then
     status_dns_tests=yes
   else
@@ -77,11 +77,11 @@ AC_ARG_ENABLE([dns-tests],
 
 if test $status_dns_tests = yes; then
   AC_COMPILE_IFELSE(
-        [AC_LANG_PROGRAM([
+	[AC_LANG_PROGRAM([
 	      #include <sys/syscall.h>
 	      int x[] = { SYS_connect, SYS_sendto, SYS_recvfrom };
 	   ],
- 	   [[void main(){}]])],
+	   [[void main(){}]])],
 	 [],
 	 [status_dns_tests=no])
 fi
@@ -210,6 +210,42 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
+AC_ARG_WITH([lua],
+ [AS_HELP_STRING([--with-lua],
+		 [compile with Lua library])],
+ [status_lua=${withval}],
+ [status_lua=probe])
+
+if test $status_lua != no; then
+  # Check for lua header files
+  AC_CHECK_HEADERS([lua.h])
+  AC_CHECK_LIB([lua],[main])
+  if test "$ac_cv_lib_lua_main$ac_cv_header_lua_h" = yesyes; then
+    AC_COMPILE_IFELSE(
+      [AC_LANG_PROGRAM([
+	   #include <lua.h>
+	   #ifdef LUA_VERSION_NUM
+	   # if LUA_VERSION_NUM < 503
+	   #   error "Unsupported Lua version"
+	   # endif
+	   #else
+	   # error "LUA_VERSION_NUM not defined"
+	   #endif
+	 ],
+	 [[void main(){}]])],
+      [status_lua=yes
+       AC_DEFINE([ENABLE_LUA], [1],
+		 [Define if Lua extension language is supported])],
+      [status_lua=no])
+  else
+    status_lua=no
+  fi
+  AC_MSG_CHECKING([For liblua 5.3 or newer])
+  AC_MSG_RESULT([$status_lua])
+fi
+
+AM_CONDITIONAL([COND_LUA], [test $status_lua = yes])
+
 AC_MSG_CHECKING([if building from git clone])
 if test -d .git; then
     build_from_git=yes
@@ -237,6 +273,7 @@ Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
 Test dynamic backends ......................... $status_dns_tests
+Lua support ................................... $status_lua
 *******************************************************************
 
 EOF
@@ -255,6 +292,7 @@ else
 fi
 status_dynamic_backends=$status_dynamic_backends
 status_dns_tests=$status_dns_tests
+status_lua=$status_lua
 ])
 
 AC_CONFIG_TESTDIR(tests)
