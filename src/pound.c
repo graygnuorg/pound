@@ -411,8 +411,6 @@ pound_http_destroy (POUND_HTTP *arg)
 
   submatch_queue_free (&arg->smq);
 
-  pndlua_destroy (arg);
-
   free (arg);
 }
 

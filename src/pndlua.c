@@ -24,44 +24,6 @@
 static lua_State *p_lua_state;
 static pthread_mutex_t p_lua_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-struct pndlua
-{
-  lua_State *T;
-  int Tref;
-};
-
-static struct pndlua *
-pndlua_get (POUND_HTTP *phttp)
-{
-  if (phttp->pndlua == NULL)
-    {
-      phttp->pndlua = malloc (sizeof (*phttp->pndlua));
-      if (phttp->pndlua)
-	{
-	  pthread_mutex_lock (&p_lua_state_mutex);
-	  phttp->pndlua->T = lua_newthread (p_lua_state);
-	  phttp->pndlua->Tref = luaL_ref(p_lua_state, LUA_REGISTRYINDEX);
-	  pthread_mutex_unlock (&p_lua_state_mutex);
-	}
-      else
-	lognomem ();
-    }
-  return phttp->pndlua;
-}
-
-void
-pndlua_destroy (POUND_HTTP *phttp)
-{
-  if (phttp->pndlua == NULL)
-    return;
-  pthread_mutex_lock (&p_lua_state_mutex);
-  luaL_unref (p_lua_state, LUA_REGISTRYINDEX, phttp->pndlua->Tref);
-  lua_gc (p_lua_state, LUA_GCCOLLECT, 0);
-  pthread_mutex_unlock (&p_lua_state_mutex);
-  free (phttp->pndlua);
-  phttp->pndlua = NULL;
-}
-
 static int
 pndlua_load (char const *fname)
 {
@@ -117,30 +79,26 @@ pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv)
 {
   int i;
   int res;
-  struct pndlua *plua = pndlua_get (phttp);
-
-  if (!plua)
-    return -1;
 
   pthread_mutex_lock (&p_lua_state_mutex);
 
-  lua_getglobal (plua->T, fname);
+  lua_getglobal (p_lua_state, fname);
   for (i = 0; i < argc; i++)
-    lua_pushstring (plua->T, argv[i]);
+    lua_pushstring (p_lua_state, argv[i]);
 
-  res = lua_pcall (plua->T, argc, 1, 0);
+  res = lua_pcall (p_lua_state, argc, 1, 0);
   if (res)
     {
       logmsg (LOG_ERR, "(%"PRItid") error calling Lua function %s: %s",
-	      POUND_TID (), fname, lua_tostring (plua->T, -1));
+	      POUND_TID (), fname, lua_tostring (p_lua_state, -1));
       res = -1;
     }
   else
     {
-      res = lua_toboolean (plua->T, -1);
+      res = lua_toboolean (p_lua_state, -1);
     }
 
-  lua_pop (plua->T, 1);
+  lua_pop (p_lua_state, 1);
 
   pthread_mutex_unlock (&p_lua_state_mutex);
   return res;

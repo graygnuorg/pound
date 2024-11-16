@@ -995,10 +995,6 @@ typedef struct _pound_http
   char *orig_forwarded_header; /* Original value of forwarded header */
   int response_code;
 
-#ifdef ENABLE_LUA
-  struct pndlua *pndlua;
-#endif
-
   CONTENT_LENGTH res_bytes;
 
   SLIST_ENTRY(_pound_http) next;
@@ -1273,7 +1269,6 @@ int is_combinable_header (struct http_header *hdr);
 
 #if ENABLE_LUA
 void pndlua_init (void);
-void pndlua_destroy (POUND_HTTP *phttp);
 int pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv);
 int pndlua_parse_lua_load (void *call_data, void *section_data);
 int pndlua_parse_cond (struct cond_lua *cond);
@@ -1291,7 +1286,6 @@ pndlua_parse_cond (struct cond_lua *cond)
   conf_error ("%s", "this pound is compiled without support for Lua");
   return CFGPARSER_FAIL;
 }
-static inline void pndlua_destroy (POUND_HTTP *phttp) { }
 static inline int
 pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv)
 {
