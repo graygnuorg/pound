@@ -17,7 +17,7 @@
 EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4 poundharness.pl\
  perllib/PoundNS.pm
 DISTCLEANFILES       = atconfig $(check_SCRIPTS)
-MAINTAINERCLEANFILES = Makefile.in $(TESTSUITE)
+MAINTAINERCLEANFILES = Makefile.in $(TESTSUITE) package.m4
 
 ## ------------ ##
 ## package.m4.  ##
