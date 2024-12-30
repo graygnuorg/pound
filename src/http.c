@@ -1436,8 +1436,11 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	}
 
       if (buf[0])
-	logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
-		POUND_TID (), buf);
+	{
+	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
+		  POUND_TID (), buf);
+	  return HTTP_STATUS_BAD_REQUEST;
+	}    
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
