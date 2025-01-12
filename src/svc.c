@@ -1655,7 +1655,7 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
   BACKEND *be = data;
   char buf[MAXBUF];
 
-  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && be->refcount > 1)
+  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && backend_referenced(be))
     {
       if (!be->v.reg.alive)
 	{

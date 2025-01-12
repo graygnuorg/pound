@@ -1031,9 +1031,14 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 #ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
+static inline int backend_referenced (BACKEND *be)
+{
+  return be->refcount > 1;
+}
 #else
 # define backend_ref(be)
 # define backend_unref(be)
+# define backend_referenced(be) 1
 #endif
 
 void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
