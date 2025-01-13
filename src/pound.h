@@ -558,7 +558,9 @@ typedef struct _backend
 
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
+#ifdef ENABLE_DYNAMIC_BACKENDS
   unsigned long refcount;       /* reference counter */
+#endif
   double numreq;		/* number of requests seen */
   double avgtime;		/* Avg. time per request */
   double avgsqtime;             /* Avg. squared time per request */
@@ -1031,6 +1033,11 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 #ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
+static inline void
+backend_refcount_init (BACKEND *be)
+{
+  be->refcount = 1;
+}
 static inline int backend_referenced (BACKEND *be)
 {
   return be->refcount > 1;
@@ -1038,6 +1045,7 @@ static inline int backend_referenced (BACKEND *be)
 #else
 # define backend_ref(be)
 # define backend_unref(be)
+# define backend_refcount_init(be)
 # define backend_referenced(be) 1
 #endif
 

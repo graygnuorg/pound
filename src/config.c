@@ -78,7 +78,7 @@ backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
       pthread_mutex_init (&be->mut, &mutex_attr_recursive);
       if (loc)
 	be->locus = *loc;
-      be->refcount = 1;
+      backend_refcount_init (be);
     }
   return be;
 }
@@ -4820,7 +4820,7 @@ backend_resolve (BACKEND *be)
   free (hostname);
   be->v.reg = reg;
   be->be_type = BE_REGULAR;
-  be->refcount = 1;
+  backend_refcount_init (be);
   return 0;
 }
 
