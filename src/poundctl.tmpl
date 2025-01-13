@@ -115,7 +115,7 @@ Global services:
     <server>
       <version>{{ .version }}</version>
       <pid>{{ .pid }}</pid>
-    <server>
+    </server>
     <workers>
       {{with .workers -}}
       <min>{{ .min }}</min>
@@ -130,7 +130,7 @@ Global services:
   {{- /* Iterate over all listeners */ -}}
   {{- range $lno,$lstn = .listeners }}
     {{block "xml.print_listener" $lstn -}}
-    <listener name="{{ .name }}" index="{{ $lno }}" protocol="{{ .protocol }}" address="{{ .address }}" status="{{if .enabled}}active{{else}}DISABLED{{end}}>
+    <listener name="{{ .name }}" index="{{ $lno }}" protocol="{{ .protocol }}" address="{{ .address }}" status="{{if .enabled}}active{{else}}DISABLED{{end}}">
     {{- block "xml.print_services" .services}}
     {{- range $sno,$svc = . }}
       {{block "xml.print_service" $svc -}}
