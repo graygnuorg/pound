@@ -691,7 +691,7 @@ typedef struct _service_cond
   {
     ACL *acl;
     GENPAT re;
-    struct bool_service_cond bool;
+    struct bool_service_cond boolean;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
@@ -712,8 +712,8 @@ service_cond_init (SERVICE_COND *cond, int type)
       break;
 
     case COND_BOOL:
-      cond->bool.op = BOOL_AND;
-      SLIST_INIT (&cond->bool.head);
+      cond->boolean.op = BOOL_AND;
+      SLIST_INIT (&cond->boolean.head);
       break;
     }
 }

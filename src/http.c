@@ -3142,9 +3142,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_BOOL:
-      if (cond->bool.op == BOOL_NOT)
+      if (cond->boolean.op == BOOL_NOT)
 	{
-	  subcond = SLIST_FIRST (&cond->bool.head);
+	  subcond = SLIST_FIRST (&cond->boolean.head);
 	  if ((r = match_cond (subcond, phttp, req)) == -1)
 	    res = -1;
 	  else
@@ -3152,12 +3152,12 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	}
       else
 	{
-	  SLIST_FOREACH (subcond, &cond->bool.head, next)
+	  SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	    {
 	      res = match_cond (subcond, phttp, req);
 	      if (res == -1)
 		break;
-	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
+	      if ((cond->boolean.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
 	}

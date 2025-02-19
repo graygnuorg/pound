@@ -1130,7 +1130,7 @@ service_cond_append (SERVICE_COND *cond, int type)
   assert (cond->type == COND_BOOL);
   XZALLOC (sc);
   service_cond_init (sc, type);
-  SLIST_PUSH (&cond->bool.head, sc, next);
+  SLIST_PUSH (&cond->boolean.head, sc, next);
 
   return sc;
 }
@@ -1394,7 +1394,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	}
 
       cond = service_cond_append (top_cond, COND_BOOL);
-      cond->bool.op = BOOL_OR;
+      cond->boolean.op = BOOL_OR;
 
       switch (type)
 	{
@@ -1591,7 +1591,7 @@ parse_cond_head_deny_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
-  cond->bool.op = BOOL_NOT;
+  cond->boolean.op = BOOL_NOT;
   return parse_cond_matcher (cond, COND_HDR, dfl->re_type, dfl->re_type,
 			     GENPAT_MULTILINE | GENPAT_ICASE,
 			     NULL);
@@ -1981,7 +1981,7 @@ static int
 parse_not_cond (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
-  cond->bool.op = BOOL_NOT;
+  cond->boolean.op = BOOL_NOT;
   return cfgparser (negate_parsetab, cond, section_data,
 		    1,
 		    feature_is_set (FEATURE_WARN_DEPRECATED)
@@ -2008,7 +2008,7 @@ parse_cond (int op, SERVICE_COND *cond, void *section_data)
   SERVICE_COND *subcond = service_cond_append (cond, COND_BOOL);
   struct locus_range range;
 
-  subcond->bool.op = op;
+  subcond->boolean.op = op;
   return parser_loop (logcon_parsetab, subcond, section_data, &range);
 }
 
@@ -2381,7 +2381,7 @@ rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
   if (!SLIST_EMPTY (head))
     {
       REWRITE_RULE *rw = SLIST_LAST (head);
-      if (rw->cond.type == COND_BOOL && SLIST_EMPTY (&rw->cond.bool.head))
+      if (rw->cond.type == COND_BOOL && SLIST_EMPTY (&rw->cond.boolean.head))
 	return rw;
     }
 
@@ -3316,7 +3316,7 @@ foreach_client_cert (SERVICE_COND *cond, int (*cb) (X509 *, void *), void *data)
     case COND_BOOL:
       {
 	SERVICE_COND *subcond;
-	SLIST_FOREACH (subcond, &cond->bool.head, next)
+	SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	  {
 	    if ((rc = foreach_client_cert (subcond, cb, data)) != 0)
 	      break;
@@ -5073,7 +5073,7 @@ cond_pass_file_fixup (SERVICE_COND *cond)
     case COND_BOOL:
       {
 	SERVICE_COND *subcond;
-	SLIST_FOREACH (subcond, &cond->bool.head, next)
+	SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	  {
 	    if ((rc = cond_pass_file_fixup (subcond)) != 0)
 	      break;
