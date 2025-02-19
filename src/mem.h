@@ -15,6 +15,8 @@
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+#include <stdarg.h>
+
 void *mem2nrealloc (void *p, size_t *pn, size_t s);
 void xnomem (void);
 void *xmalloc (size_t s);

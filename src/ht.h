@@ -139,9 +139,9 @@ static inline void
 cat2(HT_TYPE,_HASH_FREE) (HT_TYPE_HASH_T *tab)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  return cat3(lh_, HT_TYPE, _free) (tab);
+  cat3(lh_, HT_TYPE, _free) (tab);
 #else
-  return LHM_lh_free (HT_TYPE, tab);
+  LHM_lh_free (HT_TYPE, tab);
 #endif
 }
 #endif /* HT_NO_HASH_FREE */
@@ -210,7 +210,7 @@ static inline void
 cat2(HT_TYPE, _set_down_load) (HT_TYPE_HASH_T *tab, unsigned long dl)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  return cat3 (lh_, HT_TYPE, _set_down_load) (tab, dl);
+  cat3 (lh_, HT_TYPE, _set_down_load) (tab, dl);
 #else
   CHECKED_LHASH_OF (HT_TYPE, tab)->down_load = dl;
 #endif

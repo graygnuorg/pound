@@ -488,7 +488,7 @@ strstr_compile (void *gp_data, const char *pattern, int pflags)
   fill_bad_char_delta (sp);
   fill_good_pfx_delta (sp);
   return 0;
-};
+}
 
 #define max(a,b) ((a)>(b)?(a):(b))
 
