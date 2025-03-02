@@ -558,7 +558,7 @@ str_be (char *buf, size_t size, BACKEND *be)
 }
 
 /*
- * Match the request obtained via PHTT against conditions from the service
+ * Match the request obtained via PHTTP against conditions from the service
  * SVC.  Return value:
  *
  *  0 request doesn't match or an error occurred;
@@ -1183,7 +1183,7 @@ static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
  * disabled field of a backend (instead of that of the backend itself) is
  * used throughout the code.  In particular, it is used in backend
  * serialization code below as well as in matrix backend manuipulations
- * (see resolver.c).
+ * (see dynbe.c).
  */
 static void
 cb_backend_disable (BACKEND *b, void *data)
