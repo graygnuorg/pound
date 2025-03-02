@@ -1,6 +1,6 @@
 /*
  * General-purpose hash table macros for pound.
- * Copyright (C) 2023-2024 Sergey Poznyakoff
+ * Copyright (C) 2023-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -39,7 +39,7 @@
  *     void X_FOREACH_SAFE(X_HASH *, void (*)(X *, void *), void *)
  *
  *   The X_FOREACH and X_FOREACH_SAFE functions iterate over all elements
- *   in hash invoking the supplied callback function on each of them.  Use 
+ *   in hash invoking the supplied callback function on each of them.  Use
  *   X_FOREACH_SAFE if the callback can delete elements from the hash.
  *
  *   If the name of the key field is not "name", the HT_NAME_FIELD must
@@ -139,9 +139,9 @@ static inline void
 cat2(HT_TYPE,_HASH_FREE) (HT_TYPE_HASH_T *tab)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  return cat3(lh_, HT_TYPE, _free) (tab);
+  cat3(lh_, HT_TYPE, _free) (tab);
 #else
-  return LHM_lh_free (HT_TYPE, tab);
+  LHM_lh_free (HT_TYPE, tab);
 #endif
 }
 #endif /* HT_NO_HASH_FREE */
@@ -210,7 +210,7 @@ static inline void
 cat2(HT_TYPE, _set_down_load) (HT_TYPE_HASH_T *tab, unsigned long dl)
 {
 #if OPENSSL_VERSION_NUMBER >= 0x10100000L
-  return cat3 (lh_, HT_TYPE, _set_down_load) (tab, dl);
+  cat3 (lh_, HT_TYPE, _set_down_load) (tab, dl);
 #else
   CHECKED_LHASH_OF (HT_TYPE, tab)->down_load = dl;
 #endif

@@ -1,6 +1,6 @@
 ## Makefile for the pound testsuite
 ## Process this file with automake to produce Makefile.in.
-## Copyright (C) 2022-2024 Sergey Poznyakoff
+## Copyright (C) 2022-2025 Sergey Poznyakoff
 ##
 ## Pound is free software; you can redistribute it and/or modify
 ## it under the terms of the GNU General Public License as published by
@@ -62,6 +62,7 @@ check-local: atconfig atlocal $(TESTSUITE)
 
 TESTSUITE_AT = \
  testsuite.at \
+ acl.at\
  acme.at\
  addheader.at\
  backref.at\
@@ -105,6 +106,7 @@ TESTSUITE_AT = \
  maxrequest.at\
  maxuri.at\
  multival.at\
+ nacl.at\
  nb.at\
  not.at\
  optfwd.at\

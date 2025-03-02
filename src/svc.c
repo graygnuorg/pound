@@ -1,7 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- * Copyright (C) 2022-2024 Sergey Poznyakoff
+ * Copyright (C) 2022-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -558,7 +558,7 @@ str_be (char *buf, size_t size, BACKEND *be)
 }
 
 /*
- * Match the request obtained via PHTT against conditions from the service
+ * Match the request obtained via PHTTP against conditions from the service
  * SVC.  Return value:
  *
  *  0 request doesn't match or an error occurred;
@@ -1183,7 +1183,7 @@ static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
  * disabled field of a backend (instead of that of the backend itself) is
  * used throughout the code.  In particular, it is used in backend
  * serialization code below as well as in matrix backend manuipulations
- * (see resolver.c).
+ * (see dynbe.c).
  */
 static void
 cb_backend_disable (BACKEND *b, void *data)
@@ -1655,7 +1655,7 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
   BACKEND *be = data;
   char buf[MAXBUF];
 
-  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && be->refcount > 1)
+  if (ctl == job_ctl_run && be->be_type == BE_REGULAR && backend_referenced(be))
     {
       if (!be->v.reg.alive)
 	{

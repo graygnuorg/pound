@@ -1,6 +1,6 @@
 /*
  * Pound - the reverse-proxy load-balancer
- * Copyright (C) 2023-2024 Sergey Poznyakoff
+ * Copyright (C) 2023-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -488,7 +488,7 @@ strstr_compile (void *gp_data, const char *pattern, int pflags)
   fill_bad_char_delta (sp);
   fill_good_pfx_delta (sp);
   return 0;
-};
+}
 
 #define max(a,b) ((a)>(b)?(a):(b))
 

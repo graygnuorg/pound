@@ -1,7 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- * Copyright (C) 2018-2024 Sergey Poznyakoff
+ * Copyright (C) 2018-2025 Sergey Poznyakoff
  *
  * This file is part of Pound.
  *
@@ -558,7 +558,9 @@ typedef struct _backend
 
   /* Statistics */
   pthread_mutex_t mut;		/* mutex for this back-end */
+#ifdef ENABLE_DYNAMIC_BACKENDS
   unsigned long refcount;       /* reference counter */
+#endif
   double numreq;		/* number of requests seen */
   double avgtime;		/* Avg. time per request */
   double avgsqtime;             /* Avg. squared time per request */
@@ -697,7 +699,7 @@ typedef struct _service_cond
   {
     ACL *acl;
     GENPAT re;
-    struct bool_service_cond bool;
+    struct bool_service_cond boolean;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
@@ -719,8 +721,8 @@ service_cond_init (SERVICE_COND *cond, int type)
       break;
 
     case COND_BOOL:
-      cond->bool.op = BOOL_AND;
-      SLIST_INIT (&cond->bool.head);
+      cond->boolean.op = BOOL_AND;
+      SLIST_INIT (&cond->boolean.head);
       break;
     }
 }
@@ -1040,9 +1042,20 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 #ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
+static inline void
+backend_refcount_init (BACKEND *be)
+{
+  be->refcount = 1;
+}
+static inline int backend_referenced (BACKEND *be)
+{
+  return be->refcount > 1;
+}
 #else
 # define backend_ref(be)
 # define backend_unref(be)
+# define backend_refcount_init(be)
+# define backend_referenced(be) 1
 #endif
 
 void backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,

@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2022-2024 Sergey Poznyakoff
+# Copyright (C) 2022-2025 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -83,6 +83,8 @@ m4_include([or.at])
 m4_include([not.at])
 m4_include([fromfile.at])
 m4_include([basicauth.at])
+m4_include([acl.at])
+m4_include([nacl.at])
 
 AT_BANNER([Includes])
 m4_include([include.at])

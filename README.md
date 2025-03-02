@@ -122,16 +122,26 @@ generic configure options, refer to [Autoconf documentation](https://www.gnu.org
 Apart from the generic ones, there are also several *pound-specific*
 configuration options:
 
+* `--enable-dns-tests`
+
+  Enable tests of DNS-based [dynamic backends](#user-content-dynamic-backends).
+  The dynamic backends are enabled using the `--enable-dynamic-backends`
+  option (see below).  The corresponding tests involve the use of an
+  experimental pre-loaded library and are by default disabled.  Use this
+  option to enable them.  These tests also require a specific version of
+  `Net::DNS::Nameserver` module.  [See below](#user-content-testing), for
+  details.
+
 * `--enable-dynamic-backends` or `--disable-dynamic-backends`
 
-  Enable or disable support for DNS-based dynamic backends.  You will
+  Enable or disable support for DNS-based [dynamic backends](#user-content-dynamic-backends).  You will
   need the [GNU adns](http://www.gnu.org/software/adns) library to be able
   to use it.  On debian-based systems, it can be installed by
 
      ```sh
      apt-get install libadns1-dev
      ```
-     
+
   By default, dynamic backends are enabled whenever this library is
   present.
 
@@ -253,7 +263,7 @@ something like that (ellipsis indicating output omitted for brevity):
 ## -------------------------- ##
 ## pound 4.14 test suite.     ##
 ## -------------------------- ##
-  1: Configuration file syntax                       ok  
+  1: Configuration file syntax                       ok
   2: Traditional log levels (compilation)            ok
   3: Basic request processing                        ok
   4: Traditional log levels (output)                 ok

@@ -1,5 +1,5 @@
 /* This file is part of pound
- * Copyright (C) 2020-2024 Sergey Poznyakoff
+ * Copyright (C) 2020-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -14,6 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
+
+#include <stdarg.h>
 
 void *mem2nrealloc (void *p, size_t *pn, size_t s);
 void xnomem (void);

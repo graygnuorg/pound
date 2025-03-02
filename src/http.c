@@ -1,7 +1,7 @@
 /*
  * Pound - the reverse-proxy load-balancer
  * Copyright (C) 2002-2010 Apsis GmbH
- * Copyright (C) 2018-2024 Sergey Poznyakoff
+ * Copyright (C) 2018-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -1436,8 +1436,11 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	}
 
       if (buf[0])
-	logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
-		POUND_TID (), buf);
+	{
+	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
+		  POUND_TID (), buf);
+	  return HTTP_STATUS_BAD_REQUEST;
+	}
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
@@ -3170,9 +3173,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_BOOL:
-      if (cond->bool.op == BOOL_NOT)
+      if (cond->boolean.op == BOOL_NOT)
 	{
-	  subcond = SLIST_FIRST (&cond->bool.head);
+	  subcond = SLIST_FIRST (&cond->boolean.head);
 	  if ((r = match_cond (subcond, phttp, req)) == -1)
 	    res = -1;
 	  else
@@ -3180,12 +3183,12 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	}
       else
 	{
-	  SLIST_FOREACH (subcond, &cond->bool.head, next)
+	  SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	    {
 	      res = match_cond (subcond, phttp, req);
 	      if (res == -1)
 		break;
-	      if ((cond->bool.op == BOOL_AND) ? (res == 0) : (res == 1))
+	      if ((cond->boolean.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
 	}

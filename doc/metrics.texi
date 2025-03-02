@@ -1,5 +1,5 @@
 @c This file is part of the pound manual.
-@c Copyright (C) 2024 Sergey Poznyakoff
+@c Copyright (C) 2024--2025 Sergey Poznyakoff
 @c This file is distributed under GFDL 1.3 or any later version
 @c published by the Free Software Foundation.
 

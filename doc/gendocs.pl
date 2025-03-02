@@ -1,5 +1,5 @@
 # This file is part of GNU Pies.
-# Copyright (C) 2020-2023 Sergey Poznyakoff
+# Copyright (C) 2020-2025 Sergey Poznyakoff
 #
 # GNU Pies is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
