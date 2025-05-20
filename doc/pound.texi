@@ -2690,6 +2690,49 @@ This setting can be overridden for a particular listener using the
 @code{HeadOption} within it.
 @end deffn
 
+@deffn {Global directive} CombineHeaders
+HTTP protocol allows for certain headers to appear in the message
+multiple times.  Namely, multiple headers with the same header name  are 
+permitted if that header field is defined as a comma-separated list.
+
+The standard specifies that such fields can be combined in a single
+header line, by appending each subsequent field value to the combined
+field value in order, separated by a comma.
+
+The @code{CombineHeaders} statement declares names of the headers to
+which @command{pound} is to apply this operation.  Each header name
+should be listed on a separate line, enclosed in double-quotes.  The
+keyword @code{End} on a line by itself ends the statement.  E.g.:
+
+@example
+@group
+CombineHeaders
+    "Accept"
+    "Allow"
+    "Cache-Control"
+End
+@end group
+@end example
+
+The @code{include} statement (@pxref{File inclusion}) can be used in
+@code{CombineHeaders} statement.
+
+@findex mvh.inc
+@command{Pound} distribution includes file @file{mvh.inc},
+which declares all known multiple-value headers in a form suitable for
+inclusion to @file{pound.cfg}.  This file is installed in the package
+data directory, so that in order to use it, it suffices to add the
+following to the configuration file:
+
+@example
+@group
+CombineHeaders
+    Include "mvh.inc"
+End    
+@end group
+@end example
+@end deffn
+
 @node SSL Settings
 @subsection SSL Settings
 
