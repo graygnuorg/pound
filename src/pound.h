@@ -317,9 +317,9 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 #include "cfgparser.h"
 #include "cctype.h"
 
-char *field_list_locate (char const *subj,
-			 int (*pred) (char const *, size_t, void *),
-			 void *data, char **nextp);
+int field_list_filter (char const *subj, size_t len,
+		       int (*pred) (char const *, size_t, void *),
+		       void *data, char **endp);
 
 /* Header types */
 enum

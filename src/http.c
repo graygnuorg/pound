@@ -1852,55 +1852,58 @@ field_segment_len (char const *fstr, size_t flen)
 }
 
 /*
- * Find first occurrence of TOK in a comma-separated list of values SUBJ.
- * Use case-insensitive comparison unless CI is 0.  Ignore whitespace.
+ * Apply PRED to each non-empty element in comma-separated list of values HVAL.
+ * Continue until HLEN bytes have been processed or PRED returned non-0,
+ * whichever happens first.  Return the last value returned by PRED.
+ * If ENDP is not NULL, store there the pointer to the last element processed
+ * by PRED.
  *
- * Return pointer to the first occurrence of TOK, if found or NULL
- * otherwise.
- * Unless NEXTP is NULL, initialize it with the pointer to the next item in
- * SUBJ.
+ * The function is called as:
+ *
+ *       PRED(ELT, LEN, DATA)
+ *
+ * where ELT is a pointer to the list element with leading whitespace removed,
+ * LEN is its length (not counting trailing whitespace), and DATA is the DATA
+ * argument passed to field_list_filter.
  */
-char *
-field_list_locate (char const *subj,
+int
+field_list_filter (char const *hval, size_t hlen,
 		   int (*pred) (char const *, size_t, void *),
-		   void *data, char **nextp)
+		   void *data,
+		   char **endp)
 {
-  size_t subjlen = strlen (subj);
-  char *retval = NULL;
+  int retval = 0;
+  char *last = NULL;
 
   do
     {
-      size_t n = c_memspn (subj, CCTYPE_BLANK, subjlen);
-      subj += n;
-      subjlen -= n;
-      if (subjlen == 0)
+      size_t n = c_memspn (hval, CCTYPE_BLANK, hlen);
+      hval += n;
+      hlen -= n;
+      if (hlen == 0)
 	break;
-      n = field_segment_len (subj, subjlen);
+      n = field_segment_len (hval, hlen);
       if (n > 0)
 	{
 	  size_t i = n;
-	  char *p = c_trimws (subj, &i);
 
-	  subj += n;
-	  subjlen -= n;
+	  last = c_trimws (hval, &i);
 
-	  if (pred (p, i, data) == 0)
-	    retval = p;
+	  hval += n;
+	  hlen -= n;
+
+	  retval = pred (last, i, data);
 	}
-      if (subjlen > 0)
+      if (hlen > 0)
 	{
-	  subj++;
-	  subjlen--;
+	  hval++;
+	  hlen--;
 	}
     }
-  while (subjlen > 0 && retval == NULL);
+  while (hlen > 0 && retval == 0);
 
-  if (nextp)
-    {
-      *nextp = (char*) subj;
-      if (*subj)
-	*nextp += c_memspn (subj, CCTYPE_BLANK, subjlen);
-    }
+  if (endp)
+    *endp = last;
 
   return retval;
 }
@@ -1915,25 +1918,42 @@ static int
 field_token_cmp (char const *str, size_t len, void *data)
 {
   struct token_closure *cp = data;
-  return len != cp->toklen || strncmp (str, cp->token, len);
+  return len == cp->toklen && strncmp (str, cp->token, len) == 0;
 }
 
 static int
 field_token_casecmp (char const *str, size_t len, void *data)
 {
   struct token_closure *cp = data;
-  return len != cp->toklen && c_strncasecmp (str, cp->token, len);
+  return len == cp->toklen && c_strncasecmp (str, cp->token, len) == 0;
 }
 
 static char *
 cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
 {
   struct token_closure tc;
+  char *found;
+  size_t len = strlen(subj);
+
   tc.token = tok;
   tc.toklen = strlen (tok);
-  return field_list_locate (subj,
-			    ci ? field_token_casecmp : field_token_cmp,
-			    &tc, nextp);
+  if (field_list_filter (subj, len,
+			 ci ? field_token_casecmp : field_token_cmp,
+			 &tc, &found))
+    {
+      if (nextp)
+	{
+	  char *p = strchr (found + tc.toklen, ',');
+	  if (p)
+	    {
+	      p++;
+	      p += c_memspn (p, CCTYPE_BLANK, strlen (p));
+	    }
+	  *nextp = p;
+	}
+      return found;
+    }
+  return NULL;
 }
 
 static int
@@ -2663,6 +2683,7 @@ typedef struct
 {
   struct http_header *hdr;
   struct stringbuf sb;
+  int count;
 } COMPOSE_HEADER;
 
 static unsigned long
@@ -2726,39 +2747,15 @@ compose_header_finish (COMPOSE_HEADER *chdr, void *data)
   free (chdr);
 }
 
-/*
- * Append to SB the value of a list header HVAL, HLEN bytes long.
- * Take care to omit empty list elements, as per RFC 9110, 5.6.1.1.
- */
-static void
-stringbuf_compose_header_add (struct stringbuf *sb, char const *hval,
-			      size_t hlen, int first)
+static int
+compose_header_add (char const *str, size_t len, void *data)
 {
-  do
-    {
-      size_t n = c_memspn (hval, CCTYPE_BLANK, hlen);
-      hval += n;
-      hlen -= n;
-      if (hlen == 0)
-	break;
-      n = field_segment_len (hval, hlen);
-      if (n > 0)
-	{
-	  if (first)
-	    first = 0;
-	  else
-	    stringbuf_add (sb, ", ", 2);
-	  stringbuf_add (sb, hval, n);
-	  hval += n;
-	  hlen -= n;
-	}
-      if (hlen)
-	{
-	  hval++;
-	  hlen--;
-	}
-    }
-  while (hlen > 0);
+  COMPOSE_HEADER *comp = data;
+  if (comp->count > 0)
+    stringbuf_add (&comp->sb, ", ", 2);
+  stringbuf_add (&comp->sb, str, len);
+  comp->count++;
+  return 0;
 }
 
 static int
@@ -2847,10 +2844,10 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 	      key.hdr = hdr;
 	      if ((comp = COMPOSE_HEADER_RETRIEVE (chash, &key)) != NULL)
 		{
-		  stringbuf_compose_header_add (&comp->sb,
-						hdr->header + hdr->val_start,
-						hdr->val_end - hdr->val_start,
-						0);
+		  field_list_filter (hdr->header + hdr->val_start,
+				     hdr->val_end - hdr->val_start,
+				     compose_header_add,
+				     comp, NULL);
 		  http_header_free (hdr);
 		  if (stringbuf_err (&comp->sb))
 		    {
@@ -2870,14 +2867,15 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 		      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 		    }
 		  comp->hdr = hdr;
+		  comp->count = 0;
 		  stringbuf_init_log (&comp->sb);
 		  stringbuf_add (&comp->sb, http_header_name_ptr (hdr),
 				 http_header_name_len (hdr));
 		  stringbuf_add (&comp->sb, ": ", 2);
-		  stringbuf_compose_header_add (&comp->sb,
-						hdr->header + hdr->val_start,
-						hdr->val_end - hdr->val_start,
-						1);
+		  field_list_filter (hdr->header + hdr->val_start,
+				     hdr->val_end - hdr->val_start,
+				     compose_header_add,
+				     comp, NULL);
 		  if (stringbuf_err (&comp->sb))
 		    {
 		      http_request_free (req);
@@ -4802,7 +4800,7 @@ do_http (POUND_HTTP *phttp)
 		  char *next;
 		  if (cs_locate_token (val, "chunked", 1, &next))
 		    {
-		      if (*next)
+		      if (next)
 			{
 			  /*
 			   * When the "chunked" transfer-coding is used,
