@@ -201,11 +201,11 @@ scan_forwarded_header (char const *hdr, ACL *acl)
       j = 0;
       if (*p == ',')
 	j++;
-      while (j < len && isspace (p[j]))
+      while (j < len && c_isspace (p[j]))
 	j++;
       while (j < len)
 	{
-	  if (isspace (p[j]))
+	  if (c_isspace (p[j]))
 	    break;
 	  buf[i++] = p[j++];
 	}

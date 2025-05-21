@@ -545,9 +545,9 @@ parse_acl (ACL *acl)
 	continue;
       if (tok->type == T_IDENT)
 	{
-	  if (strcasecmp (tok->str, "end") == 0)
+	  if (c_strcasecmp (tok->str, "end") == 0)
 	    break;
-	  if (strcasecmp (tok->str, "include") == 0)
+	  if (c_strcasecmp (tok->str, "include") == 0)
 	    {
 	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
 		return rc;
@@ -1887,9 +1887,9 @@ parse_match (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   if (tok->type == T_IDENT)
     {
-      if (strcasecmp (tok->str, "and") == 0)
+      if (c_strcasecmp (tok->str, "and") == 0)
 	op = BOOL_AND;
-      else if (strcasecmp (tok->str, "or") == 0)
+      else if (c_strcasecmp (tok->str, "or") == 0)
 	op = BOOL_OR;
       else
 	{
@@ -2349,12 +2349,12 @@ parse_rewrite (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   if (tok->type == T_IDENT)
     {
-      if (strcasecmp (tok->str, "response") == 0)
+      if (c_strcasecmp (tok->str, "response") == 0)
 	{
 	  table = response_rewrite_rule_parsetab;
 	  head = &rw[REWRITE_RESPONSE];
 	}
-      else if (strcasecmp (tok->str, "request") == 0)
+      else if (c_strcasecmp (tok->str, "request") == 0)
 	{
 	  table = rewrite_rule_parsetab;
 	  head = &rw[REWRITE_REQUEST];
@@ -2430,9 +2430,9 @@ parse_balancer (void *call_data, void *section_data)
 
   if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
     return CFGPARSER_FAIL;
-  if (strcasecmp (tok->str, "random") == 0)
+  if (c_strcasecmp (tok->str, "random") == 0)
     *t = BALANCER_ALGO_RANDOM;
-  else if (strcasecmp (tok->str, "iwrr") == 0)
+  else if (c_strcasecmp (tok->str, "iwrr") == 0)
     *t = BALANCER_ALGO_IWRR;
   else
     {
@@ -2465,7 +2465,7 @@ parse_log_suppress (void *call_data, void *section_data)
 
   do
     {
-      if (strlen (tok->str) == 1 && isdigit (tok->str[0]))
+      if (strlen (tok->str) == 1 && c_isdigit (tok->str[0]))
 	{
 	  n = tok->str[0] - '0';
 	  if (n <= 0 || n >= sizeof (status_table) / sizeof (status_table[0]))
@@ -3001,11 +3001,11 @@ parse_header_options (void *call_data, void *section_data)
 	}
 
       name = tok->str;
-      if (strcasecmp (name, "none") == 0)
+      if (c_strcasecmp (name, "none") == 0)
 	*opt = 0;
       else
 	{
-	  if (strncasecmp (name, "no-", 3) == 0)
+	  if (c_strncasecmp (name, "no-", 3) == 0)
 	    {
 	      neg = 1;
 	      name += 3;
@@ -4351,9 +4351,9 @@ parse_combine_headers (void *call_data, void *section_data)
 	continue;
       if (tok->type == T_IDENT)
 	{
-	  if (strcasecmp (tok->str, "end") == 0)
+	  if (c_strcasecmp (tok->str, "end") == 0)
 	    break;
-	  if (strcasecmp (tok->str, "include") == 0)
+	  if (c_strcasecmp (tok->str, "include") == 0)
 	    {
 	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
 		return rc;
@@ -4700,7 +4700,7 @@ str_is_ipv4 (const char *addr)
 	    return 0;
 	  digit_count = 0;
 	}
-      else if (!(isdigit (c) && ++digit_count <= 3))
+      else if (!(c_isdigit (c) && ++digit_count <= 3))
 	return 0;
     }
 
@@ -4717,9 +4717,9 @@ str_is_ipv6 (const char *addr)
 
   for (; (c = *addr) != 0; addr++)
     {
-      if (!isascii (c))
+      if (!c_isascii (c))
 	return 0;
-      else if (isxdigit (c))
+      else if (c_isxdigit (c))
 	{
 	  if (++dig_count > 4)
 	    return 0;
@@ -4743,15 +4743,15 @@ str_is_ip (const char *addr)
 {
   int c;
   int dot = 0;
-  for (; (c = *addr) != 0 && isascii (c); addr++)
+  for (; (c = *addr) != 0 && c_isascii (c); addr++)
     {
-      if (!isascii (c))
+      if (!c_isascii (c))
 	break;
-      else if (isxdigit (c))
+      else if (c_isxdigit (c))
 	return str_is_ipv6 (addr);
       else if (c == dot)
 	return str_is_ipv4 (addr);
-      else if (isdigit (c))
+      else if (c_isdigit (c))
 	dot = '.';
       else
 	break;

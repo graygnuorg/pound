@@ -42,7 +42,6 @@
 #include <grp.h>
 #include <syslog.h>
 #include <signal.h>
-#include <ctype.h>
 #include <errno.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -316,6 +315,11 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 #include "list.h"
 /* Configuration parser */
 #include "cfgparser.h"
+#include "cctype.h"
+
+char *field_list_locate (char const *subj,
+			 int (*pred) (char const *, size_t, void *),
+			 void *data, char **nextp);
 
 /* Header types */
 enum

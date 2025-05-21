@@ -922,9 +922,9 @@ find_backend_by_header (SERVICE *svc,
 static int
 key_authbasic (char const *hval, char const *sid, char *ret_key)
 {
-  if (strncasecmp (hval, "Basic", 5) == 0 && isspace (hval[5]))
+  if (c_strncasecmp (hval, "Basic", 5) == 0 && c_isspace (hval[5]))
     {
-      for (hval += 6; *hval && isspace (*hval); hval++)
+      for (hval += 6; *hval && c_isspace (*hval); hval++)
 	;
       strncpy (ret_key, hval, KEY_SIZE);
       ret_key[KEY_SIZE] = 0;

@@ -47,6 +47,8 @@ endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = \
+ cctype.c\
+ cctype.h\
  cfgparser.c\
  cfgparser.h\
  json.c\

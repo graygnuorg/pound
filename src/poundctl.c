@@ -264,7 +264,7 @@ find_keyword (int kwtab, char const *arg, size_t len)
 {
   struct keyword *kw;
   for (kw = keywords[kwtab]; kw->name; kw++)
-    if (strncasecmp (kw->name, arg, len) == 0)
+    if (c_strncasecmp (kw->name, arg, len) == 0)
       return kw->flag;
   return -1;
 }
@@ -299,16 +299,17 @@ get_socket_name (void)
       len = strlen (buf);
       if (len == 0)
 	continue;
-      if (buf[len-1] != '\n')
+      if (buf[len-1] == '\n')
+	--len;
+      else
 	{
 	  errormsg (0, 0, "%s:%d: line too long", conf_name, line);
 	  break;
 	}
-      while (len > 0 && isspace (buf[len-1]))
-	--len;
+      len = c_trimrws (buf, len);
       buf[len] = 0;
 
-      for (p = buf; *p && isspace (*p); p++)
+      for (p = buf; *p && c_isspace (*p); p++)
 	;
 
       if (*p == 0 || *p == '#')
@@ -322,7 +323,7 @@ get_socket_name (void)
 	  break;
 
 	case 1:
-	  for (p += len; *p && isspace (*p); p++)
+	  for (p += len; *p && c_isspace (*p); p++)
 	    ;
 	  if (*p == '"')
 	    {
@@ -685,10 +686,10 @@ read_response_line (BIO *bio, char *ret_status, size_t size, int *ret_version)
   if (ver != 0 && ver != 1)
     goto err;
   p = buf + 8;
-  if (!isspace (*p))
+  if (!c_isspace (*p))
     goto err;
 
-  while (isspace (*p))
+  while (c_isspace (*p))
     {
       if (!*p)
 	goto err;
@@ -729,7 +730,7 @@ read_response (BIO *bio)
   static char h_##n[] = v;				\
   static size_t l_##n = sizeof (h_##n) - 1
 #define HDREQ(n, s)				\
-  (strncasecmp (s, h_##n, l_##n) == 0 && s[l_##n] == ':')
+  (c_strncasecmp (s, h_##n, l_##n) == 0 && s[l_##n] == ':')
 #define HDRVAL(n, s)				\
   (s + l_##n + 1)
 
@@ -771,7 +772,7 @@ read_response (BIO *bio)
 	{
 	  p = HDRVAL (connection, buf);
 	  p += strspn (p, " \t");
-	  conn_close = strcasecmp (p, "close") == 0;
+	  conn_close = c_strcasecmp (p, "close") == 0;
 	}
     }
 

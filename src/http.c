@@ -236,20 +236,6 @@ http_err_reply (POUND_HTTP *phttp, int err)
   phttp->conn_closed = 1;
 }
 
-static inline int
-isws (int c)
-{
-  return c == ' ' || c == '\t';
-}
-
-static char const *
-trimwsl (char const *s)
-{
-  while (*s && isws (*s))
-    s++;
-  return s;
-}
-
 static int
 submatch_realloc (struct submatch *sm, GENPAT re)
 {
@@ -476,17 +462,10 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
   size_t arglen = 0;
   size_t i;
 
-  while (len && isws (*input))
-    {
-      input++;
-      len--;
-    }
+  input = c_trimlws (input, &len);
   if (len == 0)
     return NULL;
-
-  for (i = 0; i < len; i++)
-    if (isws (input[i]))
-      break;
+  i = c_memcspn (input, CCTYPE_BLANK, len);
 
   for (ap = accessors; ; ap++)
     {
@@ -498,31 +477,20 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
 
   if (ap->arg)
     {
-      if (!isspace (input[i]))
+      if (!c_isblank (input[i]))
 	return NULL;
-
-      do
-	{
-	  i++;
-	  if (i == len)
-	    return NULL;
-	}
-      while (isspace (input[i]));
+      i += c_memspn (input + i, CCTYPE_BLANK, len - i);
 
       arg = input + i;
       arglen = len - i;
 
-      do
-	{
-	  if (arglen == 0)
-	    return NULL;
-	}
-      while (isspace (arg[arglen-1]));
+      arglen = c_trimrws (arg, arglen);
+      if (arglen == 0)
+	return NULL;
     }
   else
     {
-      while (i < len && isspace(input[i]))
-	i++;
+      i += c_memspn (input + i, CCTYPE_BLANK, len - i);
       if (i < len)
 	return NULL;
       arg = NULL;
@@ -572,7 +540,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  stringbuf_add_char (sb, str[0]);
 	  str += 2;
 	}
-      else if (str[0] == '%' && isxdigit (str[1]) && isxdigit (str[2]))
+      else if (str[0] == '%' && c_isxdigit (str[1]) && c_isxdigit (str[2]))
 	{
 	  stringbuf_add (sb, str, 3);
 	  str += 3;
@@ -612,7 +580,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 
 	  str = q + 1;
 	}
-      else if ((brace = (str[1] == '{')) || isdigit (str[1]))
+      else if ((brace = (str[1] == '{')) || c_isdigit (str[1]))
 	{
 	  long groupno;
 	  errno = 0;
@@ -841,7 +809,7 @@ redirect_response (POUND_HTTP *phttp)
   stringbuf_init_log (&sb_url);
   for (i = 0; xurl[i]; i++)
     {
-      if (isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
+      if (c_isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
 	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?'
 	  || xurl[i] == '&' || xurl[i] == ';' || xurl[i] == '-'
 	  || xurl[i] == '=')
@@ -1201,7 +1169,7 @@ get_line (BIO *in, char *const buf, int bufsize)
 	      }
 	  }
 
-	if (!iscntrl (tmp) || tmp == '\t')
+	if (!c_iscntrl (tmp) || tmp == '\t')
 	  {
 	    buf[i] = tmp;
 	    continue;
@@ -1330,11 +1298,11 @@ get_content_length (char const *arg, int mode)
   CONTENT_LENGTH n;
 
   if (mode == CL_HEADER)
-    arg = trimwsl (arg);
+    arg = c_trimlws (arg, NULL);
 
   if (strtoclen (arg, mode == CL_HEADER ? 10 : 16, &n, &p))
     return NO_CONTENT_LENGTH;
-  p = (char*) trimwsl (p);
+  p = (char*) c_trimlws (p, NULL);
   if (*p)
     {
       if (!(mode == CL_CHUNK && *p == ';'))
@@ -1440,7 +1408,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 	  logmsg (LOG_NOTICE, "(%"PRItid") unexpected after chunk \"%s\"",
 		  POUND_TID (), buf);
 	  return HTTP_STATUS_BAD_REQUEST;
-	}    
+	}
       if (!no_write)
 	if (BIO_printf (be, "%s\r\n", buf) <= 0)
 	  {
@@ -1715,7 +1683,7 @@ find_method (const char *str, int len)
 
   for (m = methods; m->name; m++)
     {
-      if (len == m->length && strncasecmp (m->name, str, m->length) == 0)
+      if (len == m->length && c_strncasecmp (m->name, str, m->length) == 0)
 	return m;
     }
   return NULL;
@@ -1770,7 +1738,7 @@ strhash_ci (const char *c, size_t len)
   n = 0x100;
   while (len--)
     {
-      v = n | tolower (*c);
+      v = n | c_tolower (*c);
       n += 0x100;
       r = (int)((v >> 2) ^ v) & 0x0f;
       /* cast to uint64_t to avoid 32 bit shift of 32 bit value */
@@ -1791,7 +1759,7 @@ HEADER_NAME_hash (const HEADER_NAME *hname)
 static int
 HEADER_NAME_cmp (const HEADER_NAME *a, const HEADER_NAME *b)
 {
-  return a->len != b->len || strncasecmp (a->name, b->name, a->len);
+  return a->len != b->len || c_strncasecmp (a->name, b->name, a->len);
 }
 
 #define HT_TYPE HEADER_NAME
@@ -1838,6 +1806,52 @@ is_combinable_header (struct http_header *hdr)
 }
 
 /*
+ * Return length of the quoted string beginning at FSTR[0], scanning at
+ * most FLEN bytes.  The returned length includes both initial and closing
+ * double-quote (if such is present).
+ */
+size_t
+field_string_len (char const *fstr, size_t flen)
+{
+  size_t i;
+  for (i = 1; i < flen; i++)
+    {
+      if (fstr[i] == '"')
+	{
+	  i++;
+	  break;
+	}
+      else if (fstr[i] == '\\')
+	{
+	  i++;
+	  if (i == flen)
+	    break;
+	}
+    }
+  return i;
+}
+
+/*
+ * Return length of the initial segment of FSTR ending with an unquoted ','.
+ * Scan at most FLEN bytes.
+ */
+size_t
+field_segment_len (char const *fstr, size_t flen)
+{
+  size_t i;
+  for (i = 0; i < flen; )
+    {
+      if (fstr[i] == ',')
+	break;
+      else if (fstr[i] == '"')
+	i += field_string_len (fstr, flen);
+      else
+	i++;
+    }
+  return i;
+}
+
+/*
  * Find first occurrence of TOK in a comma-separated list of values SUBJ.
  * Use case-insensitive comparison unless CI is 0.  Ignore whitespace.
  *
@@ -1846,36 +1860,80 @@ is_combinable_header (struct http_header *hdr)
  * Unless NEXTP is NULL, initialize it with the pointer to the next item in
  * SUBJ.
  */
+char *
+field_list_locate (char const *subj,
+		   int (*pred) (char const *, size_t, void *),
+		   void *data, char **nextp)
+{
+  size_t subjlen = strlen (subj);
+  char *retval = NULL;
+
+  do
+    {
+      size_t n = c_memspn (subj, CCTYPE_BLANK, subjlen);
+      subj += n;
+      subjlen -= n;
+      if (subjlen == 0)
+	break;
+      n = field_segment_len (subj, subjlen);
+      if (n > 0)
+	{
+	  size_t i = n;
+	  char *p = c_trimws (subj, &i);
+
+	  subj += n;
+	  subjlen -= n;
+
+	  if (pred (p, i, data) == 0)
+	    retval = p;
+	}
+      if (subjlen > 0)
+	{
+	  subj++;
+	  subjlen--;
+	}
+    }
+  while (subjlen > 0 && retval == NULL);
+
+  if (nextp)
+    {
+      *nextp = (char*) subj;
+      if (*subj)
+	*nextp += c_memspn (subj, CCTYPE_BLANK, subjlen);
+    }
+
+  return retval;
+}
+
+struct token_closure
+{
+  char const *token;
+  size_t toklen;
+};
+
+static int
+field_token_cmp (char const *str, size_t len, void *data)
+{
+  struct token_closure *cp = data;
+  return len != cp->toklen || strncmp (str, cp->token, len);
+}
+
+static int
+field_token_casecmp (char const *str, size_t len, void *data)
+{
+  struct token_closure *cp = data;
+  return len != cp->toklen && c_strncasecmp (str, cp->token, len);
+}
+
 static char *
 cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
 {
-  size_t toklen = strlen (tok);
-  char const *next = NULL;
-
-  while (*subj)
-    {
-      size_t i, len;
-
-      while (*subj && isspace (*subj))
-	subj++;
-      if (!*subj)
-	return NULL;
-      len = strcspn (subj, ",");
-      for (i = len; i > 0; i--)
-	if (!isspace (subj[i-1]))
-	  break;
-      next = subj + len;
-      if (*next)
-	next++;
-      if (i == toklen && (ci ? strncasecmp : strncmp) (subj, tok, i) == 0)
-	break;
-      subj = next;
-    }
-
-  if (nextp)
-    *nextp = (char*) next;
-
-  return *subj != 0 ? (char*) subj : NULL;
+  struct token_closure tc;
+  tc.token = tok;
+  tc.toklen = strlen (tok);
+  return field_list_locate (subj,
+			    ci ? field_token_casecmp : field_token_cmp,
+			    &tc, nextp);
 }
 
 static int
@@ -1914,8 +1972,9 @@ qualify_header (struct http_header *hdr)
       hdr->val_end = matches[2].rm_eo;
       for (i = 0; hd_types[i].len > 0; i++)
 	if ((matches[1].rm_eo - matches[1].rm_so) == hd_types[i].len
-	    && strncasecmp (hdr->header + matches[1].rm_so, hd_types[i].header,
-			    hd_types[i].len) == 0)
+	    && c_strncasecmp (hdr->header + matches[1].rm_so,
+			      hd_types[i].header,
+			      hd_types[i].len) == 0)
 	  {
 	    return hdr->code = hd_types[i].val;
 	  }
@@ -2037,7 +2096,7 @@ http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name,
   DLIST_FOREACH (hdr, head, link)
     {
       if (http_header_name_len (hdr) == len &&
-	  strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
+	  c_strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
 	return hdr;
     }
   return NULL;
@@ -2052,7 +2111,7 @@ http_header_list_next (struct http_header *hdr)
   while ((hdr = DLIST_NEXT (hdr, link)) != NULL)
     {
       if (http_header_name_len (hdr) == len &&
-	  strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
+	  c_strncasecmp (http_header_name_ptr (hdr), name, len) == 0)
 	return hdr;
     }
   return NULL;
@@ -2093,7 +2152,7 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 			       hdr->val_end - hdr->name_start);
 		stringbuf_add_char (&sb, ',');
 		val = text + hdr->name_end + 1;
-		if (!isspace (*val))
+		if (!c_isspace (*val))
 		  stringbuf_add_char (&sb, ' ');
 		stringbuf_add_string (&sb, val);
 		val = stringbuf_finish (&sb);
@@ -2619,8 +2678,8 @@ COMPOSE_HEADER_cmp (const COMPOSE_HEADER *a, const COMPOSE_HEADER *b)
   size_t alen, blen;
   alen = http_header_name_len (a->hdr);
   blen = http_header_name_len (b->hdr);
-  return alen != blen || strncasecmp (http_header_name_ptr (a->hdr),
-				      http_header_name_ptr (b->hdr), alen);
+  return alen != blen || c_strncasecmp (http_header_name_ptr (a->hdr),
+					http_header_name_ptr (b->hdr), alen);
 }
 
 #define HT_TYPE COMPOSE_HEADER
@@ -2668,64 +2727,6 @@ compose_header_finish (COMPOSE_HEADER *chdr, void *data)
 }
 
 /*
- * Return length of the initial whitespace segment in first FLEN bytes of
- * FSTR.
- */
-static size_t
-field_lws_len (char const *fstr, size_t flen)
-{
-  size_t i;
-  for (i = 0; i < flen && isspace (fstr[i]); i++);
-  return i;
-}
-
-/*
- * Return length of the quoted string beginning at FSTR[0], scanning at
- * most FLEN bytes.  The returned length includes both initial and closing
- * double-quote (if such is present).
- */
-size_t
-field_string_len (char const *fstr, size_t flen)
-{
-  size_t i;
-  for (i = 1; i < flen; i++)
-    {
-      if (fstr[i] == '"')
-	{
-	  i++;
-	  break;
-	}
-      else if (fstr[i] == '\\')
-	{
-	  i++;
-	  if (i == flen)
-	    break;
-	}
-    }
-  return i;
-}
-
-/*
- * Return length of the initial segment of FSTR ending with an unquoted ','.
- * Scan at most FLEN bytes.
- */
-size_t
-field_segment_len (char const *fstr, size_t flen)
-{
-  size_t i;
-  for (i = 0; i < flen; )
-    {
-      if (fstr[i] == ',')
-	break;
-      else if (fstr[i] == '"')
-	i += field_string_len (fstr, flen);
-      else
-	i++;
-    }
-  return i;
-}
-
-/*
  * Append to SB the value of a list header HVAL, HLEN bytes long.
  * Take care to omit empty list elements, as per RFC 9110, 5.6.1.1.
  */
@@ -2735,7 +2736,7 @@ stringbuf_compose_header_add (struct stringbuf *sb, char const *hval,
 {
   do
     {
-      size_t n = field_lws_len (hval, hlen);
+      size_t n = c_memspn (hval, CCTYPE_BLANK, hlen);
       hval += n;
       hlen -= n;
       if (hlen == 0)
@@ -2750,11 +2751,12 @@ stringbuf_compose_header_add (struct stringbuf *sb, char const *hval,
 	  stringbuf_add (sb, hval, n);
 	  hval += n;
 	  hlen -= n;
-	  if (hlen == 0)
-	    break;
 	}
-      hval++;
-      hlen--;
+      if (hlen)
+	{
+	  hval++;
+	  hlen--;
+	}
     }
   while (hlen > 0);
 }
@@ -2926,12 +2928,11 @@ get_basic_auth (char const *hdrval, char **u_name, char **u_pass)
   char buf[MAXBUF], *q;
   int rc;
 
-  if (strncasecmp (hdrval, "Basic", 5))
+  if (c_strncasecmp (hdrval, "Basic", 5))
     return 1;
 
   hdrval += 5;
-  while (*hdrval && isspace (*hdrval))
-    hdrval++;
+  hdrval += c_memspn (hdrval, CCTYPE_BLANK, strlen (hdrval));
 
   len = strlen (hdrval);
   if (*hdrval == '"')
@@ -2939,8 +2940,7 @@ get_basic_auth (char const *hdrval, char **u_name, char **u_pass)
       hdrval++;
       len--;
 
-      while (len > 0 && isspace (hdrval[len-1]))
-	len--;
+      len = c_trimrws (hdrval, len);
 
       if (len == 0 || hdrval[len] != '"')
 	return 1;
@@ -3375,7 +3375,7 @@ set_header_from_bio (BIO *bio, struct http_request *req,
   if ((rc = get_line (bio, buf, sizeof (buf))) == COPY_OK)
     {
       stringbuf_reset (sb);
-      stringbuf_printf (sb, "%s: %s", hdr, trimwsl (buf));
+      stringbuf_printf (sb, "%s: %s", hdr, c_trimlws (buf, NULL));
       if ((str = stringbuf_finish (sb)) == NULL
 	  || http_header_list_append (&req->headers, str, H_REPLACE))
 	{
@@ -3727,11 +3727,11 @@ http_response_validate (struct http_request *req)
 
   if (!(strncmp (str, "HTTP/1.", 7) == 0 &&
 	((http_ver = str[7]) == '0' || http_ver == '1') &&
-	isws (str[8])))
+	c_isblank (str[8])))
     return 0;
   req->version = http_ver - '0';
 
-  str = trimwsl (str + 8);
+  str = c_trimlws (str + 8, NULL);
 
   switch (str[0])
     {
@@ -3740,7 +3740,7 @@ http_response_validate (struct http_request *req)
     case '3':
     case '4':
     case '5':
-      if (isdigit (str[1]) && isdigit (str[2]) && (str[3] == 0 || isws (str[3])))
+      if (c_isdigit (str[1]) && c_isdigit (str[2]) && (str[3] == 0 || c_isblank (str[3])))
 	return (int) strtol (str, NULL, 10);
     }
 
@@ -3830,7 +3830,7 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_CONNECTION:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (!strcasecmp ("close", val))
+	      if (!c_strcasecmp ("close", val))
 		phttp->conn_closed = 1;
 	      /*
 	       * Connection: upgrade
@@ -4854,7 +4854,7 @@ do_http (POUND_HTTP *phttp)
 	       */
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (!strcasecmp ("100-continue", val))
+	      if (!c_strcasecmp ("100-continue", val))
 		{
 		  http_header_list_remove (&phttp->request.headers, hdr);
 		}

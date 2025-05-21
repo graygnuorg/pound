@@ -21,7 +21,6 @@
 #include <assert.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -33,6 +32,7 @@
 #include "list.h"
 #include "mem.h"
 #include "cfgparser.h"
+#include "cctype.h"
 
 extern char const *progname;
 
@@ -76,13 +76,13 @@ token_type_str (unsigned type)
       return "'\"'";
     }
 
-  if (isprint (type))
+  if (c_isprint (type))
     {
       buf[0] = buf[2] = '\'';
       buf[1] = type;
       buf[3] = 0;
     }
-  else if (iscntrl (type))
+  else if (c_iscntrl (type))
     {
       buf[0] = '^';
       buf[1] = type ^ 0100;
@@ -147,7 +147,7 @@ int
 kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval)
 {
   for (; kwt->name; kwt++)
-    if ((ci ? strcasecmp : strcmp) (kwt->name, name) == 0)
+    if ((ci ? c_strcasecmp : strcmp) (kwt->name, name) == 0)
       {
 	*retval = kwt->tok;
 	return 0;
@@ -579,8 +579,8 @@ input_ungetc (struct cfginput *input, int c)
     }
 }
 
-#define is_ident_start(c) (isalpha (c) || c == '_')
-#define is_ident_cont(c) (is_ident_start (c) || isdigit (c))
+#define is_ident_start(c) (c_isalpha (c) || c == '_')
+#define is_ident_cont(c) (is_ident_start (c) || c_isdigit (c))
 
 int
 input_gettkn (struct cfginput *input, struct token **tok)
@@ -632,7 +632,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	  break;
 	}
 
-      if (isspace (c))
+      if (c_isspace (c))
 	continue;
 
       input->token.locus.beg = input->locus;
@@ -677,7 +677,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	      stringbuf_add_char (&input->buf, c);
 	    }
 	  while ((c = input_getc (input)) != EOF && is_ident_cont (c));
-	  if (c == EOF || isspace (c))
+	  if (c == EOF || c_isspace (c))
 	    {
 	      input_ungetc (input, c);
 	      input->token.type = T_IDENT;
@@ -687,7 +687,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	  /* It is a literal */
 	}
 
-      if (isdigit (c))
+      if (c_isdigit (c))
 	input->token.type = T_NUMBER;
       else
 	input->token.type = T_LITERAL;
@@ -695,10 +695,10 @@ input_gettkn (struct cfginput *input, struct token **tok)
       do
 	{
 	  stringbuf_add_char (&input->buf, c);
-	  if (!isdigit (c))
+	  if (!c_isdigit (c))
 	    input->token.type = T_LITERAL;
 	}
-      while ((c = input_getc (input)) != EOF && !isspace (c));
+      while ((c = input_getc (input)) != EOF && !c_isspace (c));
 
       input_ungetc (input, c);
       input->token.str = stringbuf_finish (&input->buf);
@@ -907,19 +907,9 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 	    }
 
 	  len = linelen = end - line;
-	  while (len > 0 && isspace (*line))
-	    {
-	      line++;
-	      len--;
-	    }
-	  
-	  while (len > 0 && isspace (end[-1]))
-	    {
-	      end--;
-	      len--;
-	    }
+	  line = c_trimws (line, &len);
 
-	  if (len == 3 && strncasecmp (line, "end", 3) == 0)
+	  if (len == 3 && c_strncasecmp (line, "end", 3) == 0)
 	    {
 	      stringbuf_truncate (&input->buf, stringbuf_len (&input->buf) -
 				  linelen);
@@ -966,7 +956,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
 	      return result;
 	    }
 	}
-      else if (strcasecmp (p->name, name) == 0)
+      else if (c_strcasecmp (p->name, name) == 0)
 	{
 	  *ref = p;
 	  if (p->type == KWT_ALIAS)
