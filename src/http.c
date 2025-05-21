@@ -1915,13 +1915,6 @@ struct token_closure
 };
 
 static int
-field_token_cmp (char const *str, size_t len, void *data)
-{
-  struct token_closure *cp = data;
-  return len == cp->toklen && strncmp (str, cp->token, len) == 0;
-}
-
-static int
 field_token_casecmp (char const *str, size_t len, void *data)
 {
   struct token_closure *cp = data;
@@ -1929,7 +1922,7 @@ field_token_casecmp (char const *str, size_t len, void *data)
 }
 
 static char *
-cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
+cs_locate_token (char const *subj, char const *tok, char **nextp)
 {
   struct token_closure tc;
   char *found;
@@ -1937,8 +1930,7 @@ cs_locate_token (char const *subj, char const *tok, int ci, char **nextp)
 
   tc.token = tok;
   tc.toklen = strlen (tok);
-  if (field_list_filter (subj, len,
-			 ci ? field_token_casecmp : field_token_cmp,
+  if (field_list_filter (subj, len, field_token_casecmp,
 			 &tc, &found))
     {
       if (nextp)
@@ -3840,14 +3832,14 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_UPGRADE:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (cs_locate_token (val, "websocket", 1, NULL))
+	      if (cs_locate_token (val, "websocket", NULL))
 		phttp->ws_state |= WSS_RESP_HEADER_UPGRADE_WEBSOCKET;
 	      break;
 
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (cs_locate_token (val, "chunked", 1, NULL))
+	      if (cs_locate_token (val, "chunked", NULL))
 		{
 		  chunked = 1;
 		  phttp->no_cont = 0;
@@ -4769,7 +4761,7 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_CONNECTION:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (cs_locate_token (val, "close", 1, NULL))
+	      if (cs_locate_token (val, "close", NULL))
 		phttp->conn_closed = 1;
 	      /*
 	       * Connection: upgrade
@@ -4781,7 +4773,7 @@ do_http (POUND_HTTP *phttp)
 	    case HEADER_UPGRADE:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		goto err;
-	      if (cs_locate_token (val, "websocket", 1, NULL))
+	      if (cs_locate_token (val, "websocket", NULL))
 		phttp->ws_state |= WSS_REQ_HEADER_UPGRADE_WEBSOCKET;
 	      break;
 
@@ -4798,7 +4790,7 @@ do_http (POUND_HTTP *phttp)
 	      else
 		{
 		  char *next;
-		  if (cs_locate_token (val, "chunked", 1, &next))
+		  if (cs_locate_token (val, "chunked", &next))
 		    {
 		      if (next)
 			{
