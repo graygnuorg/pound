@@ -2667,6 +2667,98 @@ compose_header_finish (COMPOSE_HEADER *chdr, void *data)
   free (chdr);
 }
 
+/*
+ * Return length of the initial whitespace segment in first FLEN bytes of
+ * FSTR.
+ */
+static size_t
+field_lws_len (char const *fstr, size_t flen)
+{
+  size_t i;
+  for (i = 0; i < flen && isspace (fstr[i]); i++);
+  return i;
+}
+
+/*
+ * Return length of the quoted string beginning at FSTR[0], scanning at
+ * most FLEN bytes.  The returned length includes both initial and closing
+ * double-quote (if such is present).
+ */
+size_t
+field_string_len (char const *fstr, size_t flen)
+{
+  size_t i;
+  for (i = 1; i < flen; i++)
+    {
+      if (fstr[i] == '"')
+	{
+	  i++;
+	  break;
+	}
+      else if (fstr[i] == '\\')
+	{
+	  i++;
+	  if (i == flen)
+	    break;
+	}
+    }
+  return i;
+}
+
+/*
+ * Return length of the initial segment of FSTR ending with an unquoted ','.
+ * Scan at most FLEN bytes.
+ */
+size_t
+field_segment_len (char const *fstr, size_t flen)
+{
+  size_t i;
+  for (i = 0; i < flen; )
+    {
+      if (fstr[i] == ',')
+	break;
+      else if (fstr[i] == '"')
+	i += field_string_len (fstr, flen);
+      else
+	i++;
+    }
+  return i;
+}
+
+/*
+ * Append to SB the value of a list header HVAL, HLEN bytes long.
+ * Take care to omit empty list elements, as per RFC 9110, 5.6.1.1.
+ */
+static void
+stringbuf_compose_header_add (struct stringbuf *sb, char const *hval,
+			      size_t hlen, int first)
+{
+  do
+    {
+      size_t n = field_lws_len (hval, hlen);
+      hval += n;
+      hlen -= n;
+      if (hlen == 0)
+	break;
+      n = field_segment_len (hval, hlen);
+      if (n > 0)
+	{
+	  if (first)
+	    first = 0;
+	  else
+	    stringbuf_add (sb, ", ", 2);
+	  stringbuf_add (sb, hval, n);
+	  hval += n;
+	  hlen -= n;
+	  if (hlen == 0)
+	    break;
+	}
+      hval++;
+      hlen--;
+    }
+  while (hlen > 0);
+}
+
 static int
 http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 {
@@ -2753,9 +2845,10 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 	      key.hdr = hdr;
 	      if ((comp = COMPOSE_HEADER_RETRIEVE (chash, &key)) != NULL)
 		{
-		  stringbuf_add (&comp->sb, ", ", 2);
-		  stringbuf_add (&comp->sb, hdr->header + hdr->val_start,
-				 hdr->val_end - hdr->val_start);
+		  stringbuf_compose_header_add (&comp->sb,
+						hdr->header + hdr->val_start,
+						hdr->val_end - hdr->val_start,
+						0);
 		  http_header_free (hdr);
 		  if (stringbuf_err (&comp->sb))
 		    {
@@ -2779,8 +2872,10 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
 		  stringbuf_add (&comp->sb, http_header_name_ptr (hdr),
 				 http_header_name_len (hdr));
 		  stringbuf_add (&comp->sb, ": ", 2);
-		  stringbuf_add (&comp->sb, hdr->header + hdr->val_start,
-				 hdr->val_end - hdr->val_start);
+		  stringbuf_compose_header_add (&comp->sb,
+						hdr->header + hdr->val_start,
+						hdr->val_end - hdr->val_start,
+						1);
 		  if (stringbuf_err (&comp->sb))
 		    {
 		      http_request_free (req);
