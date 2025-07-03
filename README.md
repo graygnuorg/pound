@@ -45,9 +45,8 @@ to any machine.
 
 ## What Pound Is Not
 
-1. __Pound__ is not a Web server: it serves no content itself, it only
-   passes requests and responses back and forth between clients and
-   actual web servers (*backends*).
+1. Although __pound__ is able to [serve static content](#user-content-special-backends), it is not a Web server: its main purpose is to pass requests and
+   responses back and forth between clients and actual web servers (*backends*).
 2. __Pound__ is not a Web accelerator: no caching is done --
    every request is passed to a backend server "as is".
 
@@ -531,6 +530,37 @@ An example of a dynamic backend definition:
 		End
 	End
 ```
+
+### Special backends
+
+Backends discussed above define where incoming requests should be routed.
+There are also several other types of backends, which are collectively
+called *special*, because requests sent to them are handled by __pound__
+itself.  It can be said that special backends implement parts of the
+HTTP server functionality.  These are:
+
+* `Error` *status* [*file*]
+
+   Replies with the HTTP status code *status*.  If *file* is given, it
+   supplies content of the response.
+
+* `Redirect` [*status*] "*url*"
+
+   Returns a redirect to *url*.  If *status* is omitted, 302 is assumed.
+
+* `SendFile` *dir*
+
+   Serves static files from directory *dir*.  The path part of the request
+   URL gives the file name.  [Request rewriting](https://www.gnu.org.ua/software/pound/manual/Special-Backends.html#index-SendFile) can be used to modify
+   it.
+
+* `Control`
+
+  Provides access to [pound management interface](https://www.gnu.org.ua/software/pound/manual/Management-interface.html).
+
+* `Metrics`
+
+  Generates Openmetric telemetry response.
 
 ### Sessions
 
