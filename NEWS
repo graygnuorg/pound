@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-01-13
+Pound -- history of user-visible changes. 2025-07-03
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,21 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.16.90 (git)
+
+* New special backend "SendFile"
+
+This backend treats the path part of the request as local file name
+and sends back the contents of that file, if it exists.  Default
+content type is "text/plain".  Both parameters can be changed using
+request (for file name), and response (for content type) rewriting.
+
+Syntax is:
+
+         SendFile DIR
+
+the DIR argument specifying the directory from which to serve files.
 
 Version 4.16, 2025-01-13
 

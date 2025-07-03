@@ -1108,6 +1108,94 @@ error_response (POUND_HTTP *phttp)
   return 0;
 }
 
+static char file_headers[] = "Content-Type: text/plain\r\n";
+
+static int
+file_response (POUND_HTTP *phttp)
+{
+  char *file_name;
+  struct http_request req;
+  BIO *bin;
+  int rc, fd;
+  struct stat st;
+
+  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp) ||
+      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
+		     phttp))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  http_request_init (&req);
+  if (parse_header_text (&req.headers, file_headers))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
+      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  file_name = phttp->request.path;
+
+  if ((fd = openat (phttp->backend->v.file.wd, file_name, O_RDONLY)) == -1)
+    {
+      if (errno == ENOENT)
+	{
+	  rc = HTTP_STATUS_NOT_FOUND;
+	}
+      else
+	{
+	  logmsg (LOG_ERR, "can't open %s: %s", file_name, strerror (errno));
+	  rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	}
+    }
+  else if (fstat (fd, &st))
+    {
+      logmsg (LOG_ERR, "can't stat %s: %s", file_name, strerror (errno));
+      close (fd);
+      rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
+  else
+    {
+      bin = BIO_new_fd (fd, BIO_CLOSE);
+      bio_http_reply_start_list (phttp->cl,
+				 phttp->request.version,
+				 http_status[HTTP_STATUS_OK].code,
+				 http_status[HTTP_STATUS_OK].reason,
+				 &req.headers,
+				 (CONTENT_LENGTH) st.st_size);
+      rc = copy_bin (bin, phttp->cl, st.st_size, NULL, 0);
+      switch (rc)
+	{
+	case COPY_OK:
+	  break;
+
+	case COPY_READ_ERR:
+	case COPY_WRITE_ERR:
+	  if (errno)
+	    {
+	      logmsg (LOG_NOTICE,
+		      "(%"PRItid") %s while sending file %s: %s",
+		      POUND_TID (),
+		      copy_status_string (rc), file_name,
+		      strerror (errno));
+	      break;
+	    }
+
+	default:
+	  logmsg (LOG_NOTICE,
+		  "(%"PRItid") %s while sending file %s",
+		  POUND_TID (), copy_status_string (rc), file_name);
+	}
+
+      BIO_free (bin);
+      BIO_flush (phttp->cl);
+      rc = HTTP_STATUS_OK;
+    }
+
+  http_request_free (&req);
+
+  return rc;
+}
+
 static void
 drain_eol (BIO *in)
 {
@@ -4999,6 +5087,10 @@ do_http (POUND_HTTP *phttp)
 	  if (res == 0)
 	    /* Process the response. */
 	    res = backend_response (phttp);
+	  break;
+
+	case BE_FILE:
+	  res = file_response (phttp);
 	  break;
 
 	case BE_MATRIX:

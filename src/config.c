@@ -1743,6 +1743,46 @@ parse_error_backend (void *call_data, void *section_data)
 }
 
 static int
+parse_sendfile_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  struct token *tok;
+  BACKEND *be;
+  int fd;
+  struct locus_range range;
+  struct stat st;
+
+  range.beg = last_token_locus_range ()->beg;
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  range.end = last_token_locus_range ()->end;
+
+  if (stat (tok->str, &st))
+    {
+      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  if (!S_ISDIR (st.st_mode))
+    {
+      conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
+    {
+      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+
+  be = xbackend_create (BE_FILE, 1, &range);
+  be->locus_str = format_locus_str (&range);
+  be->v.file.wd = fd;
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return CFGPARSER_OK;
+}
+
+static int
 parse_errorfile (void *call_data, void *section_data)
 {
   struct token *tok;
@@ -2560,6 +2600,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "Error",
     .parser = parse_error_backend,
+    .off = offsetof (SERVICE, balancers)
+  },
+  {
+    .name = "SendFile",
+    .parser = parse_sendfile_backend,
     .off = offsetof (SERVICE, balancers)
   },
   {

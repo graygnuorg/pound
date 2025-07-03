@@ -2568,7 +2568,8 @@ to access any files outside that directory.
 Before chrooting, @command{pound} makes the necessary preparations to
 be able to access the files it needs during operation, in particular
 user databases supplied with the @code{BasicAuth} statements
-(@pxref{Authentication}).
+(@pxref{Authentication}), and static file directories (@xref{ACME}, and
+@pxref{SendFile}).
 @end deffn
 
 @deffn {Global directive} User "@var{user_name}"
@@ -3862,7 +3863,7 @@ header will be added to the end of the header list.
 @kwindex Service definitions
 The @code{Service} section defines rules that decide to which backend to
 route requests received by that listener.  Any number of
-@code{Service} section can be present.  When a request is received,
+@code{Service} sections can be present.  When a request is received,
 the listener iterates over all services in the order of their
 appearance in the configuration and applies the section rules to the
 request.  If the rules match the request, the request is forwarded to
@@ -4608,6 +4609,33 @@ the @var{url} does contain a path (even if it is just a @samp{/}),
 then the request path is ignored.
 
 @xref{Redirects}, for a detailed discussion of this backend and its use.
+@end deffn
+
+@anchor{SendFile}
+@deffn {Service directive} SendFile @var{dir}
+Defines a special backend that serves static files from directory
+@var{dir}.  Name of the file to serve is supplied by the request path,
+after applying usual request modifications (@pxref{Request
+Modification}).  By default, the response bears @code{Content-Type:
+text/plain} header.  To change this, use @code{SetHeader} statement in
+response rewriting (@pxref{rewrite response}).
+
+The following example defines a service which will serve requests to
+paths beginning with @samp{/about/} from directory
+@file{/var/lib/pound/static}.  Name of the file to serve is obtained
+by removing the @samp{/about/} prefix from the request pathname.
+Content type is set to @samp{text/html}:
+
+@example
+Service
+    Path -re "/about/(.+)"
+    SetPath "$1"
+    Rewrite response
+         SetHeader "Content-Type: text/html"
+    End
+    SendFile "/var/lib/pound/static"
+End
+@end example
 @end deffn
 
 @deffn {Service directive} Control

@@ -551,6 +551,10 @@ str_be (char *buf, size_t size, BACKEND *be)
       strncpy (buf, "metrics", size);
       break;
 
+    case BE_FILE:
+      strncpy (buf, "file", size);
+      break;
+
     default:
       abort ();
     }
@@ -1974,6 +1978,9 @@ backend_type_str (BACKEND_TYPE t)
     case BE_METRICS:
       return "metrics";
 
+    case BE_FILE:
+      return "file";
+
     default: /* BE_REGULAR_REF can't happen at this stage. */
       break;
     }
@@ -2177,6 +2184,7 @@ backend_serialize (BACKEND *be)
 		  case BE_ACME:
 		  case BE_CONTROL:
 		  case BE_METRICS:
+		  case BE_FILE:
 		    /* FIXME */
 		    break;
 		    

@@ -471,6 +471,7 @@ typedef enum
     BE_ERROR,
     BE_METRICS,
     BE_BACKEND_REF,     /* See be_name in BACKEND */
+    BE_FILE
   }
   BACKEND_TYPE;
 
@@ -533,7 +534,7 @@ struct be_redirect
   int has_uri;		 /* URL has path and/or query part. */
 };
 
-struct be_acme
+struct be_file           /* For ACME services and FILE backends. */
 {
   int wd;                /* Working directory descriptor. */
 };
@@ -575,7 +576,8 @@ typedef struct _backend
   {
     struct be_regular reg;
     struct be_matrix mtx;
-    struct be_acme acme;
+    struct be_file acme;
+    struct be_file file;
     struct be_redirect redirect;
     struct be_error error;
     char *be_name;              /* Name of the backend; Used during parsing. */
