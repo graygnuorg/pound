@@ -1247,6 +1247,20 @@ will be read only once, at program startup.  If you modify the file
 and want @command{pound} to notice changes, you will have to restart
 it.
 
+ Unless the file begins with a newline or @samp{<} character, its
+initial portion up to first empty line (inclusive) supplies headers
+that will be sent with the response.  The following defaults will be
+used, unless already defined in the file:
+
+@example
+@group
+Content-Type: text/html
+Expires: now
+Pragma: no-cache
+Cache-control: no-cache,no-store
+@end group
+@end example
+
  If the second argument is not supplied, the error text is determined
 by the @code{ErrorFile @var{code}} statement in the enclosing listener (where
 @var{code} is the HTTP code in question).  If it is not supplied, the
@@ -3224,8 +3238,9 @@ Read HTML page for HTTP status code @var{code} from file
 @var{filename}.
 
 The @var{code} argument is a three-digit HTTP response status, and
-@var{filename} is the name of a file which supplies text of the error
-page to be returned.  The file is read once, at program startup.
+@var{filename} is the name of a file which supplies contents (and,
+optionally, HTTP headers) of the error response.  @xref{Error
+responses}, for details about the file and its usage.
 @end deffn
 
 @kwindex Err400

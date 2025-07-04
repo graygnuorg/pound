@@ -539,7 +539,7 @@ str_be (char *buf, size_t size, BACKEND *be)
       break;
 
     case BE_ERROR:
-      if (be->v.error.text)
+      if (be->v.error.msg.text)
 	snprintf (buf, size, "error:%d:text",
 		  pound_to_http_status (be->v.error.status));
       else
@@ -2196,7 +2196,9 @@ backend_serialize (BACKEND *be)
 		    err = json_object_set (obj, "status",
 					   json_new_integer (pound_to_http_status (be->v.error.status)))
 		      || json_object_set (obj, "text",
-					  be->v.error.text ? json_new_string (be->v.error.text) : json_new_null ());
+					  be->v.error.msg.text
+					   ? json_new_string (be->v.error.msg.text)
+					   : json_new_null ());
 		    break;
 		  }
 	      if (enable_backend_stats && be->be_type != BE_MATRIX)

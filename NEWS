@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-03
+Pound -- history of user-visible changes. 2025-07-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -21,6 +21,14 @@ Syntax is:
          SendFile DIR
 
 the DIR argument specifying the directory from which to serve files.
+
+* Error file contents
+
+Error file supplied with "Error", "ErrorFile", or any "ErrNNN"
+directvie, can begin with HTTP headers.  If so, these will be
+sent along with the response, and the actual response contents will
+begin after the empty line that terminates the headers.
+
 
 Version 4.16, 2025-01-13
 

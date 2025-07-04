@@ -1691,15 +1691,37 @@ parse_redirect_backend (void *call_data, void *section_data)
 }
 
 static int
+parse_http_errmsg (struct http_errmsg *errmsg)
+{
+  int rc;
+  char *p;
+
+  rc = cfg_assign_string_from_file (&errmsg->text, NULL);
+  if (rc == CFGPARSER_FAIL)
+    return rc;
+
+  DLIST_INIT (&errmsg->hdr);
+  if (http_header_list_parse (&errmsg->hdr, errmsg->text, H_REPLACE, &p) == 0
+      && p != errmsg->text)
+    {
+      p++;
+      memmove (errmsg->text, p, strlen (p) + 1);
+    }
+  else
+    http_header_list_free (&errmsg->hdr);
+  return CFGPARSER_OK;
+}
+
+static int
 parse_error_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
   struct token *tok;
   int n, status;
-  char *text = NULL;
   BACKEND *be;
   int rc;
   struct locus_range range;
+  struct http_errmsg errmsg = HTTP_ERRMSG_INITIALIZER(errmsg);
 
   range.beg = last_token_locus_range ()->beg;
 
@@ -1719,7 +1741,7 @@ parse_error_backend (void *call_data, void *section_data)
   if (tok->type == T_STRING)
     {
       putback_tkn (tok);
-      if ((rc = cfg_assign_string_from_file (&text, section_data)) == CFGPARSER_FAIL)
+      if ((rc = parse_http_errmsg (&errmsg)) == CFGPARSER_FAIL)
 	return rc;
     }
   else if (tok->type == '\n')
@@ -1735,13 +1757,44 @@ parse_error_backend (void *call_data, void *section_data)
   be = xbackend_create (BE_ERROR, 1, &range);
   be->locus_str = format_locus_str (&range);
   be->v.error.status = status;
-  be->v.error.text = text;
+  be->v.error.msg = errmsg;
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return rc;
 }
 
+static int
+parse_errorfile (void *call_data, void *section_data)
+{
+  struct token *tok;
+  int status;
+  struct http_errmsg **http_err = call_data;
+
+  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if ((status = http_status_to_pound (atoi (tok->str))) == -1)
+    {
+      conf_error ("%s", "unsupported status code");
+      return CFGPARSER_FAIL;
+    }
+
+  if (!http_err[status])
+    XZALLOC (http_err[status]);
+  return parse_http_errmsg (http_err[status]);
+}
+
+static int
+parse_errN (void *call_data, void *section_data)
+{
+  struct http_errmsg **http_err = call_data;
+
+  if (!*http_err)
+    XZALLOC (*http_err);
+  return parse_http_errmsg (*http_err);
+}
+
 static int
 parse_sendfile_backend (void *call_data, void *section_data)
 {
@@ -1780,25 +1833,6 @@ parse_sendfile_backend (void *call_data, void *section_data)
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return CFGPARSER_OK;
-}
-
-static int
-parse_errorfile (void *call_data, void *section_data)
-{
-  struct token *tok;
-  int status;
-  char **http_err = call_data;
-
-  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((status = http_status_to_pound (atoi (tok->str))) == -1)
-    {
-      conf_error ("%s", "unsupported status code");
-      return CFGPARSER_FAIL;
-    }
-
-  return cfg_assign_string_from_file (&http_err[status], section_data);
 }
 
 struct service_session
@@ -3221,63 +3255,63 @@ static CFGPARSER_TABLE http_deprecated[] = {
   /* Backward compatibility */
   {
     .name = "Err400",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
     .deprecated = 1,
     .message = "use \"ErrorFile 400\" instead"
   },
   {
     .name = "Err401",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
     .deprecated = 1,
     .message = "use \"ErrorFile 401\" instead"
   },
   {
     .name = "Err403",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
     .deprecated = 1,
     .message = "use \"ErrorFile 403\" instead"
   },
   {
     .name = "Err404",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
     .deprecated = 1,
     .message = "use \"ErrorFile 404\" instead"
   },
   {
     .name = "Err413",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
     .deprecated = 1,
     .message = "use \"ErrorFile 413\" instead"
   },
   {
     .name = "Err414",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
     .deprecated = 1,
     .message = "use \"ErrorFile 414\" instead"
   },
   {
     .name = "Err500",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
     .deprecated = 1,
     .message = "use \"ErrorFile 500\" instead"
   },
   {
     .name = "Err501",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
     .deprecated = 1,
     .message = "use \"ErrorFile 501\" instead"
   },
   {
     .name = "Err503",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
     .deprecated = 1,
     .message = "use \"ErrorFile 503\" instead"

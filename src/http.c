@@ -32,12 +32,12 @@ bio_http_reply_start (BIO *bio, int proto, int code, char const *text,
 		      char const *headers,
 		      char const *type, CONTENT_LENGTH len)
 {
-  BIO_printf (bio, "HTTP/1.%d %d %s\r\n"
-	      "Content-Type: %s\r\n",
+  BIO_printf (bio, "HTTP/1.%d %d %s\r\n",
 	      proto,
 	      code,
-	      text,
-	      type);
+	      text);
+  if (type)
+    BIO_printf (bio, "Content-Type: %s\r\n", type);
   if (proto == 1)
     {
       BIO_printf (bio,
@@ -194,10 +194,16 @@ pound_to_http_status (int err)
  * If it is NULL, the default text from the http_status table is
  * used.
  */
-static void
-bio_err_reply (BIO *bio, int proto, int err, char const *content)
+static int
+bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
+	       int (*cbf) (HTTP_HEADER_LIST *, void *), void *data)
 {
-  struct stringbuf sb;
+  char const *content;
+  struct http_errmsg tmp = HTTP_ERRMSG_INITIALIZER (tmp);
+  char *mem = NULL;
+  HTTP_HEADER_LIST hlist = DLIST_HEAD_INITIALIZER (hlist);
+  size_t len;
+  int rc = HTTP_STATUS_OK;
 
   if (!(err >= 0 && err < HTTP_STATUS_MAX))
     {
@@ -205,20 +211,48 @@ bio_err_reply (BIO *bio, int proto, int err, char const *content)
       err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  stringbuf_init_log (&sb);
-  if (!content)
+  if (!(msg && msg->text))
     {
+      struct stringbuf sb;
+      stringbuf_init_log (&sb);
       stringbuf_printf (&sb, default_error_page,
 			http_status[err].code,
 			http_status[err].reason,
 			http_status[err].reason,
 			http_status[err].text);
-      if ((content = stringbuf_finish (&sb)) == NULL)
-	content = http_status[err].text;
+      if ((mem = stringbuf_finish (&sb)) != NULL)
+	tmp.text = mem;
+      else
+	{
+	  stringbuf_free (&sb);
+	  tmp.text = (char*)http_status[err].text;
+	}
+      msg = &tmp;
     }
-  bio_http_reply (bio, proto, http_status[err].code, http_status[err].reason,
-		  err_headers, "text/html", content);
-  stringbuf_free (&sb);
+
+  content = msg->text;
+  len = strlen (content);
+
+  http_header_list_append_list (&hlist, &msg->hdr);
+  http_header_list_append (&hlist, "Content-Type: text/html", H_KEEP);
+  http_header_list_parse (&hlist, err_headers, H_KEEP, NULL);
+
+  if (!cbf || (rc = cbf (&hlist, data)) == HTTP_STATUS_OK)
+    {
+      bio_http_reply_start_list (bio,
+				 proto,
+				 http_status[err].code,
+				 http_status[err].reason,
+				 &hlist,
+				 (CONTENT_LENGTH) len);
+      BIO_write (bio, content, len);
+      BIO_flush (bio);
+    }
+
+  http_header_list_free (&hlist);
+  free (mem);
+
+  return rc;
 }
 
 /*
@@ -232,7 +266,7 @@ static void
 http_err_reply (POUND_HTTP *phttp, int err)
 {
   bio_err_reply (phttp->cl, phttp->request.version, err,
-		 phttp->lstn->http_err[err]);
+		 phttp->lstn->http_err[err], NULL, NULL);
   phttp->conn_closed = 1;
 }
 
@@ -1017,7 +1051,8 @@ acme_response (POUND_HTTP *phttp)
 }
 
 int
-parse_header_text (HTTP_HEADER_LIST *head, char const *text)
+http_header_list_parse (HTTP_HEADER_LIST *head, char const *text,
+			int replace, char **end)
 {
   struct stringbuf sb;
   int res = 0;
@@ -1034,7 +1069,7 @@ parse_header_text (HTTP_HEADER_LIST *head, char const *text)
       stringbuf_reset (&sb);
       stringbuf_add (&sb, text, len);
       if ((hdr = stringbuf_finish (&sb)) == NULL ||
-	  http_header_list_append (head, hdr, H_REPLACE))
+	  http_header_list_append (head, hdr, replace))
 	{
 	  res = -1;
 	  break;
@@ -1047,63 +1082,48 @@ parse_header_text (HTTP_HEADER_LIST *head, char const *text)
 	text++;
     }
   stringbuf_free (&sb);
+  if (end)
+    *end = (char*) text;
   return res;
+}
+
+static int
+cb_hdr_rewrite (HTTP_HEADER_LIST *hlist, void *data)
+{
+  POUND_HTTP *phttp = data;
+  struct http_request req;
+  int rc = 0;
+
+  http_request_init (&req);
+  req.headers = *hlist;
+  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
+      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  *hlist = req.headers;
+  DLIST_INIT (&req.headers);
+  http_request_free (&req);
+  return rc;
 }
 
 static int
 error_response (POUND_HTTP *phttp)
 {
   int err = phttp->backend->v.error.status;
-  const char *text = phttp->backend->v.error.text
-			? phttp->backend->v.error.text
-			: phttp->lstn->http_err[err]
-			    ? phttp->lstn->http_err[err]
-			    : http_status[err].text;
-  size_t len = strlen (text);
-  struct http_request req;
-  BIO *bin;
+  struct http_errmsg *ep;
   int rc;
 
-  http_request_init (&req);
-  if (parse_header_text (&req.headers, err_headers))
-    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  if (phttp->backend->v.error.msg.text)
+    ep = &phttp->backend->v.error.msg;
+  else if (phttp->lstn->http_err[err])
+    ep = phttp->lstn->http_err[err];
+  else
+    ep = NULL;
 
-  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
-      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
-    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  rc = bio_err_reply (phttp->cl, phttp->request.version, err,
+		      ep, cb_hdr_rewrite, phttp);
+  if (rc != HTTP_STATUS_OK)
+    return rc;
 
-  bin = BIO_new_mem_buf (text, len);
-
-  bio_http_reply_start_list (phttp->cl,
-			     phttp->request.version,
-			     http_status[err].code,
-			     http_status[err].reason,
-			     &req.headers,
-			     (CONTENT_LENGTH) len);
-  rc = copy_bin (bin, phttp->cl, len, NULL, 0);
-  switch (rc)
-    {
-    case COPY_OK:
-      break;
-
-    case COPY_READ_ERR:
-    case COPY_WRITE_ERR:
-      if (errno)
-	{
-	  logmsg (LOG_NOTICE, "(%"PRItid") %s while sending response %d: %s",
-		  POUND_TID (), copy_status_string (rc), http_status[err].code,
-		  strerror (errno));
-	  break;
-	}
-
-    default:
-      logmsg (LOG_NOTICE, "(%"PRItid") %s while sending response %d",
-	      POUND_TID (), copy_status_string (rc), http_status[err].code);
-    }
-
-  BIO_free (bin);
-  BIO_flush (phttp->cl);
-  http_request_free (&req);
   phttp->response_code = http_status[err].code;
   return 0;
 }
@@ -1126,7 +1146,7 @@ file_response (POUND_HTTP *phttp)
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   http_request_init (&req);
-  if (parse_header_text (&req.headers, file_headers))
+  if (http_header_list_parse (&req.headers, file_headers, H_REPLACE, NULL))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
@@ -2106,6 +2126,27 @@ http_header_alloc (char *text)
   return hdr;
 }
 
+static struct http_header *
+http_header_dup (struct http_header *hdr)
+{
+  struct http_header *p = calloc (1, sizeof (*p));
+  if (p)
+    {
+      *p = *hdr;
+      if ((p->header = strdup (hdr->header)) != NULL)
+	{
+	  p->value = NULL;
+	  return p;
+	}
+      else
+	{
+	  free (p);
+	  p = NULL;
+	}
+    }
+  return p;
+}
+
 static void
 http_header_free (struct http_header *hdr)
 {
@@ -2278,19 +2319,23 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 }
 
 int
-http_header_list_append_list (HTTP_HEADER_LIST *head, HTTP_HEADER_LIST *add,
-			      int replace)
+http_header_list_append_list (HTTP_HEADER_LIST *head, HTTP_HEADER_LIST *add)
 {
   struct http_header *hdr;
   DLIST_FOREACH (hdr, add, link)
     {
-      if (http_header_list_append (head, hdr->header, replace))
-	return -1;
+      struct http_header *copy = http_header_dup (hdr);
+      if (!copy)
+	{
+	  lognomem ();
+	  return -1;
+	}
+      DLIST_INSERT_TAIL (head, copy, link);
     }
   return 0;
 }
 
-static void
+void
 http_header_list_free (HTTP_HEADER_LIST *head)
 {
   while (!DLIST_EMPTY (head))

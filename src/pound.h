@@ -367,6 +367,11 @@ http_header_name_len (struct http_header *hdr)
 }
 
 typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
+#define HTTP_HEADER_LIST_INITIALIZER DLIST_HEAD_INITIALIZER
+
+int http_header_list_parse (HTTP_HEADER_LIST *head, char const *text,
+			    int replace, char **end);
+void http_header_list_free (HTTP_HEADER_LIST *head);
 
 /* Append modes: what to do if the header with that name already exist. */
 enum
@@ -377,6 +382,8 @@ enum
   };
 
 int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
+int http_header_list_append_list (HTTP_HEADER_LIST *head,
+				  HTTP_HEADER_LIST *add);
 
 struct query_param
 {
@@ -513,6 +520,15 @@ struct be_matrix
 			       dynamically generated. */
 };
 
+struct http_errmsg
+{
+  char *text;
+  HTTP_HEADER_LIST hdr;
+};
+
+#define HTTP_ERRMSG_INITIALIZER(m) \
+  { NULL, HTTP_HEADER_LIST_INITIALIZER(m.hdr) }
+
 struct be_regular
 {
   struct addrinfo addr;	/* IPv4/6 address */
@@ -542,7 +558,7 @@ struct be_file           /* For ACME services and FILE backends. */
 struct be_error
 {
   int status;            /* Pound HTTP status index */
-  char *text;            /* Error content page */
+  struct http_errmsg msg;
 };
 
 /* back-end definition */
@@ -884,7 +900,7 @@ typedef struct _listener
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */
-  char *http_err[HTTP_STATUS_MAX];	/* error messages */
+  struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */
   int rewr_loc;			/* rewrite location response */
