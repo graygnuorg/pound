@@ -1589,12 +1589,34 @@ sub http_redirect {
     });
 }
 
+sub http_status {
+    my ($http, $rest) = @_;
+    my $status = $rest;
+    $status =~ s{^/}{};
+    $status = 500 unless $status =~ /^\d{3}$/;
+    my $reason = $http->header('x-reason')//'Unknown';
+    my $text = <<EOT;
+====================
+$status $reason
+====================
+
+This response page was generated for HTTP status code $status
+by poundharness.
+EOT
+    $http->reply($status, $reason,
+		 headers => {
+		     'content-type' => 'text/plain'
+		 },
+		 body => $text);
+}
+
 sub process_http_request {
     my ($sock, $backend) = @_;
 
     my %endpoints = (
 	'echo' => \&http_echo,
 	'redirect' => \&http_redirect,
+	'status' => \&http_status
     );
 
     local $| = 1;
@@ -2277,6 +2299,11 @@ will get the following response:
     Location: https://example.org/echo/foo?bar=0
 
 This backend is used to test the B<RewriteLocation> functionality.
+
+=head2 /status/CODE
+
+Returns HTTP status I<CODE>.  The reason text may be supplied in
+the B<X-Reason> header.
 
 =head1 FILES
 

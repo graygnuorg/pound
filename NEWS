@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-04
+Pound -- history of user-visible changes. 2025-07-08
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -18,7 +18,7 @@ request (for file name), and response (for content type) rewriting.
 
 Syntax is:
 
-         SendFile DIR
+	 SendFile DIR
 
 the DIR argument specifying the directory from which to serve files.
 
@@ -28,6 +28,20 @@ Error file supplied with "Error", "ErrorFile", or any "ErrNNN"
 directvie, can begin with HTTP headers.  If so, these will be
 sent along with the response, and the actual response contents will
 begin after the empty line that terminates the headers.
+
+* Error response rewriting
+
+  When a regular backend responds with an error, the content (body)
+of that response can be replaced with an arbitrary custom page.  For
+this to work, the listener must define a custom page for the
+status code in question using the ErrorFile statement, and error
+response rewriting must be explicitly enabled.  The latter is done
+using the following statement:
+
+   RewriteErrors on
+
+The statement can be used both in ListenHTTP (ListenHTTPS) and in
+Service blocks, the latter overriding the former.
 
 
 Version 4.16, 2025-01-13

@@ -114,6 +114,7 @@ m4_include([rwchain.at])
 
 AT_BANNER([Response Rewriting])
 m4_include([resprw.at])
+m4_include([rwerr.at])
 
 AT_BANNER([Regexp Types])
 m4_include([regextype.at])

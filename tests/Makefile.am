@@ -125,6 +125,7 @@ TESTSUITE_AT = \
  rewriteloc.at\
  rewriteloc_https.at\
  rwchain.at\
+ rwerr.at\
  sendfile.at\
  sessauth.at\
  sessctl.at\

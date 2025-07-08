@@ -837,6 +837,7 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+  int rewrite_errors;           /* Rewrite HTTP errors. */
 
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
@@ -897,6 +898,7 @@ typedef struct _listener
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   int header_options;           /* additional header options */
   REWRITE_RULE_HEAD rewrite[2];
+  int rewrite_errors;           /* Rewrite HTTP errors. */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */

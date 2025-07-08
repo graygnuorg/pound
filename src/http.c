@@ -3876,7 +3876,7 @@ http_response_validate (struct http_request *req)
 static int
 backend_response (POUND_HTTP *phttp)
 {
-  int skip = 0;
+  enum { RESP_OK, RESP_SKIP, RESP_DRAIN } resp_mode = RESP_OK;
   int be_11 = 0;  /* Whether backend connection is using HTTP/1.1. */
   CONTENT_LENGTH content_length;
   char caddr[MAX_ADDR_BUFSIZE];
@@ -3906,14 +3906,6 @@ backend_response (POUND_HTTP *phttp)
 	  return res;
 	}
 
-      if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
-			 &phttp->response,
-			 phttp) ||
-	  rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
-			 &phttp->response,
-			 phttp))
-	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-
       be_11 = (phttp->response.version == 1);
       phttp->response_code = code;
 
@@ -3923,7 +3915,7 @@ backend_response (POUND_HTTP *phttp)
 	  /*
 	   * responses with code 100 are never passed back to the client
 	   */
-	  skip = 1;
+	  resp_mode = RESP_SKIP;
 	  break;
 
 	case 101:
@@ -3940,8 +3932,41 @@ backend_response (POUND_HTTP *phttp)
 	  break;
 
 	default:
-	  if (phttp->response_code / 100 == 1)
-	    phttp->no_cont = 1;
+	  switch (phttp->response_code / 100)
+	    {
+	    case 1:
+	      phttp->no_cont = 1;
+	      break;
+
+	    case 5:
+	      if (phttp->svc->rewrite_errors != -1
+		  ? phttp->svc->rewrite_errors
+		  : phttp->lstn->rewrite_errors == 1)
+		{
+		  int err = http_status_to_pound (phttp->response_code);
+		  if (err != -1 && phttp->lstn->http_err[err])
+		    {
+		      if (bio_err_reply (phttp->cl, phttp->request.version,
+					 err,
+					 phttp->lstn->http_err[err],
+					 cb_hdr_rewrite, phttp)
+			  != HTTP_STATUS_OK)
+			return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		      resp_mode = RESP_DRAIN;
+		    }
+		}
+	    }
+	}
+
+      if (resp_mode == RESP_OK)
+	{
+	  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
+			     &phttp->response,
+			     phttp) ||
+	      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
+			     &phttp->response,
+			     phttp))
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
       chunked = 0;
@@ -4060,7 +4085,7 @@ backend_response (POUND_HTTP *phttp)
       /*
        * send the response
        */
-      if (!skip)
+      if (resp_mode == RESP_OK)
 	{
 	  if (http_request_send (phttp->cl, &phttp->response))
 	    {
@@ -4101,7 +4126,7 @@ backend_response (POUND_HTTP *phttp)
 	       * the chunks (HTTP/1.1 only)
 	       */
 	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes,
-			       skip, 0) != HTTP_STATUS_OK)
+			       resp_mode != RESP_OK, 0) != HTTP_STATUS_OK)
 		{
 		  /*
 		   * copy_chunks() has its own error messages
@@ -4116,7 +4141,7 @@ backend_response (POUND_HTTP *phttp)
 	       * for the length
 	       */
 	      int ec = copy_bin (phttp->be, phttp->cl, content_length,
-				 &phttp->res_bytes, skip);
+				 &phttp->res_bytes, resp_mode != RESP_OK);
 	      switch (ec)
 		{
 		case COPY_OK:
@@ -4139,7 +4164,7 @@ backend_response (POUND_HTTP *phttp)
 		  return -1;
 		}
 	    }
-	  else if (!skip)
+	  else if (resp_mode == RESP_OK)
 	    {
 	      if (is_readable (phttp->be, phttp->backend->v.reg.to))
 		{
@@ -4366,7 +4391,7 @@ backend_response (POUND_HTTP *phttp)
 	    }
 	}
     }
-  while (skip);
+  while (resp_mode == RESP_SKIP);
 
   if (!be_11)
     close_backend (phttp);

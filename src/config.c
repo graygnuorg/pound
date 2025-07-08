@@ -2591,6 +2591,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .off = offsetof (SERVICE, rewrite)
   },
   {
+    .name = "RewriteErrors",
+    .parser =  cfg_assign_bool,
+    .off = offsetof (SERVICE, rewrite_errors)
+  },
+  {
     .name = "SetHeader",
     .parser = SETFN_SVC_NAME (set_header),
     .off = offsetof (SERVICE, rewrite)
@@ -2726,6 +2731,7 @@ new_service (BALANCER_ALGO algo)
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
   svc->balancer_algo = algo;
+  svc->rewrite_errors = -1;
 
   DLIST_INIT (&svc->be_rem_head);
   pthread_cond_init (&svc->be_rem_cond, NULL);
@@ -3158,6 +3164,12 @@ static CFGPARSER_TABLE http_common[] = {
     .parser = parse_rewrite,
     .off = offsetof (LISTENER, rewrite)
   },
+
+  {
+    .name = "RewriteErrors",
+    .parser =  cfg_assign_bool,
+    .off = offsetof (LISTENER, rewrite_errors)
+  },
   {
     .name = "SetHeader",
     .parser = SETFN_SVC_NAME (set_header),
@@ -3356,6 +3368,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
   lst->log_level = dfl->log_level;
+  lst->rewrite_errors = -1;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   lst->clnt_check = -1;

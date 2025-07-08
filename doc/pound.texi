@@ -3135,6 +3135,7 @@ number (0-based) in the configuration file.
 * Listener logging::
 * Request Modification::
 * Response Modification::
+* Error response rewriting::
 * Service definitions::
 @end menu
 
@@ -3873,6 +3874,34 @@ undergoes string expansion (@xref{String Expansions}).  If the header
 header will be added to the end of the header list.
 @end deffn
 
+@node Error response rewriting
+@subsection Rewriting error responses
+  When a regular backend responds with an error, the content (body) 
+of that response can be replaced with an arbitrary custom page.  For this
+to work, the following conditions should be met:
+
+@enumerate 1
+@item
+Response status code is one of error codes that @command{pound} itself
+can return.  These are listed in @ref{Error definitions}.
+@item
+A custom error page is defined for that status code using the
+@code{ErrorFile} statement.
+@item
+Error response rewriting is explicitly enabled for the service
+that contains the backend from which the response is obtained, or for
+the listener where that service is located.  To do so use the
+following statement:
+@end enumerate
+
+@deffn {ListenerHTTP directive} RewriteErrors @var{bool}
+Enables or disables error response rewriting for that listener.
+
+The same statement is available for use within a service (see below).
+The @code{RewriteErrors} setting of a service overrides that of the
+listener.
+@end deffn
+
 @node Service definitions
 @subsection Service definitions
 @kwindex Service definitions
@@ -4282,6 +4311,11 @@ subject of rewriting can also be specified explicitly after the
 
 @xref{Modifying responses}, for a discussion of the use of this
 statement to modify responses.
+@end deffn
+
+@deffn {Service directive} RewriteErrors @var{bool}
+Enables or disables error response rewriting for that service.
+@xref{Error response rewriting}, for a detailed discussion.
 @end deffn
 
 @node Service Logging
