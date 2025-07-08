@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 2, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "July 8, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -115,12 +115,15 @@ section below.
 .I Error backend
 An error backend creates and returns an HTTP status response.
 .TP
+.I Static file backend
+This backend responds with a contents of a disk file.
+.TP
 .I Emergency backend
 A special case of regular backend which will be used only if all other
 regular backends fail to respond.
 .RE
 .IP
-Multiple backends may be defined within a service, in which case
+Multiple regular backends may be defined within a service, in which case
 .B pound
 will balance the load between the available backends.
 .IP
@@ -907,6 +910,14 @@ Read the content to be returned along with the HTTP status code
 \fINNN\fR from the file \fIfilename\fR.  The file will be read
 exactly once, at the program startup.
 .IP
+The file can begin with one or more HTTP headers,
+separated from the actual body with an empty line (i.e., two newline
+characters).  These headers will be returned along with the
+response.  This can be used, in particular, to change the response
+content type, which is
+.B text/html
+by default.
+.IP
 Allowed values for \fINNN\fR are:
 .BR 400 ,
 .BR 401 ,
@@ -925,7 +936,21 @@ This statement is equivalent to
 ErrorFile \fINNN\fR "\fIfilename\fR"
 .EE
 .IP
-It is provided for compatibility with previous versions of the program.
+It is provided for compatibility with previous versions of the
+program.
+.TP
+\fBRewriteErrors\fR \fIbool\fR
+If \fIbool\fR is \fBtrue\fR, this enables backend error response
+rewriting, i.e. replacing the content of error responses returned by a
+regular backend with a custom error text defined by the
+.B ErrorFile
+statement.  See
+.BR "ERROR RESPONSE REWRITING" ,
+for a detailed discussion of this feature.
+.IP
+The same statement can also appear in
+.B Service
+block, in which case it overrides the settings of the listener.
 .TP
 \fBMaxRequest\fR \fIn\fR
 Maximum allowed size of incoming request. All requests will be limited
@@ -1178,7 +1203,7 @@ matches certain conditions.  If the argument is omitted, \fBrequest\fR
 is assumed.
 .IP
 Request modification is described in detail in section
-.B "REQUEST MODIFICATION DIRECTIVES" .
+.BR "REQUEST MODIFICATION DIRECTIVES" .
 .IP
 Response modification is covered by section
 .BR "RESPONSE MODIFICATION" .
@@ -1582,6 +1607,28 @@ Request modification is described in detail in section
 .IP
 Response modification is covered by section
 .BR "RESPONSE MODIFICATION" .
+.TP
+\fBRewriteErrors\fR \fIbool\fR
+If \fIbool\fR is \fBtrue\fR, this enables backend error response
+rewriting for this service, i.e. replacing the content of error
+responses returned by a regular backend with a custom error text
+defined by the
+.B ErrorFile
+statement in the listener.  See
+.BR "ERROR RESPONSE REWRITING" ,
+for a detailed discussion of this feature.
+.IP
+This statement overrides settings of the enclosing listener, so that
+.PP
+.RS
+.EX
+RewriteErrors off
+.EE
+.RE
+.IP
+appearing in a
+.B Service
+will disable that feature for that particular service.
 .SS Backend definitions
 .TP
 \fBBalancer\fR \fBrandom\fR | \fBiwrr\fR
@@ -1717,8 +1764,10 @@ it will be sent to
 \fBError \fISTATUS\fR [\fIFILE\fR]
 Special case of backend that returns HTTP error page.  The \fISTATUS\fR
 argument supplies HTTP status code.  Optional \fIFILE\fR argument is
-the name of a disk file with the error page content (HTML).  If not
-supplied, the text is determined as usual: first the
+the name of a disk file with the error page content.  If supplied, the
+file is handled as in \fBErrorFile\fR directive, which see.  If not
+present, the content to return in the response is determined as usual:
+first the
 .BI ErrorFile " STATUS"
 statement for the enclosing listener is consulted.  If it is not present, the
 default error page is used.
@@ -1726,6 +1775,18 @@ default error page is used.
 The \fBError\fR directive is useful in a catch-all service, which
 outputs an error page if no service matching the incoming request was
 found.  See the \fBEXAMPLES\fR section for details.
+.TP
+\fBSendFile \fIDIR\fR
+Static file backend.  It responds with contents of a file from
+directory \fIDIR\fR.  The path part of the request supplies
+the path to the requested file, relative to the directory \fIDIR\fR.
+The path may be modified, if need be, using request rewriting
+techniques (in particular, \fBSetPath\fR) discussed in
+.BR "REQUEST MODIFICATION DIRECTIVES" .
+Content type of the response is assumed to be
+.BR text/plain .
+This can be changed using \fBSetHeader\fR statement (see
+.BR "RESPONSE MODIFICATION" ).
 .TP
 \fBEmergency\fR
 Directives enclosed between
@@ -2548,6 +2609,36 @@ Remove matching headers from the response.
 Add header to the response.  Argument
 undergoes string expansion as described above. The expanded value must
 be a valid header line.
+.SH ERROR RESPONSE REWRITING
+When a regular backend responds with an error, the content
+of that response can be replaced with an arbitrary custom page, if its
+status code is one of the http status codes supported by
+.BR pound ,
+i.e. one of
+.BR 400 ,
+.BR 401 ,
+.BR 404 ,
+.BR 405 ,
+.BR 413 ,
+.BR 414 ,
+.BR 500 ,
+.BR 501 ,
+.BR 503 ,
+and a custom error page for that status is provided using the
+.B ErrorFile
+directive
+(or one of the legacy
+.BI ErrNNN
+directives).
+.PP
+To enable such error response rewriting use the following statement:
+.PP
+.EX
+RewriteErrors on
+.EE
+.PP
+in the \fBService\fR block, where the responding backend is defined,
+or in the enclosing \fBListenHTTP\fR (\fBListenHTTPS\fR) block.
 .SH MULTI-VALUE HEADERS
 HTTP protocol allows for certain headers to appear in the message
 multiple times.  Namely, multiple headers with the same header name
