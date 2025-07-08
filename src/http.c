@@ -3938,6 +3938,7 @@ backend_response (POUND_HTTP *phttp)
 	      phttp->no_cont = 1;
 	      break;
 
+	    case 4:
 	    case 5:
 	      if (phttp->svc->rewrite_errors != -1
 		  ? phttp->svc->rewrite_errors
