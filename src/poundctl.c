@@ -123,7 +123,10 @@ parse_server (void *call_data, void *section_data)
   return cfgparser_loop (server_parsetab, srv, NULL, DEPREC_OK, &srv->locus);
 }
 
-static CFGPARSER_TABLE toplevel_parsetab[] = {
+static CFGPARSER_TABLE top_level_parsetab[] = {
+  {
+    .type = KWT_TOPLEVEL,
+  },
   {
     .name = "URL",
     .parser = cfg_assign_string,
@@ -193,7 +196,7 @@ read_config (void)
     {
       if (poundctl_conf[0])
 	{
-	  if (cfgparser_parse (poundctl_conf, homedir, toplevel_parsetab, NULL,
+	  if (cfgparser_parse (poundctl_conf, homedir, top_level_parsetab, NULL,
 			       DEPREC_OK, 0))
 	    exit (1);
 	}
@@ -204,7 +207,7 @@ read_config (void)
       strcat (strcat (strcpy (buf, homedir), "/"), DOT_POUNDCTL_NAME);
       if (access (buf, F_OK) == 0)
 	{
-	  if (cfgparser_parse (".poundctl", homedir, toplevel_parsetab, NULL,
+	  if (cfgparser_parse (".poundctl", homedir, top_level_parsetab, NULL,
 			       DEPREC_OK, 0))
 	    exit (1);
 	}

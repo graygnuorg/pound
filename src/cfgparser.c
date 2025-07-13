@@ -911,9 +911,14 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
   CFGPARSER_TABLE *p;
 
   *ref = NULL;
-  for (p = tab; p->name; p++)
+  p = tab;
+  if (p->type == KWT_TOPLEVEL)
+    p++;
+  for (; p->name; p++)
     {
-      if (p->type == KWT_TABREF)
+      if (p->type == KWT_TOPLEVEL)
+	continue;
+      else if (p->type == KWT_TABREF)
 	{
 	  CFGPARSER_TABLE *result = parser_find (p->ref, name, buf, ref);
 	  if (result)
@@ -956,7 +961,6 @@ static CFGPARSER_TABLE global_parsetab[] = {
 int
 cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 	    int single_statement,
-	    int eof_ok,
 	    enum deprecation_mode handle_deprecated,
 	    struct locus_range *retrange)
 {
@@ -971,13 +975,14 @@ cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 
       if (type == EOF)
 	{
-	  if (!eof_ok)
+	  if (ptab[0].type == KWT_TOPLEVEL)
+	    goto end;
+	  else
 	    {
 	      conf_error_at_locus_point (&retrange->beg,
 					 "unexpected end of file");
 	      return CFGPARSER_FAIL;
 	    }
-	  goto end;
 	}
       else if (type == T_ERROR)
 	return CFGPARSER_FAIL;
@@ -1071,10 +1076,9 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 {
   int rc;
   struct locus_range range;
-  int eofok = retrange == NULL;
   locus_range_init (&range);
   rc = cfgparser0 (ptab, call_data, section_data, single_statement,
-		   eofok, handle_deprecated, &range);
+		   handle_deprecated, &range);
   if (retrange && rc == CFGPARSER_OK)
     locus_range_copy (retrange, &range);
   locus_range_unref (&range);

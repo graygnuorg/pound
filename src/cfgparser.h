@@ -292,6 +292,10 @@ enum keyword_type
     KWT_ALIAS,        /* Alias to another keyword */
     KWT_TABREF,       /* Reference to another table */
     KWT_SOFTREF,      /* Same as above, but overrides data/off pair of it. */
+    KWT_TOPLEVEL      /* Can appear only in the first entry of the table.
+			 Remaining fields are ignored.
+			 Indicates that it is a top-level table, i.e. the
+			 input ends with an EOF. */
   };
 
 typedef struct cfg_parser_table

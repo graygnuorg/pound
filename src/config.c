@@ -4601,6 +4601,9 @@ parse_resolver (void *call_data, void *section_data)
 
 static CFGPARSER_TABLE top_level_parsetab[] = {
   {
+    .type = KWT_TOPLEVEL
+  },
+  {
     .name = "IncludeDir",
     .parser = cfg_parse_includedir
   },
