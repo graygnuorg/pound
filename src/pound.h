@@ -622,7 +622,8 @@ static inline int backend_is_active (BACKEND *be)
   return !be->disabled && backend_is_alive (be);
 }
 
-BACKEND *backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc);
+BACKEND *backend_create (BACKEND_TYPE type, int prio,
+			 struct locus_range const *loc);
 
 typedef struct session
 {

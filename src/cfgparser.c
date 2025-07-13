@@ -179,7 +179,7 @@ void
 stringbuf_format_locus_point (struct stringbuf *sb,
 			      struct locus_point const *loc)
 {
-  stringbuf_printf (sb, "%s:%d", loc->filename, loc->line);
+  stringbuf_printf (sb, "%s:%d", string_ptr (loc->filename), loc->line);
   if (loc->col)
     stringbuf_printf (sb, ".%d", loc->col);
 }
@@ -188,7 +188,8 @@ static int
 same_file (struct locus_point const *a, struct locus_point const *b)
 {
   return a->filename == b->filename
-	 || (a->filename && b->filename && strcmp (a->filename, b->filename) == 0);
+	 || (a->filename && b->filename &&
+	     strcmp (string_ptr (a->filename), string_ptr (b->filename)) == 0);
 }
 
 void
@@ -270,39 +271,6 @@ conf_error_at_locus_point (struct locus_point const *loc, char const *fmt, ...)
   va_end (ap);
 }
 
-
-struct name_list
-{
-  struct name_list *next;
-  char name[1];
-};
-
-static struct name_list *name_list;
-
-static char const *
-pathname_alloc (char const *dir, char const *name)
-{
-  struct name_list *np;
-  size_t dirlen = 0;
-
-  /* Ignore the directory if the filename is absolute. */
-  if (name[0] == '/')
-    dir = NULL;
-
-  if (dir)
-    dirlen = strlen (dir) + 1;
-
-  np = xmalloc (sizeof (*np) + dirlen + strlen (name));
-  if (dir)
-    {
-      strcpy (np->name, dir);
-      np->name[dirlen-1] = '/';
-    }
-  strcpy (np->name + dirlen, name);
-  np->next = name_list;
-  name_list = np;
-  return np->name;
-}
 
 typedef DLIST_HEAD (, workdir) WORKDIR_HEAD;
 
@@ -416,7 +384,7 @@ char const *include_dir = SYSCONFDIR;
 WORKDIR *include_wd;
 
 WORKDIR *
-get_include_wd_at_locus_range (struct locus_range *locus)
+get_include_wd_at_locus_range (struct locus_range const *locus)
 {
   if (!include_wd)
     {
@@ -515,6 +483,8 @@ input_close (struct cfginput *input)
   if (input)
     {
       prev = input->prev;
+      locus_range_unref (&input->token.locus);
+      locus_point_unref (&input->locus);
       fclose (input->file);
       stringbuf_free (&input->buf);
       free (input);
@@ -537,12 +507,9 @@ input_open (char const *filename, struct stat *st)
     }
   input->ino = st->st_ino;
   input->devno = st->st_dev;
-  if (include_wd == NULL || include_wd->fd == AT_FDCWD)
-    input->locus.filename = xstrdup (filename);
-  else
-    input->locus.filename = pathname_alloc (include_wd->name, filename);
-  input->locus.line = 1;
-  input->locus.col = 0;
+  locus_point_init (&input->locus, filename,
+		    (include_wd != NULL && include_wd->fd != AT_FDCWD)
+		    ? include_wd->name : NULL);
   return input;
 }
 
@@ -582,6 +549,8 @@ input_ungetc (struct cfginput *input, int c)
 #define is_ident_start(c) (c_isalpha (c) || c == '_')
 #define is_ident_cont(c) (is_ident_start (c) || c_isdigit (c))
 
+static struct token *input_unput (struct cfginput *input);
+
 int
 input_gettkn (struct cfginput *input, struct token **tok)
 {
@@ -591,14 +560,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 
   if (input->putback_index > 0)
     {
-      input->token = input->putback[--input->putback_index];
-      if (input->token.str != NULL)
-	{
-	  stringbuf_add_string (&input->buf, input->token.str);
-	  free (input->token.str);
-	  input->token.str = stringbuf_finish (&input->buf);
-	}
-      *tok = &input->token;
+      *tok = input_unput (input);
       return input->token.type;
     }
 
@@ -625,7 +587,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 
       if (c == '\n')
 	{
-	  input->token.locus.beg = input->locus;
+	  locus_point_copy (&input->token.locus.beg, &input->locus);
 	  input->token.locus.beg.line--;
 	  input->token.locus.beg.col = input->prev_col;
 	  input->token.type = c;
@@ -635,7 +597,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
       if (c_isspace (c))
 	continue;
 
-      input->token.locus.beg = input->locus;
+      locus_point_copy (&input->token.locus.beg, &input->locus);
       if (c == '"')
 	{
 	  while ((c = input_getc (input)) != '"')
@@ -705,7 +667,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
       break;
     }
  end:
-  input->token.locus.end = input->locus;
+  locus_point_copy (&input->token.locus.end, &input->locus);
   *tok = &input->token;
   return input->token.type;
 }
@@ -714,13 +676,27 @@ static void
 input_putback (struct cfginput *input, struct token *tok)
 {
   assert (input->putback_index < MAX_PUTBACK);
+  locus_range_ref (&tok->locus);
   input->putback[input->putback_index] = *tok;
   if (tok->type >= T__BASE && tok->type < T__END)
-    input->putback[input->putback_index].str = xstrdup (tok->str);
+    input->putback[input->putback_index].str = tok->str;
   else
     input->putback[input->putback_index].str = NULL;
   input->putback_index++;
 }
+
+static struct token *
+input_unput (struct cfginput *input)
+{
+  if (input->putback_index > 0)
+    {
+      locus_range_unref (&input->token.locus);
+      input->token = input->putback[--input->putback_index];
+      return &input->token;
+    }
+  return NULL;
+}
+
 
 struct cfginput *cur_input;
 
@@ -730,7 +706,7 @@ cur_token (void)
   return &cur_input->token;
 }
 
-struct locus_range *
+struct locus_range const *
 last_token_locus_range (void)
 {
   if (cur_input)
@@ -862,20 +838,17 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 {
   int c;
   struct locus_range range;
-  
+  struct token *tok;
+
   range.beg = input->locus;
 
   stringbuf_reset (&input->buf);
 
   /* Drain putback */
-  while (input->putback_index > 0)
+  while ((tok = input_unput (input)) != NULL)
     {
-      struct token tkn = input->putback[--input->putback_index];
-      if (tkn.str != NULL)
-	{
-	  stringbuf_add_string (&input->buf, tkn.str);
-	  free (tkn.str);
-	}
+      stringbuf_add_string (&input->buf, tok->str);
+      free (tok->str);
       if (input->putback_index > 0)
 	stringbuf_add_char (&input->buf, ' ');
     }
@@ -896,7 +869,7 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 	  char *end = start + stringbuf_len (&input->buf);
 	  char *line;
 	  size_t linelen, len;
-	  
+
 	  for (line = end - 1; line > start; line--)
 	    {
 	      if (*line == '\n')
@@ -981,17 +954,16 @@ static CFGPARSER_TABLE global_parsetab[] = {
 };
 
 int
-cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
-	   int single_statement,
-	   enum deprecation_mode handle_deprecated,
-	   struct locus_range *retrange)
+cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
+	    int single_statement,
+	    int eof_ok,
+	    enum deprecation_mode handle_deprecated,
+	    struct locus_range *retrange)
 {
   struct token *tok;
 
-  if (retrange)
-    {
-      retrange->beg = last_token_locus_range ()->beg;
-    }
+  locus_point_copy (&retrange->beg, &last_token_locus_range ()->beg);
+  locus_point_init (&retrange->end, NULL, NULL);
 
   for (;;)
     {
@@ -999,7 +971,7 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 
       if (type == EOF)
 	{
-	  if (retrange)
+	  if (!eof_ok)
 	    {
 	      conf_error_at_locus_point (&retrange->beg,
 					 "unexpected end of file");
@@ -1011,9 +983,7 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 	return CFGPARSER_FAIL;
 
       if (retrange)
-	{
-	  retrange->end = last_token_locus_range ()->end;
-	}
+	locus_point_copy (&retrange->end, &last_token_locus_range ()->end);
 
       if (tok->type == T_IDENT)
 	{
@@ -1094,10 +1064,28 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 }
 
 int
+cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
+	   int single_statement,
+	   enum deprecation_mode handle_deprecated,
+	   struct locus_range *retrange)
+{
+  int rc;
+  struct locus_range range;
+  int eofok = retrange == NULL;
+  locus_range_init (&range);
+  rc = cfgparser0 (ptab, call_data, section_data, single_statement,
+		   eofok, handle_deprecated, &range);
+  if (retrange && rc == CFGPARSER_OK)
+    locus_range_copy (retrange, &range);
+  locus_range_unref (&range);
+  return rc;
+}
+
+int
 cfgparser_open (char const *filename, char const *wd)
 {
   int rc;
-  
+
   if ((include_wd = workdir_get (wd)) == NULL)
     {
       conf_error ("can't open cwd: %s", strerror (errno));
@@ -1128,7 +1116,7 @@ cfgparser_parse (char const *filename, char const *wd,
 		 enum deprecation_mode handle_deprecated, int keepwd)
 {
   int rc;
-  
+
   if (cfgparser_open (filename, wd))
     return -1;
   rc = cfgparser_loop (tab, data, data, handle_deprecated, NULL);
@@ -1175,14 +1163,14 @@ cfg_parse_end (void *call_data, void *section_data)
 {
   return CFGPARSER_END;
 }
-  
+
 int
 cfg_int_set_one (void *call_data, void *section_data)
 {
   *(int*)call_data = 1;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_string (void *call_data, void *section_data)
 {
@@ -1236,7 +1224,7 @@ cfg_assign_string_from_file (void *call_data, void *section_data)
   *(char**)call_data = s;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_bool (void *call_data, void *section_data)
 {
@@ -1265,7 +1253,7 @@ cfg_assign_bool (void *call_data, void *section_data)
     }
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_unsigned (void *call_data, void *section_data)
 {
@@ -1286,7 +1274,7 @@ cfg_assign_unsigned (void *call_data, void *section_data)
   *(unsigned *)call_data = n;
   return 0;
 }
-  
+
 int
 cfg_assign_int (void *call_data, void *section_data)
   {
@@ -1347,7 +1335,7 @@ cfg_assign_mode (void *call_data, void *section_data)
   *(mode_t*)call_data = n;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_int_enum (int *dst, struct token *tok, struct kwtab *kwtab,
 		     char *what)
