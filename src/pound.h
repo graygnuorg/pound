@@ -425,17 +425,32 @@ void http_request_free (struct http_request *);
 #define PRItid "lx"
 
 struct cidr;
+struct dynacl;
 
 typedef struct acl
 {
   char *name;                 /* ACL name (optional) */
   SLIST_HEAD (,cidr) head;    /* List of CIDRs */
   SLIST_ENTRY (acl) next;
+  struct dynacl *dynacl;
 } ACL;
 
 typedef SLIST_HEAD (,acl) ACL_HEAD;
 
+static inline int
+acl_is_dynamic (ACL *acl)
+{
+  return acl->dynacl != NULL;
+}
+
+void acl_lock (ACL *acl);
+void acl_unlock (ACL *acl);
+
 int acl_match (ACL *acl, struct sockaddr *sa);
+void acl_clear (ACL *acl);
+
+int dynacl_setup (void);
+int dynacl_register (ACL *acl, char const *filename, struct locus_range *loc);
 
 enum job_ctl
   {
@@ -446,6 +461,7 @@ typedef void (*JOB_FUNC) (enum job_ctl, void *, const struct timespec *);
 typedef unsigned long JOB_ID;
 
 JOB_ID job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+JOB_ID job_enqueue_after (unsigned t, JOB_FUNC func, void *data);
 void job_cancel (JOB_ID id);
 int job_get_timestamp (JOB_ID jid, struct timespec *ts);
 
@@ -1159,6 +1175,7 @@ int connect_nb (const int, const struct addrinfo *, const int);
  * Parse arguments/config file
  */
 void config_parse (int, char **);
+int config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd);
 
 /*
  * RSA ephemeral keys: how many and how often

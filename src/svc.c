@@ -131,7 +131,7 @@ job_enqueue_after_unlocked (unsigned t, JOB_FUNC func, void *data)
   return job_enqueue_unlocked (&ts, func, data);
 }
 
-static JOB_ID
+JOB_ID
 job_enqueue_after (unsigned t, JOB_FUNC func, void *data)
 {
   JOB_ID jid;

@@ -28,6 +28,7 @@ sbin_PROGRAMS=pound
 pound_SOURCES=\
  bauth.c\
  config.c\
+ dynacl.c\
  genpat.c\
  http.c\
  log.c\

@@ -420,17 +420,34 @@ acl_match (ACL *acl, struct sockaddr *sa)
   CIDR *cidr;
   unsigned char *ap;
   size_t len;
+  int rc = 1;
 
   if ((len = sockaddr_bytes (sa, &ap)) == -1)
     return -1;
 
+  acl_lock (acl);
   SLIST_FOREACH (cidr, &acl->head, next)
     {
       if (cidr->family == sa->sa_family && cidr_match (cidr, ap, len) == 0)
-	return 0;
+	{
+	  rc = 0;
+	  break;
+	}
     }
+  acl_unlock (acl);
 
-  return 1;
+  return rc;
+}
+
+void
+acl_clear (ACL *acl)
+{
+  while (!SLIST_EMPTY (&acl->head))
+    {
+      struct cidr *cp = SLIST_FIRST (&acl->head);
+      SLIST_SHIFT (&acl->head, next);
+      free (cp);
+    }
 }
 
 static void
@@ -449,20 +466,15 @@ masklen_to_netmask (unsigned char *buf, size_t len, size_t masklen)
     buf[i] = 0;
 }
 
-/* Parse CIDR at the current point of the input. */
 static int
-parse_cidr (ACL *acl)
+parse_cidr_str (ACL *acl, char const *str, struct locus_range const *loc)
 {
-  struct token *tok;
   char *mask;
   struct addrinfo hints, *res;
   unsigned long masklen;
   int rc;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((mask = strchr (tok->str, '/')) != NULL)
+  if ((mask = strchr (str, '/')) != NULL)
     {
       char *p;
 
@@ -472,7 +484,7 @@ parse_cidr (ACL *acl)
       masklen = strtoul (mask, &p, 10);
       if (errno || *p)
 	{
-	  conf_error ("%s", "invalid netmask");
+	  conf_error_at_locus_range (loc, "%s", "invalid netmask");
 	  return CFGPARSER_FAIL;
 	}
     }
@@ -481,7 +493,7 @@ parse_cidr (ACL *acl)
   hints.ai_family = AF_UNSPEC;
   hints.ai_flags = AI_NUMERICHOST;
 
-  if ((rc = getaddrinfo (tok->str, NULL, &hints, &res)) == 0)
+  if ((rc = getaddrinfo (str, NULL, &hints, &res)) == 0)
     {
       CIDR *cidr;
       int len, i;
@@ -489,7 +501,7 @@ parse_cidr (ACL *acl)
 
       if ((len = sockaddr_bytes (res->ai_addr, &p)) == -1)
 	{
-	  conf_error ("%s", "unsupported address family");
+	  conf_error_at_locus_range (loc, "%s", "unsupported address family");
 	  return CFGPARSER_FAIL;
 	}
       XZALLOC (cidr);
@@ -507,10 +519,22 @@ parse_cidr (ACL *acl)
     }
   else
     {
-      conf_error ("%s", "invalid IP address: %s", gai_strerror (rc));
+      conf_error_at_locus_range (loc, "invalid IP address: %s",
+				 gai_strerror (rc));
       return CFGPARSER_FAIL;
     }
   return CFGPARSER_OK;
+}
+
+/* Parse CIDR at the current point of the input. */
+static int
+parse_cidr (ACL *acl)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  return parse_cidr_str (acl, tok->str, &tok->locus);
 }
 
 /*
@@ -534,6 +558,56 @@ acl_by_name (char const *name)
 	break;
     }
   return acl;
+}
+
+int
+config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
+{
+  FILE *fp;
+  char buf[MAXBUF];
+  struct locus_range loc;
+  int rc;
+  char *p;
+
+  fp = fopen_wd (wd, filename);
+  if (fp == NULL)
+    return -1;
+
+  locus_point_init (&loc.beg, filename, wd->name);
+  locus_point_init (&loc.end, NULL, NULL);
+  locus_point_copy (&loc.end, &loc.beg);
+
+  rc = 0;
+  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
+    {
+      char *line;
+      size_t len = strlen (p);
+
+      if (len == 0)
+	continue;
+      if (p[len-1] == '\n')
+	len--;
+      line = c_trimws (p, &len);
+      if (len == 0 || *p == '#')
+	continue;
+      line[len] = 0;
+
+      if (p[0] == '"' && p[len-1] == '"')
+	{
+	  p++;
+	  p[--len] = 0;
+	}
+
+      /* Range fixup */
+      loc.beg.col = line - p;
+      loc.end.col = loc.beg.col + len;
+      if (parse_cidr_str (acl, line, &loc))
+	rc++;
+      loc.beg.line = loc.end.line = loc.beg.line + 1;
+    }
+  fclose (fp);
+  locus_range_unref (&loc);
+  return rc;
 }
 
 /*
@@ -608,9 +682,11 @@ parse_named_acl (void *call_data, void *section_data)
 }
 
 /*
- * Parse ACL reference.  Two forms are accepted:
+ * Parse ACL reference.  Three forms are accepted:
  * ACL "name"
  *   References a named ACL.
+ * ACL -file "name"
+ *   Read dynamic ACL from file.
  * ACL "\n" ... End
  *   Creates and references an unnamed ACL.
  */
@@ -629,6 +705,49 @@ parse_acl_ref (ACL **ret_acl)
       acl = new_acl (NULL);
       *ret_acl = acl;
       return parse_acl (acl);
+    }
+  else if (tok->type == T_LITERAL)
+    {
+      if (strcmp (tok->str, "-file") == 0)
+	{
+	  int rc;
+	  char *filename;
+	  struct locus_range loc = LOCUS_RANGE_INITIALIZER;
+	  if ((tok = gettkn_expect (T_STRING)) == NULL)
+	    return CFGPARSER_FAIL;
+	  filename = xstrdup (tok->str);
+	  locus_range_copy (&loc, &tok->locus);
+	  if ((tok = gettkn_any ()) == NULL)
+	    {
+	      conf_error ("%s", "unexpected end of file");
+	      free (filename);
+	      locus_range_unref (&loc);
+	      return CFGPARSER_FAIL;
+	    }
+	  else if (tok->type != '\n')
+	    {
+	      conf_error ("expected newline, but found %s",
+			  token_type_str (tok->type));
+	      free (filename);
+	      locus_range_unref (&loc);
+	      return CFGPARSER_FAIL;
+	    }
+
+	  acl = new_acl (NULL);
+	  *ret_acl = acl;
+	  rc = dynacl_register (acl, filename, &loc);
+	  locus_range_unref (&loc);
+	  free (filename);
+	  if (rc)
+	    return CFGPARSER_FAIL;
+	  return CFGPARSER_OK_NONL;
+	}
+      else
+	{
+	  conf_error ("expected -file, but found %s",
+		      token_type_str (tok->type));
+	  return CFGPARSER_FAIL;
+	}
     }
   else if (tok->type == T_STRING)
     {
@@ -1425,13 +1544,14 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
       while ((p = fgets (buf, sizeof buf, fp)) != NULL)
 	{
 	  int rc;
-	  size_t len;
+	  size_t len = strlen(p);
 	  SERVICE_COND *hc;
 
-	  p += strspn (p, " \t");
-	  for (len = strlen (p);
-	       len > 0 && (p[len-1] == ' ' || p[len-1] == '\t'|| p[len-1] == '\n'); len--)
-	    ;
+	  if (len == 0)
+	    continue;
+	  if (p[len-1] == '\n')
+	    len--;
+	  p = c_trimws (p, &len);
 	  if (len == 0 || *p == '#')
 	    continue;
 	  p[len] = 0;
@@ -4783,6 +4903,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "Resolver",
     .parser = parse_resolver
   },
+  {
+    .name = "DynACLTTL",
+    .parser = cfg_assign_unsigned,
+    .data = &dynacl_ttl
+  },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
@@ -5279,6 +5404,7 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
+      dynacl_setup ();
       if (worker_min_count > worker_max_count)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
