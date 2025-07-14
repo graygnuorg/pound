@@ -110,6 +110,12 @@ logmsg (const int priority, const char *fmt, ...)
   va_end (ap);
 }
 
+static void
+pound_cfg_error_msg (char const *msg)
+{
+  logmsg (LOG_ERR, "%s", msg);
+}
+
 /*
  * Log an out of memory condition and return.
  * Take care not to use [v]logmsg as this could create infinite recursion.
@@ -143,15 +149,16 @@ xnomem (void)
  * Log a message at LOG_CRIT and terminate the program.
  */
 void
-abend (char const *fmt, ...)
+abend (struct locus_range const *range, char const *fmt, ...)
 {
   va_list ap;
   va_start (ap, fmt);
-  vlogmsg (LOG_CRIT, fmt, ap);
+  vconf_error_at_locus_range (range, fmt, ap);
   va_end (ap);
   logmsg (LOG_NOTICE, "pound terminated");
   _exit (1);
 }
+
 
 /*
  * OpenSSL thread support stuff
@@ -253,7 +260,7 @@ worker_start (void)
   int rc;
 
   if ((rc = pthread_create (&thr, &thread_attr_worker, thr_http, NULL)) != 0)
-    abend ("can't create worker thread: %s", strerror (rc));
+    abend (NULL, "can't create worker thread: %s", strerror (rc));
   worker_count++;
 }
 
@@ -715,7 +722,7 @@ server (void)
 
   /* start timer */
   if (pthread_create (&thr, &thread_attr_detached, thr_timer, NULL))
-    abend ("can't create timer thread: %s", strerror (errno));
+    abend (NULL, "can't create timer thread: %s", strerror (errno));
 
   /*
    * Create the worker threads
@@ -888,12 +895,12 @@ detach (void)
   sa.sa_flags = 0;
 
   if (sigaction (SIGHUP, &sa, &oldsa))
-    abend ("sigaction: %s", strerror (errno));
+    abend (NULL, "sigaction: %s", strerror (errno));
 
   switch (fork ())
     {
     case -1:
-      abend ("fork: %s", strerror (errno));
+      abend (NULL, "fork: %s", strerror (errno));
       _exit (1);
 
     case 0:
@@ -909,20 +916,20 @@ detach (void)
   sigaction (SIGHUP, &oldsa, NULL);
 
   if (pid == -1)
-    abend ("setsid: %s", strerror (ec));
+    abend (NULL, "setsid: %s", strerror (ec));
 
   if (chdir ("/"))
-    abend ("can't change to /: %s", strerror (errno));
+    abend (NULL, "can't change to /: %s", strerror (errno));
 
   close (0);
   close (1);
   close (2);
   if (open ("/dev/null", O_RDONLY) == -1)
-    abend ("can't open /dev/null: %s", strerror (errno));
+    abend (NULL, "can't open /dev/null: %s", strerror (errno));
   if (open ("/dev/null", O_WRONLY) == -1)
-    abend ("can't open /dev/null: %s", strerror (errno));
+    abend (NULL, "can't open /dev/null: %s", strerror (errno));
   if (dup (1) == -1)
-    abend ("dup failed: %s", strerror (errno));
+    abend (NULL, "dup failed: %s", strerror (errno));
 }
 
 #if EARLY_PTHREAD_CANCEL_PROBE
@@ -1008,25 +1015,23 @@ listener_socket_from (LISTENER *lst)
   char tmp[MAX_ADDR_BUFSIZE];
 
   if ((sfd = socket (PF_UNIX, SOCK_STREAM, 0)) < 0)
-    abend ("%s: socket: %s", lst->locus_str, strerror (errno));
+    abend (&lst->locus, "socket: %s", strerror (errno));
 
   if (connect (sfd, lst->addr.ai_addr, lst->addr.ai_addrlen) < 0)
-    abend ("%s: connect %s: %s",
-	   lst->locus_str,
+    abend (&lst->locus, "connect %s: %s",
 	   ((struct sockaddr_un*)lst->addr.ai_addr)->sun_path,
 	   strerror (errno));
 
   fd = read_fd (sfd);
 
   if (fd == -1)
-    abend ("%s: can't get socket: %s", lst->locus_str, strerror (errno));
+    abend (&lst->locus, "can't get socket: %s", strerror (errno));
 
   if (getsockname (fd, (struct sockaddr*) &ss, &sslen) == -1)
-    abend ("%s: can't get socket address: %s",
-	   lst->locus_str, strerror (errno));
+    abend (&lst->locus, "can't get socket address: %s", strerror (errno));
 
   lst->sock = fd;
-  
+
   free (lst->addr.ai_addr);
   lst->addr.ai_addr = xmalloc (sslen);
   memcpy (lst->addr.ai_addr, &ss, sslen);
@@ -1034,7 +1039,7 @@ listener_socket_from (LISTENER *lst)
   lst->addr.ai_family = ss.ss_family;
 
   xstringbuf_init (&sb);
-  stringbuf_add_string (&sb, lst->locus_str);
+  stringbuf_format_locus_range (&sb, &lst->locus);
   stringbuf_add_string (&sb, ": obtained address ");
   stringbuf_add_string (&sb, addr2str (tmp, sizeof (tmp), &lst->addr, 0));
   logmsg (LOG_DEBUG, "%s", stringbuf_finish (&sb));
@@ -1064,25 +1069,23 @@ listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
       unlink (((struct sockaddr_un*)lst->addr.ai_addr)->sun_path);
       oldmask = umask (0777 & ~lst->mode);
       break;
-      
+
     default:
       abort ();
     }
 
   if ((lst->sock = socket (domain, SOCK_STREAM, 0)) < 0)
-    abend ("%s: can't create HTTP socket %s: %s",
-	   lst->locus_str,
+    abend (&lst->locus, "can't create HTTP socket %s: %s",
 	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
 	   strerror (errno));
 
   opt = 1;
   setsockopt (lst->sock, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof (opt));
   if (bind (lst->sock, lst->addr.ai_addr, lst->addr.ai_addrlen) < 0)
-    abend ("%s: can't bind HTTP socket to %s: %s",
-	   lst->locus_str,
+    abend (&lst->locus, "can't bind HTTP socket to %s: %s",
 	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
 	   strerror (errno));
-  
+
   if (domain == PF_UNIX)
     {
       umask (oldmask);
@@ -1090,15 +1093,15 @@ listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
 	{
 	  char *sname = ((struct sockaddr_un*)lst->addr.ai_addr)->sun_path;
 	  if (chown (sname, user_id, group_id))
-	    logmsg (LOG_ERR, "%s: can't chown socket %s to %d:%d: %s",
-		    lst->locus_str,
-		    sname, user_id, group_id, strerror (errno));
+	    conf_error_at_locus_range (&lst->locus,
+				       "can't chown socket %s to %d:%d: %s",
+				       sname, user_id, group_id,
+				       strerror (errno));
 	}
     }
 
   if (listen (lst->sock, 512))
-    abend ("%s: can't listen on %s: %s",
-	   lst->locus_str,
+    abend (&lst->locus, "can't listen on %s: %s",
 	   addr2str (abuf, sizeof (abuf), &lst->addr, 0),
 	   strerror (errno));
 }
@@ -1134,7 +1137,7 @@ main (const int argc, char **argv)
       || genpat_compile (&LOCATION,  GENPAT_POSIX,
 			"(http|https)://([^/]+)(.*)",
 			GENPAT_ICASE | GENPAT_MULTILINE))
-    abend ("bad essential Regex");
+    abend (NULL, "bad essential Regex");
 
 #ifndef SOL_TCP
   /* for systems without the definition */
@@ -1156,17 +1159,19 @@ main (const int argc, char **argv)
   pthread_attr_setdetachstate (&thread_attr_worker, PTHREAD_CREATE_DETACHED);
   /* set new stack size  */
   if (pthread_attr_setstacksize (&thread_attr_worker, 1 << 18))
-    abend ("can't set stack size");
+    abend (NULL, "can't set stack size");
 
-  
   json_memabrt = lognomem;
 
   /* read config */
   config_parse (argc, argv);
 
   if (log_facility != -1)
-    openlog (syslog_tag ? syslog_tag : progname,
-	     LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
+    {
+      openlog (syslog_tag ? syslog_tag : progname,
+	       LOG_CONS | LOG_NDELAY | LOG_PID, log_facility);
+      cfg_error_msg = pound_cfg_error_msg;
+    }
 
   /* set uid if necessary */
   if (user)
@@ -1174,7 +1179,7 @@ main (const int argc, char **argv)
       struct passwd *pw;
 
       if ((pw = getpwnam (user)) == NULL)
-	abend ("no such user %s", user);
+	abend (NULL, "no such user %s", user);
       user_id = pw->pw_uid;
     }
 
@@ -1184,7 +1189,7 @@ main (const int argc, char **argv)
       struct group *gr;
 
       if ((gr = getgrnam (group)) == NULL)
-	abend ("no such group %s", group);
+	abend (NULL, "no such group %s", group);
       group_id = gr->gr_gid;
     }
 
@@ -1222,19 +1227,19 @@ main (const int argc, char **argv)
       probe_pthread_cancel ();
 
       if (chroot (root_jail))
-	abend ("chroot: %s", strerror (errno));
+	abend (NULL, "chroot: %s", strerror (errno));
 
       if (chdir ("/"))
-	abend ("chdir /: %s", strerror (errno));
+	abend (NULL, "chdir /: %s", strerror (errno));
     }
 
   if (group)
     if (setgid (group_id) || setegid (group_id))
-      abend ("setgid: %s", strerror (errno));
+      abend (NULL, "setgid: %s", strerror (errno));
 
   if (user)
     if (setuid (user_id) || seteuid (user_id))
-      abend ("setuid: %s", strerror (errno));
+      abend (NULL, "setuid: %s", strerror (errno));
 
   if (enable_supervisor && daemonize)
     supervisor ();

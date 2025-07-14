@@ -1074,12 +1074,10 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 	   enum deprecation_mode handle_deprecated,
 	   struct locus_range *retrange)
 {
-  int rc;
-  struct locus_range range;
-  locus_range_init (&range);
-  rc = cfgparser0 (ptab, call_data, section_data, single_statement,
-		   handle_deprecated, &range);
-  if (retrange && rc == CFGPARSER_OK)
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
+  int rc = cfgparser0 (ptab, call_data, section_data, single_statement,
+		       handle_deprecated, &range);
+  if (retrange)
     locus_range_copy (retrange, &range);
   locus_range_unref (&range);
   return rc;

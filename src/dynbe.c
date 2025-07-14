@@ -460,7 +460,6 @@ service_matrix_addr_update_backends (SERVICE *svc,
 		}
 	      backend_matrix_to_regular (&mtx->v.mtx, &ai, &be->v.reg);
 	      be->service = mtx->service;
-	      be->locus_str = mtx->locus_str;
 	      be->disabled = mtx->disabled;
 	      be->v.reg.parent = mtx;
 
@@ -622,7 +621,6 @@ service_matrix_srv_update_backends (SERVICE *svc, BACKEND *mtx,
 			  break;
 			}
 		      be->service = mtx->service;
-		      be->locus_str = mtx->locus_str;
 		      be->disabled = 0;
 		      be->v.mtx.hostname = strdup (srv->host);
 		      if (!be->v.mtx.hostname)

@@ -713,21 +713,21 @@ static void
 i_backend_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->backend->locus_str);
+  stringbuf_format_locus_range (sb, &phttp->backend->locus);
 }
 
 static void
 i_service_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->svc->locus_str);
+  stringbuf_format_locus_range (sb, &phttp->svc->locus);
 }
 
 static void
 i_listener_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->lstn->locus_str);
+  stringbuf_format_locus_range (sb, &phttp->lstn->locus);
 }
 
 static struct argprt locprt[] = {

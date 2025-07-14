@@ -317,6 +317,9 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 /* Configuration parser */
 #include "cfgparser.h"
 #include "cctype.h"
+
+char *locus_point_str (struct locus_point const *loc);
+char *locus_range_str (struct locus_range const *loc);
 
 int field_list_filter (char const *subj, size_t len,
 		       int (*pred) (char const *, size_t, void *),
@@ -567,7 +570,6 @@ typedef struct _backend
   struct _service *service;     /* Back pointer to the owning service */
   struct balancer *balancer;    /* Back pointer to the owning backend list. */
   struct locus_range locus;     /* Location in the config file */
-  char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
@@ -827,7 +829,7 @@ typedef DLIST_HEAD (,balancer) BALANCER_LIST;
 typedef struct _service
 {
   char *name;			/* symbolic name */
-  char *locus_str;              /* Location in the config file, as string. */
+  struct locus_range locus;     /* Location in the config file. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
   BALANCER_LIST balancers;
@@ -889,7 +891,7 @@ int http_log_format_check (int n);
 typedef struct _listener
 {
   char *name;			/* symbolic name */
-  char *locus_str;              /* Location in the config file, as string. */
+  struct locus_range locus;     /* Location in the config file. */
   struct addrinfo addr;		/* Socket address */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
@@ -1041,8 +1043,8 @@ void *thr_http (void *);
 /* Log an error to the syslog or to stderr */
 void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
-void abend (char const *fmt, ...)
-  ATTR_PRINTFLIKE(1,2);
+void abend (struct locus_range const *range, char const *fmt, ...)
+  ATTR_PRINTFLIKE(2,3);
 
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);

@@ -66,6 +66,24 @@ openssl_error_at_locus_range (struct locus_range const *loc,
 
 #define conf_openssl_error(file, msg)				\
   openssl_error_at_locus_range (last_token_locus_range (), file, msg)
+
+char *
+locus_point_str (struct locus_point const *loc)
+{
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  stringbuf_format_locus_point (&sb, loc);
+  return stringbuf_value (&sb);
+}
+
+char *
+locus_range_str (struct locus_range const *loc)
+{
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  stringbuf_format_locus_range (&sb, loc);
+  return stringbuf_value (&sb);
+}
 
 BACKEND *
 backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
@@ -76,6 +94,7 @@ backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
       be->be_type = type;
       be->priority = prio;
       pthread_mutex_init (&be->mut, &mutex_attr_recursive);
+      locus_range_init (&be->locus);
       if (loc)
 	locus_range_copy (&be->locus, loc);
       backend_refcount_init (be);
@@ -134,16 +153,15 @@ named_backend_table_free (NAMED_BACKEND_TABLE *tab)
 }
 
 static NAMED_BACKEND *
-named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name,
-		      struct locus_range const *locus,
-		      BACKEND *be)
+named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name, BACKEND *be)
 {
   NAMED_BACKEND *bp, *old;
 
   bp = xmalloc (sizeof (*bp) + strlen (name) + 1);
   bp->name = (char*) (bp + 1);
   strcpy (bp->name, name);
-  locus_range_copy (&bp->locus, locus);
+  locus_range_init (&bp->locus);
+  locus_range_copy (&bp->locus, &be->locus);
   bp->priority = be->priority;
   bp->disabled = be->disabled;
   bp->bemtx = be->v.mtx;
@@ -984,16 +1002,6 @@ static CFGPARSER_TABLE use_backend_parsetab[] = {
   { NULL }
 };
 
-static char *
-format_locus_str (struct locus_range *rp)
-{
-  struct stringbuf sb;
-
-  xstringbuf_init (&sb);
-  stringbuf_format_locus_range (&sb, rp);
-  return stringbuf_finish (&sb);
-}
-
 static inline int
 parser_loop (CFGPARSER_TABLE *ptab,
 	     void *call_data, void *section_data,
@@ -1006,8 +1014,7 @@ parser_loop (CFGPARSER_TABLE *ptab,
 }
 
 static BACKEND *
-parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl,
-			struct locus_point *beg)
+parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl)
 {
   BACKEND *be;
   struct locus_range range = LOCUS_RANGE_INITIALIZER;
@@ -1019,11 +1026,8 @@ parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl,
 
   if (parser_loop (table, be, dfl, &range))
     return NULL;
-  if (beg)
-    locus_point_copy (&range.beg, beg);
 
   be->locus = range;
-  be->locus_str = format_locus_str (&range);
 
   return be;
 }
@@ -1034,28 +1038,43 @@ parse_backend (void *call_data, void *section_data)
   BALANCER_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
-  struct locus_point beg = last_token_locus_range ()->beg;
+  struct locus_point beg = LOCUS_POINT_INITIALIZER;
+
+  locus_point_copy (&beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
+    {
+      locus_point_unref (&beg);
+      return CFGPARSER_FAIL;
+    }
 
   if (tok->type == T_STRING)
     {
+      struct locus_range range = LOCUS_RANGE_INITIALIZER;
       be = xbackend_create (BE_BACKEND_REF, -1, NULL);
       be->v.be_name = xstrdup (tok->str);
       be->disabled = -1;
 
-      if (parser_loop (use_backend_parsetab, be, section_data, NULL))
-	return CFGPARSER_FAIL;
-      be->locus_str = format_locus_str (&tok->locus);
+      if (parser_loop (use_backend_parsetab, be, section_data, &range))
+	{
+	  locus_point_unref (&beg);
+	  return CFGPARSER_FAIL;
+	}
+      be->locus = range;
     }
   else
     {
       putback_tkn (tok);
-      be = parse_backend_internal (backend_parsetab, section_data, &beg);
+      be = parse_backend_internal (backend_parsetab, section_data);
       if (!be)
-	return CFGPARSER_FAIL;
+	{
+	  locus_point_unref (&beg);
+	  return CFGPARSER_FAIL;
+	}
     }
+
+  locus_point_copy (&be->locus.beg, &beg);
+  locus_point_unref (&beg);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1074,7 +1093,7 @@ parse_use_backend (void *call_data, void *section_data)
 
   be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
   be->v.be_name = xstrdup (tok->str);
-  be->locus_str = format_locus_str (&tok->locus);
+  locus_range_copy(&be->locus, &tok->locus);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1092,7 +1111,7 @@ parse_emergency (void *call_data, void *section_data)
   dfl.be_connto = 120;
   dfl.ws_to = 120;
 
-  be = parse_backend_internal (backend_parsetab, &dfl, NULL);
+  be = parse_backend_internal (backend_parsetab, &dfl);
   if (!be)
     return CFGPARSER_FAIL;
 
@@ -1668,7 +1687,6 @@ parse_redirect_backend (void *call_data, void *section_data)
     }
 
   be = xbackend_create (BE_REDIRECT, 1, &range);
-  be->locus_str = format_locus_str (&range);
   be->v.redirect.status = code;
   be->v.redirect.url = xstrdup (tok->str);
 
@@ -1752,7 +1770,6 @@ parse_error_backend (void *call_data, void *section_data)
   range.end = last_token_locus_range ()->end;
 
   be = xbackend_create (BE_ERROR, 1, &range);
-  be->locus_str = format_locus_str (&range);
   be->v.error.status = status;
   be->v.error.msg = errmsg;
 
@@ -1824,7 +1841,6 @@ parse_sendfile_backend (void *call_data, void *section_data)
     }
 
   be = xbackend_create (BE_FILE, 1, &range);
-  be->locus_str = format_locus_str (&range);
   be->v.file.wd = fd;
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
@@ -2731,6 +2747,7 @@ new_service (BALANCER_ALGO algo)
   pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
   svc->balancer_algo = algo;
   svc->rewrite_errors = -1;
+  locus_range_init (&svc->locus);
 
   DLIST_INIT (&svc->be_rem_head);
   pthread_cond_init (&svc->be_rem_cond, NULL);
@@ -2745,7 +2762,6 @@ parse_service (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) section_data;
   struct token *tok;
   SERVICE *svc;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
   svc = new_service (dfl->balancer_algo);
 
@@ -2772,12 +2788,11 @@ parse_service (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  if (parser_loop (service_parsetab, svc, dfl, &range))
+  if (parser_loop (service_parsetab, svc, dfl, &svc->locus))
     return CFGPARSER_FAIL;
 
   SLIST_PUSH (head, svc, next);
-  svc->locus_str = format_locus_str (&range);
-  locus_range_unref (&range);
+
   return CFGPARSER_OK;
 }
 
@@ -2793,26 +2808,32 @@ parse_acme (void *call_data, void *section_data)
   int rc;
   static char sp_acme[] = "^/\\.well-known/acme-challenge/(.+)";
   int fd;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
-  range.beg = last_token_locus_range ()->beg;
+  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
+    {
+      locus_range_unref (&range);
+      return CFGPARSER_FAIL;
+    }
 
   if (stat (tok->str, &st))
     {
       conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
   if (!S_ISDIR (st.st_mode))
     {
       conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
   if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
     {
       conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
 
@@ -2829,8 +2850,8 @@ parse_acme (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  range.end = last_token_locus_range ()->beg;
-  svc->locus_str = format_locus_str (&range);
+  locus_point_copy (&range.end, &last_token_locus_range ()->end);
+  svc->locus = range;
 
   /* Create ACME backend */
   be = xbackend_create (BE_ACME, 1, &range);
@@ -3372,6 +3393,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   lst->clnt_check = -1;
+  locus_range_init (&lst->locus);
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
   SLIST_INIT (&lst->services);
@@ -3430,7 +3452,7 @@ forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
     {
       if (foreach_client_cert (&svc->cond, NULL, NULL))
 	{
-	  conf_error_at_locus_range (NULL, "%s: %s", svc->locus_str, msg);
+	  conf_error_at_locus_range (&svc->locus, "%s", msg);
 	  return 1;
 	}
     }
@@ -3438,8 +3460,7 @@ forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
 }
 
 static int
-resolve_listener_address (LISTENER *lst, char *defsrv,
-			  struct locus_range *range)
+resolve_listener_address (LISTENER *lst, char *defsrv)
 {
   if (lst->addr.ai_addr == NULL)
     {
@@ -3455,7 +3476,7 @@ resolve_listener_address (LISTENER *lst, char *defsrv,
       rc = getaddrinfo (lst->addr_str, service, &hints, &res);
       if (rc != 0)
 	{
-	  conf_error_at_locus_range (range, "bad listener address: %s",
+	  conf_error_at_locus_range (&lst->locus, "bad listener address: %s",
 				     gai_strerror (rc));
 	  return CFGPARSER_FAIL;
 	}
@@ -3485,7 +3506,6 @@ parse_listen_http (void *call_data, void *section_data)
   LISTENER *lst;
   LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
   struct token *tok;
 
   if ((lst = listener_alloc (dfl)) == NULL)
@@ -3505,25 +3525,16 @@ parse_listen_http (void *call_data, void *section_data)
   else
     putback_tkn (tok);
 
-  if (parser_loop (http_parsetab, lst, section_data, &range))
+  if (parser_loop (http_parsetab, lst, section_data, &lst->locus))
     return CFGPARSER_FAIL;
 
-  if (resolve_listener_address (lst, PORT_HTTP_STR, &range) != CFGPARSER_OK)
-    {
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
+  if (resolve_listener_address (lst, PORT_HTTP_STR) != CFGPARSER_OK)
+    return CFGPARSER_FAIL;
 
   if (forbid_ssl_usage (&lst->services,
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
-    {
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  locus_range_unref (&range);
-  lst->locus_str = format_locus_str (&range);
+    return CFGPARSER_FAIL;
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -4140,9 +4151,9 @@ flush_service_client_cert (LISTENER *lst)
     {
       if (lst->clnt_check != -1)
 	{
-	  conf_error_at_locus_range (NULL, "%s: ClientCert in ListenHTTPS"
-				     "conflicts with that in Service",
-				     lst->locus_str);
+	  conf_error_at_locus_range (&lst->locus,
+				     "ClientCert in ListenHTTPS"
+				     " conflicts with that in Service");
 	  return -1;
 	}
       else
@@ -4166,7 +4177,6 @@ parse_listen_https (void *call_data, void *section_data)
   LISTENER *lst;
   LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
   POUND_CTX *pc;
   struct stringbuf sb;
   struct token *tok;
@@ -4196,27 +4206,20 @@ parse_listen_https (void *call_data, void *section_data)
     SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
     SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
 
-  if (parser_loop (https_parsetab, lst, section_data, &range))
+  if (parser_loop (https_parsetab, lst, section_data, &lst->locus))
     return CFGPARSER_FAIL;
 
-  if (resolve_listener_address (lst, PORT_HTTPS_STR, &range) != CFGPARSER_OK)
-    {
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  lst->locus_str = format_locus_str (&range);
+  if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
+    return CFGPARSER_FAIL;
 
   if (SLIST_EMPTY (&lst->ctx_head))
     {
-      conf_error_at_locus_range (&range, "Cert statement is missing");
-      locus_range_unref (&range);
+      conf_error_at_locus_range (&lst->locus, "Cert statement is missing");
       return CFGPARSER_FAIL;
     }
 
   if (flush_service_client_cert (lst) != CFGPARSER_OK)
     {
-      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
 
@@ -4228,7 +4231,6 @@ parse_listen_https (void *call_data, void *section_data)
 	  || !SSL_CTX_set_tlsext_servername_arg (ctx, &lst->ctx_head))
 	{
 	  conf_openssl_error (NULL, "can't set SNI callback");
-	  locus_range_unref (&range);
 	  return CFGPARSER_FAIL;
 	}
     }
@@ -4249,7 +4251,6 @@ parse_listen_https (void *call_data, void *section_data)
       SSL_CTX_set_info_callback (pc->ctx, SSLINFO_callback);
     }
   stringbuf_free (&sb);
-  locus_range_unref (&range);
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -4335,7 +4336,6 @@ parse_control_listener (void *call_data, void *section_data)
   SERVICE *svc;
   BACKEND *be;
   int rc;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
   if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;
@@ -4343,12 +4343,12 @@ parse_control_listener (void *call_data, void *section_data)
   switch (tok->type)
     {
     case '\n':
-      rc = parser_loop (control_parsetab, lst, section_data, &range);
+      rc = parser_loop (control_parsetab, lst, section_data, &lst->locus);
       if (rc == CFGPARSER_OK)
 	{
 	  if (lst->addr.ai_addrlen == 0)
 	    {
-	      conf_error_at_locus_range (&range, "%s",
+	      conf_error_at_locus_range (&lst->locus, "%s",
 					 "Socket statement is missing");
 	      rc = CFGPARSER_FAIL;
 	    }
@@ -4356,10 +4356,10 @@ parse_control_listener (void *call_data, void *section_data)
       break;
 
     case T_STRING:
-      locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
+      locus_point_copy (&lst->locus.beg, &last_token_locus_range ()->beg);
       putback_tkn (tok);
       rc = parse_control_socket (&lst->addr, section_data);
-      locus_point_copy (&range.end, &last_token_locus_range ()->end);
+      locus_point_copy (&lst->locus.end, &last_token_locus_range ()->end);
       break;
 
     default:
@@ -4369,33 +4369,26 @@ parse_control_listener (void *call_data, void *section_data)
     }
 
   if (rc != CFGPARSER_OK)
-    {
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
+    return CFGPARSER_FAIL;
 
   lst->verb = 1; /* Need PUT and DELETE methods */
-  lst->locus_str = format_locus_str (&range);
   /* Register listener in the global listener list */
   SLIST_PUSH (&listeners, lst, next);
 
   /* Create service; there'll be only one backend so the balancing algorithm
      doesn't really matter. */
   svc = new_service (BALANCER_ALGO_RANDOM);
-  lst->locus_str = format_locus_str (&range);
+  locus_range_copy (&svc->locus, &lst->locus);
 
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
 
   /* Create backend */
-  be = xbackend_create (BE_CONTROL, 1, &range);
-  be->locus_str = format_locus_str (&range);
+  be = xbackend_create (BE_CONTROL, 1, &lst->locus);
   be->service = svc;
   /* Register backend in service */
   balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
-
-  locus_range_unref (&range);
 
   return CFGPARSER_OK;
 }
@@ -4406,26 +4399,27 @@ parse_named_backend (void *call_data, void *section_data)
   NAMED_BACKEND_TABLE *tab = call_data;
   struct token *tok;
   BACKEND *be;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
   NAMED_BACKEND *olddef;
   char *name;
 
-  range.beg = last_token_locus_range ()->beg;
+  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
   name = xstrdup (tok->str);
 
-  be = parse_backend_internal (backend_parsetab, section_data, NULL);
+  be = parse_backend_internal (backend_parsetab, section_data);
   if (!be)
     return CFGPARSER_FAIL;
-  range.end = last_token_locus_range ()->end;
+  locus_point_copy (&range.end, &last_token_locus_range ()->end);
+  locus_range_copy (&be->locus, &range);
 
-  olddef = named_backend_insert (tab, name, &range, be);
+  olddef = named_backend_insert (tab, name, be);
   free (name);
   pthread_mutex_destroy (&be->mut);
-  free (be->locus_str);
+  locus_range_unref (&be->locus);
   free (be);
   // FIXME: free address on failure only.
 
@@ -4438,6 +4432,7 @@ parse_named_backend (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
+  locus_range_unref (&range);
   return CFGPARSER_OK;
 }
 
@@ -4975,8 +4970,9 @@ backend_finalize (BACKEND *be, NAMED_BACKEND_TABLE *tab)
       nb = named_backend_retrieve (tab, be->v.be_name);
       if (!nb)
 	{
-	  logmsg (LOG_ERR, "%s: named backend %s is not declared",
-		  be->locus_str, be->v.be_name);
+	  conf_error_at_locus_range (&be->locus,
+				     "named backend %s is not declared",
+				     be->v.be_name);
 	  return -1;
 	}
       free (be->v.be_name);
@@ -5099,9 +5095,8 @@ service_finalize (SERVICE *svc, void *data)
 				    BE_MASK (BE_MATRIX) |
 				    BE_MASK (BE_REDIRECT)))
 	    {
-	      conf_error_at_locus_range (NULL,
-			  "%s: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "%s",
 			  BITCOUNT (be_setup.be_class) == 1
 			    ? "multiple backends of this type are not allowed"
 			    : "service mixes backends of different types");
@@ -5110,16 +5105,14 @@ service_finalize (SERVICE *svc, void *data)
 
 	  if (be_setup.be_class & BE_MASK (BE_REDIRECT))
 	    {
-	      conf_error_at_locus_range (NULL,
-			  "%s: warning: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "warning: %s",
 			  (be_setup.be_class & (BE_MASK (BE_REGULAR) |
 						BE_MASK (BE_MATRIX)))
 			     ? "service mixes regular and redirect backends"
 			     : "service uses multiple redirect backends");
-	      conf_error_at_locus_range (NULL,
-			  "%s: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "%s",
 			  "see section \"DEPRECATED FEATURES\" in pound(8)");
 	    }
 	}
@@ -5129,8 +5122,8 @@ service_finalize (SERVICE *svc, void *data)
 
   if (be_count == 0)
     {
-      conf_error_at_locus_range (NULL, "%s: warning: no backends defined",
-				 svc->locus_str);
+      conf_error_at_locus_range (&svc->locus, "%s",
+				 "warning: no backends defined");
     }
 
   service_lb_init (svc);
@@ -5287,7 +5280,7 @@ parse_config_file (char const *file, int nosyslog)
 			   &pound_defaults.named_backend_table))
 	return -1;
       if (worker_min_count > worker_max_count)
-	abend ("WorkerMinCount is greater than WorkerMaxCount");
+	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
 	log_facility = pound_defaults.facility;
 
@@ -5538,7 +5531,7 @@ config_parse (int argc, char **argv)
     }
 
   if (SLIST_EMPTY (&listeners))
-    abend ("no listeners defined");
+    abend (NULL, "no listeners defined");
 
   if (pid_file_option)
     pid_name = pid_file_option;

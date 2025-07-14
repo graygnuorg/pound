@@ -85,9 +85,9 @@ job_arm_unlocked (JOB *job)
 {
   JOB *t;
   JOB_ID jid = job_next_id++;
-  
+
   job->id = jid;
-  
+
   DLIST_FOREACH (t, &job_head, link)
     {
       if (timespec_cmp (&job->ts, &t->ts) < 0)
@@ -115,7 +115,7 @@ JOB_ID
 job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data)
 {
   JOB_ID jid;
-  
+
   pthread_mutex_lock (job_mutex ());
   jid = job_enqueue_unlocked (ts, func, data);
   pthread_mutex_unlock (job_mutex ());
@@ -232,7 +232,7 @@ thr_timer (void *arg)
 	  DLIST_SHIFT (&jobcncl_head, link);
 	  free (jc);
 	}
-      
+
       if (DLIST_EMPTY (&job_head))
 	{
 	  pthread_cond_wait (&job_cond, job_mutex ());
@@ -247,7 +247,7 @@ thr_timer (void *arg)
 	  continue;
 	}
       else if (rc == ETIMEDOUT)
-	{	  
+	{
 	  if (job != DLIST_FIRST (&job_head))
 	    /* Job was removed or its time changed */
 	    continue;
@@ -260,7 +260,7 @@ thr_timer (void *arg)
 	    }
 	}
       else
-	abend ("unexpected error from pthread_cond_timedwait: %s",
+	abend (NULL, "unexpected error from pthread_cond_timedwait: %s",
 	       strerror (errno));
     }
   pthread_cleanup_pop (1);
@@ -315,7 +315,7 @@ expire_sessions (enum job_ctl ctl, void *data, const struct timespec *now)
 
   if (ctl != job_ctl_run)
     return;
-  
+
   pthread_mutex_lock (&svc->mut);
 
   tab = svc->sessions;
@@ -643,8 +643,8 @@ rand_pri_update (BALANCER *bl, BACKEND *be)
 {
   if (LONG_MAX - bl->rand.sum_pri < be->priority)
     {
-      logmsg (LOG_ERR, "%s: this backend overflows the sum of priorities",
-	      be->locus_str);
+      conf_error_at_locus_range (&be->locus,
+			    "this backend overflows the sum of priorities");
       return 1;
     }
   bl->rand.sum_pri += be->priority;
@@ -659,7 +659,7 @@ rand_select (BALANCER *balancer)
 
   if (DLIST_EMPTY (&balancer->backends))
     return NULL;
-  
+
   pri = random_in_range (balancer->rand.sum_pri);
   DLIST_FOREACH (be, &balancer->backends, link)
     {
@@ -696,7 +696,7 @@ iwrr_select (BALANCER *bal)
       if (bal->iwrr.cur == NULL)
 	return NULL;
     }
-  
+
   do
     {
       if (backend_is_active (bal->iwrr.cur))
@@ -725,7 +725,7 @@ iwrr_pri_update (BALANCER *bal, BACKEND *be)
 {
   if (be->priority == INT_MAX)
     {
-      logmsg (LOG_ERR, "%s: priority value too big", be->locus_str);
+      conf_error_at_locus_range (&be->locus, "priority value too big");
       return 1;
     }
   if (bal->iwrr.max_pri < be->priority)
@@ -1046,7 +1046,7 @@ get_backend (POUND_HTTP *phttp)
 	res = service_lb_select_backend (svc);
       backend_ref (res);
     }
-  
+
   pthread_mutex_unlock (&svc->mut);
 
   return res;
@@ -1108,7 +1108,7 @@ balancer_recompute_pri_unlocked (BALANCER *bl,
 				 void *data)
 {
   BACKEND *b;
-  
+
   bl->act_num = 0;
   balancer_pri_init (bl);
   DLIST_FOREACH (b, &bl->backends, link)
@@ -1135,7 +1135,7 @@ service_recompute_pri_unlocked (SERVICE *svc,
     {
       balancer_recompute_pri_unlocked (bl, cb, data);
     }
-}  
+}
 
 /*
  * Recompute max. backend priority and sum of priorities for the given
@@ -1163,7 +1163,7 @@ service_recompute_pri (SERVICE *svc, BALANCER *bl,
 	}
     }
   pthread_mutex_unlock (&svc->mut);
-}  
+}
 
 struct disable_closure
 {
@@ -1194,7 +1194,7 @@ cb_backend_disable (BACKEND *b, void *data)
 {
   struct disable_closure *c = data;
   char buf[MAXBUF];
-  
+
   if (b == c->be)
     {
       switch (c->disable_mode)
@@ -1226,7 +1226,7 @@ cb_backend_disable (BACKEND *b, void *data)
 	  break;
 	}
     }
-}  
+}
 
 /*
  * mark a backend host as dead/disabled; remove its sessions if necessary
@@ -1744,7 +1744,7 @@ do_RSAgen (enum job_ctl ctl, void *unused1, const struct timespec *unused2)
 
   if (ctl != job_ctl_run)
     return;
-  
+
   /* Re-arm the job */
   job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
 
@@ -2110,7 +2110,7 @@ backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
   else if (err == 0 && be->be_type == BE_MATRIX)
     {
       struct timespec ts;
-      
+
       if (job_get_timestamp (parent->v.mtx.jid, &ts) == 0)
 	err = json_object_set (obj, "expire", timespec_serialize (&ts));
     }
@@ -2142,7 +2142,7 @@ backend_serialize (BACKEND *be)
 	    }
 	  else
 	    {
-	      if (be->balancer) 
+	      if (be->balancer)
 		err = json_object_set (obj, "weight",
 				       json_new_integer (be->balancer->weight));
 	      if (err == 0)
@@ -2180,18 +2180,18 @@ backend_serialize (BACKEND *be)
 		      || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
 		      || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
 		    break;
-		    
+
 		  case BE_ACME:
 		  case BE_CONTROL:
 		  case BE_METRICS:
 		  case BE_FILE:
 		    /* FIXME */
 		    break;
-		    
+
 		  case BE_BACKEND_REF:
 		    /* Can't happen */
 		    break;
-		    
+
 		  case BE_ERROR:
 		    err = json_object_set (obj, "status",
 					   json_new_integer (pound_to_http_status (be->v.error.status)))
@@ -2546,19 +2546,19 @@ ctl_getident (char const **url)
   return retval;
 }
 
-#define LOCATE(obj, head, id)			                        \
-  do						                        \
-    {						                        \
-      long __n = 0;					                \
-      SLIST_FOREACH (obj, head, next)		                        \
-        {						                \
-	  switch (id.type)				                \
-	    {						                \
-	    case IDTYPE_NUM:				                \
-	      if (__n == id.n)				                \
-		return obj;				                \
-	      break;					                \
-	      						                \
+#define LOCATE(obj, head, id)						\
+  do									\
+    {									\
+      long __n = 0;							\
+      SLIST_FOREACH (obj, head, next)					\
+	{								\
+	  switch (id.type)						\
+	    {								\
+	    case IDTYPE_NUM:						\
+	      if (__n == id.n)						\
+		return obj;						\
+	      break;							\
+									\
 	    case IDTYPE_STR:						\
 	      if (obj->name && strlen (obj->name) == id.s.len &&	\
 		  memcmp (obj->name, id.s.name, id.s.len) == 0)		\
@@ -2686,7 +2686,7 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
     }
   else if ((obj.lstn = locate_listener (ctl_getident (&url))) == NULL)
     return HTTP_STATUS_NOT_FOUND;
-  
+
   if (*url && *url != '?')
     return ctl_service (func, data, c, url, obj.lstn);
 
@@ -2793,7 +2793,7 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     {
     case OBJ_BACKEND:
       if (obj->be->be_type == BE_CONTROL)
-	return HTTP_STATUS_BAD_REQUEST;	  
+	return HTTP_STATUS_BAD_REQUEST;
       backend_disable (obj->be->service, obj->be, *dis ? BE_DISABLE : BE_ENABLE);
       break;
 
@@ -3158,7 +3158,7 @@ balancer_list_get (BALANCER_LIST *ml, int weight, BALANCER_ALGO algo)
   new_bl->weight = weight;
   new_bl->algo = algo;
   DLIST_INIT (&new_bl->backends);
-  
+
   if (bl)
     DLIST_INSERT_BEFORE (ml, bl, new_bl, link);
   else
@@ -3172,6 +3172,3 @@ balancer_list_remove (BALANCER_LIST *ml, BALANCER *bl)
 {
   DLIST_REMOVE (ml, bl, link);
 }
-
-
-  
