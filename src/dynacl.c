@@ -36,7 +36,7 @@ job_dynacl_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
   if (ctl == job_ctl_run)
     {
       time_t mtime;
-      
+
       pthread_rwlock_wrlock (&dynacl->rwl);
       mtime = dynacl->mtime;
       dynacl_stat (dynacl);
@@ -60,7 +60,6 @@ job_dynacl_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
       job_enqueue_after (dynacl_ttl, job_dynacl_check, dynacl);
     }
 }
-
 
 void
 acl_lock (ACL *acl)
@@ -103,17 +102,6 @@ static DLIST_HEAD (,watchpoint) watch_head;
 static void
 watchpoint_free (struct watchpoint *wp)
 {
-  switch (wp->type)
-    {
-    case WATCH_ACL:
-      free (wp->dynacl.filename);
-      locus_range_unref (&wp->dynacl.locus);
-      pthread_rwlock_destroy (&wp->dynacl.rwl);
-      break;
-
-    case WATCH_DIR:
-      break;
-    }
   free (wp);
 }
 
@@ -251,6 +239,28 @@ workdir_set_compat_mode (WORKDIR *wd)
     {
       if (wp->type == WATCH_ACL && wp->dynacl.wd == wd)
 	watchpoint_set_compat_mode (wp);
+    }
+}
+
+static void watchpoint_remove (struct watchpoint *wp);
+
+static void
+watchpoints_disable (void)
+{
+  struct watchpoint *wp, *tmp;
+  DLIST_FOREACH_SAFE (wp, tmp, &watch_head, link)
+    {
+      switch (wp->type)
+	{
+	case WATCH_ACL:
+	  inotify_rm_watch (ifd, wp->wd);
+	  wp->wd = -1;
+	  watchpoint_set_compat_mode (wp);
+	  break;
+
+	case WATCH_DIR:
+	  watchpoint_remove (wp);
+	}
     }
 }
 
@@ -400,6 +410,7 @@ process_event (struct inotify_event *ep)
       awp->dynacl.mode = DYNACL_EXISTS;
       watchpoint_set (awp);
       watchpoint_dir_unref (wp);
+      dynacl_reread (&wp->dynacl);
     }
   else if (ep->mask & IN_CLOSE_WRITE)
     dynacl_reread (&wp->dynacl);
@@ -408,6 +419,7 @@ process_event (struct inotify_event *ep)
 static void
 dynacl_cleanup (void *arg)
 {
+  watchpoints_disable ();
   close (ifd);
 }
 
@@ -428,7 +440,6 @@ thr_dynacl (void *arg)
 	  if (errno == EINTR)
 	    continue;
 	  logmsg (LOG_CRIT, "inotify read failed: %s", strerror (errno));
-	  close (ifd);//FIXME
 	  break;
 	}
       ep = (struct inotify_event *) buffer;

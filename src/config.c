@@ -678,6 +678,27 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+
+  if (tok->type == T_LITERAL)
+    {
+      if (strcmp (tok->str, "-file") == 0)
+	{
+	  if ((tok = gettkn_expect (T_STRING)) == NULL)
+	    return CFGPARSER_FAIL;
+	  if (dynacl_register (acl, tok->str, &tok->locus))
+	    return CFGPARSER_FAIL;
+	  return CFGPARSER_OK;
+	}
+      else
+	{
+	  conf_error ("expected -file, but found %s",
+		      token_type_str (tok->type));
+	  return CFGPARSER_FAIL;
+	}
+    }
+
   return parse_acl (acl);
 }
 
@@ -710,37 +731,15 @@ parse_acl_ref (ACL **ret_acl)
     {
       if (strcmp (tok->str, "-file") == 0)
 	{
-	  int rc;
-	  char *filename;
-	  struct locus_range loc = LOCUS_RANGE_INITIALIZER;
 	  if ((tok = gettkn_expect (T_STRING)) == NULL)
 	    return CFGPARSER_FAIL;
-	  filename = xstrdup (tok->str);
-	  locus_range_copy (&loc, &tok->locus);
-	  if ((tok = gettkn_any ()) == NULL)
-	    {
-	      conf_error ("%s", "unexpected end of file");
-	      free (filename);
-	      locus_range_unref (&loc);
-	      return CFGPARSER_FAIL;
-	    }
-	  else if (tok->type != '\n')
-	    {
-	      conf_error ("expected newline, but found %s",
-			  token_type_str (tok->type));
-	      free (filename);
-	      locus_range_unref (&loc);
-	      return CFGPARSER_FAIL;
-	    }
 
 	  acl = new_acl (NULL);
 	  *ret_acl = acl;
-	  rc = dynacl_register (acl, filename, &loc);
-	  locus_range_unref (&loc);
-	  free (filename);
-	  if (rc)
+
+	  if (dynacl_register (acl, tok->str, &tok->locus))
 	    return CFGPARSER_FAIL;
-	  return CFGPARSER_OK_NONL;
+	  return CFGPARSER_OK;
 	}
       else
 	{
@@ -5543,6 +5542,14 @@ struct string_value pound_settings[] = {
 					  "enabled"
 #else
 					  "disabled"
+#endif
+    }
+  },
+  { "File change monitoring", STRING_CONSTANT, { .s_const =
+#if WITH_INOTIFY
+				 "inotify"
+#else
+				 "periodic"
 #endif
     }
   },
