@@ -28,13 +28,13 @@ sbin_PROGRAMS=pound
 pound_SOURCES=\
  bauth.c\
  config.c\
- dynacl.c\
  genpat.c\
  http.c\
  log.c\
  metrics.c\
  pound.c\
- svc.c
+ svc.c\
+ watcher.c
 
 if COND_PCRE
   pound_SOURCES += regex_pcre.c

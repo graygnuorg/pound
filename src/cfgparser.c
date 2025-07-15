@@ -442,7 +442,7 @@ filename_resolve (const char *filename)
 
 void
 fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
-	     struct locus_range *loc)
+	     struct locus_range const *loc)
 {
   if (filename[0] == '/' || wd == NULL)
     conf_error_at_locus_range (loc, "can't open %s: %s",

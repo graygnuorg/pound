@@ -1,23 +1,25 @@
 #include "pound.h"
 #include "extern.h"
 
-unsigned dynacl_ttl = 180;
+unsigned watcher_ttl = 180;
 
 struct watchpoint;
 
-enum dynacl_mode
+enum watcher_mode
   {
-    DYNACL_EXISTS,    /* File exists and is monitored. */
-    DYNACL_NOFILE,    /* File does not exist, its directory is monitored. */
-    DYNACL_COMPAT     /* Compatibility mode. */
+    WATCHER_EXISTS,    /* File exists and is monitored. */
+    WATCHER_NOFILE,    /* File does not exist, its directory is monitored. */
+    WATCHER_COMPAT     /* Compatibility mode. */
   };
 
-static void watchpoint_set_mode (struct watchpoint *wp, enum dynacl_mode);
+static void watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode);
 
-struct dynacl
+struct watcher
 {
-  enum dynacl_mode mode;
-  ACL *acl;
+  enum watcher_mode mode;
+  void *obj;
+  int (*read) (void *, char *, WORKDIR *);
+  void (*clear) (void *);
   WORKDIR *wd;                /* Working directory. */
   char *filename;             /* Filename relative to wd. */
   struct locus_range locus;
@@ -26,58 +28,44 @@ struct dynacl
 				 not available. */
 };
 
-static void dynacl_stat (struct dynacl *dynacl);
-static void dynacl_read (struct dynacl *dynacl);
+static void watcher_stat (struct watcher *watcher);
+static void watcher_read (struct watcher *watcher);
 
 static void
-job_dynacl_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
+job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
 {
-  struct dynacl *dynacl = arg;
+  struct watcher *watcher = arg;
   if (ctl == job_ctl_run)
     {
       time_t mtime;
 
-      pthread_rwlock_wrlock (&dynacl->rwl);
-      mtime = dynacl->mtime;
-      dynacl_stat (dynacl);
-      if (dynacl->mtime > mtime)
+      pthread_rwlock_wrlock (&watcher->rwl);
+      mtime = watcher->mtime;
+      watcher_stat (watcher);
+      if (watcher->mtime > mtime)
 	{
 	  if (mtime == 0)
-	    conf_error_at_locus_range (&dynacl->locus, "%s restored",
-				       dynacl->filename);
-	  dynacl_read (dynacl);
+	    conf_error_at_locus_range (&watcher->locus, "%s restored",
+				       watcher->filename);
+	  watcher_read (watcher);
 	}
-      else if (dynacl->mtime == 0)
+      else if (watcher->mtime == 0)
 	{
 	  if (mtime)
 	    {
-	      conf_error_at_locus_range (&dynacl->locus, "%s removed",
-					 dynacl->filename);
-	      acl_clear (dynacl->acl);
+	      conf_error_at_locus_range (&watcher->locus, "%s removed",
+					 watcher->filename);
+	      watcher->clear (watcher->obj);
 	    }
 	}
-      pthread_rwlock_unlock (&dynacl->rwl);
-      job_enqueue_after (dynacl_ttl, job_dynacl_check, dynacl);
+      pthread_rwlock_unlock (&watcher->rwl);
+      job_enqueue_after (watcher_ttl, job_watcher_check, watcher);
     }
-}
-
-void
-acl_lock (ACL *acl)
-{
-  if (acl_is_dynamic (acl))
-    pthread_rwlock_rdlock (&acl->dynacl->rwl);
-}
-
-void
-acl_unlock (ACL *acl)
-{
-  if (acl_is_dynamic (acl))
-    pthread_rwlock_unlock (&acl->dynacl->rwl);
 }
 
 enum
   {
-    WATCH_ACL,
+    WATCH_FILE,
     WATCH_DIR
   };
 
@@ -88,7 +76,7 @@ struct watchpoint
   DLIST_ENTRY (watchpoint) link;
   union
   {
-    struct dynacl dynacl;
+    struct watcher *watcher;
     struct
     {
       WORKDIR *wd;
@@ -108,51 +96,51 @@ watchpoint_free (struct watchpoint *wp)
 static void
 watchpoint_set_compat_mode (struct watchpoint *wp)
 {
-  wp->dynacl.mode = DYNACL_COMPAT;
-  wp->dynacl.mtime = 0;
-  dynacl_stat (&wp->dynacl);
-  job_enqueue_after (dynacl_ttl, job_dynacl_check, &wp->dynacl);
+  wp->watcher->mode = WATCHER_COMPAT;
+  wp->watcher->mtime = 0;
+  watcher_stat (wp->watcher);
+  job_enqueue_after (watcher_ttl, job_watcher_check, &wp->watcher);
 }
 
 static void
-dynacl_stat (struct dynacl *dynacl)
+watcher_stat (struct watcher *watcher)
 {
   struct stat st;
-  dynacl->mtime = 0;
-  if (fstatat (dynacl->wd->fd, dynacl->filename, &st, 0))
+  watcher->mtime = 0;
+  if (fstatat (watcher->wd->fd, watcher->filename, &st, 0))
     {
       if (errno != ENOENT)
-	conf_error_at_locus_range (&dynacl->locus,
+	conf_error_at_locus_range (&watcher->locus,
 				   "%s: can't stat: %s",
-				   dynacl->filename,
+				   watcher->filename,
 				   strerror (errno));
     }
   else
-    dynacl->mtime = st.st_mtime;
+    watcher->mtime = st.st_mtime;
 }
 
 static void
-dynacl_open_error (struct dynacl *dynacl, int ec)
+watcher_open_error (struct watcher *watcher, int ec)
 {
   struct locus_point pt = LOCUS_POINT_INITIALIZER;
 
-  locus_point_init (&pt, dynacl->filename, dynacl->wd->name);
-  conf_error_at_locus_range (&dynacl->locus, "can't open file %s: %s",
+  locus_point_init (&pt, watcher->filename, watcher->wd->name);
+  conf_error_at_locus_range (&watcher->locus, "can't open file %s: %s",
 			     string_ptr (pt.filename), strerror (ec));
   locus_point_unref (&pt);
 }
 
 static void
-dynacl_read (struct dynacl *dynacl)
+watcher_read (struct watcher *watcher)
 {
-  conf_error_at_locus_range (&dynacl->locus, "re-reading %s",
-			     dynacl->filename);
-  acl_clear (dynacl->acl);
-  if (config_parse_acl_file (dynacl->acl, dynacl->filename, dynacl->wd) == -1)
-    dynacl_open_error (dynacl, errno);
+  conf_error_at_locus_range (&watcher->locus, "re-reading %s",
+			     watcher->filename);
+  watcher->clear (watcher->obj);
+  if (watcher->read (watcher->obj, watcher->filename, watcher->wd) == -1)
+    watcher_open_error (watcher, errno);
 }
 
-static char const *
+char const *
 filename_split (char const *filename, char **dir)
 {
   char *p = strrchr (filename, '/');
@@ -166,22 +154,41 @@ filename_split (char const *filename, char **dir)
   return p ? p + 1 : filename;
 }
 
-int
-dynacl_register (ACL *acl, char const *filename, struct locus_range *loc)
+void
+watcher_lock (struct watcher *dp)
+{
+  if (dp)
+    pthread_rwlock_rdlock (&dp->rwl);
+}
+
+void
+watcher_unlock (struct watcher *dp)
+{
+  if (dp)
+    pthread_rwlock_unlock (&dp->rwl);
+}
+
+struct watcher *
+watcher_register (void *obj, char const *filename, struct locus_range const *loc,
+		  int (*read) (void *, char *, WORKDIR *),
+		  void (*clear) (void *))
 {
   struct watchpoint *wp;
   char const *basename;
   char *dir;
   int rc;
-  enum dynacl_mode mode;
+  enum watcher_mode mode;
 
   XZALLOC (wp);
   wp->wd = -1;
-  wp->type = WATCH_ACL;
-  wp->dynacl.acl = acl;
+  wp->type = WATCH_FILE;
+  XZALLOC (wp->watcher);
+  wp->watcher->obj = obj;
+  wp->watcher->read = read;
+  wp->watcher->clear = clear;
 
   basename = filename_split (filename, &dir);
-  if ((wp->dynacl.wd = workdir_get (dir)) == NULL)
+  if ((wp->watcher->wd = workdir_get (dir)) == NULL)
     {
       conf_error_at_locus_range (loc,
 				 "can't open directory %s: %s",
@@ -189,35 +196,35 @@ dynacl_register (ACL *acl, char const *filename, struct locus_range *loc)
 				 strerror (errno));
       free (dir);
       free (wp);
-      return -1;
+      return NULL;
     }
   free (dir);
-  wp->dynacl.filename = xstrdup (basename);
-  locus_range_init (&wp->dynacl.locus);
-  locus_range_copy (&wp->dynacl.locus, loc);
-  pthread_rwlock_init (&wp->dynacl.rwl, NULL);
+  wp->watcher->filename = xstrdup (basename);
+  locus_range_init (&wp->watcher->locus);
+  locus_range_copy (&wp->watcher->locus, loc);
+  pthread_rwlock_init (&wp->watcher->rwl, NULL);
 
-  rc = config_parse_acl_file (acl, wp->dynacl.filename, wp->dynacl.wd);
+  rc = wp->watcher->read (wp->watcher->obj, wp->watcher->filename,
+			 wp->watcher->wd);
   if (rc == -1)
     {
       if (errno == ENOENT)
-	mode = DYNACL_NOFILE;
+	mode = WATCHER_NOFILE;
       else
 	{
-	  dynacl_open_error (&wp->dynacl, errno);
+	  watcher_open_error (wp->watcher, errno);
 	  watchpoint_free (wp);
-	  return -1;
+	  return NULL;
 	}
     }
   else
-    mode = DYNACL_EXISTS;
+    mode = WATCHER_EXISTS;
 
   watchpoint_set_mode (wp, mode);
-  acl->dynacl = &wp->dynacl;
 
   DLIST_PUSH (&watch_head, wp, link);
 
-  return 0;
+  return wp->watcher;
 }
 
 #ifdef WITH_INOTIFY
@@ -226,9 +233,9 @@ dynacl_register (ACL *acl, char const *filename, struct locus_range *loc)
 static int ifd;
 
 static void
-watchpoint_set_mode (struct watchpoint *wp, enum dynacl_mode mode)
+watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
 {
-  wp->dynacl.mode = mode;
+  wp->watcher->mode = mode;
 }
 
 static void
@@ -237,7 +244,7 @@ workdir_set_compat_mode (WORKDIR *wd)
   struct watchpoint *wp;
   DLIST_FOREACH (wp, &watch_head, link)
     {
-      if (wp->type == WATCH_ACL && wp->dynacl.wd == wd)
+      if (wp->type == WATCH_FILE && wp->watcher->wd == wd)
 	watchpoint_set_compat_mode (wp);
     }
 }
@@ -252,7 +259,7 @@ watchpoints_disable (void)
     {
       switch (wp->type)
 	{
-	case WATCH_ACL:
+	case WATCH_FILE:
 	  inotify_rm_watch (ifd, wp->wd);
 	  wp->wd = -1;
 	  watchpoint_set_compat_mode (wp);
@@ -282,10 +289,10 @@ watchpoint_locate_file (WORKDIR *wdir, char const *filename)
   struct watchpoint *wp;
   DLIST_FOREACH (wp, &watch_head, link)
     {
-      if (wp->type == WATCH_ACL &&
-	  wp->dynacl.mode == DYNACL_NOFILE &&
-	  wp->dynacl.wd == wdir &&
-	  strcmp (wp->dynacl.filename, filename) == 0)
+      if (wp->type == WATCH_FILE &&
+	  wp->watcher->mode == WATCHER_NOFILE &&
+	  wp->watcher->wd == wdir &&
+	  strcmp (wp->watcher->filename, filename) == 0)
 	return wp;
     }
   return NULL;
@@ -298,8 +305,8 @@ watchpoint_set (struct watchpoint *wp)
 
   switch (wp->type)
     {
-    case WATCH_ACL:
-      locus_point_init (&pt, wp->dynacl.filename, wp->dynacl.wd->name);
+    case WATCH_FILE:
+      locus_point_init (&pt, wp->watcher->filename, wp->watcher->wd->name);
       wp->wd = inotify_add_watch (ifd, string_ptr (pt.filename),
 				  IN_CLOSE_WRITE);
       locus_point_unref (&pt);
@@ -353,11 +360,11 @@ watchpoint_dir_unref (struct watchpoint *wp)
 }
 
 static void
-dynacl_reread (struct dynacl *dynacl)
+watcher_reread (struct watcher *watcher)
 {
-  pthread_rwlock_wrlock (&dynacl->rwl);
-  dynacl_read (dynacl);
-  pthread_rwlock_unlock (&dynacl->rwl);
+  pthread_rwlock_wrlock (&watcher->rwl);
+  watcher_read (watcher);
+  pthread_rwlock_unlock (&watcher->rwl);
 }
 
 static void
@@ -387,10 +394,11 @@ process_event (struct inotify_event *ep)
       wp->wd = -1;
       switch (wp->type)
 	{
-	case WATCH_ACL:
-	  conf_error_at_locus_range (&wp->dynacl.locus, "file removed");
-	  wp->dynacl.mode = DYNACL_NOFILE;
-	  watchpoint_locate_dir (wp->dynacl.wd);
+	case WATCH_FILE:
+	  conf_error_at_locus_range (&wp->watcher->locus, "file removed");
+	  wp->watcher->clear (wp->watcher->obj);
+	  wp->watcher->mode = WATCHER_NOFILE;
+	  watchpoint_locate_dir (wp->watcher->wd);
 	  break;
 
 	case WATCH_DIR:
@@ -405,33 +413,33 @@ process_event (struct inotify_event *ep)
   if (ep->mask & (IN_CREATE | IN_MOVED_TO))
     {
       struct watchpoint *awp = watchpoint_locate_file (wp->wdir.wd, ep->name);
-      conf_error_at_locus_range (&awp->dynacl.locus, "%s restored",
-				 awp->dynacl.filename);
-      awp->dynacl.mode = DYNACL_EXISTS;
+      conf_error_at_locus_range (&awp->watcher->locus, "%s restored",
+				 awp->watcher->filename);
+      awp->watcher->mode = WATCHER_EXISTS;
       watchpoint_set (awp);
       watchpoint_dir_unref (wp);
-      dynacl_reread (&wp->dynacl);
+      watcher_reread (awp->watcher);
     }
   else if (ep->mask & IN_CLOSE_WRITE)
-    dynacl_reread (&wp->dynacl);
+    watcher_reread (wp->watcher);
 }
 
 static void
-dynacl_cleanup (void *arg)
+watcher_cleanup (void *arg)
 {
   watchpoints_disable ();
   close (ifd);
 }
 
 static void *
-thr_dynacl (void *arg)
+thr_watcher (void *arg)
 {
   char buffer[4096];
   struct inotify_event *ep;
   size_t size;
   ssize_t rdbytes;
 
-  pthread_cleanup_push (dynacl_cleanup, NULL);
+  pthread_cleanup_push (watcher_cleanup, NULL);
   while (1)
     {
       rdbytes = read (ifd, buffer, sizeof (buffer));
@@ -458,7 +466,7 @@ thr_dynacl (void *arg)
 }
 
 int
-dynacl_setup (void)
+watcher_setup (void)
 {
   struct watchpoint *wp;
   pthread_t tid;
@@ -477,40 +485,40 @@ dynacl_setup (void)
     {
       if (wp->type == WATCH_DIR)
 	continue;
-      switch (wp->dynacl.mode)
+      switch (wp->watcher->mode)
 	{
-	case DYNACL_EXISTS:
+	case WATCHER_EXISTS:
 	  watchpoint_set (wp);
 	  break;
 
-	case DYNACL_NOFILE:
-	  watchpoint_locate_dir (wp->dynacl.wd);
+	case WATCHER_NOFILE:
+	  watchpoint_locate_dir (wp->watcher->wd);
 	  break;
 
-	case DYNACL_COMPAT:
+	case WATCHER_COMPAT:
 	  /* Shouldn't happen. */
 	  break;
 	}
     }
 
-  pthread_create (&tid, &thread_attr_detached, thr_dynacl, NULL);
+  pthread_create (&tid, &thread_attr_detached, thr_watcher, NULL);
   return 0;
 }
 #else
 static void
-watchpoint_set_mode (struct watchpoint *wp, enum dynacl_mode mode)
+watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
 {
   watchpoint_set_compat_mode (wp);
 }
 
 int
-dynacl_setup (void)
+watcher_setup (void)
 {
   struct watchpoint *wp;
   DLIST_FOREACH (wp, &watch_head, link)
     {
-      if (wp->type == WATCH_ACL)
-	job_enqueue_after (dynacl_ttl, job_dynacl_check, &wp->dynacl);
+      if (wp->type == WATCH_FILE)
+	job_enqueue_after (watcher_ttl, job_watcher_check, &wp->watcher);
     }
   return 0;
 }

@@ -424,33 +424,44 @@ void http_request_free (struct http_request *);
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
 
+typedef struct watcher WATCHER;
+
+void watcher_lock (WATCHER *);
+void watcher_unlock (WATCHER *);
+WATCHER *watcher_register (void *obj, char
+			   const *filename, struct locus_range const *loc,
+			   int (*read) (void *, char *, WORKDIR *),
+			   void (*clear) (void *));
+int watcher_setup (void);
+
+char const *filename_split (char const *filename, char **dir);
+
 struct cidr;
-struct dynacl;
 
 typedef struct acl
 {
   char *name;                 /* ACL name (optional) */
   SLIST_HEAD (,cidr) head;    /* List of CIDRs */
   SLIST_ENTRY (acl) next;
-  struct dynacl *dynacl;
+  WATCHER *watcher;
 } ACL;
 
 typedef SLIST_HEAD (,acl) ACL_HEAD;
 
-static inline int
-acl_is_dynamic (ACL *acl)
+static inline void
+acl_lock (ACL *acl)
 {
-  return acl->dynacl != NULL;
+  watcher_lock (acl->watcher);
 }
 
-void acl_lock (ACL *acl);
-void acl_unlock (ACL *acl);
+static inline void
+acl_unlock (ACL *acl)
+{
+  watcher_unlock (acl->watcher);
+}
 
 int acl_match (ACL *acl, struct sockaddr *sa);
 void acl_clear (ACL *acl);
-
-int dynacl_setup (void);
-int dynacl_register (ACL *acl, char const *filename, struct locus_range *loc);
 
 enum job_ctl
   {
@@ -1299,7 +1310,7 @@ void service_lb_reset (SERVICE *svc, BACKEND *be);
 FILE *fopen_wd (WORKDIR *wd, const char *filename);
 FILE *fopen_include (const char *filename);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
-		  struct locus_range *loc);
+		  struct locus_range const *loc);
 char *filename_resolve (const char *filename);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);

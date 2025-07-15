@@ -43,9 +43,9 @@ AT_DATA([pound.cfi],
 	End
 End],[$1])
 ])
-AT_DATA([input],
+m4_if([$2],[input],,[AT_DATA([input],
 [$2
-])
+])])
 perl $HARNESS HARNESS_OPTIONS --transcript xscript.log input
 ],
 m4_shift2($@))])
@@ -84,7 +84,9 @@ m4_include([not.at])
 m4_include([fromfile.at])
 m4_include([basicauth.at])
 m4_include([acl.at])
+m4_include([dynacl.at])
 m4_include([nacl.at])
+m4_include([ndynacl.at])
 
 AT_BANNER([Includes])
 m4_include([include.at])

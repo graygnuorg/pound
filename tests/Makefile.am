@@ -80,6 +80,7 @@ TESTSUITE_AT = \
  dyn_srv.at\
  dyn_srv_0.at\
  dyn_srv_ttl.at\
+ dynacl.at\
  echo.at\
  err503.at\
  errfile.at\
@@ -107,6 +108,7 @@ TESTSUITE_AT = \
  maxuri.at\
  multival.at\
  nacl.at\
+ ndynacl.at\
  nb.at\
  not.at\
  optfwd.at\

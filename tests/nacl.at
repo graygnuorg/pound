@@ -14,27 +14,12 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AT_SETUP([Named ACL])
-AT_KEYWORDS([cond named_acl nacl])
+AT_KEYWORDS([cond acl named_acl nacl])
 m4_pushdef([HARNESS_OPTIONS],[--source-address=127.0.0.2 dnl
  --source-address=127.0.0.3 dnl
  --source-address=127.0.0.9 --source-address=127.0.0.17])
-PT_CHECK([ACL "secure"
-		"127.0.0.1"
-		"127.0.0.2"
-		"127.0.0.8/29"
-	End
-ListenHTTP	
-	Service
-		ACL "secure"
-		Backend
-			Address
-			Port
-		End
-	End
-	Service
-		Error 404
-	End
-End],
+
+AT_DATA([input],
 [GET /echo/foo
 Host: example.org
 end
@@ -79,5 +64,46 @@ end
 end
 
 ])
+
+PT_CHECK([ACL "secure"
+		"127.0.0.1"
+		"127.0.0.2"
+		"127.0.0.8/29"
+	End
+ListenHTTP
+	Service
+		ACL "secure"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service
+		Error 404
+	End
+End],
+[input])
+
+AT_DATA([aclfile],
+[127.0.0.1
+127.0.0.2
+127.0.0.8/29
+])
+
+PT_CHECK([ACL "secure" -file "aclfile"
+ListenHTTP
+	Service
+		ACL "secure"
+		Backend
+			Address
+			Port
+		End
+	End
+	Service
+		Error 404
+	End
+End],
+[input])
+
 m4_popdef([HARNESS_OPTIONS])
 AT_CLEANUP

@@ -69,4 +69,4 @@ enum
 
 int feature_is_set (int f);
 
-extern unsigned dynacl_ttl;
+extern unsigned watcher_ttl;

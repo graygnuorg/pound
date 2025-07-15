@@ -84,6 +84,58 @@ locus_range_str (struct locus_range const *loc)
   stringbuf_format_locus_range (&sb, loc);
   return stringbuf_value (&sb);
 }
+
+struct config_option
+{
+  char *name;
+  int code;
+  int has_arg;
+};
+
+static struct config_option const *
+config_option_find (struct config_option const *optab, char const *name)
+{
+  for (; optab->name; optab++)
+    {
+      if (strcmp (optab->name, name) == 0)
+	return optab;
+    }
+  return NULL;
+}
+
+static int
+gettok_option (struct config_option const *optab, int *opt, char const **arg)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_any ()) == NULL)
+    {
+      *opt = -1;
+    }
+  else if (tok->type != T_LITERAL || tok->str[0] != '-')
+    {
+      *opt = -1;
+      putback_tkn (tok);
+      return CFGPARSER_OK;
+    }
+
+  if ((optab = config_option_find (optab, tok->str + 1)) == NULL)
+    {
+      conf_error ("unexpected token: %s", tok->str);
+      return CFGPARSER_FAIL;
+    }
+
+  *opt = optab->code;
+  if (optab->has_arg)
+    {
+      if ((tok = gettkn_expect (T_STRING)) == NULL)
+	return CFGPARSER_FAIL;
+      *arg = tok->str;
+    }
+  else
+    *arg = NULL;
+  return CFGPARSER_OK;
+}
 
 BACKEND *
 backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
@@ -410,6 +462,26 @@ sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
   return -1;
 }
 
+static int
+dynacl_read (void *obj, char *filename, WORKDIR *wd)
+{
+  return config_parse_acl_file (obj, filename, wd);
+}
+
+static void
+dynacl_clear (void *obj)
+{
+  acl_clear (obj);
+}
+
+static int
+dynacl_register (ACL *acl, char const *filename, struct locus_range const *loc)
+{
+  acl->watcher = watcher_register (acl, filename, loc,
+				   dynacl_read, dynacl_clear);
+  return acl->watcher == NULL;
+}
+
 /*
  * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
  * and -1 on error (invalid address family).
@@ -610,6 +682,40 @@ config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
   return rc;
 }
 
+static int
+parse_acl_file (ACL *acl, char const *filename)
+{
+  WORKDIR *wd;
+  char const *basename;
+  char *dir;
+  int rc;
+
+  basename = filename_split (filename, &dir);
+  if ((wd = workdir_get (dir)) == NULL)
+    {
+      conf_error ("can't open directory %s: %s", dir, strerror (errno));
+      free (dir);
+      return CFGPARSER_FAIL;
+    }
+  free (dir);
+  rc = config_parse_acl_file (acl, basename, wd);
+  workdir_unref (wd);
+  if (rc == -1)
+    {
+      if (errno == ENOENT)
+	conf_error ("file %s does not exist", filename);
+      else
+	conf_error ("can't open %s: %s", filename, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  else if (rc > 0)
+    {
+      conf_error ("errors reading %s", filename);
+      return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
+}
+
 /*
  * Parse ACL definition.
  * On entry, input must be positioned on the next token after ACL ["name"].
@@ -656,6 +762,25 @@ parse_acl (ACL *acl)
   return CFGPARSER_OK;
 }
 
+#define OPT_FILE  0x1
+#define OPT_WATCH 0x2
+
+static int
+get_file_option (int *opt, char const **filename)
+{
+  static struct config_option optab[] = {
+    { "file", OPT_FILE, 1 },
+    { "filewatch", OPT_FILE | OPT_WATCH, 1 },
+    { NULL }
+  };
+
+  *opt = 0;
+  *filename = NULL;
+  if (gettok_option (optab, opt, filename) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+  return CFGPARSER_OK;
+}
+
 /*
  * Parse a named ACL.
  * Input is positioned after the "ACL" keyword.
@@ -665,6 +790,8 @@ parse_named_acl (void *call_data, void *section_data)
 {
   ACL *acl;
   struct token *tok;
+  int opt;
+  char const *filename;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -678,25 +805,19 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
-  if ((tok = gettkn_any ()) == NULL)
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
-  if (tok->type == T_LITERAL)
+  if (filename)
     {
-      if (strcmp (tok->str, "-file") == 0)
+      if (opt & OPT_WATCH)
 	{
-	  if ((tok = gettkn_expect (T_STRING)) == NULL)
+	  if (dynacl_register (acl, filename, &tok->locus))
 	    return CFGPARSER_FAIL;
-	  if (dynacl_register (acl, tok->str, &tok->locus))
-	    return CFGPARSER_FAIL;
-	  return CFGPARSER_OK;
 	}
-      else
-	{
-	  conf_error ("expected -file, but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
+      else if (parse_acl_file (acl, filename))
+	return CFGPARSER_FAIL;
+      return CFGPARSER_OK;
     }
 
   return parse_acl (acl);
@@ -716,6 +837,26 @@ parse_acl_ref (ACL **ret_acl)
 {
   struct token *tok;
   ACL *acl;
+  int opt;
+  char const *filename;
+
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
+  if (filename)
+    {
+      acl = new_acl (NULL);
+      *ret_acl = acl;
+
+      if (opt & OPT_WATCH)
+	{
+	  if (dynacl_register (acl, filename, last_token_locus_range ()))
+	    return CFGPARSER_FAIL;
+	}
+      else if (parse_acl_file (acl, filename))
+	return CFGPARSER_FAIL;
+      return CFGPARSER_OK;
+    }
 
   if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;
@@ -726,27 +867,6 @@ parse_acl_ref (ACL **ret_acl)
       acl = new_acl (NULL);
       *ret_acl = acl;
       return parse_acl (acl);
-    }
-  else if (tok->type == T_LITERAL)
-    {
-      if (strcmp (tok->str, "-file") == 0)
-	{
-	  if ((tok = gettkn_expect (T_STRING)) == NULL)
-	    return CFGPARSER_FAIL;
-
-	  acl = new_acl (NULL);
-	  *ret_acl = acl;
-
-	  if (dynacl_register (acl, tok->str, &tok->locus))
-	    return CFGPARSER_FAIL;
-	  return CFGPARSER_OK;
-	}
-      else
-	{
-	  conf_error ("expected -file, but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
     }
   else if (tok->type == T_STRING)
     {
@@ -1288,10 +1408,9 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 }
 
 static int
-parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
+parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
+		  char **from_file)
 {
-  struct token *tok;
-
   enum
   {
     MATCH_RE,
@@ -1306,39 +1425,36 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
     MATCH_PCRE,
   };
 
-  static struct kwtab optab[] = {
-    { "-re",      MATCH_RE },
-    { "-exact",   MATCH_EXACT },
-    { "-beg",     MATCH_BEG },
-    { "-end",     MATCH_END },
-    { "-contain", MATCH_CONTAIN },
-    { "-icase",   MATCH_ICASE },
-    { "-case",    MATCH_CASE },
-    { "-file",    MATCH_FILE },
-    { "-posix",   MATCH_POSIX },
-    { "-pcre",    MATCH_PCRE },
-    { "-perl",    MATCH_PCRE },
+  static struct config_option optab[] = {
+    { "file",    MATCH_FILE, 1 },
+    { "re",      MATCH_RE },
+    { "exact",   MATCH_EXACT },
+    { "beg",     MATCH_BEG },
+    { "end",     MATCH_END },
+    { "contain", MATCH_CONTAIN },
+    { "icase",   MATCH_ICASE },
+    { "case",    MATCH_CASE },
+    { "posix",   MATCH_POSIX },
+    { "pcre",    MATCH_PCRE },
+    { "perl",    MATCH_PCRE },
     { NULL }
   };
 
+  struct config_option *optptr = from_file ? optab : optab + 1;
+
   if (from_file)
-    *from_file = 0;
+    *from_file = NULL;
 
   for (;;)
     {
       int n;
+      char const *arg;
 
-      if ((tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_LITERAL))) == NULL)
+      if (gettok_option (optptr, &n, &arg) == CFGPARSER_FAIL)
 	return CFGPARSER_FAIL;
 
-      if (tok->type == T_STRING)
+      if (n == -1)
 	break;
-
-      if (kw_to_tok (optab, tok->str, 0, &n))
-	{
-	  conf_error ("unexpected token: %s", tok->str);
-	  return CFGPARSER_FAIL;
-	}
 
       switch (n)
 	{
@@ -1351,13 +1467,7 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
 	  break;
 
 	case MATCH_FILE:
-	  if (from_file)
-	    *from_file = 1;
-	  else
-	    {
-	      conf_error ("unexpected token: %s", tok->str);
-	      return CFGPARSER_FAIL;
-	    }
+	  *from_file = xstrdup (arg);
 	  break;
 
 	case MATCH_RE:
@@ -1394,7 +1504,6 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
 	  break;
 	}
     }
-  putback_tkn (tok);
   return CFGPARSER_OK;
 }
 
@@ -1504,13 +1613,10 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
   int rc;
   struct stringbuf sb;
   SERVICE_COND *cond;
-  int from_file;
+  char *from_file;
   char *expr;
 
   if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file))
-    return CFGPARSER_FAIL;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
   xstringbuf_init (&sb);
@@ -1521,11 +1627,14 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
       char buf[MAXBUF];
       STRING_REF *ref = NULL;
 
-      if ((fp = fopen_include (tok->str)) == NULL)
+      if ((fp = fopen_include (from_file)) == NULL)
 	{
-	  fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
+	  fopen_error (LOG_ERR, errno, include_wd, from_file,
+		       last_token_locus_range ());
+	  free (from_file);
 	  return CFGPARSER_FAIL;
 	}
+      free (from_file);//FIXME
 
       cond = service_cond_append (top_cond, COND_BOOL);
       cond->boolean.op = BOOL_OR;
@@ -1588,6 +1697,9 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
     }
   else
     {
+      if ((tok = gettkn_expect (T_STRING)) == NULL)
+	return CFGPARSER_FAIL;
+
       cond = service_cond_append (top_cond, type);
       if (type == COND_HOST)
 	expr = host_prefix_regex (&sb, &gp_type, tok->str);
@@ -1706,7 +1818,8 @@ parse_cond_string_matcher (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   string = xstrdup (tok->str);
   rc = parse_cond_matcher (top_cond,
-			   COND_STRING_MATCH, dfl->re_type, dfl->re_type, flags,
+			   COND_STRING_MATCH, dfl->re_type, dfl->re_type,
+			   flags,
 			   string);
   free (string);
   return rc;
@@ -4903,9 +5016,9 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = parse_resolver
   },
   {
-    .name = "DynACLTTL",
+    .name = "WatcherTTL",
     .parser = cfg_assign_unsigned,
-    .data = &dynacl_ttl
+    .data = &watcher_ttl
   },
   /* Backward compatibility. */
   {
@@ -5403,7 +5516,7 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
-      dynacl_setup ();
+      watcher_setup ();
       if (worker_min_count > worker_max_count)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)

@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2024-2025 Sergey Poznyakoff
+# Copyright (C) 2025 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,11 +13,21 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([ACL])
-AT_KEYWORDS([cond acl])
+AT_SETUP([Dynamic named ACL])
+AT_KEYWORDS([cond acl named_acl dyn_named_acl ndynacl])
 m4_pushdef([HARNESS_OPTIONS],[--source-address=127.0.0.2 dnl
  --source-address=127.0.0.3 dnl
  --source-address=127.0.0.9 --source-address=127.0.0.17])
+
+AT_DATA([aclfile],
+[127.0.0.1
+])
+
+AT_DATA([aclfile.full],
+[127.0.0.1
+127.0.0.2
+127.0.0.8/29
+])
 
 AT_DATA([input],
 [GET /echo/foo
@@ -28,6 +38,42 @@ end
 end
 
 source 127.0.0.2
+
+GET /echo/foo
+Host: example.org
+end
+
+404
+end
+
+run echo 127.0.0.2 >> aclfile
+end
+
+#:mtime sleep 2
+
+GET /echo/foo
+Host: example.org
+end
+
+200
+end
+
+run rm aclfile
+end
+
+#:mtime sleep 2
+
+GET /echo/foo
+Host: example.org
+end
+
+404
+end
+
+run cp aclfile.full aclfile
+end
+
+#:mtime sleep 2
 
 GET /echo/foo
 Host: example.org
@@ -53,45 +99,18 @@ end
 
 200
 end
-
-source 127.0.0.17
-
-GET /echo/foo
-Host: example.org
-end
-
-404
-end
-
 ])
 
-PT_CHECK([ListenHTTP
-	Service
-		ACL
-			"127.0.0.1"
-			"127.0.0.2"
-			"127.0.0.8/29"
-		End
-		Backend
-			Address
-			Port
-		End
-	End
-	Service
-		Error 404
-	End
-End],
-[input])
-
-AT_DATA([aclfile],
-[127.0.0.1
-127.0.0.2
-127.0.0.8/29
+AT_CHECK([if test "$INOTIFY_AVAILABLE" != "1"; then
+  sed -i -e 's/^#:mtime //' input
+fi
 ])
 
-PT_CHECK([ListenHTTP
+PT_CHECK([WatcherTTL 1
+ACL "secure" -filewatch "aclfile"
+ListenHTTP
 	Service
-		ACL -file "aclfile"
+		ACL "secure"
 		Backend
 			Address
 			Port
