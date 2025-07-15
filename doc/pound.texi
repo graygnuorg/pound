@@ -865,11 +865,12 @@ the file changes, it is re-read and the ACL is reconstructed from its
 new contents.  If the file is removed, the ACL is cleared (which means
 that it will evaluate to false during request matching), and a file
 creation monitor is installed.  Once the file is re-created, the
-monitor will wake up and the ACL reconstructed from the file.
+monitor will wake up, the file will be rescanned and the ACL updated
+accordingly.
 
   Consequently, when @option{-filewatch} form is used, it is OK if the
-file does not exist at startup.  Any errors in the file contents are
-reported, but don't cause program termination.
+file does not exist at startup.  Furthermore, any errors in the file
+contents are reported, but don't cause program termination.
 
   On GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
 @footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
@@ -3210,11 +3211,11 @@ This value can be overridden for specific backends.
 @end deffn
 
 @deffn {Global directive} WatcherTTL @var{n}
-If file reference ACLs on a system that doesn't support @code{inotify}
-API, this directive defines the interval between two successive checks
-of file modification times.  @xref{ACL filewatch}, for a detailed
-discussion of this feature and situations when this setting might be
-useful.
+If file reference ACLs are used on a system that doesn't support
+@code{inotify} API, this directive defines the interval between two
+successive checks of file modification times.  @xref{ACL filewatch},
+for a detailed discussion of this feature and situations when this
+setting might be useful.
 
 The default value is 180 seconds.
 @end deffn
