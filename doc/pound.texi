@@ -409,19 +409,19 @@ messages in accordance with its configuration file.
  The following table summarizes all command line options:
 
 @table @option
-@kwindex -c
+@opindex -c
 @item -c
 Check configuration file for syntax error and exit.  Exit code
 indicates whether the configuration is OK (0) or not (1).
 
-@kwindex -e
+@opindex -e
 @item -e
 Start in foreground mode and log to standard error (or standard
 output, for messages with LOG_DEBUG and LOG_INFO severity levels).
 This option ignores the @code{LogLevel} configuration setting
 (@pxref{Logging}).
 
-@kwindex -F
+@opindex -F
 @item -F
 Foreground mode.  Do not detach from the controlling terminal after
 startup, but remain in the foreground instead.  This overrides the
@@ -429,23 +429,23 @@ startup, but remain in the foreground instead.  This overrides the
 stream (syslog facility or stderr) requested in the configuration file
 remains in effect.
 
-@kwindex -f
+@opindex -f
 @item -f @var{file}
 Read configuration from the supplied @var{file}, instead of from the
 default location.
 
-@kwindex -h
+@opindex -h
 @item -h
 Print short command line usage summary and exit.
 
-@kwindex -p
+@opindex -p
 @item -p @var{file}
 Sets location of the @dfn{PID file}.  This is the file where
 @command{pound} will write its PID after startup.  This option
 overrides the value set by the @code{PIDFile} configuration setting
 (@pxref{PIDFile}).
 
-@kwindex -v
+@opindex -v
 @item -v
 Verbose mode.  During startup, error messages will be sent to stderr
 (stdout, for @code{LOG_DEBUG} and @code{LOG_INFO} severities).  If
@@ -457,14 +457,14 @@ When used with @option{-c} this option also instructs @command{pound}
 to print an extra confirmation message on standard error, if there are
 no errors in the configuration file.
 
-@kwindex -V
+@opindex -V
 @item -V
 Print program version, licensing terms, and configuration flags and
 exit with status 0.  You can use this option, in particular, to get
 the default values @command{pound} was built with, such as
 e.g. configuration file location.
 
-@kwindex -W
+@opindex -W
 @item -W @var{feature}
 @itemx -W no-@var{feature}
 Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
@@ -804,14 +804,20 @@ Host -pcre -icase "(?<!www\\.)example.org"
 
 @node ACL
 @subsection ACL
+@cindex ACL
   Access control lists, or @dfn{ACLs}, are special request matching
-statements that evaluate to true if the request came from one of the
+statements that evaluate to true for requests originating from one of the
 predefined IP addresses.  Access control lists are defined using the
-@code{ACL} section statement.  Each line within it defines a single
-@dfn{CIDR} enclosed in double quotes.  A CIDR consists of a @dfn{network
-address} (IPv4 or IPv6), optionally followed by slash and @dfn{network
-mask length}, a decimal number in the range [0,32] for IPv4 and [0.64]
-for IPv6.  For example:
+@code{ACL} section statement, which has three forms: anonymous,
+file reference, and ACL reference.
+
+In @dfn{anonymous} form, the @code{ACL} is a section statement: the
+keyword is followed by a newline and a list of CIDRs, terminated with
+@code{End} on a separate line.  Each line in the list defines a single
+CIDR enclosed in double quotes.  A @dfn{CIDR} consists of a
+@dfn{network address} (IPv4 or IPv6), optionally followed by slash and
+@dfn{network mask length}, a decimal number in the range [0,32] for
+IPv4 and [0,64] for IPv6.  For example:
 
 @example
 @group
@@ -822,15 +828,88 @@ End
 @end group
 @end example
 
-  Such @dfn{anonymous ACLs} can appear anywhere a matching statement
-is allowed.
+  For convenience, @code{Include} statements can also be used between
+@code{ACL} and @code{End}.
 
-  If an ACL is intended for use in multiple places of the configuration
-file, it can be defined as a @dfn{named ACL}.  In a named ACL
-declaration, the @code{ACL} keyword is followed by a symbolic name in
-double quotes.  This name must uniquely identify this ACL among other
-access control lists.  Named ACLs are allowed only in the global
-(top-level) scope of a configuration file:
+@anchor{File reference ACL}
+@kwindex -file
+  In @dfn{file reference} form, the ACL syntax is:
+
+@example
+ACL -file "@var{name}"
+@end example
+
+@noindent
+or
+
+@example
+ACL -filewatch "@var{name}"
+@end example
+
+  Here, @var{name} is the name of a disk file with the ACL definition.
+Its syntax is similar to the contents of anonymous ACL definition,
+except that CIDRs need not be quoted, and @code{Include} statements
+are not allowed.  If the file name is relative, it is looked up in the
+@ref{include directory}.
+
+  If the @option{-file} keyword is used, the file is read at startup
+and its contents is remembered for the lifetime of the program.  It is an
+error if the file does not exist.  Any errors in the file are treated
+as configuration file errors and cause immediate program termination.
+
+@anchor{ACL filewatch}
+@kwindex -filewatch
+  If the @option{-filewatch} keyword is used, the file is read at
+startup and is being monitored for changes during the runtime.  Once
+the file changes, it is re-read and the ACL is reconstructed from its
+new contents.  If the file is removed, the ACL is cleared (which means
+that it will evaluate to false during request matching), and a file
+creation monitor is installed.  Once the file is re-created, the
+monitor will wake up and the ACL reconstructed from the file.
+
+  Consequently, when @option{-filewatch} form is used, it is OK if the
+file does not exist at startup.  Any errors in the file contents are
+reported, but don't cause program termination.
+
+  On GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
+@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
+man page}.  To check, if your @command{pound} binary is compiled with
+the support for inotify API, examine the output of @command{pound
+-V}.}, which allows it to react immediately on the file system
+changes.  On systems where @code{inotify} is not available,
+@command{pound} falls back to periodic checking for changes in file
+modification time.  The interval between two succeeding checks is
+defined by the @code{WatcherTTL} statement (@pxref{Timeouts, WatcherTTL}).
+
+@anchor{ACL reference}
+  The third syntax form for @code{ACL} statements is @dfn{ACL
+reference}.  As its name implies, the ACL in this form refers to
+another @dfn{named ACL}, defined elsewhere in the configuration
+files. Syntactically, it is
+
+@example
+ACL "@var{name}"
+@end example
+
+@noindent
+where @var{name} is the name of the ACL to refer to.  This syntax
+makes it possible to use a single ACL in multiple places of the configuration
+file.
+
+Named access control lists are defined at the top level of a
+configuration file.  Syntactically, the definition is similar to
+anonymous or file reference forms of ACLs as discussed above, except
+that the keyword @code{ACL} is followed on the same line by the name
+to be assigned to that ACL, in double quotes.  Thus the following are
+valid named ACL declarations:
+
+@example
+ACL "secure" -file "aclfile"
+@end example
+
+@example
+ACL "secure" -filewatch "aclfile"
+@end example
 
 @example
 @group
@@ -841,8 +920,11 @@ End
 @end group
 @end example
 
-  This ACL can then be used in any @code{Service} appearing after its
-definition by using the following construct:
+All three examples define a named ACL @samp{secure}.  The former two
+read its contents from the disk file @file{aclfile}.  The latter one
+provides its definition in the form of a section.  This ACL can then
+be used in any @code{Service} appearing after its definition by using
+the following construct:
 
 @example
 ACL "secure"
@@ -1830,15 +1912,15 @@ statement.  Its allowed values are:
 
 @table @code
 @item any
-@kwindex any, @code{Family} statement
+@kwindex any
 Use all address families available.  This is the default.
 
 @item inet
-@kwindex inet, @code{Family} statement
+@kwindex inet
 Use only IPv4 addresses (@code{A} DNS records).
 
 @item inet6
-@kwindex inet6, @code{Family} statement
+@kwindex inet6
 Use only IPv6 addresses (@code{AAAA} DNS records).
 @end table
 
@@ -1966,33 +2048,33 @@ The built-in formats are:
 @table @asis
 @item 0
 @itemx null
-@kwindex null, request logging
+@kwindex null
 No request logging at all.
 
 @item 1
 @itemx regular
-@kwindex regular, request logging
+@kwindex regular
 For each request, its source address, request line and response status
 are logged.
 
 @item 2
 @itemx extended
-@kwindex extended, request logging
+@kwindex extended
 In addition to the above, the selected service and backend are shown.
 
 @item 3
 @itemx vhost_combined
-@kwindex vhost_combined, request logging
+@kwindex vhost_combined
 Detailed request logging using Apache-style @dfn{Combined} log format.
 
 @item 4
 @itemx combined
-@kwindex combined, request logging
+@kwindex combined
 Same as above, but without virtual host information.
 
 @item 5
 @itemx detailed
-@kwindex detailed, request logging
+@kwindex detailed
 Same as @samp{combined}, with additional information about the
 selected service and backend.
 @end table
@@ -2051,7 +2133,7 @@ TrustedIP "@var{name}"
 
 @noindent
 refers to the named ACL @var{name} (which must be defined earlier,
-@pxref{ACL}), and
+@pxref{ACL}),
 
 @example
 @group
@@ -2064,7 +2146,17 @@ End
 @end example
 
 @noindent
-defines the list of trusted IPs in place.
+defines the list of trusted IPs in place, and
+
+@example
+@group
+TrustedIP -file "@var{filename}"
+TrustedIP -filewatch "@var{filename}"
+@end group
+@end example
+
+@noindent
+reads CIDR definitions from file @var{filename}.
 
 If needed, the @code{ForwardedHeader} statement may be used to declare
 the name of the header to use instead of @code{X-Forwarded-For}.  As
@@ -2707,7 +2799,7 @@ This setting can be overridden for a particular listener using the
 
 @deffn {Global directive} CombineHeaders
 HTTP protocol allows for certain headers to appear in the message
-multiple times.  Namely, multiple headers with the same header name  are 
+multiple times.  Namely, multiple headers with the same header name  are
 permitted if that header field is defined as a comma-separated list.
 
 The standard specifies that such fields can be combined in a single
@@ -2743,7 +2835,7 @@ following to the configuration file:
 @group
 CombineHeaders
     Include "mvh.inc"
-End    
+End
 @end group
 @end example
 @end deffn
@@ -2797,8 +2889,15 @@ instead (@pxref{conditional-option}).
 
 @deffn {Global directive} ACL "@var{name}"
 Define a @dfn{named access control list}.  An @dfn{ACL} is a
-list of network addresses in CIDR notation, one address per line,
-terminated with an @code{End} directive on a line by itself.  E.g.:
+list of network addresses in CIDR notation.  Once defined, the ACL can
+be used in @code{Service} statements to limit access to resources
+(@pxref{ACL reference}).
+
+The statement has two forms: immediate and file reference ACL.  In
+@dfn{immediate} form, the CIDR list follows the @code{ACL} line and
+is terminated with an @code{End} directive on a line by itself.  Each
+non-empty line contains a CIDR enclosed in double quotes.  Comments
+and @code{Include} statements are allowed.  For example:
 
 @example
 @group
@@ -2809,10 +2908,28 @@ End
 @end group
 @end example
 
-The @code{Include} directive is allowed within the ACL section.
-Named ACLs can be used in @code{Service} definitions to limit access
-to services from certain IP addresses only.  @xref{ACL}, for a
-detailed discussion of this.
+The syntax of named @dfn{file reference} ACL is:
+
+@example
+ACL "@var{name}" -file "@var{filename}"
+@end example
+
+@noindent
+or
+
+@example
+ACL "@var{name}" -filewatch "@var{filename}"
+@end example
+
+If @var{filename} is relative, it is looked up in the @ref{include directory}.
+The syntax of the file is similar to the described above, except that
+CIDRs need not be quoted and @code{Include} statements are not
+allowed.  The form with @code{-file} reads the file contents once, at
+the program startup.  The one with @code{-filewatch} reads it and then
+monitors that file for changes.  Any change to the file causes it to
+be read again, thus the ACLs are updated automatically without the
+need to restart the program.  @xref{File reference ACL}, for a
+detailed discussion of this feature.
 @end deffn
 
 @node File inclusion
@@ -2898,11 +3015,13 @@ IP addresses, which is used to determine the originator IP.
 @xref{%a}, for details.
 
 This statement is a special form of @code{ACL} statement, described
-below.  It can appear in two forms: as a @dfn{section} or as a
-@dfn{directive}.  When used as a section, it is followed by a list of
-one or more CIDRs each appearing on a separate line.  The @code{End}
-keyword terminates the statement, e.g.:
+in @ref{ACL}.  It can have in three forms: @dfn{anonymous ACL},
+@dfn{file reference}, or @dfn{ACL reference}.
 
+  Examples:
+
+@enumerate
+@item
 @example
 @group
 TrustedIP
@@ -2911,14 +3030,15 @@ TrustedIP
 End
 @end group
 @end example
-
-In directive form, this statement takes a single argument, the name of
-an access control list defined earlier using the @code{ACL} statement,
-e.g.
-
+@item
+@example
+TrustedIP -filewatch "/etc/pound/trustip.acl"
+@end example
+@item
 @example
 TrustedIP "proxy_addresses"
 @end example
+@end enumerate
 @end deffn
 
 @deffn {Global directive} Anonymise
@@ -3087,6 +3207,16 @@ a backend to be established.  Default is the same as the
 @code{TimeOut} value.
 
 This value can be overridden for specific backends.
+@end deffn
+
+@deffn {Global directive} WatcherTTL @var{n}
+If file reference ACLs on a system that doesn't support @code{inotify}
+API, this directive defines the interval between two successive checks
+of file modification times.  @xref{ACL filewatch}, for a detailed
+discussion of this feature and situations when this setting might be
+useful.
+
+The default value is 180 seconds.
 @end deffn
 
 @deffn {Global directive} WSTimeOut @var{n}
@@ -3582,6 +3712,20 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
+@deffn {Request Conditional} ACL -file "@var{filename}"
+@deffnx {Request Conditional} ACL -filewatch "@var{filename}"
+Defines an unnamed ACL to match the source IP against.  The ACL definition
+is read from the file @var{filename}, one CIDR per line.  Empty lines
+and comments are allowed.  If @var{filename} is relative, it is looked
+up in the @ref{include directory}.  The form with @code{-file} reads
+the file contents once, at the program startup.  The one with
+@code{-filewatch} reads it and then monitors that file for changes.
+Any change to the file causes it to be read again, thus the ACLs are
+updated automatically without the need to restart the program.
+
+@xref{File reference ACL}, for a detailed discussion of this feature.
+@end deffn
+
 @deffn {Request Conditional} BasicAuth "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
@@ -3876,7 +4020,7 @@ header will be added to the end of the header list.
 
 @node Error response rewriting
 @subsection Rewriting error responses
-  When a regular backend responds with an error, the content (body) 
+  When a regular backend responds with an error, the content (body)
 of that response can be replaced with an arbitrary custom page.  For this
 to work, the following conditions should be met:
 
@@ -4335,11 +4479,11 @@ determine the originator IP.
 @xref{%a}, for a detailed discussion.
 
 This statement is a special form of @code{ACL} statement, described
-in @ref{ACL}.  It can appear in two forms: as a @dfn{section} or as a
-@dfn{directive}.  When used as a section, it is followed by a list of
-one or more CIDRs each appearing on a separate line.  The @code{End}
-keyword terminates the statement, e.g.:
+in @ref{ACL}.  It can appear in three forms: @dfn{anonymous ACL},
+@dfn{file reference}, or @dfn{ACL reference}.  Examples:
 
+@enumerate
+@item
 @example
 @group
 TrustedIP
@@ -4348,14 +4492,15 @@ TrustedIP
 End
 @end group
 @end example
-
-In directive form, this statement takes a single argument, the name of
-an access control list defined earlier using the @code{ACL} statement,
-e.g.
-
+@item
+@example
+TrustedIP -filewatch "/etc/pound/trustip.acl"
+@end example
+@item
 @example
 TrustedIP "proxy_addresses"
 @end example
+@end enumerate
 @end deffn
 
 @anchor{LogSuppress}

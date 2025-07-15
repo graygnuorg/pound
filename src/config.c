@@ -5016,7 +5016,7 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = parse_resolver
   },
   {
-    .name = "WatcherTTL",
+    .name = "WatcherTTL,
     .parser = cfg_assign_unsigned,
     .data = &watcher_ttl
   },

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-08
+Pound -- history of user-visible changes. 2025-07-15
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -8,6 +8,42 @@ on 2022-09-19.  See the README file for details.
 Please send pound bug reports to <gray@gnu.org>
 
 Version 4.16.90 (git)
+
+* Changes to the "ACL" statements
+
+Two new forms of the ACL statements are provided:
+
+ - ACL -file "NAME"
+
+   Reads ACL from the file NAME.  The file shall contain one or more
+   CIDRs, one per input line.  CIDRs need not be quoted.  Empty lines
+   and comments are allowed.
+
+   The file is read once, at program startup.
+
+ - ACL -filewatch "NAME"
+
+   Same as above, but the file will be monitored for changes during
+   the runtime.  If a change is detected, the file will be rescanned
+   and the ACL updated.
+
+   On GNU/Linux systems, this uses inotify(7), which means that
+   file changes are noticed immediately.  On systems not supporting
+   inotify, the file will be checked periodically.  The check interval
+   is set by the WatcherTTL global directive.
+
+The corresponding new forms are implemented for all ACL statements,
+i.e.:
+
+ - Named ACLs:
+
+   ACL "name" -file "filename"
+   ACL "name" -filewatch "filename"
+
+ - Trusted IP lists:
+
+   TrustedIP -file "filename"
+   TrustedIP -filewatch "filename"
 
 * New special backend "SendFile"
 

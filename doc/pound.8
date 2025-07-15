@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 8, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "July 15, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -561,10 +561,10 @@ specifier in
 for a detailed discussion.
 .IP
 This statement is a special form of \fBACL\fR statement, described
-below.  It can appear as a \fIsection\fR or \fIdirective\fR.  When
-used as a section, it is followed by a list of one or more CIDRs
-each appearing on a separate line.  The \fBEnd\fR keyword terminates
-the statement, e.g.:
+below.  It can appear as an \fIanonymous ACL\fR (\fIsection\fR),
+\fIfile reference\fR, or as an \fIACL reference\fR.  In anonymous ACL
+form, it is followed by a list of one or more CIDRs each appearing on
+a separate line.  The \fBEnd\fR keyword terminates the statement, e.g.:
 .IP
 .RS
 .EX
@@ -575,7 +575,24 @@ End
 .EE
 .RE
 .IP
-In directive form, this statement takes single argument, the name of
+In file reference form, the statement is:
+.IP
+.RS
+.EX
+TrustedIP -file "\fIfilename\fR"
+.EE
+or
+.EX
+TrustedIP -filewatch "\fIfilename\fR"
+.EE
+.RE
+.IP
+and the list of IP addresses is read from file \fIfilename\fR.  When
+used with
+.BR -filewatch ,
+the file will be watched for changes and re-read when such occur.
+.IP
+In ACL reference form, this statement takes single argument, the name of
 an access control list defined earlier using the \fBACL\fR statement,
 e.g.
 .IP
@@ -723,6 +740,28 @@ Named ACLs can be used in \fBService\fR definitions to make services
 available from certain IP addresses only.
 .RE
 .TP
+\fBACL\fR "\fIname\fR" -file "\fIfilename\fR"
+Same as above, but reads ACL definition from file \fIfilename\fR.
+The name is taken relative to the \fBIncludeDir\fR directory, unless
+it starts with a slash.
+.IP
+The ACL file should contain one CIDR per line.  Empty lines and
+comments are allowed.
+.TP
+\fBACL\fR "\fIname\fR" -filewatch "\fIfilename\fR"
+Same as above, but \fIfilename\fR will be watched for changes during
+the runtime.  Once a change is detected, the file will be re-read and
+the ACL updated.
+.IP
+If possible, this uses
+.BR inotify (7).
+On systems that does not support
+.BR inotify ,
+the file will be checked for changes periodically.  The chech interval
+is defined by the
+.B WatcherTTL
+setting.
+.TP
 \fBPIDFile\fR "\fIfilename\fR"
 Sets the name of the file where to store program PID.  It can be
 overridden by the
@@ -761,6 +800,13 @@ compile-time support.  The selected regular expression type remains in
 effect until next
 .B RegexType
 statement or end of the configuration file, whichever occurs first.
+.TP
+\fBWatcherTTL \fIN\fR
+If file reference ACLs (i.e. \fIACL -filewatch\fR) are used on a
+system that doesn't support
+.BR inotify (7)
+API, this directive defines the interval between two successive checks
+of file modification times.
 .SS Control socket
 .B Pound
 can be instructed to listen for management requests,
@@ -1388,9 +1434,31 @@ section above.
 The ACL definition is finished with a
 .B End
 keyword on a line by itself.
-.sp
+.IP
 Semantically it is equivalent to the named ACL reference described
 above.
+.TP
+\fBACL\fR -file "\fIfilename\fR"
+Same as above, but reads ACL definition from file \fIfilename\fR.
+The name is taken relative to the \fBIncludeDir\fR directory, unless
+it starts with a slash.
+.IP
+The ACL file should contain one CIDR per line.  Empty lines and
+comments are allowed.
+.TP
+\fBACL\fR -filewatch "\fIfilename\fR"
+Same as above, but \fIfilename\fR will be watched for changes during
+the runtime.  Once a change is detected, the file will be re-read and
+the ACL updated.
+.IP
+If possible, this uses
+.BR inotify (7).
+On systems that does not support
+.BR inotify ,
+the file will be checked for changes periodically.  The chech interval
+is defined by the
+.B WatcherTTL
+setting.
 .TP
 \fBBasicAuth\fR "\fIfilename\fR"
 Evaluates to true if the incoming request passes basic authorization
