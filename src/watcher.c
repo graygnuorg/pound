@@ -438,12 +438,15 @@ process_event (struct inotify_event *ep)
   if (ep->mask & (IN_CREATE | IN_MOVED_TO))
     {
       struct watchpoint *awp = watchpoint_locate_file (wp->wdir.wd, ep->name);
-      conf_error_at_locus_range (&awp->watcher->locus, "%s restored",
-				 awp->watcher->filename);
-      awp->watcher->mode = WATCHER_EXISTS;
-      watchpoint_set (awp);
-      watchpoint_dir_unref (wp);
-      watcher_reread (awp->watcher);
+      if (awp)
+	{
+	  conf_error_at_locus_range (&awp->watcher->locus, "%s restored",
+				     awp->watcher->filename);
+	  awp->watcher->mode = WATCHER_EXISTS;
+	  watchpoint_set (awp);
+	  watchpoint_dir_unref (wp);
+	  watcher_reread (awp->watcher);
+	}
     }
   else if (ep->mask & IN_CLOSE_WRITE)
     watcher_reread (wp->watcher);
