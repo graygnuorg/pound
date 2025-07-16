@@ -99,7 +99,7 @@ locus_point_init (struct locus_point *pt, char const *filename,
       pt->filename = string_alloc (strlen (filename) +
 				   (dlen ? (dlen + 1) : 0));
       p = pt->filename->str;
-      if (dir)
+      if (dlen > 0)
 	{
 	  memcpy (p, dir, dlen);
 	  p += dlen;
