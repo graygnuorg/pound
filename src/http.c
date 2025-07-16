@@ -3266,7 +3266,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_QUERY_PARAM:
-      switch (http_request_get_query_param_value (req, cond->sm.string->value,
+      switch (http_request_get_query_param_value (req,
+						  string_ptr (cond->sm.string),
 						  &str))
 	{
 	case RETRIEVE_ERROR:
@@ -3346,7 +3347,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       {
 	char *subj;
 
-	subj = expand_string (cond->sm.string->value, phttp, req,
+	subj = expand_string (string_ptr (cond->sm.string), phttp, req,
 			      "string_match");
 	if (subj)
 	  {

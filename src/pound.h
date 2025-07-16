@@ -707,15 +707,9 @@ enum service_cond_type
     COND_CLIENT_CERT
   };
 
-typedef struct string_ref
-{
-  unsigned refcount;
-  char value[1];
-} STRING_REF;
-
 struct string_match
 {
-  STRING_REF *string;
+  STRING *string;
   GENPAT re;
 };
 

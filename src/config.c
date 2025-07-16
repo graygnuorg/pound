@@ -828,7 +828,8 @@ parse_named_acl (void *call_data, void *section_data)
  * ACL "name"
  *   References a named ACL.
  * ACL -file "name"
- *   Read dynamic ACL from file.
+ * ACL -filewatch "name"
+ *   Read ACL from file.
  * ACL "\n" ... End
  *   Creates and references an unnamed ACL.
  */
@@ -1579,30 +1580,6 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
   return CFGPARSER_OK;
 }
 
-STRING_REF *
-string_ref_alloc (char const *str)
-{
-  STRING_REF *ref = xmalloc (sizeof (*ref) + strlen (str));
-  ref->refcount = 1;
-  strcpy (ref->value, str);
-  return ref;
-}
-
-STRING_REF *
-string_ref_incr (STRING_REF *ref)
-{
-  if (ref)
-    ref->refcount++;
-  return ref;
-}
-
-void
-string_ref_free (STRING_REF *ref)
-{
-  if (ref && --ref->refcount == 0)
-    free (ref);
-}
-
 static int
 parse_cond_matcher_0 (SERVICE_COND *top_cond,
 		      enum service_cond_type type,
@@ -1625,7 +1602,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
       FILE *fp;
       char *p;
       char buf[MAXBUF];
-      STRING_REF *ref = NULL;
+      STRING *ref = NULL;
 
       if ((fp = fopen_include (from_file)) == NULL)
 	{
@@ -1634,7 +1611,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	  free (from_file);
 	  return CFGPARSER_FAIL;
 	}
-      free (from_file);//FIXME
+      free (from_file);
 
       cond = service_cond_append (top_cond, COND_BOOL);
       cond->boolean.op = BOOL_OR;
@@ -1643,7 +1620,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	{
 	case COND_QUERY_PARAM:
 	case COND_STRING_MATCH:
-	  ref = string_ref_alloc (string);
+	  ref = string_init (string);
 	  break;
 	default:
 	  break;
@@ -1685,14 +1662,14 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	    case COND_QUERY_PARAM:
 	    case COND_STRING_MATCH:
 	      memmove (&hc->sm.re, &hc->re, sizeof (hc->sm.re));
-	      hc->sm.string = string_ref_incr (ref);
+	      hc->sm.string = string_ref (ref);
 	      break;
 
 	    default:
 	      break;
 	    }
 	}
-      string_ref_free (ref);
+      string_unref (ref);
       fclose (fp);
     }
   else
@@ -1717,7 +1694,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	case COND_QUERY_PARAM:
 	case COND_STRING_MATCH:
 	  memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));
-	  cond->sm.string = string_ref_alloc (string);
+	  cond->sm.string = string_init (string);
 	  break;
 
 	default:
@@ -4360,7 +4337,6 @@ client_cert_cb (X509 *x509, void *data)
       X509_STORE *store = SSL_CTX_get_cert_store (pc->ctx);
       if (X509_STORE_add_cert (store, x509) != 1)
 	{
-	  //FIXME
 	  openssl_error_at_locus_range (NULL, NULL, "X509_STORE_add_cert");
 	  return -1;
 	}
@@ -4653,7 +4629,6 @@ parse_named_backend (void *call_data, void *section_data)
   pthread_mutex_destroy (&be->mut);
   locus_range_unref (&be->locus);
   free (be);
-  // FIXME: free address on failure only.
 
   if (olddef)
     {
@@ -5216,7 +5191,7 @@ backend_finalize (BACKEND *be, NAMED_BACKEND_TABLE *tab)
       be->be_type = BE_MATRIX;
       be->v.mtx = nb->bemtx;
       /* Hostname will be freed after resolving backend to be_regular.
-	 FIXME: use STRING_REF? */
+	 FIXME: use STRING? */
       be->v.mtx.hostname = xstrdup (be->v.mtx.hostname);
       if (be->priority == -1)
 	be->priority = nb->priority;
