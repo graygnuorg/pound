@@ -543,7 +543,7 @@ watcher_setup (void)
   DLIST_FOREACH (wp, &watch_head, link)
     {
       if (wp->type == WATCH_FILE)
-	job_enqueue_after (watcher_ttl, job_watcher_check, &wp->watcher);
+	job_enqueue_after (watcher_ttl, job_watcher_check, wp->watcher);
     }
   return 0;
 }

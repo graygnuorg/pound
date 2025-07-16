@@ -46,6 +46,9 @@ end
 404
 end
 
+# Make sure file mtime is at least one second past its initial value
+#:mtime sleep 1
+
 run echo 127.0.0.2 >> aclfile
 end
 
