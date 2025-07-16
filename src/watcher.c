@@ -141,7 +141,7 @@ watcher_read (struct watcher *watcher)
 }
 
 char const *
-filename_split (char const *filename, char **dir)
+filename_split_str (char const *filename, char **dir)
 {
   char *p = strrchr (filename, '/');
   if (dir)
@@ -152,6 +152,36 @@ filename_split (char const *filename, char **dir)
 	*dir = NULL;
     }
   return p ? p + 1 : filename;
+}
+
+char const *
+filename_split_wd (char const *filename, WORKDIR **wdp)
+{
+  char const *name;
+  WORKDIR *wd;
+
+  if (filename[0] == '/')
+    {
+      char *dir;
+      name = filename_split_str (filename, &dir);
+      if ((wd = workdir_get (dir)) == NULL)
+	{
+	  logmsg (LOG_ERR, "can't open directory %s: %s",
+		  dir, strerror (errno));
+	  free (dir);
+	  return NULL;
+	}
+      free (dir);
+    }
+  else
+    {
+      if ((wd = get_include_wd ()) == NULL)
+	return NULL;
+      workdir_ref (wd);
+      name = filename;
+    }
+  *wdp = wd;
+  return name;
 }
 
 void
@@ -169,13 +199,13 @@ watcher_unlock (struct watcher *dp)
 }
 
 struct watcher *
-watcher_register (void *obj, char const *filename, struct locus_range const *loc,
+watcher_register (void *obj, char const *filename,
+		  struct locus_range const *loc,
 		  int (*read) (void *, char *, WORKDIR *),
 		  void (*clear) (void *))
 {
   struct watchpoint *wp;
   char const *basename;
-  char *dir;
   int rc;
   enum watcher_mode mode;
 
@@ -187,18 +217,13 @@ watcher_register (void *obj, char const *filename, struct locus_range const *loc
   wp->watcher->read = read;
   wp->watcher->clear = clear;
 
-  basename = filename_split (filename, &dir);
-  if ((wp->watcher->wd = workdir_get (dir)) == NULL)
+  basename = filename_split_wd (filename, &wp->watcher->wd);
+  if (!basename)
     {
-      conf_error_at_locus_range (loc,
-				 "can't open directory %s: %s",
-				 dir,
-				 strerror (errno));
-      free (dir);
+      conf_error_at_locus_range (loc, "can't register watcher");
       free (wp);
       return NULL;
     }
-  free (dir);
   wp->watcher->filename = xstrdup (basename);
   locus_range_init (&wp->watcher->locus);
   locus_range_copy (&wp->watcher->locus, loc);

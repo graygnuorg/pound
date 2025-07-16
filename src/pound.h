@@ -434,7 +434,8 @@ WATCHER *watcher_register (void *obj, char
 			   void (*clear) (void *));
 int watcher_setup (void);
 
-char const *filename_split (char const *filename, char **dir);
+char const *filename_split_str (char const *filename, char **dir);
+char const *filename_split_wd (char const *filename, WORKDIR **wdp);
 
 struct cidr;
 

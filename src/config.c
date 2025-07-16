@@ -683,17 +683,10 @@ parse_acl_file (ACL *acl, char const *filename)
 {
   WORKDIR *wd;
   char const *basename;
-  char *dir;
   int rc;
 
-  basename = filename_split (filename, &dir);
-  if ((wd = workdir_get (dir)) == NULL)
-    {
-      conf_error ("can't open directory %s: %s", dir, strerror (errno));
-      free (dir);
-      return CFGPARSER_FAIL;
-    }
-  free (dir);
+  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+    return CFGPARSER_FAIL;
   rc = config_parse_acl_file (acl, basename, wd);
   workdir_unref (wd);
   if (rc == -1)
