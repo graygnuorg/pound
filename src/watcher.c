@@ -99,7 +99,7 @@ watchpoint_set_compat_mode (struct watchpoint *wp)
   wp->watcher->mode = WATCHER_COMPAT;
   wp->watcher->mtime = 0;
   watcher_stat (wp->watcher);
-  job_enqueue_after (watcher_ttl, job_watcher_check, &wp->watcher);
+  job_enqueue_after (watcher_ttl, job_watcher_check, wp->watcher);
 }
 
 static void
@@ -542,12 +542,6 @@ watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
 int
 watcher_setup (void)
 {
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_FILE)
-	job_enqueue_after (watcher_ttl, job_watcher_check, wp->watcher);
-    }
   return 0;
 }
 #endif
