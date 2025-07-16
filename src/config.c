@@ -647,7 +647,6 @@ config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
 
   locus_point_init (&loc.beg, filename, wd->name);
   locus_point_init (&loc.end, NULL, NULL);
-  locus_point_copy (&loc.end, &loc.beg);
 
   rc = 0;
   while ((p = fgets (buf, sizeof buf, fp)) != NULL)
@@ -664,15 +663,12 @@ config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
 	continue;
       line[len] = 0;
 
-      if (p[0] == '"' && p[len-1] == '"')
+      if (line[0] == '"' && line[len-1] == '"')
 	{
-	  p++;
-	  p[--len] = 0;
+	  line[--len] = 0;
+	  line++;
 	}
 
-      /* Range fixup */
-      loc.beg.col = line - p;
-      loc.end.col = loc.beg.col + len;
       if (parse_cidr_str (acl, line, &loc))
 	rc++;
       loc.beg.line = loc.end.line = loc.beg.line + 1;
