@@ -1620,6 +1620,7 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	  int rc;
 	  size_t len = strlen(p);
 	  SERVICE_COND *hc;
+	  int gpt = gp_type;
 
 	  if (len == 0)
 	    continue;
@@ -1633,13 +1634,13 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	  if (type == COND_HOST)
 	    {
 	      stringbuf_reset (&sb);
-	      expr = host_prefix_regex (&sb, &gp_type, p);
+	      expr = host_prefix_regex (&sb, &gpt, p);
 	    }
 	  else
 	    expr = p;
 
 	  hc = service_cond_append (cond, type);
-	  rc = genpat_compile (&hc->re, gp_type, expr, flags);
+	  rc = genpat_compile (&hc->re, gpt, expr, flags);
 	  if (rc)
 	    {
 	      conf_regcomp_error (rc, hc->re, NULL);

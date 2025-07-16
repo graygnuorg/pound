@@ -115,6 +115,7 @@ TESTSUITE_AT = \
  optorder.at\
  optssl.at\
  or.at\
+ patfile.at\
  path.at\
  pcre.at\
  prio.at\

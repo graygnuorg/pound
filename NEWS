@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-15
+Pound -- history of user-visible changes. 2025-07-16
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -78,6 +78,15 @@ using the following statement:
 
 The statement can be used both in ListenHTTP (ListenHTTPS) and in
 Service blocks, the latter overriding the former.
+
+* Bugfixes
+
+** Improper pattern handling in patterns read from file
+
+When using -file with one of the following pattern types: -exact, -beg,
+-end, -contain, only first pattern from the file was compiled using the
+requested pattern type.  Remaining patterns were treated as POSIX regular
+expressions.
 
 
 Version 4.16, 2025-01-13
