@@ -649,11 +649,13 @@ config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
   locus_point_init (&loc.end, NULL, NULL);
 
   rc = 0;
+  loc.beg.line--;
   while ((p = fgets (buf, sizeof buf, fp)) != NULL)
     {
       char *line;
       size_t len = strlen (p);
 
+      loc.beg.line++;
       if (len == 0)
 	continue;
       if (p[len-1] == '\n')
@@ -671,7 +673,6 @@ config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
 
       if (parse_cidr_str (acl, line, &loc))
 	rc++;
-      loc.beg.line = loc.end.line = loc.beg.line + 1;
     }
   fclose (fp);
   locus_range_unref (&loc);

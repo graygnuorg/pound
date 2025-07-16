@@ -239,7 +239,9 @@ c_memrcspn (char const *str, int class, size_t len)
 size_t
 c_trimrws (char const *str, size_t len)
 {
-  return len - c_memrspn (str, CCTYPE_BLANK, len) + 1;
+  return (len == 0)
+    ? 0
+    : len - c_memrspn (str, CCTYPE_BLANK, len) + 1;
 }
 
 char *
