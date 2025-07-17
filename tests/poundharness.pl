@@ -436,7 +436,7 @@ EOT
 			push @opts, $1;
 			if ($1 eq '-re' || $1 eq '-beg') {
 			    $exact = 0;
-			} elsif ($1 eq '-file') {
+			} elsif ($1 eq '-file' || $1 eq '-filewatch') {
 			    $file = 1;
 			}
 			$hostline = $2;

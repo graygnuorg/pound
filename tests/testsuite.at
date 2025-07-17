@@ -85,9 +85,12 @@ m4_include([fromfile.at])
 m4_include([patfile.at])
 m4_include([basicauth.at])
 m4_include([acl.at])
-m4_include([dynacl.at])
 m4_include([nacl.at])
+
+AT_BANNER([Dynamically updated conditions])
+m4_include([dynacl.at])
 m4_include([ndynacl.at])
+m4_include([dynpat.at])
 
 AT_BANNER([Includes])
 m4_include([include.at])

@@ -705,8 +705,18 @@ enum service_cond_type
 		   Host: header */
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
-    COND_CLIENT_CERT
+    COND_CLIENT_CERT,
+    COND_DYN
   };
+
+struct dyn_service_cond
+{
+  struct bool_service_cond boolean;
+  STRING *string;
+  enum service_cond_type cond_type;
+  int pat_type;
+  int flags;
+};
 
 struct string_match
 {
@@ -735,11 +745,13 @@ struct pass_file
 typedef struct _service_cond
 {
   enum service_cond_type type;
+  WATCHER *watcher;
   union
   {
     ACL *acl;
     GENPAT re;
     struct bool_service_cond boolean;
+    struct dyn_service_cond dyn;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */

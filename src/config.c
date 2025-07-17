@@ -1368,13 +1368,48 @@ parse_metrics (void *call_data, void *section_data)
 }
 
 static SERVICE_COND *
+service_cond_alloc (int type)
+{
+  SERVICE_COND *sc;
+  XZALLOC (sc);
+  service_cond_init (sc, type);
+  return sc;
+}
+
+static void
+service_cond_free (SERVICE_COND *sc)
+{
+  switch (sc->type)
+    {
+    case COND_QUERY_PARAM:
+    case COND_STRING_MATCH:
+      string_unref (sc->sm.string);
+      genpat_free (sc->sm.re);
+      break;
+
+    case COND_URL:
+    case COND_PATH:
+    case COND_QUERY:
+    case COND_HDR:
+    case COND_HOST:
+      genpat_free (sc->re);
+      break;
+
+    default:
+      /* FIXME: so far this function is only used by dyncond_read which
+	 operates on one of cond types handled above. */
+      abort ();
+    }
+  free (sc);
+}
+
+static SERVICE_COND *
 service_cond_append (SERVICE_COND *cond, int type)
 {
   SERVICE_COND *sc;
 
-  assert (cond->type == COND_BOOL);
-  XZALLOC (sc);
-  service_cond_init (sc, type);
+  assert (cond->type == COND_BOOL || cond->type == COND_DYN);
+  sc = service_cond_alloc (type);
   SLIST_PUSH (&cond->boolean.head, sc, next);
 
   return sc;
@@ -1400,7 +1435,7 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 
 static int
 parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
-		  char **from_file)
+		  char **from_file, int *watch)
 {
   enum
   {
@@ -1412,26 +1447,28 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     MATCH_ICASE,
     MATCH_CASE,
     MATCH_FILE,
+    MATCH_FILEWATCH,
     MATCH_POSIX,
     MATCH_PCRE,
   };
 
   static struct config_option optab[] = {
-    { "file",    MATCH_FILE, 1 },
-    { "re",      MATCH_RE },
-    { "exact",   MATCH_EXACT },
-    { "beg",     MATCH_BEG },
-    { "end",     MATCH_END },
-    { "contain", MATCH_CONTAIN },
-    { "icase",   MATCH_ICASE },
-    { "case",    MATCH_CASE },
-    { "posix",   MATCH_POSIX },
-    { "pcre",    MATCH_PCRE },
-    { "perl",    MATCH_PCRE },
+    { "file",      MATCH_FILE, 1 },
+    { "filewatch", MATCH_FILEWATCH, 1 },
+    { "re",        MATCH_RE },
+    { "exact",     MATCH_EXACT },
+    { "beg",       MATCH_BEG },
+    { "end",       MATCH_END },
+    { "contain",   MATCH_CONTAIN },
+    { "icase",     MATCH_ICASE },
+    { "case",      MATCH_CASE },
+    { "posix",     MATCH_POSIX },
+    { "pcre",      MATCH_PCRE },
+    { "perl",      MATCH_PCRE },
     { NULL }
   };
 
-  struct config_option *optptr = from_file ? optab : optab + 1;
+  struct config_option *optptr = from_file ? optab : optab + 2;
 
   if (from_file)
     *from_file = NULL;
@@ -1459,6 +1496,12 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 
 	case MATCH_FILE:
 	  *from_file = xstrdup (arg);
+	  *watch = 0;
+	  break;
+
+	case MATCH_FILEWATCH:
+	  *from_file = xstrdup (arg);
+	  *watch = 1;
 	  break;
 
 	case MATCH_RE:
@@ -1499,10 +1542,12 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 }
 
 static char *
-host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
+header_prefix_regex (struct stringbuf *sb, int *gp_type,
+		     char const *hdr, char const *expr)
 {
   stringbuf_add_char (sb, '^');
-  stringbuf_add_string (sb, "Host:");
+  stringbuf_add_string (sb, hdr);
+  stringbuf_add_char (sb, ':');
   switch (*gp_type)
     {
     case GENPAT_POSIX:
@@ -1547,13 +1592,19 @@ host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
   return stringbuf_finish (sb);
 }
 
+static inline char *
+host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
+{
+  return header_prefix_regex (sb, gp_type, "Host", expr);
+}
+
 static int
 parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
 {
   struct token *tok;
   int rc;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL))
     return CFGPARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -1571,84 +1622,77 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
 }
 
 static int
-parse_cond_matcher_0 (SERVICE_COND *top_cond,
-		      enum service_cond_type type,
-		      int dfl_re_type,
-		      int gp_type, int flags, char const *string)
+dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
+		       STRING *ref, enum service_cond_type cond_type,
+		       int pat_type, int flags)
 {
-  struct token *tok;
+  FILE *fp;
+  struct locus_range loc;
+  char *p;
+  char buf[MAXBUF];
   int rc;
   struct stringbuf sb;
-  SERVICE_COND *cond;
-  char *from_file;
-  char *expr;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file))
-    return CFGPARSER_FAIL;
+  fp = fopen_wd (wd, filename);
+  if (fp == NULL)
+    return -1;
+
+  locus_point_init (&loc.beg, filename, wd->name);
+  locus_point_init (&loc.end, NULL, NULL);
+
+  rc = 0;
 
   xstringbuf_init (&sb);
-  if (from_file)
+  loc.beg.line--;
+  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
     {
-      FILE *fp;
-      char *p;
-      char buf[MAXBUF];
-      STRING *ref = NULL;
+      int rc;
+      size_t len = strlen (p);
+      SERVICE_COND *hc;
+      char *expr;
+      int gpt = pat_type;
 
-      if ((fp = fopen_include (from_file)) == NULL)
+      loc.beg.line++;
+
+      if (len == 0)
+	continue;
+      if (p[len-1] == '\n')
+	len--;
+      p = c_trimws (p, &len);
+      if (len == 0 || *p == '#')
+	continue;
+      p[len] = 0;
+
+      switch (cond_type)
 	{
-	  fopen_error (LOG_ERR, errno, include_wd, from_file,
-		       last_token_locus_range ());
-	  free (from_file);
-	  return CFGPARSER_FAIL;
-	}
-      free (from_file);
-
-      cond = service_cond_append (top_cond, COND_BOOL);
-      cond->boolean.op = BOOL_OR;
-
-      switch (type)
-	{
-	case COND_QUERY_PARAM:
-	case COND_STRING_MATCH:
-	  ref = string_init (string);
+	case COND_HOST:
+	  stringbuf_reset (&sb);
+	  expr = host_prefix_regex (&sb, &gpt, p);
 	  break;
-	default:
-	  break;
-	}
 
-      while ((p = fgets (buf, sizeof buf, fp)) != NULL)
-	{
-	  int rc;
-	  size_t len = strlen(p);
-	  SERVICE_COND *hc;
-	  int gpt = gp_type;
-
-	  if (len == 0)
-	    continue;
-	  if (p[len-1] == '\n')
-	    len--;
-	  p = c_trimws (p, &len);
-	  if (len == 0 || *p == '#')
-	    continue;
-	  p[len] = 0;
-
-	  if (type == COND_HOST)
+	case COND_HDR:
+	  if (ref)
 	    {
 	      stringbuf_reset (&sb);
-	      expr = host_prefix_regex (&sb, &gpt, p);
+	      expr = header_prefix_regex (&sb, &gpt, string_ptr (ref), p);
+	      break;
 	    }
-	  else
-	    expr = p;
+	  /* fall through */
+	default:
+	  expr = p;
+	}
 
-	  hc = service_cond_append (cond, type);
-	  rc = genpat_compile (&hc->re, gpt, expr, flags);
-	  if (rc)
-	    {
-	      conf_regcomp_error (rc, hc->re, NULL);
-	      // FIXME: genpat_free (hc->re);
-	      return CFGPARSER_FAIL;
-	    }
-	  switch (type)
+      hc = service_cond_alloc (cond_type);
+      rc = genpat_compile (&hc->re, gpt, expr, flags);
+      if (rc)
+	{
+	  regcomp_error_at_locus_range (&loc, hc->re, NULL);
+	  service_cond_free (hc);
+	  rc++;
+	}
+      else
+	{
+	  switch (cond_type)
 	    {
 	    case COND_QUERY_PARAM:
 	    case COND_STRING_MATCH:
@@ -1659,20 +1703,158 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	    default:
 	      break;
 	    }
+
+	  SLIST_PUSH (&cond->boolean.head, hc, next);
 	}
-      string_unref (ref);
-      fclose (fp);
+    }
+  stringbuf_free (&sb);
+  locus_range_unref (&loc);
+  fclose (fp);
+  return rc;
+}
+
+static int
+dyncond_read (void *obj, char *filename, WORKDIR *wd)
+{
+  SERVICE_COND *cond = obj;
+  return dyncond_read_internal (cond, filename, wd,
+				cond->dyn.string,
+				cond->dyn.cond_type,
+				cond->dyn.pat_type,
+				cond->dyn.flags);
+}
+
+static int
+dyncond_read_immediate (SERVICE_COND *cond, char *filename,
+			STRING *ref, enum service_cond_type cond_type,
+			int pat_type, int flags)
+{
+  WORKDIR *wd;
+  char const *basename;
+  int rc;
+
+  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+    return CFGPARSER_FAIL;
+  rc = dyncond_read_internal (cond, basename, wd, ref, cond_type, pat_type,
+			      flags);
+  workdir_unref (wd);
+  if (rc == -1)
+    {
+      if (errno == ENOENT)
+	conf_error ("file %s does not exist", filename);
+      else
+	conf_error ("can't open %s: %s", filename, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  else if (rc > 0)
+    {
+      conf_error ("errors reading %s", filename);
+      return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
+}
+
+static void
+dyncond_clear (void *obj)
+{
+  SERVICE_COND *cond = obj;
+  assert (cond->type == COND_BOOL || cond->type == COND_DYN);
+  while (!SLIST_EMPTY (&cond->boolean.head))
+    {
+      SERVICE_COND *sc = SLIST_FIRST (&cond->boolean.head);
+      SLIST_SHIFT (&cond->boolean.head, next);
+      service_cond_free (sc);
+    }
+}
+
+static int
+dyncond_register (SERVICE_COND *cond, char const *filename,
+		  struct locus_range const *loc)
+{
+  cond->watcher = watcher_register (cond, filename, loc,
+				    dyncond_read, dyncond_clear);
+  return cond->watcher == NULL;
+}
+
+static int
+parse_cond_matcher (SERVICE_COND *top_cond,
+		    enum service_cond_type type,
+		    int dfl_re_type,
+		    int gp_type, int flags, char const *string)
+{
+  struct token *tok;
+  int rc;
+  struct stringbuf sb;
+  SERVICE_COND *cond;
+  char *from_file;
+  int watch;
+  STRING *ref;
+
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file, &watch))
+    return CFGPARSER_FAIL;
+
+  if (from_file)
+    {
+      switch (type)
+	{
+	case COND_HDR:
+	case COND_QUERY_PARAM:
+	case COND_STRING_MATCH:
+	  ref = string_init (string);
+	  break;
+	default:
+	  ref = NULL;
+	  break;
+	}
+
+      if (watch)
+	{
+	  cond = service_cond_append (top_cond, COND_DYN);
+	  cond->dyn.boolean.op = BOOL_OR;
+	  cond->dyn.string = ref;
+	  cond->dyn.cond_type = type;
+	  cond->dyn.pat_type = gp_type;
+	  cond->dyn.flags = flags;
+	  if (dyncond_register (cond, from_file, last_token_locus_range ()))
+	    return CFGPARSER_FAIL;
+	}
+      else
+	{
+	  cond = service_cond_append (top_cond, COND_BOOL);
+	  cond->boolean.op = BOOL_OR;
+	  rc = dyncond_read_immediate (cond, from_file,
+				       ref, type, gp_type, flags);
+	  string_unref (ref);
+	  if (rc)
+	    return rc;
+	}
+      free (from_file);
     }
   else
     {
+      char *expr;
+
       if ((tok = gettkn_expect (T_STRING)) == NULL)
 	return CFGPARSER_FAIL;
 
+      xstringbuf_init (&sb);
       cond = service_cond_append (top_cond, type);
-      if (type == COND_HOST)
-	expr = host_prefix_regex (&sb, &gp_type, tok->str);
-      else
-	expr = tok->str;
+      switch (type)
+	{
+	case COND_HOST:
+	  expr = host_prefix_regex (&sb, &gp_type, tok->str);
+	  break;
+
+	case COND_HDR:
+	  if (string)
+	    {
+	      expr = header_prefix_regex (&sb, &gp_type, string, tok->str);
+	      break;
+	    }
+	  /* fall through */
+	default:
+	  expr = tok->str;
+	}
       rc = genpat_compile (&cond->re, gp_type, expr, flags);
       if (rc)
 	{
@@ -1691,28 +1873,10 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	default:
 	  break;
 	}
+      stringbuf_free (&sb);
     }
-  stringbuf_free (&sb);
 
   return CFGPARSER_OK;
-}
-
-static int
-parse_cond_matcher (SERVICE_COND *top_cond,
-		    enum service_cond_type type,
-		    int dfl_re_type,
-		    int gp_type, int flags, char const *string)
-{
-  int rc;
-  char *string_copy;
-  if (string)
-    string_copy = xstrdup (string);
-  else
-    string_copy = NULL;
-  rc = parse_cond_matcher_0 (top_cond, type, dfl_re_type, gp_type, flags,
-			     string_copy);
-  free (string_copy);
-  return rc;
 }
 
 static int
@@ -1797,9 +1961,40 @@ static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
-			     GENPAT_MULTILINE | GENPAT_ICASE,
-			     NULL);
+  char *string = NULL;
+  struct token *tok;
+  int rc;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  if (tok->type == T_STRING)
+    {
+      struct locus_range loc = LOCUS_RANGE_INITIALIZER;
+      string = xstrdup (tok->str);
+      locus_range_copy (&loc, &tok->locus);
+
+      if ((tok = gettkn_any ()) == NULL)
+	{
+	  locus_range_unref (&loc);
+	  free (string);
+	  return CFGPARSER_FAIL;
+	}
+      putback_tkn (tok);
+      if (tok->type == '\n')
+	{
+	  putback_synth (T_STRING, string, &loc);
+	  free (string);
+	  string = NULL;
+	}
+      locus_range_unref (&loc);
+    }
+  else
+    putback_tkn (tok);
+  rc = parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
+			   GENPAT_MULTILINE | GENPAT_ICASE,
+			   string);
+  free (string);
+  return rc;
 }
 
 static int

@@ -393,6 +393,41 @@ watcher_reread (struct watcher *watcher)
 }
 
 static void
+sentinel_wakeup (struct watchpoint *sentinel, char const *name)
+{
+  struct watchpoint *wp = watchpoint_locate_file (sentinel->wdir.wd, name);
+  if (wp)
+    {
+      conf_error_at_locus_range (&wp->watcher->locus, "%s restored",
+				 wp->watcher->filename);
+      wp->watcher->mode = WATCHER_EXISTS;
+      watchpoint_set (wp);
+      watchpoint_dir_unref (sentinel);
+      watcher_reread (wp->watcher);
+    }
+}
+
+static void
+sentinel_setup (struct watchpoint *wp)
+{
+  WATCHER *watcher = wp->watcher;
+  struct watchpoint *sentinel;
+  struct stat st;
+
+  conf_error_at_locus_range (&watcher->locus, "file removed");
+  watcher->clear (watcher->obj);
+  watcher->mode = WATCHER_NOFILE;
+  sentinel = watchpoint_locate_dir (watcher->wd);
+  if (fstatat (watcher->wd->fd, watcher->filename, &st, 0) == 0)
+    {
+      /* The file had been created before the sentinel was installed.
+	 No create event will be reported in this case, so trigger the
+	 sentinel explicitly. */
+      sentinel_wakeup (sentinel, watcher->filename);
+    }
+}
+
+static void
 process_event (struct inotify_event *ep)
 {
   struct watchpoint *wp;
@@ -420,10 +455,7 @@ process_event (struct inotify_event *ep)
       switch (wp->type)
 	{
 	case WATCH_FILE:
-	  conf_error_at_locus_range (&wp->watcher->locus, "file removed");
-	  wp->watcher->clear (wp->watcher->obj);
-	  wp->watcher->mode = WATCHER_NOFILE;
-	  watchpoint_locate_dir (wp->watcher->wd);
+	  sentinel_setup (wp);
 	  break;
 
 	case WATCH_DIR:
@@ -436,18 +468,7 @@ process_event (struct inotify_event *ep)
     }
 
   if (ep->mask & (IN_CREATE | IN_MOVED_TO))
-    {
-      struct watchpoint *awp = watchpoint_locate_file (wp->wdir.wd, ep->name);
-      if (awp)
-	{
-	  conf_error_at_locus_range (&awp->watcher->locus, "%s restored",
-				     awp->watcher->filename);
-	  awp->watcher->mode = WATCHER_EXISTS;
-	  watchpoint_set (awp);
-	  watchpoint_dir_unref (wp);
-	  watcher_reread (awp->watcher);
-	}
-    }
+    sentinel_wakeup (wp, ep->name);
   else if (ep->mask & IN_CLOSE_WRITE)
     watcher_reread (wp->watcher);
 }

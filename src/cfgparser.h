@@ -60,7 +60,7 @@ string_ninit (char const *s, size_t n)
 static inline STRING *
 string_init (char const *s)
 {
-  return string_ninit (s, strlen (s));
+  return s ? string_ninit (s, strlen (s)) : NULL;
 }
 
 static inline char const *
@@ -275,6 +275,7 @@ struct token *gettkn_expect_mask (int expect);
 struct token *gettkn_expect (int type);
 struct token *gettkn_any (void);
 void putback_tkn (struct token *tok);
+void putback_synth (int type, char const *str, struct locus_range *loc);
 
 enum
   {

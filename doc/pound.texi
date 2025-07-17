@@ -2757,7 +2757,7 @@ allowed, each being one of:
 Disable additional headers.
 
 @item forwarded
-Add @code{X-For-warded-For}, @code{X-Forwarded-Proto}, and
+Add @code{X-Forwarded-For}, @code{X-Forwarded-Proto}, and
 @code{X-Forwarded-Port} headers.
 
 @item ssl
@@ -3742,10 +3742,65 @@ modification time has changed.
 @end deffn
 
 @deffn {Request Conditional} Header [@var{options}] "@var{pattern}"
-Yields @samp{true}, if the request contains at least one header
-matching the given @var{pattern}.  By default, @var{pattern} is treated as
-case-insensitive POSIX extended regular expression.  This can be changed by
-@var{options}, described below.
+@deffnx {Request Conditional} Header "@var{field}" [@var{options}] "@var{pattern}"
+Evaluates to @samp{true}, if the request contains at least one header
+matching the given @var{pattern}.  The directive has two forms.
+In first form, the @var{pattern} is compared against entire header line.
+In second form, the @var{field} argument supplies the header name, and
+@var{pattern} the pattern to match against its value (or the name of
+the file to read patterns from, if @var{options} is @code{-file} or
+@code{-filewatch}).
+
+An example of @code{Header} statement in first form:
+
+@example
+Header "^Content-Type:[[:space:]]+text/.*"
+@end example
+
+Here's the corresponding statement in second form:
+
+@example
+Header "Content-Type" "text/.*"
+@end example
+
+In both forms, @var{pattern} is treated as case-insensitive POSIX
+extended regular expression.  This can be changed by @var{options},
+described below.
+
+The following list of differences will help you select the right form
+to use:
+
+@enumerate 1
+@item
+In first form, pattern modification options, such as @code{-beg} or
+@code{-contain} apply to entire header line.  In second form, they
+apply to header value only.  For example, you can write:
+
+@example
+Header "Content-Type" -beg "text/"
+@end example
+
+@noindent
+to match a request whose @samp{Content-Type} header value begins with
+@samp{text/}, or
+
+@example
+Header -contain "forwarded"
+@end example
+
+@noindent
+to match requests that contain any header with the word
+@samp{forwarded} anywhere, be it header field name or its value.
+
+@item
+Only the second form can be used to match against a list of patterns
+from a file, e.g.:
+
+@example
+Header "User-Agent" -file "user-agents.pat"
+@end example
+@end enumerate
+
 @end deffn
 
 @deffn {Request Conditional} Host [@var{options}] "@var{hostname}"
@@ -3836,6 +3891,10 @@ will be looked up in the @ref{include directory}.  Patterns are read
 from the file line by line.  Leading and trailing whitespace is
 removed.  Empty lines and comments (lines starting with @code{#}) are
 ignored.
+
+@kwindex -filewatch, header matching flag
+@item @code{-filewatch} @tab Same as @code{-file}, but the file will
+be monitored and read again if any change occurs.
 
 @kwindex -icase, header matching flag
 @cindex case sensitive match, headers

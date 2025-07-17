@@ -3235,6 +3235,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
   SERVICE_COND *subcond;
   char const *str;
 
+  watcher_lock (cond->watcher);
   switch (cond->type)
     {
     case COND_ACL:
@@ -3360,6 +3361,13 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       }
       break;
 
+    case COND_DYN:
+      if (SLIST_EMPTY (&cond->dyn.boolean.head))
+	{
+	  res = 0;
+	  break;
+	}
+      /* fall through */
     case COND_BOOL:
       if (cond->boolean.op == BOOL_NOT)
 	{
@@ -3387,6 +3395,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
     }
+  watcher_unlock (cond->watcher);
 
   return res;
 }

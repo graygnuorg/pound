@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-16
+Pound -- history of user-visible changes. 2025-07-17
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -44,6 +44,25 @@ i.e.:
 
    TrustedIP -file "filename"
    TrustedIP -filewatch "filename"
+
+* Changes to the "Header" statement
+
+New statement form is introduced:
+
+    Header "FIELD" [OPTIONS] "VALUE"
+
+In this form, pattern modification options apply to header value only,
+e.g.
+
+    Header "Content-Type" -beg "text/"
+
+Besides, it is now possible to match against a pattern list read from
+a file:
+
+    Header "User-Agent" -file "agents.txt"
+
+The -filewatch option is also accepted.  If used, the file will be
+monitored and the pattern list reconstructed each time it changes.
 
 * New special backend "SendFile"
 

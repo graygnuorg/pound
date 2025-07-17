@@ -828,6 +828,23 @@ putback_tkn (struct token *tok)
   input_putback (cur_input, tok ? tok : cur_token ());
 }
 
+void
+putback_synth (int type, char const *str, struct locus_range *loc)
+{
+  struct token tok;
+  if (str)
+    {
+      stringbuf_reset (&cur_input->buf);
+      stringbuf_add_string (&cur_input->buf, str);
+    }
+  tok.type = type;
+  tok.str = stringbuf_finish (&cur_input->buf);
+  locus_range_init (&tok.locus);
+  if (loc)
+    locus_range_copy (&tok.locus, loc);
+  putback_tkn (&tok);
+}
+
 /*
  * Read from the input all material up to "End" (case-insensitive) on a
  * line by itself.  Leave the material in input->buf.  Return last character
