@@ -557,12 +557,21 @@ watcher_setup (void)
 static void
 watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
 {
-  watchpoint_set_compat_mode (wp);
+  /*
+   * Nothing to do: the mode will be set in watcher_setup, prior to
+   * arming the watcher job.
+   */
 }
 
 int
 watcher_setup (void)
 {
+  struct watchpoint *wp;
+  DLIST_FOREACH (wp, &watch_head, link)
+    {
+      if (wp->type == WATCH_FILE)
+	watchpoint_set_compat_mode (wp);
+    }
   return 0;
 }
 #endif
