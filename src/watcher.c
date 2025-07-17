@@ -31,6 +31,22 @@ struct watcher
 static void watcher_stat (struct watcher *watcher);
 static void watcher_read (struct watcher *watcher);
 
+static ATTR_PRINTFLIKE(2,3) void
+watcher_info (struct watcher *watcher, char const *fmt, ...)
+{
+  va_list ap;
+  struct stringbuf sb;
+
+  xstringbuf_init (&sb);
+  stringbuf_format_locus_range (&sb, &watcher->locus);
+  stringbuf_add_string (&sb, ": ");
+  va_start (ap, fmt);
+  stringbuf_vprintf (&sb, fmt, ap);
+  va_end (ap);
+  logmsg (LOG_INFO, "%s", stringbuf_value (&sb));
+  stringbuf_free (&sb);
+}
+
 static void
 job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
 {
@@ -45,16 +61,14 @@ job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
       if (watcher->mtime > mtime)
 	{
 	  if (mtime == 0)
-	    conf_error_at_locus_range (&watcher->locus, "%s restored",
-				       watcher->filename);
+	    watcher_info (watcher, "%s restored", watcher->filename);
 	  watcher_read (watcher);
 	}
       else if (watcher->mtime == 0)
 	{
 	  if (mtime)
 	    {
-	      conf_error_at_locus_range (&watcher->locus, "%s removed",
-					 watcher->filename);
+	      watcher_info (watcher, "%s removed", watcher->filename);
 	      watcher->clear (watcher->obj);
 	    }
 	}
@@ -133,8 +147,7 @@ watcher_open_error (struct watcher *watcher, int ec)
 static void
 watcher_read (struct watcher *watcher)
 {
-  conf_error_at_locus_range (&watcher->locus, "re-reading %s",
-			     watcher->filename);
+  watcher_info (watcher, "re-reading %s", watcher->filename);
   watcher->clear (watcher->obj);
   if (watcher->read (watcher->obj, watcher->filename, watcher->wd) == -1)
     watcher_open_error (watcher, errno);
@@ -398,8 +411,7 @@ sentinel_wakeup (struct watchpoint *sentinel, char const *name)
   struct watchpoint *wp = watchpoint_locate_file (sentinel->wdir.wd, name);
   if (wp)
     {
-      conf_error_at_locus_range (&wp->watcher->locus, "%s restored",
-				 wp->watcher->filename);
+      watcher_info (wp->watcher, "%s restored", wp->watcher->filename);
       wp->watcher->mode = WATCHER_EXISTS;
       watchpoint_set (wp);
       watchpoint_dir_unref (sentinel);
@@ -414,7 +426,7 @@ sentinel_setup (struct watchpoint *wp)
   struct watchpoint *sentinel;
   struct stat st;
 
-  conf_error_at_locus_range (&watcher->locus, "file removed");
+  watcher_info (watcher, "%s", "file removed");
   watcher->clear (watcher->obj);
   watcher->mode = WATCHER_NOFILE;
   sentinel = watchpoint_locate_dir (watcher->wd);
