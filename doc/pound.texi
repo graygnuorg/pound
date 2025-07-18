@@ -872,15 +872,23 @@ accordingly.
 file does not exist at startup.  Furthermore, any errors in the file
 contents are reported, but don't cause program termination.
 
-  On GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
+@cindex inotify
+@cindex kqueue
+  The support for that option depends on the operating system.  On
+GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
 @footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
-man page}.  To check, if your @command{pound} binary is compiled with
-the support for inotify API, examine the output of @command{pound
--V}.}, which allows it to react immediately on the file system
-changes.  On systems where @code{inotify} is not available,
-@command{pound} falls back to periodic checking for changes in file
-modification time.  The interval between two succeeding checks is
-defined by the @code{WatcherTTL} statement (@pxref{Timeouts, WatcherTTL}).
+man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
+uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
+mechanism,kqueue(2),kqueue(2) man page}.}.  To check, which API your
+@command{pound} binary is compiled with, examine the output of
+@command{pound -V}.
+
+Both @code{inotify} and @code{kqueue} allow @command{pound} to react
+immediately on the file system changes.  On systems that don't support
+either API, @command{pound} falls back to periodic checking for
+changes in file modification time.  The interval between two
+succeeding checks is defined by the @code{WatcherTTL} statement
+(@pxref{Timeouts, WatcherTTL}).
 
 @anchor{ACL reference}
   The third syntax form for @code{ACL} statements is @dfn{ACL

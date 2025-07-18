@@ -20,6 +20,7 @@
 #include "pound.h"
 #include "json.h"
 #include "extern.h"
+#include "watcher.h"
 
 /* common variables */
 char *user;			/* user to run as */
@@ -1209,6 +1210,8 @@ main (const int argc, char **argv)
   print_log = 0;
   if (daemonize)
     detach ();
+
+  watcher_setup ();
 
   pidfile_create ();
 

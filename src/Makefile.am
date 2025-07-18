@@ -46,6 +46,18 @@ if COND_DYNAMIC_BACKENDS
   pound_SOURCES += resolver.c dynbe.c
 endif
 
+if COND_INOTIFY
+  pound_SOURCES += fsevmon.c watcher/inotify.c
+  AM_CPPFLAGS += -DWITH_INOTIFY=1
+else
+if  COND_KQUEUE
+  pound_SOURCES += fsevmon.c watcher/kqueue.c
+  AM_CPPFLAGS += -DWITH_KQUEUE=1
+else
+  pound_SOURCES += watcher/periodic.c
+endif
+endif
+
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = \
  cctype.c\
@@ -62,7 +74,7 @@ libpound_a_SOURCES = \
 pkgdata_DATA = poundctl.tmpl mvh.inc
 EXTRA_DIST = poundctl.tmpl mvh.inc
 
-noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h
+noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h watcher.h
 
 if SET_DH_AUTO
 DHSRC =

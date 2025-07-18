@@ -21,7 +21,7 @@ AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
-AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar])
+AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar subdir-objects])
 AC_CANONICAL_HOST
 
 # Checks for programs.
@@ -211,29 +211,52 @@ AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
 # **********************
-# Inotify
+# Event monitoring
 # **********************
-# Checks for header files.
-AC_CHECK_HEADERS([sys/inotify.h])
-AC_CHECK_FUNCS([inotify_init])
-AC_ARG_WITH(inotify,
-	AS_HELP_STRING([--with-inotify],[compile with inotify(7) support (Linux-specific)]),
-	[status_inotify=${withval}],
-	[status_inotify=probe])
-if test $status_inotify != no; then
-  if test "$ac_cv_header_sys_inotify_h" = yes &&
-	     test "$ac_cv_func_inotify_init" = yes; then
-    status_inotify=yes
-  elif test $status_inotify = probe; then
-    status_inotify=no
-  else
-    AC_MSG_FAILURE([Requested inotify(7) support is not available])
-  fi
+AC_CHECK_HEADERS([sys/inotify.h sys/event.h])
+AC_CHECK_FUNCS([inotify_init kqueue])
+
+if test "$ac_cv_header_sys_inotify_h/$ac_cv_func_inotify_init" = yes/yes; then
+  status_fsevmon=inotify
+elif test "$ac_cv_header_sys_event_h/$ac_cv_func_kqueue" = yes/yes; then
+  status_fsevmon=kqueue
+else
+  status_fsevmon=none
 fi
-if test $status_inotify = yes; then
-  AC_DEFINE([WITH_INOTIFY],1,[Set to 1 if inotify(7) is to be used])
-fi
-AM_CONDITIONAL([COND_INOTIFY],[test $status_inotify = yes])
+
+AC_ARG_WITH(fsevmon,
+	[AS_HELP_STRING([--without-fsevmon],
+	  [disable filesystem event monitoring API])],
+	[case $withval in
+	 inotify)
+	     if test $status_fsevmon != inotify; then
+	       AC_MSG_ERROR([inotify is requested, but not available])
+	     fi
+	     ;;
+	 kqueue)
+	     if test $status_fsevmon != kqueue; then
+	       AC_MSG_ERROR([kqueue is requested, but not available])
+	     fi
+	     ;;
+	 yes) ;;
+	 no|periodic) status_fsevmon=none
+	     ;;
+	 *) AC_MSG_ERROR([unsupported value for --with-fsevmon: $witval])
+	 esac])
+
+AC_ARG_WITH(inotify,[],
+	    [case $withval$status_fsevmon in
+	     noinotify)
+	       status_fsevmon=none
+	       ;;
+	     no*|yesinotify)
+	       ;;
+	     *)
+	       AC_MSG_ERROR([--with-inotify doesn't take arguments])
+	     esac])
+
+AM_CONDITIONAL([COND_INOTIFY],[test $status_fsevmon = inotify])
+AM_CONDITIONAL([COND_KQUEUE],[test $status_fsevmon = kqueue])
 
 AC_MSG_CHECKING([if building from git clone])
 if test -d .git; then
@@ -262,7 +285,7 @@ Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
 Test dynamic backends ......................... $status_dns_tests
-Inotify support ............................... $status_inotify
+Filesystem event monitoring ................... $status_fsevmon
 *******************************************************************
 
 EOF
@@ -281,7 +304,7 @@ else
 fi
 status_dynamic_backends=$status_dynamic_backends
 status_dns_tests=$status_dns_tests
-status_inotify=$status_inotify
+status_fsevmon=$status_fsevmon
 ])
 
 AC_CONFIG_TESTDIR(tests)

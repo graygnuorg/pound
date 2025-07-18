@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-17
+Pound -- history of user-visible changes. 2025-07-18
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -28,9 +28,11 @@ Two new forms of the ACL statements are provided:
    and the ACL updated.
 
    On GNU/Linux systems, this uses inotify(7), which means that
-   file changes are noticed immediately.  On systems not supporting
-   inotify, the file will be checked periodically.  The check interval
-   is set by the WatcherTTL global directive.
+   file changes are noticed immediately.  On BSD derivatives, it uses
+   kqueue(7).  Both interfaces allow it to to react immediately on the
+   file system changes.  On systems not supporting either interface,
+   the file will be checked periodically.  Check interval is set by
+   the WatcherTTL global directive.
 
 The corresponding new forms are implemented for all ACL statements,
 i.e.:

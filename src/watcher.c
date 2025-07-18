@@ -1,49 +1,50 @@
+/*
+ * Pound - the reverse-proxy load-balancer
+ * Copyright (C) 2025 Sergey Poznyakoff
+ *
+ * Pound is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 3 of the License, or
+ * (at your option) any later version.
+ *
+ * Pound is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with pound.  If not, see <http://www.gnu.org/licenses/>.
+ */
 #include "pound.h"
 #include "extern.h"
+#include "watcher.h"
 
 unsigned watcher_ttl = 180;
 
-struct watchpoint;
-
-enum watcher_mode
-  {
-    WATCHER_EXISTS,    /* File exists and is monitored. */
-    WATCHER_NOFILE,    /* File does not exist, its directory is monitored. */
-    WATCHER_COMPAT     /* Compatibility mode. */
-  };
-
-static void watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode);
-
-struct watcher
-{
-  enum watcher_mode mode;
-  void *obj;
-  int (*read) (void *, char *, WORKDIR *);
-  void (*clear) (void *);
-  WORKDIR *wd;                /* Working directory. */
-  char *filename;             /* Filename relative to wd. */
-  struct locus_range locus;
-  pthread_rwlock_t rwl;       /* Locker. */
-  time_t mtime;               /* File mtime.  Used if inotify is
-				 not available. */
-};
-
 static void watcher_stat (struct watcher *watcher);
-static void watcher_read (struct watcher *watcher);
+static void watcher_read_unlocked (struct watcher *watcher);
 
-static ATTR_PRINTFLIKE(2,3) void
-watcher_info (struct watcher *watcher, char const *fmt, ...)
+void
+watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
 {
   va_list ap;
   struct stringbuf sb;
+  struct locus_point pt;
 
   xstringbuf_init (&sb);
   stringbuf_format_locus_range (&sb, &watcher->locus);
   stringbuf_add_string (&sb, ": ");
+
+  locus_point_init (&pt, watcher->filename,
+		    watcher->wd ? watcher->wd->name : NULL);
+  stringbuf_add_string (&sb, string_ptr (pt.filename));
+  locus_point_unref (&pt);
+  stringbuf_add_string (&sb, ": ");
+
   va_start (ap, fmt);
   stringbuf_vprintf (&sb, fmt, ap);
   va_end (ap);
-  logmsg (LOG_INFO, "%s", stringbuf_value (&sb));
+  logmsg (pri, "%s", stringbuf_value (&sb));
   stringbuf_free (&sb);
 }
 
@@ -61,14 +62,14 @@ job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
       if (watcher->mtime > mtime)
 	{
 	  if (mtime == 0)
-	    watcher_info (watcher, "%s restored", watcher->filename);
-	  watcher_read (watcher);
+	    watcher_log (LOG_INFO, watcher, "file restored");
+	  watcher_read_unlocked (watcher);
 	}
       else if (watcher->mtime == 0)
 	{
 	  if (mtime)
 	    {
-	      watcher_info (watcher, "%s removed", watcher->filename);
+	      watcher_log (LOG_INFO, watcher, "file removed");
 	      watcher->clear (watcher->obj);
 	    }
 	}
@@ -77,39 +78,18 @@ job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
     }
 }
 
-enum
-  {
-    WATCH_FILE,
-    WATCH_DIR
-  };
+WATCHPOINT_HEAD watch_head;
 
-struct watchpoint
-{
-  int type;
-  int wd;
-  DLIST_ENTRY (watchpoint) link;
-  union
-  {
-    struct watcher *watcher;
-    struct
-    {
-      WORKDIR *wd;
-      size_t nref;
-    } wdir;
-  };
-};
-
-static DLIST_HEAD (,watchpoint) watch_head;
-
-static void
+void
 watchpoint_free (struct watchpoint *wp)
 {
   free (wp);
 }
 
-static void
+void
 watchpoint_set_compat_mode (struct watchpoint *wp)
 {
+  // FIXME: Remove existing watcher
   wp->watcher->mode = WATCHER_COMPAT;
   wp->watcher->mtime = 0;
   watcher_stat (wp->watcher);
@@ -124,33 +104,33 @@ watcher_stat (struct watcher *watcher)
   if (fstatat (watcher->wd->fd, watcher->filename, &st, 0))
     {
       if (errno != ENOENT)
-	conf_error_at_locus_range (&watcher->locus,
-				   "%s: can't stat: %s",
-				   watcher->filename,
-				   strerror (errno));
+	watcher_log (LOG_ERR, watcher, "can't stat: %s", strerror (errno));
     }
   else
     watcher->mtime = st.st_mtime;
 }
 
-static void
+static inline void
 watcher_open_error (struct watcher *watcher, int ec)
 {
-  struct locus_point pt = LOCUS_POINT_INITIALIZER;
-
-  locus_point_init (&pt, watcher->filename, watcher->wd->name);
-  conf_error_at_locus_range (&watcher->locus, "can't open file %s: %s",
-			     string_ptr (pt.filename), strerror (ec));
-  locus_point_unref (&pt);
+  watcher_log (LOG_ERR, watcher, "can't open file: %s", strerror (ec));
 }
 
 static void
-watcher_read (struct watcher *watcher)
+watcher_read_unlocked (struct watcher *watcher)
 {
-  watcher_info (watcher, "re-reading %s", watcher->filename);
+  watcher_log (LOG_INFO, watcher, "re-reading");
   watcher->clear (watcher->obj);
   if (watcher->read (watcher->obj, watcher->filename, watcher->wd) == -1)
     watcher_open_error (watcher, errno);
+}
+
+void
+watcher_reread (struct watcher *watcher)
+{
+  pthread_rwlock_wrlock (&watcher->rwl);
+  watcher_read_unlocked (watcher);
+  pthread_rwlock_unlock (&watcher->rwl);
 }
 
 char const *
@@ -247,7 +227,10 @@ watcher_register (void *obj, char const *filename,
   if (rc == -1)
     {
       if (errno == ENOENT)
-	mode = WATCHER_NOFILE;
+	{
+	  watcher_log (LOG_WARNING, wp->watcher, "file does not exist");
+	  mode = WATCHER_NOFILE;
+	}
       else
 	{
 	  watcher_open_error (wp->watcher, errno);
@@ -264,326 +247,3 @@ watcher_register (void *obj, char const *filename,
 
   return wp->watcher;
 }
-
-#ifdef WITH_INOTIFY
-#include <sys/inotify.h>
-
-static int ifd;
-
-static void
-watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
-{
-  wp->watcher->mode = mode;
-}
-
-static void
-workdir_set_compat_mode (WORKDIR *wd)
-{
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_FILE && wp->watcher->wd == wd)
-	watchpoint_set_compat_mode (wp);
-    }
-}
-
-static void watchpoint_remove (struct watchpoint *wp);
-
-static void
-watchpoints_disable (void)
-{
-  struct watchpoint *wp, *tmp;
-  DLIST_FOREACH_SAFE (wp, tmp, &watch_head, link)
-    {
-      switch (wp->type)
-	{
-	case WATCH_FILE:
-	  inotify_rm_watch (ifd, wp->wd);
-	  wp->wd = -1;
-	  watchpoint_set_compat_mode (wp);
-	  break;
-
-	case WATCH_DIR:
-	  watchpoint_remove (wp);
-	}
-    }
-}
-
-static struct watchpoint *
-watchpoint_locate (int wd)
-{
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->wd == wd)
-	return wp;
-    }
-  return NULL;
-}
-
-static struct watchpoint *
-watchpoint_locate_file (WORKDIR *wdir, char const *filename)
-{
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_FILE &&
-	  wp->watcher->mode == WATCHER_NOFILE &&
-	  wp->watcher->wd == wdir &&
-	  strcmp (wp->watcher->filename, filename) == 0)
-	return wp;
-    }
-  return NULL;
-}
-
-static void
-watchpoint_set (struct watchpoint *wp)
-{
-  struct locus_point pt;
-
-  switch (wp->type)
-    {
-    case WATCH_FILE:
-      locus_point_init (&pt, wp->watcher->filename, wp->watcher->wd->name);
-      wp->wd = inotify_add_watch (ifd, string_ptr (pt.filename),
-				  IN_CLOSE_WRITE);
-      locus_point_unref (&pt);
-      break;
-
-    case WATCH_DIR:
-      wp->wd = inotify_add_watch (ifd, wp->wdir.wd->name,
-				  IN_CREATE | IN_MOVED_TO);
-      break;
-    }
-}
-
-static struct watchpoint *
-watchpoint_locate_dir (WORKDIR *wd)
-{
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_DIR && wp->wdir.wd == wd)
-	{
-	  wp->wdir.nref++;
-	  return wp;
-	}
-    }
-  XZALLOC (wp);
-  wp->type = WATCH_DIR;
-  wp->wdir.wd = wd;
-  wp->wdir.nref = 1;
-  watchpoint_set (wp);
-  DLIST_PUSH (&watch_head, wp, link);
-  return wp;
-}
-
-static void
-watchpoint_remove (struct watchpoint *wp)
-{
-  DLIST_REMOVE (&watch_head, wp, link);
-  if (wp->wd != -1)
-    {
-      inotify_rm_watch (ifd, wp->wd);
-      wp->wd = -1;
-    }
-  watchpoint_free (wp);
-}
-
-static void
-watchpoint_dir_unref (struct watchpoint *wp)
-{
-  if (--wp->wdir.nref == 0)
-    watchpoint_remove (wp);
-}
-
-static void
-watcher_reread (struct watcher *watcher)
-{
-  pthread_rwlock_wrlock (&watcher->rwl);
-  watcher_read (watcher);
-  pthread_rwlock_unlock (&watcher->rwl);
-}
-
-static void
-sentinel_wakeup (struct watchpoint *sentinel, char const *name)
-{
-  struct watchpoint *wp = watchpoint_locate_file (sentinel->wdir.wd, name);
-  if (wp)
-    {
-      watcher_info (wp->watcher, "%s restored", wp->watcher->filename);
-      wp->watcher->mode = WATCHER_EXISTS;
-      watchpoint_set (wp);
-      watchpoint_dir_unref (sentinel);
-      watcher_reread (wp->watcher);
-    }
-}
-
-static void
-sentinel_setup (struct watchpoint *wp)
-{
-  WATCHER *watcher = wp->watcher;
-  struct watchpoint *sentinel;
-  struct stat st;
-
-  watcher_info (watcher, "%s", "file removed");
-  watcher->clear (watcher->obj);
-  watcher->mode = WATCHER_NOFILE;
-  sentinel = watchpoint_locate_dir (watcher->wd);
-  if (fstatat (watcher->wd->fd, watcher->filename, &st, 0) == 0)
-    {
-      /* The file had been created before the sentinel was installed.
-	 No create event will be reported in this case, so trigger the
-	 sentinel explicitly. */
-      sentinel_wakeup (sentinel, watcher->filename);
-    }
-}
-
-static void
-process_event (struct inotify_event *ep)
-{
-  struct watchpoint *wp;
-
-  if (ep->mask & IN_Q_OVERFLOW)
-    logmsg (LOG_NOTICE, "event queue overflow");
-
-  wp = watchpoint_locate (ep->wd);
-  if (!wp)
-    {
-      if (!(ep->mask & IN_IGNORED))
-	{
-	  if (ep->len > 0)
-	    logmsg (LOG_NOTICE, "ignoring unrecognized event %#x for %s",
-		    ep->mask, ep->name);
-	  else
-	    logmsg (LOG_NOTICE, "ignoring unrecognized event %#x", ep->mask);
-	}
-      return;
-    }
-
-  if (ep->mask & IN_IGNORED)
-    {
-      wp->wd = -1;
-      switch (wp->type)
-	{
-	case WATCH_FILE:
-	  sentinel_setup (wp);
-	  break;
-
-	case WATCH_DIR:
-	  logmsg (LOG_NOTICE, "%s: directory removed", wp->wdir.wd->name);
-	  workdir_set_compat_mode (wp->wdir.wd);
-	  watchpoint_remove (wp);
-	  break;
-	}
-      return;
-    }
-
-  if (ep->mask & (IN_CREATE | IN_MOVED_TO))
-    sentinel_wakeup (wp, ep->name);
-  else if (ep->mask & IN_CLOSE_WRITE)
-    watcher_reread (wp->watcher);
-}
-
-static void
-watcher_cleanup (void *arg)
-{
-  watchpoints_disable ();
-  close (ifd);
-}
-
-static void *
-thr_watcher (void *arg)
-{
-  char buffer[4096];
-  struct inotify_event *ep;
-  size_t size;
-  ssize_t rdbytes;
-
-  pthread_cleanup_push (watcher_cleanup, NULL);
-  while (1)
-    {
-      rdbytes = read (ifd, buffer, sizeof (buffer));
-      if (rdbytes == -1)
-	{
-	  if (errno == EINTR)
-	    continue;
-	  logmsg (LOG_CRIT, "inotify read failed: %s", strerror (errno));
-	  break;
-	}
-      ep = (struct inotify_event *) buffer;
-
-      while (rdbytes)
-	{
-	  if (ep->wd >= 0)
-	    process_event (ep);
-	  size = sizeof (*ep) + ep->len;
-	  ep = (struct inotify_event *) ((char*) ep + size);
-	  rdbytes -= size;
-	}
-    }
-  pthread_cleanup_pop (1);
-  return NULL;
-}
-
-int
-watcher_setup (void)
-{
-  struct watchpoint *wp;
-  pthread_t tid;
-
-  if (DLIST_EMPTY (&watch_head))
-    return 0;
-
-  ifd = inotify_init ();
-  if (ifd == -1)
-    {
-      logmsg (LOG_CRIT, "inotify_init: %s", strerror (errno));
-      return -1;
-    }
-
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_DIR)
-	continue;
-      switch (wp->watcher->mode)
-	{
-	case WATCHER_EXISTS:
-	  watchpoint_set (wp);
-	  break;
-
-	case WATCHER_NOFILE:
-	  watchpoint_locate_dir (wp->watcher->wd);
-	  break;
-
-	case WATCHER_COMPAT:
-	  /* Shouldn't happen. */
-	  break;
-	}
-    }
-
-  pthread_create (&tid, &thread_attr_detached, thr_watcher, NULL);
-  return 0;
-}
-#else
-static void
-watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
-{
-  /*
-   * Nothing to do: the mode will be set in watcher_setup, prior to
-   * arming the watcher job.
-   */
-}
-
-int
-watcher_setup (void)
-{
-  struct watchpoint *wp;
-  DLIST_FOREACH (wp, &watch_head, link)
-    {
-      if (wp->type == WATCH_FILE)
-	watchpoint_set_compat_mode (wp);
-    }
-  return 0;
-}
-#endif

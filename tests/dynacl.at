@@ -105,7 +105,7 @@ end
 end
 ])
 
-AT_CHECK([if test "$INOTIFY_AVAILABLE" != "1"; then
+AT_CHECK([if test "$EVMON_AVAILABLE" != "1"; then
   sed -i -e 's/^#:mtime //' input
 fi
 ])

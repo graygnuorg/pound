@@ -5677,7 +5677,6 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
-      watcher_setup ();
       if (worker_min_count > worker_max_count)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
@@ -5819,11 +5818,13 @@ struct string_value pound_settings[] = {
 #endif
     }
   },
-  { "File change monitoring", STRING_CONSTANT, { .s_const =
+  { "FS event monitoring", STRING_CONSTANT, { .s_const =
 #if WITH_INOTIFY
 				 "inotify"
+#elif WITH_KQUEUE
+                                 "kqueue"
 #else
-				 "periodic"
+                                 "periodic"
 #endif
     }
   },
