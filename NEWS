@@ -15,7 +15,7 @@ Two new forms of the ACL statements are provided:
 
  - ACL -file "NAME"
 
-   Reads ACL from the file NAME.  The file shall contain one or more
+   Reads ACL from the file NAME.  The file shall contain a list of
    CIDRs, one per input line.  CIDRs need not be quoted.  Empty lines
    and comments are allowed.
 
@@ -25,14 +25,12 @@ Two new forms of the ACL statements are provided:
 
    Same as above, but the file will be monitored for changes during
    the runtime.  If a change is detected, the file will be rescanned
-   and the ACL updated.
-
-   On GNU/Linux systems, this uses inotify(7), which means that
-   file changes are noticed immediately.  On BSD derivatives, it uses
-   kqueue(7).  Both interfaces allow it to to react immediately on the
-   file system changes.  On systems not supporting either interface,
-   the file will be checked periodically.  Check interval is set by
-   the WatcherTTL global directive.
+   and the ACL updated.  To ensure file changes are noticed
+   immediately, pound relies on filesystem monitoring API provided by
+   the operating system - inotify on GNU/Linux systems and kqueue on
+   BSD.  On systems not supporting either interface, the file will be
+   checked periodically.  The interval between successive checks is
+   defined by the WatcherTTL global directive.
 
 The corresponding new forms are implemented for all ACL statements,
 i.e.:
@@ -65,6 +63,11 @@ a file:
 
 The -filewatch option is also accepted.  If used, the file will be
 monitored and the pattern list reconstructed each time it changes.
+
+* Changes to other request matching directives
+
+The following request matching directives support the -filewatch
+flag, discussed above: URL, Path, Query, QueryParam, StringMatch.
 
 * New special backend "SendFile"
 
