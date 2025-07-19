@@ -246,8 +246,8 @@ installed with the following command:
  apt-get install libnet-dns-perl
 ```
 
-You will need version 1.47 of `libnet-dns-perl`, which corresponds to
-version 1990 of `Net::DNS::Nameserver`.
+You will need at least version 1.44 of `libnet-dns-perl`, which corresponds to
+version 1963 of `Net::DNS::Nameserver`.
 
 To run tests, type
 

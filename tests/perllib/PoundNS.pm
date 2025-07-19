@@ -25,9 +25,11 @@ use File::stat;
 
 # This module modifies internals of Net::DNS::Nameserver, therefore it
 # is not guaranteed that it will work with any version other than that
-# for which it has been written.
+# for which it has been written.  It is known to work with versions of
+# [1963,1990].  Let's assume it will work for newer versions as well.
+# If it breaks, poundharness.pl will just skip related tests.
 croak 'unsupported version of Net::DNS::Nameserver'
-    unless $Net::DNS::Nameserver::VERSION == 1990;
+    unless $Net::DNS::Nameserver::VERSION >= 1963;
 
 sub TCP_server {
     my ($self, $listen) = @_;
