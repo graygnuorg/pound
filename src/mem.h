@@ -17,17 +17,19 @@
 
 #include <stdarg.h>
 
+#define ATTR_RETURNS_NONNULL __attribute__ ((__returns_nonnull__))
+
 void *mem2nrealloc (void *p, size_t *pn, size_t s);
 void xnomem (void);
-void *xmalloc (size_t s);
-void *xcalloc (size_t nmemb, size_t size);
+void *xmalloc (size_t s) ATTR_RETURNS_NONNULL;
+void *xcalloc (size_t nmemb, size_t size) ATTR_RETURNS_NONNULL;
 #define xzalloc(s) xcalloc(1, s)
 #define XZALLOC(v) (v = xzalloc (sizeof ((v)[0])))
 
-void *xrealloc (void *p, size_t s);
-void *x2nrealloc (void *p, size_t *pn, size_t s);
-char *xstrdup (char const *s);
-char *xstrndup (const char *s, size_t n);
+void *xrealloc (void *p, size_t s) ATTR_RETURNS_NONNULL;
+void *x2nrealloc (void *p, size_t *pn, size_t s) ATTR_RETURNS_NONNULL;
+char *xstrdup (char const *s) ATTR_RETURNS_NONNULL;
+char *xstrndup (const char *s, size_t n) ATTR_RETURNS_NONNULL;
 
 struct stringbuf
 {
