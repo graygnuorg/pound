@@ -17,20 +17,153 @@
 #include <stdarg.h>
 #include <stddef.h>
 
+typedef struct
+{
+  unsigned refcnt;
+  char str[1];
+} STRING;
+
+static inline STRING *
+string_ref (STRING *s)
+{
+  if (s) s->refcnt++;
+  return s;
+}
+
+static inline STRING *
+string_unref (STRING *sp)
+{
+  if (sp && --sp->refcnt == 0)
+    {
+      free (sp);
+      return NULL;
+    }
+  return sp;
+}
+
+static inline STRING *
+string_alloc (size_t n)
+{
+  return string_ref (xcalloc (1, sizeof (STRING) + n));
+}
+
+static inline STRING *
+string_ninit (char const *s, size_t n)
+{
+  STRING *str = string_alloc (n);
+  memcpy (str->str, s, n);
+  str->str[n] = 0;
+  string_ref (str);
+  return str;
+}
+
+static inline STRING *
+string_init (char const *s)
+{
+  return s ? string_ninit (s, strlen (s)) : NULL;
+}
+
+static inline char const *
+string_ptr (STRING *s)
+{
+  return s ? s->str : NULL;
+}
+
 /* Locations in the source file */
 struct locus_point
 {
-  char const *filename;
+  STRING *filename;
   int line;
   int col;
 };
+
+#define LOCUS_POINT_INITIALIZER { NULL, 1, 0 }
 
 struct locus_range
 {
   struct locus_point beg, end;
 };
 
-struct locus_range *last_token_locus_range (void);
+#define LOCUS_RANGE_INITIALIZER \
+  { LOCUS_POINT_INITIALIZER, LOCUS_POINT_INITIALIZER }
+
+
+static inline void
+locus_point_init (struct locus_point *pt, char const *filename,
+		  char const *dir)
+{
+  if (filename)
+    {
+      size_t dlen = (dir && filename[0] != '/') ? strlen (dir) : 0;
+      char *p;
+      pt->filename = string_alloc (strlen (filename) +
+				   (dlen ? (dlen + 1) : 0));
+      p = pt->filename->str;
+      if (dlen > 0)
+	{
+	  memcpy (p, dir, dlen);
+	  p += dlen;
+	  *p++ = '/';
+	}
+      strcpy (p, filename);
+    }
+  else
+    pt->filename = NULL;
+  pt->line = 1;
+  pt->col = 0;
+}
+
+static inline void
+locus_point_ref (struct locus_point *pt)
+{
+  string_ref (pt->filename);
+}
+
+static inline void
+locus_point_unref (struct locus_point *pt)
+{
+  string_unref (pt->filename);
+  pt->filename = NULL;
+}
+
+static inline void
+locus_point_copy (struct locus_point *dst, struct locus_point const *src)
+{
+  if (dst->filename != src->filename)
+    string_unref (dst->filename);
+  *dst = *src;
+  string_ref (dst->filename);
+}
+
+static inline void
+locus_range_init (struct locus_range *rng)
+{
+  locus_point_init (&rng->beg, NULL, NULL);
+  locus_point_init (&rng->end, NULL, NULL);
+}
+
+static inline void
+locus_range_copy (struct locus_range *dst, struct locus_range const *src)
+{
+  locus_point_copy (&dst->beg, &src->beg);
+  locus_point_copy (&dst->end, &src->end);
+}
+
+static inline void
+locus_range_ref (struct locus_range *r)
+{
+  locus_point_ref (&r->beg);
+  locus_point_ref (&r->end);
+}
+
+static inline void
+locus_range_unref (struct locus_range *r)
+{
+  locus_point_unref (&r->beg);
+  locus_point_unref (&r->end);
+}
+
+struct locus_range const *last_token_locus_range (void);
 
 typedef struct workdir
 {
@@ -57,7 +190,7 @@ workdir_unref (WORKDIR *wd)
 }
 
 WORKDIR *workdir_get (char const *name);
-WORKDIR *get_include_wd_at_locus_range (struct locus_range *locus);
+WORKDIR *get_include_wd_at_locus_range (struct locus_range const *locus);
 static inline WORKDIR *get_include_wd (void)
 {
   return get_include_wd_at_locus_range (last_token_locus_range ());
@@ -142,6 +275,7 @@ struct token *gettkn_expect_mask (int expect);
 struct token *gettkn_expect (int type);
 struct token *gettkn_any (void);
 void putback_tkn (struct token *tok);
+void putback_synth (int type, char const *str, struct locus_range *loc);
 
 enum
   {
@@ -159,6 +293,10 @@ enum keyword_type
     KWT_ALIAS,        /* Alias to another keyword */
     KWT_TABREF,       /* Reference to another table */
     KWT_SOFTREF,      /* Same as above, but overrides data/off pair of it. */
+    KWT_TOPLEVEL      /* Can appear only in the first entry of the table.
+			 Remaining fields are ignored.
+			 Indicates that it is a top-level table, i.e. the
+			 input ends with an EOF. */
   };
 
 typedef struct cfg_parser_table

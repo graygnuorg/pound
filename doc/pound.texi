@@ -409,19 +409,19 @@ messages in accordance with its configuration file.
  The following table summarizes all command line options:
 
 @table @option
-@kwindex -c
+@opindex -c
 @item -c
 Check configuration file for syntax error and exit.  Exit code
 indicates whether the configuration is OK (0) or not (1).
 
-@kwindex -e
+@opindex -e
 @item -e
 Start in foreground mode and log to standard error (or standard
 output, for messages with LOG_DEBUG and LOG_INFO severity levels).
 This option ignores the @code{LogLevel} configuration setting
 (@pxref{Logging}).
 
-@kwindex -F
+@opindex -F
 @item -F
 Foreground mode.  Do not detach from the controlling terminal after
 startup, but remain in the foreground instead.  This overrides the
@@ -429,23 +429,23 @@ startup, but remain in the foreground instead.  This overrides the
 stream (syslog facility or stderr) requested in the configuration file
 remains in effect.
 
-@kwindex -f
+@opindex -f
 @item -f @var{file}
 Read configuration from the supplied @var{file}, instead of from the
 default location.
 
-@kwindex -h
+@opindex -h
 @item -h
 Print short command line usage summary and exit.
 
-@kwindex -p
+@opindex -p
 @item -p @var{file}
 Sets location of the @dfn{PID file}.  This is the file where
 @command{pound} will write its PID after startup.  This option
 overrides the value set by the @code{PIDFile} configuration setting
 (@pxref{PIDFile}).
 
-@kwindex -v
+@opindex -v
 @item -v
 Verbose mode.  During startup, error messages will be sent to stderr
 (stdout, for @code{LOG_DEBUG} and @code{LOG_INFO} severities).  If
@@ -457,14 +457,14 @@ When used with @option{-c} this option also instructs @command{pound}
 to print an extra confirmation message on standard error, if there are
 no errors in the configuration file.
 
-@kwindex -V
+@opindex -V
 @item -V
 Print program version, licensing terms, and configuration flags and
 exit with status 0.  You can use this option, in particular, to get
 the default values @command{pound} was built with, such as
 e.g. configuration file location.
 
-@kwindex -W
+@opindex -W
 @item -W @var{feature}
 @itemx -W no-@var{feature}
 Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
@@ -804,14 +804,20 @@ Host -pcre -icase "(?<!www\\.)example.org"
 
 @node ACL
 @subsection ACL
+@cindex ACL
   Access control lists, or @dfn{ACLs}, are special request matching
-statements that evaluate to true if the request came from one of the
+statements that evaluate to true for requests originating from one of the
 predefined IP addresses.  Access control lists are defined using the
-@code{ACL} section statement.  Each line within it defines a single
-@dfn{CIDR} enclosed in double quotes.  A CIDR consists of a @dfn{network
-address} (IPv4 or IPv6), optionally followed by slash and @dfn{network
-mask length}, a decimal number in the range [0,32] for IPv4 and [0.64]
-for IPv6.  For example:
+@code{ACL} section statement, which has three forms: anonymous,
+file reference, and ACL reference.
+
+In @dfn{anonymous} form, the @code{ACL} is a section statement: the
+keyword is followed by a newline and a list of CIDRs, terminated with
+@code{End} on a separate line.  Each line in the list defines a single
+CIDR enclosed in double quotes.  A @dfn{CIDR} consists of a
+@dfn{network address} (IPv4 or IPv6), optionally followed by slash and
+@dfn{network mask length}, a decimal number in the range [0,32] for
+IPv4 and [0,64] for IPv6.  For example:
 
 @example
 @group
@@ -822,15 +828,97 @@ End
 @end group
 @end example
 
-  Such @dfn{anonymous ACLs} can appear anywhere a matching statement
-is allowed.
+  For convenience, @code{Include} statements can also be used between
+@code{ACL} and @code{End}.
 
-  If an ACL is intended for use in multiple places of the configuration
-file, it can be defined as a @dfn{named ACL}.  In a named ACL
-declaration, the @code{ACL} keyword is followed by a symbolic name in
-double quotes.  This name must uniquely identify this ACL among other
-access control lists.  Named ACLs are allowed only in the global
-(top-level) scope of a configuration file:
+@anchor{File reference ACL}
+@kwindex -file
+  In @dfn{file reference} form, the ACL syntax is:
+
+@example
+ACL -file "@var{name}"
+@end example
+
+@noindent
+or
+
+@example
+ACL -filewatch "@var{name}"
+@end example
+
+  Here, @var{name} is the name of a disk file with the ACL definition.
+Its syntax is similar to the contents of anonymous ACL definition,
+except that CIDRs need not be quoted, and @code{Include} statements
+are not allowed.  If the file name is relative, it is looked up in the
+@ref{include directory}.
+
+  If the @option{-file} keyword is used, the file is read at startup
+and its contents is remembered for the lifetime of the program.  It is an
+error if the file does not exist.  Any errors in the file are treated
+as configuration file errors and cause immediate program termination.
+
+@anchor{ACL filewatch}
+@kwindex -filewatch
+  If the @option{-filewatch} keyword is used, the file is read at
+startup and is being monitored for changes during the runtime.  Once
+the file changes, it is re-read and the ACL is reconstructed from its
+new contents.  If the file is removed, the ACL is cleared (which means
+that it will evaluate to false during request matching), and a file
+creation monitor is installed.  Once the file is re-created, the
+monitor will wake up, the file will be rescanned and the ACL updated
+accordingly.
+
+  Consequently, when @option{-filewatch} form is used, it is OK if the
+file does not exist at startup.  Furthermore, any errors in the file
+contents are reported, but don't cause program termination.
+
+@cindex inotify
+@cindex kqueue
+  The support for that option depends on the operating system.  On
+GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
+@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
+man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
+uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
+mechanism,kqueue(2),kqueue(2) man page}.}.  To check, which API your
+@command{pound} binary is compiled with, examine the output of
+@command{pound -V}.
+
+Both @code{inotify} and @code{kqueue} allow @command{pound} to react
+immediately on the file system changes.  On systems that don't support
+either API, @command{pound} falls back to periodic checking for
+changes in file modification time.  The interval between two
+succeeding checks is defined by the @code{WatcherTTL} statement
+(@pxref{Timeouts, WatcherTTL}).
+
+@anchor{ACL reference}
+  The third syntax form for @code{ACL} statements is @dfn{ACL
+reference}.  As its name implies, the ACL in this form refers to
+another @dfn{named ACL}, defined elsewhere in the configuration
+files. Syntactically, it is
+
+@example
+ACL "@var{name}"
+@end example
+
+@noindent
+where @var{name} is the name of the ACL to refer to.  This syntax
+makes it possible to use a single ACL in multiple places of the configuration
+file.
+
+Named access control lists are defined at the top level of a
+configuration file.  Syntactically, the definition is similar to
+anonymous or file reference forms of ACLs as discussed above, except
+that the keyword @code{ACL} is followed on the same line by the name
+to be assigned to that ACL, in double quotes.  Thus the following are
+valid named ACL declarations:
+
+@example
+ACL "secure" -file "aclfile"
+@end example
+
+@example
+ACL "secure" -filewatch "aclfile"
+@end example
 
 @example
 @group
@@ -841,8 +929,11 @@ End
 @end group
 @end example
 
-  This ACL can then be used in any @code{Service} appearing after its
-definition by using the following construct:
+All three examples define a named ACL @samp{secure}.  The former two
+read its contents from the disk file @file{aclfile}.  The latter one
+provides its definition in the form of a section.  This ACL can then
+be used in any @code{Service} appearing after its definition by using
+the following construct:
 
 @example
 ACL "secure"
@@ -1246,6 +1337,20 @@ pound-specific files.  @xref{include directory}.  The file
 will be read only once, at program startup.  If you modify the file
 and want @command{pound} to notice changes, you will have to restart
 it.
+
+ Unless the file begins with a newline or @samp{<} character, its
+initial portion up to first empty line (inclusive) supplies headers
+that will be sent with the response.  The following defaults will be
+used, unless already defined in the file:
+
+@example
+@group
+Content-Type: text/html
+Expires: now
+Pragma: no-cache
+Cache-control: no-cache,no-store
+@end group
+@end example
 
  If the second argument is not supplied, the error text is determined
 by the @code{ErrorFile @var{code}} statement in the enclosing listener (where
@@ -1816,15 +1921,15 @@ statement.  Its allowed values are:
 
 @table @code
 @item any
-@kwindex any, @code{Family} statement
+@kwindex any
 Use all address families available.  This is the default.
 
 @item inet
-@kwindex inet, @code{Family} statement
+@kwindex inet
 Use only IPv4 addresses (@code{A} DNS records).
 
 @item inet6
-@kwindex inet6, @code{Family} statement
+@kwindex inet6
 Use only IPv6 addresses (@code{AAAA} DNS records).
 @end table
 
@@ -1952,33 +2057,33 @@ The built-in formats are:
 @table @asis
 @item 0
 @itemx null
-@kwindex null, request logging
+@kwindex null
 No request logging at all.
 
 @item 1
 @itemx regular
-@kwindex regular, request logging
+@kwindex regular
 For each request, its source address, request line and response status
 are logged.
 
 @item 2
 @itemx extended
-@kwindex extended, request logging
+@kwindex extended
 In addition to the above, the selected service and backend are shown.
 
 @item 3
 @itemx vhost_combined
-@kwindex vhost_combined, request logging
+@kwindex vhost_combined
 Detailed request logging using Apache-style @dfn{Combined} log format.
 
 @item 4
 @itemx combined
-@kwindex combined, request logging
+@kwindex combined
 Same as above, but without virtual host information.
 
 @item 5
 @itemx detailed
-@kwindex detailed, request logging
+@kwindex detailed
 Same as @samp{combined}, with additional information about the
 selected service and backend.
 @end table
@@ -2037,7 +2142,7 @@ TrustedIP "@var{name}"
 
 @noindent
 refers to the named ACL @var{name} (which must be defined earlier,
-@pxref{ACL}), and
+@pxref{ACL}),
 
 @example
 @group
@@ -2050,7 +2155,17 @@ End
 @end example
 
 @noindent
-defines the list of trusted IPs in place.
+defines the list of trusted IPs in place, and
+
+@example
+@group
+TrustedIP -file "@var{filename}"
+TrustedIP -filewatch "@var{filename}"
+@end group
+@end example
+
+@noindent
+reads CIDR definitions from file @var{filename}.
 
 If needed, the @code{ForwardedHeader} statement may be used to declare
 the name of the header to use instead of @code{X-Forwarded-For}.  As
@@ -2568,7 +2683,8 @@ to access any files outside that directory.
 Before chrooting, @command{pound} makes the necessary preparations to
 be able to access the files it needs during operation, in particular
 user databases supplied with the @code{BasicAuth} statements
-(@pxref{Authentication}).
+(@pxref{Authentication}), and static file directories (@xref{ACME}, and
+@pxref{SendFile}).
 @end deffn
 
 @deffn {Global directive} User "@var{user_name}"
@@ -2649,7 +2765,7 @@ allowed, each being one of:
 Disable additional headers.
 
 @item forwarded
-Add @code{X-For-warded-For}, @code{X-Forwarded-Proto}, and
+Add @code{X-Forwarded-For}, @code{X-Forwarded-Proto}, and
 @code{X-Forwarded-Port} headers.
 
 @item ssl
@@ -2688,6 +2804,49 @@ HeaderOption forwarded ssl
 
 This setting can be overridden for a particular listener using the
 @code{HeadOption} within it.
+@end deffn
+
+@deffn {Global directive} CombineHeaders
+HTTP protocol allows for certain headers to appear in the message
+multiple times.  Namely, multiple headers with the same header name  are
+permitted if that header field is defined as a comma-separated list.
+
+The standard specifies that such fields can be combined in a single
+header line, by appending each subsequent field value to the combined
+field value in order, separated by a comma.
+
+The @code{CombineHeaders} statement declares names of the headers to
+which @command{pound} is to apply this operation.  Each header name
+should be listed on a separate line, enclosed in double-quotes.  The
+keyword @code{End} on a line by itself ends the statement.  E.g.:
+
+@example
+@group
+CombineHeaders
+    "Accept"
+    "Allow"
+    "Cache-Control"
+End
+@end group
+@end example
+
+The @code{include} statement (@pxref{File inclusion}) can be used in
+@code{CombineHeaders} statement.
+
+@findex mvh.inc
+@command{Pound} distribution includes file @file{mvh.inc},
+which declares all known multiple-value headers in a form suitable for
+inclusion to @file{pound.cfg}.  This file is installed in the package
+data directory, so that in order to use it, it suffices to add the
+following to the configuration file:
+
+@example
+@group
+CombineHeaders
+    Include "mvh.inc"
+End
+@end group
+@end example
 @end deffn
 
 @node SSL Settings
@@ -2739,8 +2898,15 @@ instead (@pxref{conditional-option}).
 
 @deffn {Global directive} ACL "@var{name}"
 Define a @dfn{named access control list}.  An @dfn{ACL} is a
-list of network addresses in CIDR notation, one address per line,
-terminated with an @code{End} directive on a line by itself.  E.g.:
+list of network addresses in CIDR notation.  Once defined, the ACL can
+be used in @code{Service} statements to limit access to resources
+(@pxref{ACL reference}).
+
+The statement has two forms: immediate and file reference ACL.  In
+@dfn{immediate} form, the CIDR list follows the @code{ACL} line and
+is terminated with an @code{End} directive on a line by itself.  Each
+non-empty line contains a CIDR enclosed in double quotes.  Comments
+and @code{Include} statements are allowed.  For example:
 
 @example
 @group
@@ -2751,10 +2917,28 @@ End
 @end group
 @end example
 
-The @code{Include} directive is allowed within the ACL section.
-Named ACLs can be used in @code{Service} definitions to limit access
-to services from certain IP addresses only.  @xref{ACL}, for a
-detailed discussion of this.
+The syntax of named @dfn{file reference} ACL is:
+
+@example
+ACL "@var{name}" -file "@var{filename}"
+@end example
+
+@noindent
+or
+
+@example
+ACL "@var{name}" -filewatch "@var{filename}"
+@end example
+
+If @var{filename} is relative, it is looked up in the @ref{include directory}.
+The syntax of the file is similar to the described above, except that
+CIDRs need not be quoted and @code{Include} statements are not
+allowed.  The form with @code{-file} reads the file contents once, at
+the program startup.  The one with @code{-filewatch} reads it and then
+monitors that file for changes.  Any change to the file causes it to
+be read again, thus the ACLs are updated automatically without the
+need to restart the program.  @xref{File reference ACL}, for a
+detailed discussion of this feature.
 @end deffn
 
 @node File inclusion
@@ -2840,11 +3024,13 @@ IP addresses, which is used to determine the originator IP.
 @xref{%a}, for details.
 
 This statement is a special form of @code{ACL} statement, described
-below.  It can appear in two forms: as a @dfn{section} or as a
-@dfn{directive}.  When used as a section, it is followed by a list of
-one or more CIDRs each appearing on a separate line.  The @code{End}
-keyword terminates the statement, e.g.:
+in @ref{ACL}.  It can have in three forms: @dfn{anonymous ACL},
+@dfn{file reference}, or @dfn{ACL reference}.
 
+  Examples:
+
+@enumerate
+@item
 @example
 @group
 TrustedIP
@@ -2853,14 +3039,15 @@ TrustedIP
 End
 @end group
 @end example
-
-In directive form, this statement takes a single argument, the name of
-an access control list defined earlier using the @code{ACL} statement,
-e.g.
-
+@item
+@example
+TrustedIP -filewatch "/etc/pound/trustip.acl"
+@end example
+@item
 @example
 TrustedIP "proxy_addresses"
 @end example
+@end enumerate
 @end deffn
 
 @deffn {Global directive} Anonymise
@@ -3031,6 +3218,16 @@ a backend to be established.  Default is the same as the
 This value can be overridden for specific backends.
 @end deffn
 
+@deffn {Global directive} WatcherTTL @var{n}
+If file reference ACLs are used on a system that doesn't support
+@code{inotify} API, this directive defines the interval between two
+successive checks of file modification times.  @xref{ACL filewatch},
+for a detailed discussion of this feature and situations when this
+setting might be useful.
+
+The default value is 180 seconds.
+@end deffn
+
 @deffn {Global directive} WSTimeOut @var{n}
 Specify for how long @command{pound} will wait for data from either
 backend or client in a connection upgraded to WebSocket protocol.
@@ -3077,6 +3274,7 @@ number (0-based) in the configuration file.
 * Listener logging::
 * Request Modification::
 * Response Modification::
+* Error response rewriting::
 * Service definitions::
 @end menu
 
@@ -3180,8 +3378,9 @@ Read HTML page for HTTP status code @var{code} from file
 @var{filename}.
 
 The @var{code} argument is a three-digit HTTP response status, and
-@var{filename} is the name of a file which supplies text of the error
-page to be returned.  The file is read once, at program startup.
+@var{filename} is the name of a file which supplies contents (and,
+optionally, HTTP headers) of the error response.  @xref{Error
+responses}, for details about the file and its usage.
 @end deffn
 
 @kwindex Err400
@@ -3522,6 +3721,20 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
+@deffn {Request Conditional} ACL -file "@var{filename}"
+@deffnx {Request Conditional} ACL -filewatch "@var{filename}"
+Defines an unnamed ACL to match the source IP against.  The ACL definition
+is read from the file @var{filename}, one CIDR per line.  Empty lines
+and comments are allowed.  If @var{filename} is relative, it is looked
+up in the @ref{include directory}.  The form with @code{-file} reads
+the file contents once, at the program startup.  The one with
+@code{-filewatch} reads it and then monitors that file for changes.
+Any change to the file causes it to be read again, thus the ACLs are
+updated automatically without the need to restart the program.
+
+@xref{File reference ACL}, for a detailed discussion of this feature.
+@end deffn
+
 @deffn {Request Conditional} BasicAuth "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
@@ -3537,10 +3750,65 @@ modification time has changed.
 @end deffn
 
 @deffn {Request Conditional} Header [@var{options}] "@var{pattern}"
-Yields @samp{true}, if the request contains at least one header
-matching the given @var{pattern}.  By default, @var{pattern} is treated as
-case-insensitive POSIX extended regular expression.  This can be changed by
-@var{options}, described below.
+@deffnx {Request Conditional} Header "@var{field}" [@var{options}] "@var{pattern}"
+Evaluates to @samp{true}, if the request contains at least one header
+matching the given @var{pattern}.  The directive has two forms.
+In first form, the @var{pattern} is compared against entire header line.
+In second form, the @var{field} argument supplies the header name, and
+@var{pattern} the pattern to match against its value (or the name of
+the file to read patterns from, if @var{options} is @code{-file} or
+@code{-filewatch}).
+
+An example of @code{Header} statement in first form:
+
+@example
+Header "^Content-Type:[[:space:]]+text/.*"
+@end example
+
+Here's the corresponding statement in second form:
+
+@example
+Header "Content-Type" "text/.*"
+@end example
+
+In both forms, @var{pattern} is treated as case-insensitive POSIX
+extended regular expression.  This can be changed by @var{options},
+described below.
+
+The following list of differences will help you select the right form
+to use:
+
+@enumerate 1
+@item
+In first form, pattern modification options, such as @code{-beg} or
+@code{-contain} apply to entire header line.  In second form, they
+apply to header value only.  For example, you can write:
+
+@example
+Header "Content-Type" -beg "text/"
+@end example
+
+@noindent
+to match a request whose @samp{Content-Type} header value begins with
+@samp{text/}, or
+
+@example
+Header -contain "forwarded"
+@end example
+
+@noindent
+to match requests that contain any header with the word
+@samp{forwarded} anywhere, be it header field name or its value.
+
+@item
+Only the second form can be used to match against a list of patterns
+from a file, e.g.:
+
+@example
+Header "User-Agent" -file "user-agents.pat"
+@end example
+@end enumerate
+
 @end deffn
 
 @deffn {Request Conditional} Host [@var{options}] "@var{hostname}"
@@ -3631,6 +3899,10 @@ will be looked up in the @ref{include directory}.  Patterns are read
 from the file line by line.  Leading and trailing whitespace is
 removed.  Empty lines and comments (lines starting with @code{#}) are
 ignored.
+
+@kwindex -filewatch, header matching flag
+@item @code{-filewatch} @tab Same as @code{-file}, but the file will
+be monitored and read again if any change occurs.
 
 @kwindex -icase, header matching flag
 @cindex case sensitive match, headers
@@ -3814,12 +4086,40 @@ undergoes string expansion (@xref{String Expansions}).  If the header
 header will be added to the end of the header list.
 @end deffn
 
+@node Error response rewriting
+@subsection Rewriting error responses
+  When a regular backend responds with an error, the content (body)
+of that response can be replaced with an arbitrary custom page.  For this
+to work, the following conditions should be met:
+
+@enumerate 1
+@item
+Response status code is one of error codes that @command{pound} itself
+can return.  These are listed in @ref{Error definitions}.
+@item
+A custom error page is defined for that status code using the
+@code{ErrorFile} statement.
+@item
+Error response rewriting is explicitly enabled for the service
+that contains the backend from which the response is obtained, or for
+the listener where that service is located.  To do so use the
+following statement:
+@end enumerate
+
+@deffn {ListenerHTTP directive} RewriteErrors @var{bool}
+Enables or disables error response rewriting for that listener.
+
+The same statement is available for use within a service (see below).
+The @code{RewriteErrors} setting of a service overrides that of the
+listener.
+@end deffn
+
 @node Service definitions
 @subsection Service definitions
 @kwindex Service definitions
 The @code{Service} section defines rules that decide to which backend to
 route requests received by that listener.  Any number of
-@code{Service} section can be present.  When a request is received,
+@code{Service} sections can be present.  When a request is received,
 the listener iterates over all services in the order of their
 appearance in the configuration and applies the section rules to the
 request.  If the rules match the request, the request is forwarded to
@@ -4225,6 +4525,11 @@ subject of rewriting can also be specified explicitly after the
 statement to modify responses.
 @end deffn
 
+@deffn {Service directive} RewriteErrors @var{bool}
+Enables or disables error response rewriting for that service.
+@xref{Error response rewriting}, for a detailed discussion.
+@end deffn
+
 @node Service Logging
 @subsection Service Logging
 
@@ -4242,11 +4547,11 @@ determine the originator IP.
 @xref{%a}, for a detailed discussion.
 
 This statement is a special form of @code{ACL} statement, described
-in @ref{ACL}.  It can appear in two forms: as a @dfn{section} or as a
-@dfn{directive}.  When used as a section, it is followed by a list of
-one or more CIDRs each appearing on a separate line.  The @code{End}
-keyword terminates the statement, e.g.:
+in @ref{ACL}.  It can appear in three forms: @dfn{anonymous ACL},
+@dfn{file reference}, or @dfn{ACL reference}.  Examples:
 
+@enumerate
+@item
 @example
 @group
 TrustedIP
@@ -4255,14 +4560,15 @@ TrustedIP
 End
 @end group
 @end example
-
-In directive form, this statement takes a single argument, the name of
-an access control list defined earlier using the @code{ACL} statement,
-e.g.
-
+@item
+@example
+TrustedIP -filewatch "/etc/pound/trustip.acl"
+@end example
+@item
 @example
 TrustedIP "proxy_addresses"
 @end example
+@end enumerate
 @end deffn
 
 @anchor{LogSuppress}
@@ -4565,6 +4871,33 @@ the @var{url} does contain a path (even if it is just a @samp{/}),
 then the request path is ignored.
 
 @xref{Redirects}, for a detailed discussion of this backend and its use.
+@end deffn
+
+@anchor{SendFile}
+@deffn {Service directive} SendFile @var{dir}
+Defines a special backend that serves static files from directory
+@var{dir}.  Name of the file to serve is supplied by the request path,
+after applying usual request modifications (@pxref{Request
+Modification}).  By default, the response bears @code{Content-Type:
+text/plain} header.  To change this, use @code{SetHeader} statement in
+response rewriting (@pxref{rewrite response}).
+
+The following example defines a service which will serve requests to
+paths beginning with @samp{/about/} from directory
+@file{/var/lib/pound/static}.  Name of the file to serve is obtained
+by removing the @samp{/about/} prefix from the request pathname.
+Content type is set to @samp{text/html}:
+
+@example
+Service
+    Path -re "/about/(.+)"
+    SetPath "$1"
+    Rewrite response
+         SetHeader "Content-Type: text/html"
+    End
+    SendFile "/var/lib/pound/static"
+End
+@end example
 @end deffn
 
 @deffn {Service directive} Control

@@ -42,7 +42,6 @@
 #include <grp.h>
 #include <syslog.h>
 #include <signal.h>
-#include <ctype.h>
 #include <errno.h>
 #include <sys/wait.h>
 #include <sys/stat.h>
@@ -82,6 +81,7 @@
 # include <openssl/ssl.h>
 # include <openssl/lhash.h>
 # include <openssl/err.h>
+# include <openssl/rand.h>
 # if OPENSSL_VERSION_NUMBER >= 0x00907000L
 #  ifndef OPENSSL_THREADS
 #   error "Pound requires OpenSSL with thread support"
@@ -316,6 +316,14 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 #include "list.h"
 /* Configuration parser */
 #include "cfgparser.h"
+#include "cctype.h"
+
+char *locus_point_str (struct locus_point const *loc);
+char *locus_range_str (struct locus_range const *loc);
+
+int field_list_filter (char const *subj, size_t len,
+		       int (*pred) (char const *, size_t, void *),
+		       void *data, char **endp);
 
 /* Header types */
 enum
@@ -362,6 +370,11 @@ http_header_name_len (struct http_header *hdr)
 }
 
 typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
+#define HTTP_HEADER_LIST_INITIALIZER DLIST_HEAD_INITIALIZER
+
+int http_header_list_parse (HTTP_HEADER_LIST *head, char const *text,
+			    int replace, char **end);
+void http_header_list_free (HTTP_HEADER_LIST *head);
 
 /* Append modes: what to do if the header with that name already exist. */
 enum
@@ -372,6 +385,8 @@ enum
   };
 
 int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
+int http_header_list_append_list (HTTP_HEADER_LIST *head,
+				  HTTP_HEADER_LIST *add);
 
 struct query_param
 {
@@ -409,6 +424,19 @@ void http_request_free (struct http_request *);
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
 
+typedef struct watcher WATCHER;
+
+void watcher_lock (WATCHER *);
+void watcher_unlock (WATCHER *);
+WATCHER *watcher_register (void *obj, char
+			   const *filename, struct locus_range const *loc,
+			   int (*read) (void *, char *, WORKDIR *),
+			   void (*clear) (void *));
+int watcher_setup (void);
+
+char const *filename_split_str (char const *filename, char **dir);
+char const *filename_split_wd (char const *filename, WORKDIR **wdp);
+
 struct cidr;
 
 typedef struct acl
@@ -416,11 +444,25 @@ typedef struct acl
   char *name;                 /* ACL name (optional) */
   SLIST_HEAD (,cidr) head;    /* List of CIDRs */
   SLIST_ENTRY (acl) next;
+  WATCHER *watcher;
 } ACL;
 
 typedef SLIST_HEAD (,acl) ACL_HEAD;
 
+static inline void
+acl_lock (ACL *acl)
+{
+  watcher_lock (acl->watcher);
+}
+
+static inline void
+acl_unlock (ACL *acl)
+{
+  watcher_unlock (acl->watcher);
+}
+
 int acl_match (ACL *acl, struct sockaddr *sa);
+void acl_clear (ACL *acl);
 
 enum job_ctl
   {
@@ -431,6 +473,7 @@ typedef void (*JOB_FUNC) (enum job_ctl, void *, const struct timespec *);
 typedef unsigned long JOB_ID;
 
 JOB_ID job_enqueue (struct timespec const *ts, JOB_FUNC func, void *data);
+JOB_ID job_enqueue_after (unsigned t, JOB_FUNC func, void *data);
 void job_cancel (JOB_ID id);
 int job_get_timestamp (JOB_ID jid, struct timespec *ts);
 
@@ -466,6 +509,7 @@ typedef enum
     BE_ERROR,
     BE_METRICS,
     BE_BACKEND_REF,     /* See be_name in BACKEND */
+    BE_FILE
   }
   BACKEND_TYPE;
 
@@ -507,6 +551,15 @@ struct be_matrix
 			       dynamically generated. */
 };
 
+struct http_errmsg
+{
+  char *text;
+  HTTP_HEADER_LIST hdr;
+};
+
+#define HTTP_ERRMSG_INITIALIZER(m) \
+  { NULL, HTTP_HEADER_LIST_INITIALIZER(m.hdr) }
+
 struct be_regular
 {
   struct addrinfo addr;	/* IPv4/6 address */
@@ -528,7 +581,7 @@ struct be_redirect
   int has_uri;		 /* URL has path and/or query part. */
 };
 
-struct be_acme
+struct be_file           /* For ACME services and FILE backends. */
 {
   int wd;                /* Working directory descriptor. */
 };
@@ -536,7 +589,7 @@ struct be_acme
 struct be_error
 {
   int status;            /* Pound HTTP status index */
-  char *text;            /* Error content page */
+  struct http_errmsg msg;
 };
 
 /* back-end definition */
@@ -545,7 +598,6 @@ typedef struct _backend
   struct _service *service;     /* Back pointer to the owning service */
   struct balancer *balancer;    /* Back pointer to the owning backend list. */
   struct locus_range locus;     /* Location in the config file */
-  char *locus_str;              /* Location formatted as string. */
   BACKEND_TYPE be_type;         /* Backend type */
   int priority;			/* priority */
   int disabled;			/* true if the back-end is disabled */
@@ -570,7 +622,8 @@ typedef struct _backend
   {
     struct be_regular reg;
     struct be_matrix mtx;
-    struct be_acme acme;
+    struct be_file acme;
+    struct be_file file;
     struct be_redirect redirect;
     struct be_error error;
     char *be_name;              /* Name of the backend; Used during parsing. */
@@ -599,7 +652,8 @@ static inline int backend_is_active (BACKEND *be)
   return !be->disabled && backend_is_alive (be);
 }
 
-BACKEND *backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc);
+BACKEND *backend_create (BACKEND_TYPE type, int prio,
+			 struct locus_range const *loc);
 
 typedef struct session
 {
@@ -652,18 +706,22 @@ enum service_cond_type
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
     COND_CLIENT_CERT,
-    COND_LUA
+    COND_DYN,
+    COND_LUA,
   };
 
-typedef struct string_ref
+struct dyn_service_cond
 {
-  unsigned refcount;
-  char value[1];
-} STRING_REF;
+  struct bool_service_cond boolean;
+  STRING *string;
+  enum service_cond_type cond_type;
+  int pat_type;
+  int flags;
+};
 
 struct string_match
 {
-  STRING_REF *string;
+  STRING *string;
   GENPAT re;
 };
 
@@ -695,11 +753,13 @@ struct cond_lua
 typedef struct _service_cond
 {
   enum service_cond_type type;
+  WATCHER *watcher;
   union
   {
     ACL *acl;
     GENPAT re;
     struct bool_service_cond boolean;
+    struct dyn_service_cond dyn;
     struct _service_cond *cond;
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
@@ -812,7 +872,7 @@ typedef DLIST_HEAD (,balancer) BALANCER_LIST;
 typedef struct _service
 {
   char *name;			/* symbolic name */
-  char *locus_str;              /* Location in the config file, as string. */
+  struct locus_range locus;     /* Location in the config file. */
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
   BALANCER_LIST balancers;
@@ -823,6 +883,7 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+  int rewrite_errors;           /* Rewrite HTTP errors. */
 
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
@@ -873,7 +934,7 @@ int http_log_format_check (int n);
 typedef struct _listener
 {
   char *name;			/* symbolic name */
-  char *locus_str;              /* Location in the config file, as string. */
+  struct locus_range locus;     /* Location in the config file. */
   struct addrinfo addr;		/* Socket address */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
@@ -883,10 +944,11 @@ typedef struct _listener
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   int header_options;           /* additional header options */
   REWRITE_RULE_HEAD rewrite[2];
+  int rewrite_errors;           /* Rewrite HTTP errors. */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */
-  char *http_err[HTTP_STATUS_MAX];	/* error messages */
+  struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */
   int rewr_loc;			/* rewrite location response */
@@ -1024,8 +1086,8 @@ void *thr_http (void *);
 /* Log an error to the syslog or to stderr */
 void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
-void abend (char const *fmt, ...)
-  ATTR_PRINTFLIKE(1,2);
+void abend (struct locus_range const *range, char const *fmt, ...)
+  ATTR_PRINTFLIKE(2,3);
 
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);
@@ -1140,6 +1202,7 @@ int connect_nb (const int, const struct addrinfo *, const int);
  * Parse arguments/config file
  */
 void config_parse (int, char **);
+int config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd);
 
 /*
  * RSA ephemeral keys: how many and how often
@@ -1263,7 +1326,7 @@ void service_lb_reset (SERVICE *svc, BACKEND *be);
 FILE *fopen_wd (WORKDIR *wd, const char *filename);
 FILE *fopen_include (const char *filename);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
-		  struct locus_range *loc);
+		  struct locus_range const *loc);
 char *filename_resolve (const char *filename);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);

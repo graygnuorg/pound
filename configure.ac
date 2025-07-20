@@ -15,13 +15,13 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.16],[gray@gnu.org],
+AC_INIT([pound],[4.16.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
-AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar])
+AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar subdir-objects])
 AC_CANONICAL_HOST
 
 # Checks for programs.
@@ -246,6 +246,54 @@ fi
 
 AM_CONDITIONAL([COND_LUA], [test $status_lua = yes])
 
+# **********************
+# Event monitoring
+# **********************
+AC_CHECK_HEADERS([sys/inotify.h sys/event.h])
+AC_CHECK_FUNCS([inotify_init kqueue])
+
+if test "$ac_cv_header_sys_inotify_h/$ac_cv_func_inotify_init" = yes/yes; then
+  status_fsevmon=inotify
+elif test "$ac_cv_header_sys_event_h/$ac_cv_func_kqueue" = yes/yes; then
+  status_fsevmon=kqueue
+else
+  status_fsevmon=none
+fi
+
+AC_ARG_WITH(fsevmon,
+	[AS_HELP_STRING([--without-fsevmon],
+	  [disable filesystem event monitoring API])],
+	[case $withval in
+	 inotify)
+	     if test $status_fsevmon != inotify; then
+	       AC_MSG_ERROR([inotify is requested, but not available])
+	     fi
+	     ;;
+	 kqueue)
+	     if test $status_fsevmon != kqueue; then
+	       AC_MSG_ERROR([kqueue is requested, but not available])
+	     fi
+	     ;;
+	 yes) ;;
+	 no|periodic) status_fsevmon=none
+	     ;;
+	 *) AC_MSG_ERROR([unsupported value for --with-fsevmon: $witval])
+	 esac])
+
+AC_ARG_WITH(inotify,[],
+	    [case $withval$status_fsevmon in
+	     noinotify)
+	       status_fsevmon=none
+	       ;;
+	     no*|yesinotify)
+	       ;;
+	     *)
+	       AC_MSG_ERROR([--with-inotify doesn't take arguments])
+	     esac])
+
+AM_CONDITIONAL([COND_INOTIFY],[test $status_fsevmon = inotify])
+AM_CONDITIONAL([COND_KQUEUE],[test $status_fsevmon = kqueue])
+
 AC_MSG_CHECKING([if building from git clone])
 if test -d .git; then
     build_from_git=yes
@@ -273,6 +321,7 @@ Memory allocator .............................. $memory_allocator
 Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
 Test dynamic backends ......................... $status_dns_tests
+Filesystem event monitoring ................... $status_fsevmon
 Lua support ................................... $status_lua
 *******************************************************************
 
@@ -293,6 +342,7 @@ fi
 status_dynamic_backends=$status_dynamic_backends
 status_dns_tests=$status_dns_tests
 status_lua=$status_lua
+status_fsevmon=$status_fsevmon
 ])
 
 AC_CONFIG_TESTDIR(tests)

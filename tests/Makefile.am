@@ -80,6 +80,8 @@ TESTSUITE_AT = \
  dyn_srv.at\
  dyn_srv_0.at\
  dyn_srv_ttl.at\
+ dynacl.at\
+ dynpat.at\
  echo.at\
  err503.at\
  errfile.at\
@@ -107,12 +109,14 @@ TESTSUITE_AT = \
  maxuri.at\
  multival.at\
  nacl.at\
+ ndynacl.at\
  nb.at\
  not.at\
  optfwd.at\
  optorder.at\
  optssl.at\
  or.at\
+ patfile.at\
  path.at\
  pcre.at\
  prio.at\
@@ -125,6 +129,8 @@ TESTSUITE_AT = \
  rewriteloc.at\
  rewriteloc_https.at\
  rwchain.at\
+ rwerr.at\
+ sendfile.at\
  sessauth.at\
  sessctl.at\
  sesscookie.at\

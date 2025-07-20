@@ -436,7 +436,7 @@ EOT
 			push @opts, $1;
 			if ($1 eq '-re' || $1 eq '-beg') {
 			    $exact = 0;
-			} elsif ($1 eq '-file') {
+			} elsif ($1 eq '-file' || $1 eq '-filewatch') {
 			    $file = 1;
 			}
 			$hostline = $2;
@@ -1012,10 +1012,11 @@ sub parse_body {
 	$self->{line}++;
 	chomp;
 
-	if (/^end$/) {
+	if (/^end(nonl)?$/) {
 	    $self->{REQ}{END} = $self->{line};
 	    if ($self->{REQ}{BODY}) {
-		$self->{REQ}{BODY} = join("\n", @{$self->{REQ}{BODY}})."\n";
+		$self->{REQ}{BODY} = join("\n", @{$self->{REQ}{BODY}});
+		$self->{REQ}{BODY} .= "\n" unless /nonl/;
 	    }
 	    $self->parse_expect;
 	    return;
@@ -1273,9 +1274,12 @@ sub parse_expect_body {
 	$self->{line}++;
 	chomp;
 
-	if (/^end$/) {
+	if (/^end(nonl)?$/) {
 	    $self->{EXP}{END} = $self->{line};
-	    $self->{EXP}{BODY} = join("\n", @{$self->{EXP}{BODY}})."\n";
+	    if ($self->{EXP}{BODY}) {
+		$self->{EXP}{BODY} = join("\n", @{$self->{EXP}{BODY}});
+		$self->{EXP}{BODY} .= "\n" unless /nonl/;
+	    }
 	    $self->send;
 	    return;
 	}
@@ -1585,12 +1589,34 @@ sub http_redirect {
     });
 }
 
+sub http_status {
+    my ($http, $rest) = @_;
+    my $status = $rest;
+    $status =~ s{^/}{};
+    $status = 500 unless $status =~ /^\d{3}$/;
+    my $reason = $http->header('x-reason')//'Unknown';
+    my $text = <<EOT;
+====================
+$status $reason
+====================
+
+This response page was generated for HTTP status code $status
+by poundharness.
+EOT
+    $http->reply($status, $reason,
+		 headers => {
+		     'content-type' => 'text/plain'
+		 },
+		 body => $text);
+}
+
 sub process_http_request {
     my ($sock, $backend) = @_;
 
     my %endpoints = (
 	'echo' => \&http_echo,
 	'redirect' => \&http_redirect,
+	'status' => \&http_status
     );
 
     local $| = 1;
@@ -1981,12 +2007,14 @@ Two types of send/expect stanzas are available:
 
 =head2 HTTP send/expect
 
-An HTTP send/expect defined a HTTP requests and expected response.
+An HTTP send/expect defines a HTTP requests and expected response.
 
 A request starts with a line specifying the request method in uppercase
 (e.g. B<GET>, B<POST>, etc.) followed by an URI.  This line may be followed
 by arbitrary number of HTTP headers, newline and request body.  The request
-is terminated with the word B<end> on a line alone.
+is terminated with the word B<end> or B<endnonl> on a line alone.  If
+terminated with B<endnonl>, last newline will not be included in the request
+body.
 
 The sequence B<@@> has a special meaning when used in the body.  These
 characters instruct B<poundharness> to send the body using B<chunked> transfer
@@ -2011,7 +2039,8 @@ The test will fail if such header is present.
 
 Headers may be followed by a newline and response body (content).  If
 present, it will be matched literally against the actual response.
-The response is terminated with the word B<end> on a line alone.
+The response is terminated with the word B<end> or B<endnonl> on a line
+alone (the semantics of the latter is described above).
 
 Values of both request and expected headers may contain the following
 I<variables>, which are expanded when reading the file:
@@ -2270,6 +2299,11 @@ will get the following response:
     Location: https://example.org/echo/foo?bar=0
 
 This backend is used to test the B<RewriteLocation> functionality.
+
+=head2 /status/CODE
+
+Returns HTTP status I<CODE>.  The reason text may be supplied in
+the B<X-Reason> header.
 
 =head1 FILES
 

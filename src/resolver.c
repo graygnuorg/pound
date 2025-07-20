@@ -301,11 +301,12 @@ CNAME_REF_cmp (const CNAME_REF *a, const CNAME_REF *b)
 #include "ht.h"
 
 static int
-cname_install (CNAME_REF_HASH *hash, unsigned *n, char const *name)
+cname_install (CNAME_REF_HASH *hash, unsigned *n, char const *name,
+	       char const **new_name)
 {
   CNAME_REF *rec, *old;
 
-  rec = malloc (sizeof (*rec));
+  rec = malloc (sizeof (*rec) + strlen (name));
   if (rec == NULL)
     return errno;
   strcpy (rec->name, name);
@@ -315,6 +316,7 @@ cname_install (CNAME_REF_HASH *hash, unsigned *n, char const *name)
       return EEXIST;
     }
   ++*n;
+  *new_name = rec->name;
   return 0;
 }
 
@@ -350,7 +352,7 @@ dns_query (const char *name, adns_rrtype type, adns_answer **ans_ret)
       unsigned cname_count = 0;
 
       /* Record the queried name, first. */
-      if ((rc = cname_install (hash, &cname_count, name)) == 0)
+      if ((rc = cname_install (hash, &cname_count, name, &name)) == 0)
 	{
 	  /* Follow the CNAME chain. */
 	  while (cname_count - 1 <= conf.max_cname_chain)
@@ -363,7 +365,8 @@ dns_query (const char *name, adns_rrtype type, adns_answer **ans_ret)
 		  /*
 		   * CNAME found. Record it and continue.
 		   */
-		  rc = cname_install (hash, &cname_count, cnans->rrs.str[0]);
+		  rc = cname_install (hash, &cname_count, cnans->rrs.str[0],
+				      &name);
 		  free (cnans);
 		  if (rc)
 		    {

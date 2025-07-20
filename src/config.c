@@ -66,9 +66,79 @@ openssl_error_at_locus_range (struct locus_range const *loc,
 
 #define conf_openssl_error(file, msg)				\
   openssl_error_at_locus_range (last_token_locus_range (), file, msg)
+
+char *
+locus_point_str (struct locus_point const *loc)
+{
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  stringbuf_format_locus_point (&sb, loc);
+  return stringbuf_value (&sb);
+}
+
+char *
+locus_range_str (struct locus_range const *loc)
+{
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  stringbuf_format_locus_range (&sb, loc);
+  return stringbuf_value (&sb);
+}
+
+struct config_option
+{
+  char *name;
+  int code;
+  int has_arg;
+};
+
+static struct config_option const *
+config_option_find (struct config_option const *optab, char const *name)
+{
+  for (; optab->name; optab++)
+    {
+      if (strcmp (optab->name, name) == 0)
+	return optab;
+    }
+  return NULL;
+}
+
+static int
+gettok_option (struct config_option const *optab, int *opt, char const **arg)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_any ()) == NULL)
+    {
+      *opt = -1;
+    }
+  else if (tok->type != T_LITERAL || tok->str[0] != '-')
+    {
+      *opt = -1;
+      putback_tkn (tok);
+      return CFGPARSER_OK;
+    }
+
+  if ((optab = config_option_find (optab, tok->str + 1)) == NULL)
+    {
+      conf_error ("unexpected token: %s", tok->str);
+      return CFGPARSER_FAIL;
+    }
+
+  *opt = optab->code;
+  if (optab->has_arg)
+    {
+      if ((tok = gettkn_expect (T_STRING)) == NULL)
+	return CFGPARSER_FAIL;
+      *arg = tok->str;
+    }
+  else
+    *arg = NULL;
+  return CFGPARSER_OK;
+}
 
 BACKEND *
-backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
+backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
 {
   BACKEND *be = calloc (1, sizeof (*be));
   if (be)
@@ -76,15 +146,16 @@ backend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
       be->be_type = type;
       be->priority = prio;
       pthread_mutex_init (&be->mut, &mutex_attr_recursive);
+      locus_range_init (&be->locus);
       if (loc)
-	be->locus = *loc;
+	locus_range_copy (&be->locus, loc);
       backend_refcount_init (be);
     }
   return be;
 }
 
 static BACKEND *
-xbackend_create (BACKEND_TYPE type, int prio, struct locus_range *loc)
+xbackend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
 {
   BACKEND *be = backend_create (type, prio, loc);
   if (!be)
@@ -134,16 +205,15 @@ named_backend_table_free (NAMED_BACKEND_TABLE *tab)
 }
 
 static NAMED_BACKEND *
-named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name,
-		      struct locus_range const *locus,
-		      BACKEND *be)
+named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name, BACKEND *be)
 {
   NAMED_BACKEND *bp, *old;
 
   bp = xmalloc (sizeof (*bp) + strlen (name) + 1);
   bp->name = (char*) (bp + 1);
   strcpy (bp->name, name);
-  bp->locus = *locus;
+  locus_range_init (&bp->locus);
+  locus_range_copy (&bp->locus, &be->locus);
   bp->priority = be->priority;
   bp->disabled = be->disabled;
   bp->bemtx = be->v.mtx;
@@ -392,6 +462,26 @@ sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
   return -1;
 }
 
+static int
+dynacl_read (void *obj, char *filename, WORKDIR *wd)
+{
+  return config_parse_acl_file (obj, filename, wd);
+}
+
+static void
+dynacl_clear (void *obj)
+{
+  acl_clear (obj);
+}
+
+static int
+dynacl_register (ACL *acl, char const *filename, struct locus_range const *loc)
+{
+  acl->watcher = watcher_register (acl, filename, loc,
+				   dynacl_read, dynacl_clear);
+  return acl->watcher == NULL;
+}
+
 /*
  * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
  * and -1 on error (invalid address family).
@@ -402,17 +492,34 @@ acl_match (ACL *acl, struct sockaddr *sa)
   CIDR *cidr;
   unsigned char *ap;
   size_t len;
+  int rc = 1;
 
   if ((len = sockaddr_bytes (sa, &ap)) == -1)
     return -1;
 
+  acl_lock (acl);
   SLIST_FOREACH (cidr, &acl->head, next)
     {
       if (cidr->family == sa->sa_family && cidr_match (cidr, ap, len) == 0)
-	return 0;
+	{
+	  rc = 0;
+	  break;
+	}
     }
+  acl_unlock (acl);
 
-  return 1;
+  return rc;
+}
+
+void
+acl_clear (ACL *acl)
+{
+  while (!SLIST_EMPTY (&acl->head))
+    {
+      struct cidr *cp = SLIST_FIRST (&acl->head);
+      SLIST_SHIFT (&acl->head, next);
+      free (cp);
+    }
 }
 
 static void
@@ -431,20 +538,15 @@ masklen_to_netmask (unsigned char *buf, size_t len, size_t masklen)
     buf[i] = 0;
 }
 
-/* Parse CIDR at the current point of the input. */
 static int
-parse_cidr (ACL *acl)
+parse_cidr_str (ACL *acl, char const *str, struct locus_range const *loc)
 {
-  struct token *tok;
   char *mask;
   struct addrinfo hints, *res;
   unsigned long masklen;
   int rc;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((mask = strchr (tok->str, '/')) != NULL)
+  if ((mask = strchr (str, '/')) != NULL)
     {
       char *p;
 
@@ -454,7 +556,7 @@ parse_cidr (ACL *acl)
       masklen = strtoul (mask, &p, 10);
       if (errno || *p)
 	{
-	  conf_error ("%s", "invalid netmask");
+	  conf_error_at_locus_range (loc, "%s", "invalid netmask");
 	  return CFGPARSER_FAIL;
 	}
     }
@@ -463,7 +565,7 @@ parse_cidr (ACL *acl)
   hints.ai_family = AF_UNSPEC;
   hints.ai_flags = AI_NUMERICHOST;
 
-  if ((rc = getaddrinfo (tok->str, NULL, &hints, &res)) == 0)
+  if ((rc = getaddrinfo (str, NULL, &hints, &res)) == 0)
     {
       CIDR *cidr;
       int len, i;
@@ -471,7 +573,7 @@ parse_cidr (ACL *acl)
 
       if ((len = sockaddr_bytes (res->ai_addr, &p)) == -1)
 	{
-	  conf_error ("%s", "unsupported address family");
+	  conf_error_at_locus_range (loc, "%s", "unsupported address family");
 	  return CFGPARSER_FAIL;
 	}
       XZALLOC (cidr);
@@ -489,10 +591,22 @@ parse_cidr (ACL *acl)
     }
   else
     {
-      conf_error ("%s", "invalid IP address: %s", gai_strerror (rc));
+      conf_error_at_locus_range (loc, "invalid IP address: %s",
+				 gai_strerror (rc));
       return CFGPARSER_FAIL;
     }
   return CFGPARSER_OK;
+}
+
+/* Parse CIDR at the current point of the input. */
+static int
+parse_cidr (ACL *acl)
+{
+  struct token *tok;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  return parse_cidr_str (acl, tok->str, &tok->locus);
 }
 
 /*
@@ -516,6 +630,80 @@ acl_by_name (char const *name)
 	break;
     }
   return acl;
+}
+
+int
+config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
+{
+  FILE *fp;
+  char buf[MAXBUF];
+  struct locus_range loc;
+  int rc;
+  char *p;
+
+  fp = fopen_wd (wd, filename);
+  if (fp == NULL)
+    return -1;
+
+  locus_point_init (&loc.beg, filename, wd->name);
+  locus_point_init (&loc.end, NULL, NULL);
+
+  rc = 0;
+  loc.beg.line--;
+  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
+    {
+      char *line;
+      size_t len = strlen (p);
+
+      loc.beg.line++;
+      if (len == 0)
+	continue;
+      if (p[len-1] == '\n')
+	len--;
+      line = c_trimws (p, &len);
+      if (len == 0 || *p == '#')
+	continue;
+      line[len] = 0;
+
+      if (line[0] == '"' && line[len-1] == '"')
+	{
+	  line[--len] = 0;
+	  line++;
+	}
+
+      if (parse_cidr_str (acl, line, &loc))
+	rc++;
+    }
+  fclose (fp);
+  locus_range_unref (&loc);
+  return rc;
+}
+
+static int
+parse_acl_file (ACL *acl, char const *filename)
+{
+  WORKDIR *wd;
+  char const *basename;
+  int rc;
+
+  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+    return CFGPARSER_FAIL;
+  rc = config_parse_acl_file (acl, basename, wd);
+  workdir_unref (wd);
+  if (rc == -1)
+    {
+      if (errno == ENOENT)
+	conf_error ("file %s does not exist", filename);
+      else
+	conf_error ("can't open %s: %s", filename, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  else if (rc > 0)
+    {
+      conf_error ("errors reading %s", filename);
+      return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
 }
 
 /*
@@ -545,9 +733,9 @@ parse_acl (ACL *acl)
 	continue;
       if (tok->type == T_IDENT)
 	{
-	  if (strcasecmp (tok->str, "end") == 0)
+	  if (c_strcasecmp (tok->str, "end") == 0)
 	    break;
-	  if (strcasecmp (tok->str, "include") == 0)
+	  if (c_strcasecmp (tok->str, "include") == 0)
 	    {
 	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
 		return rc;
@@ -564,6 +752,25 @@ parse_acl (ACL *acl)
   return CFGPARSER_OK;
 }
 
+#define OPT_FILE  0x1
+#define OPT_WATCH 0x2
+
+static int
+get_file_option (int *opt, char const **filename)
+{
+  static struct config_option optab[] = {
+    { "file", OPT_FILE, 1 },
+    { "filewatch", OPT_FILE | OPT_WATCH, 1 },
+    { NULL }
+  };
+
+  *opt = 0;
+  *filename = NULL;
+  if (gettok_option (optab, opt, filename) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+  return CFGPARSER_OK;
+}
+
 /*
  * Parse a named ACL.
  * Input is positioned after the "ACL" keyword.
@@ -573,6 +780,8 @@ parse_named_acl (void *call_data, void *section_data)
 {
   ACL *acl;
   struct token *tok;
+  int opt;
+  char const *filename;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -586,13 +795,31 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
+  if (filename)
+    {
+      if (opt & OPT_WATCH)
+	{
+	  if (dynacl_register (acl, filename, &tok->locus))
+	    return CFGPARSER_FAIL;
+	}
+      else if (parse_acl_file (acl, filename))
+	return CFGPARSER_FAIL;
+      return CFGPARSER_OK;
+    }
+
   return parse_acl (acl);
 }
 
 /*
- * Parse ACL reference.  Two forms are accepted:
+ * Parse ACL reference.  Three forms are accepted:
  * ACL "name"
  *   References a named ACL.
+ * ACL -file "name"
+ * ACL -filewatch "name"
+ *   Read ACL from file.
  * ACL "\n" ... End
  *   Creates and references an unnamed ACL.
  */
@@ -601,6 +828,26 @@ parse_acl_ref (ACL **ret_acl)
 {
   struct token *tok;
   ACL *acl;
+  int opt;
+  char const *filename;
+
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
+  if (filename)
+    {
+      acl = new_acl (NULL);
+      *ret_acl = acl;
+
+      if (opt & OPT_WATCH)
+	{
+	  if (dynacl_register (acl, filename, last_token_locus_range ()))
+	    return CFGPARSER_FAIL;
+	}
+      else if (parse_acl_file (acl, filename))
+	return CFGPARSER_FAIL;
+      return CFGPARSER_OK;
+    }
 
   if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;
@@ -984,16 +1231,6 @@ static CFGPARSER_TABLE use_backend_parsetab[] = {
   { NULL }
 };
 
-static char *
-format_locus_str (struct locus_range *rp)
-{
-  struct stringbuf sb;
-
-  xstringbuf_init (&sb);
-  stringbuf_format_locus_range (&sb, rp);
-  return stringbuf_finish (&sb);
-}
-
 static inline int
 parser_loop (CFGPARSER_TABLE *ptab,
 	     void *call_data, void *section_data,
@@ -1006,11 +1243,10 @@ parser_loop (CFGPARSER_TABLE *ptab,
 }
 
 static BACKEND *
-parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl,
-			struct locus_point *beg)
+parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl)
 {
   BACKEND *be;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
   be = xbackend_create (BE_MATRIX, 5, NULL);
   be->v.mtx.to = dfl->be_to;
@@ -1019,10 +1255,8 @@ parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl,
 
   if (parser_loop (table, be, dfl, &range))
     return NULL;
-  if (beg)
-    range.beg = *beg;
+
   be->locus = range;
-  be->locus_str = format_locus_str (&range);
 
   return be;
 }
@@ -1033,32 +1267,43 @@ parse_backend (void *call_data, void *section_data)
   BALANCER_LIST *bml = call_data;
   BACKEND *be;
   struct token *tok;
-  struct locus_point beg = last_token_locus_range ()->beg;
+  struct locus_point beg = LOCUS_POINT_INITIALIZER;
+
+  locus_point_copy (&beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
+    {
+      locus_point_unref (&beg);
+      return CFGPARSER_FAIL;
+    }
 
   if (tok->type == T_STRING)
     {
-      struct locus_range range;
-
-      range.beg = beg;
-
+      struct locus_range range = LOCUS_RANGE_INITIALIZER;
       be = xbackend_create (BE_BACKEND_REF, -1, NULL);
       be->v.be_name = xstrdup (tok->str);
       be->disabled = -1;
 
       if (parser_loop (use_backend_parsetab, be, section_data, &range))
-	return CFGPARSER_FAIL;
-      be->locus_str = format_locus_str (&tok->locus);
+	{
+	  locus_point_unref (&beg);
+	  return CFGPARSER_FAIL;
+	}
+      be->locus = range;
     }
   else
     {
       putback_tkn (tok);
-      be = parse_backend_internal (backend_parsetab, section_data, &beg);
+      be = parse_backend_internal (backend_parsetab, section_data);
       if (!be)
-	return CFGPARSER_FAIL;
+	{
+	  locus_point_unref (&beg);
+	  return CFGPARSER_FAIL;
+	}
     }
+
+  locus_point_copy (&be->locus.beg, &beg);
+  locus_point_unref (&beg);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1077,7 +1322,7 @@ parse_use_backend (void *call_data, void *section_data)
 
   be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
   be->v.be_name = xstrdup (tok->str);
-  be->locus_str = format_locus_str (&tok->locus);
+  locus_range_copy(&be->locus, &tok->locus);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1095,7 +1340,7 @@ parse_emergency (void *call_data, void *section_data)
   dfl.be_connto = 120;
   dfl.ws_to = 120;
 
-  be = parse_backend_internal (backend_parsetab, &dfl, NULL);
+  be = parse_backend_internal (backend_parsetab, &dfl);
   if (!be)
     return CFGPARSER_FAIL;
 
@@ -1123,13 +1368,48 @@ parse_metrics (void *call_data, void *section_data)
 }
 
 static SERVICE_COND *
+service_cond_alloc (int type)
+{
+  SERVICE_COND *sc;
+  XZALLOC (sc);
+  service_cond_init (sc, type);
+  return sc;
+}
+
+static void
+service_cond_free (SERVICE_COND *sc)
+{
+  switch (sc->type)
+    {
+    case COND_QUERY_PARAM:
+    case COND_STRING_MATCH:
+      string_unref (sc->sm.string);
+      genpat_free (sc->sm.re);
+      break;
+
+    case COND_URL:
+    case COND_PATH:
+    case COND_QUERY:
+    case COND_HDR:
+    case COND_HOST:
+      genpat_free (sc->re);
+      break;
+
+    default:
+      /* FIXME: so far this function is only used by dyncond_read which
+	 operates on one of cond types handled above. */
+      abort ();
+    }
+  free (sc);
+}
+
+static SERVICE_COND *
 service_cond_append (SERVICE_COND *cond, int type)
 {
   SERVICE_COND *sc;
 
-  assert (cond->type == COND_BOOL);
-  XZALLOC (sc);
-  service_cond_init (sc, type);
+  assert (cond->type == COND_BOOL || cond->type == COND_DYN);
+  sc = service_cond_alloc (type);
   SLIST_PUSH (&cond->boolean.head, sc, next);
 
   return sc;
@@ -1154,10 +1434,9 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 }
 
 static int
-parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
+parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
+		  char **from_file, int *watch)
 {
-  struct token *tok;
-
   enum
   {
     MATCH_RE,
@@ -1168,43 +1447,42 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
     MATCH_ICASE,
     MATCH_CASE,
     MATCH_FILE,
+    MATCH_FILEWATCH,
     MATCH_POSIX,
     MATCH_PCRE,
   };
 
-  static struct kwtab optab[] = {
-    { "-re",      MATCH_RE },
-    { "-exact",   MATCH_EXACT },
-    { "-beg",     MATCH_BEG },
-    { "-end",     MATCH_END },
-    { "-contain", MATCH_CONTAIN },
-    { "-icase",   MATCH_ICASE },
-    { "-case",    MATCH_CASE },
-    { "-file",    MATCH_FILE },
-    { "-posix",   MATCH_POSIX },
-    { "-pcre",    MATCH_PCRE },
-    { "-perl",    MATCH_PCRE },
+  static struct config_option optab[] = {
+    { "file",      MATCH_FILE, 1 },
+    { "filewatch", MATCH_FILEWATCH, 1 },
+    { "re",        MATCH_RE },
+    { "exact",     MATCH_EXACT },
+    { "beg",       MATCH_BEG },
+    { "end",       MATCH_END },
+    { "contain",   MATCH_CONTAIN },
+    { "icase",     MATCH_ICASE },
+    { "case",      MATCH_CASE },
+    { "posix",     MATCH_POSIX },
+    { "pcre",      MATCH_PCRE },
+    { "perl",      MATCH_PCRE },
     { NULL }
   };
 
+  struct config_option *optptr = from_file ? optab : optab + 2;
+
   if (from_file)
-    *from_file = 0;
+    *from_file = NULL;
 
   for (;;)
     {
       int n;
+      char const *arg;
 
-      if ((tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_LITERAL))) == NULL)
+      if (gettok_option (optptr, &n, &arg) == CFGPARSER_FAIL)
 	return CFGPARSER_FAIL;
 
-      if (tok->type == T_STRING)
+      if (n == -1)
 	break;
-
-      if (kw_to_tok (optab, tok->str, 0, &n))
-	{
-	  conf_error ("unexpected token: %s", tok->str);
-	  return CFGPARSER_FAIL;
-	}
 
       switch (n)
 	{
@@ -1217,13 +1495,13 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
 	  break;
 
 	case MATCH_FILE:
-	  if (from_file)
-	    *from_file = 1;
-	  else
-	    {
-	      conf_error ("unexpected token: %s", tok->str);
-	      return CFGPARSER_FAIL;
-	    }
+	  *from_file = xstrdup (arg);
+	  *watch = 0;
+	  break;
+
+	case MATCH_FILEWATCH:
+	  *from_file = xstrdup (arg);
+	  *watch = 1;
 	  break;
 
 	case MATCH_RE:
@@ -1260,15 +1538,16 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags, int *from_file)
 	  break;
 	}
     }
-  putback_tkn (tok);
   return CFGPARSER_OK;
 }
 
 static char *
-host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
+header_prefix_regex (struct stringbuf *sb, int *gp_type,
+		     char const *hdr, char const *expr)
 {
   stringbuf_add_char (sb, '^');
-  stringbuf_add_string (sb, "Host:");
+  stringbuf_add_string (sb, hdr);
+  stringbuf_add_char (sb, ':');
   switch (*gp_type)
     {
     case GENPAT_POSIX:
@@ -1313,13 +1592,19 @@ host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
   return stringbuf_finish (sb);
 }
 
+static inline char *
+host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
+{
+  return header_prefix_regex (sb, gp_type, "Host", expr);
+}
+
 static int
 parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
 {
   struct token *tok;
   int rc;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL))
     return CFGPARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -1336,128 +1621,240 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
   return CFGPARSER_OK;
 }
 
-STRING_REF *
-string_ref_alloc (char const *str)
-{
-  STRING_REF *ref = xmalloc (sizeof (*ref) + strlen (str));
-  ref->refcount = 1;
-  strcpy (ref->value, str);
-  return ref;
-}
-
-STRING_REF *
-string_ref_incr (STRING_REF *ref)
-{
-  if (ref)
-    ref->refcount++;
-  return ref;
-}
-
-void
-string_ref_free (STRING_REF *ref)
-{
-  if (ref && --ref->refcount == 0)
-    free (ref);
-}
-
 static int
-parse_cond_matcher_0 (SERVICE_COND *top_cond,
-		      enum service_cond_type type,
-		      int dfl_re_type,
-		      int gp_type, int flags, char const *string)
+dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
+		       STRING *ref, enum service_cond_type cond_type,
+		       int pat_type, int flags)
 {
-  struct token *tok;
+  FILE *fp;
+  struct locus_range loc;
+  char *p;
+  char buf[MAXBUF];
   int rc;
   struct stringbuf sb;
-  SERVICE_COND *cond;
-  int from_file;
-  char *expr;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file))
-    return CFGPARSER_FAIL;
+  fp = fopen_wd (wd, filename);
+  if (fp == NULL)
+    return -1;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
+  locus_point_init (&loc.beg, filename, wd->name);
+  locus_point_init (&loc.end, NULL, NULL);
+
+  rc = 0;
 
   xstringbuf_init (&sb);
-  if (from_file)
+  loc.beg.line--;
+  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
     {
-      FILE *fp;
-      char *p;
-      char buf[MAXBUF];
-      STRING_REF *ref = NULL;
+      int rc;
+      size_t len = strlen (p);
+      SERVICE_COND *hc;
+      char *expr;
+      int gpt = pat_type;
 
-      if ((fp = fopen_include (tok->str)) == NULL)
+      loc.beg.line++;
+
+      if (len == 0)
+	continue;
+      if (p[len-1] == '\n')
+	len--;
+      p = c_trimws (p, &len);
+      if (len == 0 || *p == '#')
+	continue;
+      p[len] = 0;
+
+      switch (cond_type)
 	{
-	  fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
-	  return CFGPARSER_FAIL;
-	}
-
-      cond = service_cond_append (top_cond, COND_BOOL);
-      cond->boolean.op = BOOL_OR;
-
-      switch (type)
-	{
-	case COND_QUERY_PARAM:
-	case COND_STRING_MATCH:
-	  ref = string_ref_alloc (string);
+	case COND_HOST:
+	  stringbuf_reset (&sb);
+	  expr = host_prefix_regex (&sb, &gpt, p);
 	  break;
-	default:
-	  break;
-	}
 
-      while ((p = fgets (buf, sizeof buf, fp)) != NULL)
-	{
-	  int rc;
-	  size_t len;
-	  SERVICE_COND *hc;
-
-	  p += strspn (p, " \t");
-	  for (len = strlen (p);
-	       len > 0 && (p[len-1] == ' ' || p[len-1] == '\t'|| p[len-1] == '\n'); len--)
-	    ;
-	  if (len == 0 || *p == '#')
-	    continue;
-	  p[len] = 0;
-
-	  if (type == COND_HOST)
+	case COND_HDR:
+	  if (ref)
 	    {
 	      stringbuf_reset (&sb);
-	      expr = host_prefix_regex (&sb, &gp_type, p);
+	      expr = header_prefix_regex (&sb, &gpt, string_ptr (ref), p);
+	      break;
 	    }
-	  else
-	    expr = p;
+	  /* fall through */
+	default:
+	  expr = p;
+	}
 
-	  hc = service_cond_append (cond, type);
-	  rc = genpat_compile (&hc->re, gp_type, expr, flags);
-	  if (rc)
-	    {
-	      conf_regcomp_error (rc, hc->re, NULL);
-	      // FIXME: genpat_free (hc->re);
-	      return CFGPARSER_FAIL;
-	    }
-	  switch (type)
+      hc = service_cond_alloc (cond_type);
+      rc = genpat_compile (&hc->re, gpt, expr, flags);
+      if (rc)
+	{
+	  regcomp_error_at_locus_range (&loc, hc->re, NULL);
+	  service_cond_free (hc);
+	  rc++;
+	}
+      else
+	{
+	  switch (cond_type)
 	    {
 	    case COND_QUERY_PARAM:
 	    case COND_STRING_MATCH:
 	      memmove (&hc->sm.re, &hc->re, sizeof (hc->sm.re));
-	      hc->sm.string = string_ref_incr (ref);
+	      hc->sm.string = string_ref (ref);
 	      break;
 
 	    default:
 	      break;
 	    }
+
+	  SLIST_PUSH (&cond->boolean.head, hc, next);
 	}
-      string_ref_free (ref);
-      fclose (fp);
+    }
+  stringbuf_free (&sb);
+  locus_range_unref (&loc);
+  fclose (fp);
+  return rc;
+}
+
+static int
+dyncond_read (void *obj, char *filename, WORKDIR *wd)
+{
+  SERVICE_COND *cond = obj;
+  return dyncond_read_internal (cond, filename, wd,
+				cond->dyn.string,
+				cond->dyn.cond_type,
+				cond->dyn.pat_type,
+				cond->dyn.flags);
+}
+
+static int
+dyncond_read_immediate (SERVICE_COND *cond, char *filename,
+			STRING *ref, enum service_cond_type cond_type,
+			int pat_type, int flags)
+{
+  WORKDIR *wd;
+  char const *basename;
+  int rc;
+
+  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+    return CFGPARSER_FAIL;
+  rc = dyncond_read_internal (cond, basename, wd, ref, cond_type, pat_type,
+			      flags);
+  workdir_unref (wd);
+  if (rc == -1)
+    {
+      if (errno == ENOENT)
+	conf_error ("file %s does not exist", filename);
+      else
+	conf_error ("can't open %s: %s", filename, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  else if (rc > 0)
+    {
+      conf_error ("errors reading %s", filename);
+      return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
+}
+
+static void
+dyncond_clear (void *obj)
+{
+  SERVICE_COND *cond = obj;
+  assert (cond->type == COND_BOOL || cond->type == COND_DYN);
+  while (!SLIST_EMPTY (&cond->boolean.head))
+    {
+      SERVICE_COND *sc = SLIST_FIRST (&cond->boolean.head);
+      SLIST_SHIFT (&cond->boolean.head, next);
+      service_cond_free (sc);
+    }
+}
+
+static int
+dyncond_register (SERVICE_COND *cond, char const *filename,
+		  struct locus_range const *loc)
+{
+  cond->watcher = watcher_register (cond, filename, loc,
+				    dyncond_read, dyncond_clear);
+  return cond->watcher == NULL;
+}
+
+static int
+parse_cond_matcher (SERVICE_COND *top_cond,
+		    enum service_cond_type type,
+		    int dfl_re_type,
+		    int gp_type, int flags, char const *string)
+{
+  struct token *tok;
+  int rc;
+  struct stringbuf sb;
+  SERVICE_COND *cond;
+  char *from_file;
+  int watch;
+  STRING *ref;
+
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file, &watch))
+    return CFGPARSER_FAIL;
+
+  if (from_file)
+    {
+      switch (type)
+	{
+	case COND_HDR:
+	case COND_QUERY_PARAM:
+	case COND_STRING_MATCH:
+	  ref = string_init (string);
+	  break;
+	default:
+	  ref = NULL;
+	  break;
+	}
+
+      if (watch)
+	{
+	  cond = service_cond_append (top_cond, COND_DYN);
+	  cond->dyn.boolean.op = BOOL_OR;
+	  cond->dyn.string = ref;
+	  cond->dyn.cond_type = type;
+	  cond->dyn.pat_type = gp_type;
+	  cond->dyn.flags = flags;
+	  if (dyncond_register (cond, from_file, last_token_locus_range ()))
+	    return CFGPARSER_FAIL;
+	}
+      else
+	{
+	  cond = service_cond_append (top_cond, COND_BOOL);
+	  cond->boolean.op = BOOL_OR;
+	  rc = dyncond_read_immediate (cond, from_file,
+				       ref, type, gp_type, flags);
+	  string_unref (ref);
+	  if (rc)
+	    return rc;
+	}
+      free (from_file);
     }
   else
     {
+      char *expr;
+
+      if ((tok = gettkn_expect (T_STRING)) == NULL)
+	return CFGPARSER_FAIL;
+
+      xstringbuf_init (&sb);
       cond = service_cond_append (top_cond, type);
-      if (type == COND_HOST)
-	expr = host_prefix_regex (&sb, &gp_type, tok->str);
-      else
-	expr = tok->str;
+      switch (type)
+	{
+	case COND_HOST:
+	  expr = host_prefix_regex (&sb, &gp_type, tok->str);
+	  break;
+
+	case COND_HDR:
+	  if (string)
+	    {
+	      expr = header_prefix_regex (&sb, &gp_type, string, tok->str);
+	      break;
+	    }
+	  /* fall through */
+	default:
+	  expr = tok->str;
+	}
       rc = genpat_compile (&cond->re, gp_type, expr, flags);
       if (rc)
 	{
@@ -1470,34 +1867,16 @@ parse_cond_matcher_0 (SERVICE_COND *top_cond,
 	case COND_QUERY_PARAM:
 	case COND_STRING_MATCH:
 	  memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));
-	  cond->sm.string = string_ref_alloc (string);
+	  cond->sm.string = string_init (string);
 	  break;
 
 	default:
 	  break;
 	}
+      stringbuf_free (&sb);
     }
-  stringbuf_free (&sb);
 
   return CFGPARSER_OK;
-}
-
-static int
-parse_cond_matcher (SERVICE_COND *top_cond,
-		    enum service_cond_type type,
-		    int dfl_re_type,
-		    int gp_type, int flags, char const *string)
-{
-  int rc;
-  char *string_copy;
-  if (string)
-    string_copy = xstrdup (string);
-  else
-    string_copy = NULL;
-  rc = parse_cond_matcher_0 (top_cond, type, dfl_re_type, gp_type, flags,
-			     string_copy);
-  free (string_copy);
-  return rc;
 }
 
 static int
@@ -1571,7 +1950,8 @@ parse_cond_string_matcher (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   string = xstrdup (tok->str);
   rc = parse_cond_matcher (top_cond,
-			   COND_STRING_MATCH, dfl->re_type, dfl->re_type, flags,
+			   COND_STRING_MATCH, dfl->re_type, dfl->re_type,
+			   flags,
 			   string);
   free (string);
   return rc;
@@ -1581,9 +1961,40 @@ static int
 parse_cond_hdr_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
-			     GENPAT_MULTILINE | GENPAT_ICASE,
-			     NULL);
+  char *string = NULL;
+  struct token *tok;
+  int rc;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  if (tok->type == T_STRING)
+    {
+      struct locus_range loc = LOCUS_RANGE_INITIALIZER;
+      string = xstrdup (tok->str);
+      locus_range_copy (&loc, &tok->locus);
+
+      if ((tok = gettkn_any ()) == NULL)
+	{
+	  locus_range_unref (&loc);
+	  free (string);
+	  return CFGPARSER_FAIL;
+	}
+      putback_tkn (tok);
+      if (tok->type == '\n')
+	{
+	  putback_synth (T_STRING, string, &loc);
+	  free (string);
+	  string = NULL;
+	}
+      locus_range_unref (&loc);
+    }
+  else
+    putback_tkn (tok);
+  rc = parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
+			   GENPAT_MULTILINE | GENPAT_ICASE,
+			   string);
+  free (string);
+  return rc;
 }
 
 static int
@@ -1613,7 +2024,7 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
-  cond->pwfile.locus = tok->locus;
+  locus_range_copy (&cond->pwfile.locus, &tok->locus);
   cond->pwfile.filename = xstrdup (tok->str);
   return CFGPARSER_OK;
 }
@@ -1678,7 +2089,6 @@ parse_redirect_backend (void *call_data, void *section_data)
     }
 
   be = xbackend_create (BE_REDIRECT, 1, &range);
-  be->locus_str = format_locus_str (&range);
   be->v.redirect.status = code;
   be->v.redirect.url = xstrdup (tok->str);
 
@@ -1698,15 +2108,37 @@ parse_redirect_backend (void *call_data, void *section_data)
 }
 
 static int
+parse_http_errmsg (struct http_errmsg *errmsg)
+{
+  int rc;
+  char *p;
+
+  rc = cfg_assign_string_from_file (&errmsg->text, NULL);
+  if (rc == CFGPARSER_FAIL)
+    return rc;
+
+  DLIST_INIT (&errmsg->hdr);
+  if (http_header_list_parse (&errmsg->hdr, errmsg->text, H_REPLACE, &p) == 0
+      && p != errmsg->text)
+    {
+      p++;
+      memmove (errmsg->text, p, strlen (p) + 1);
+    }
+  else
+    http_header_list_free (&errmsg->hdr);
+  return CFGPARSER_OK;
+}
+
+static int
 parse_error_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
   struct token *tok;
   int n, status;
-  char *text = NULL;
   BACKEND *be;
   int rc;
   struct locus_range range;
+  struct http_errmsg errmsg = HTTP_ERRMSG_INITIALIZER(errmsg);
 
   range.beg = last_token_locus_range ()->beg;
 
@@ -1726,7 +2158,7 @@ parse_error_backend (void *call_data, void *section_data)
   if (tok->type == T_STRING)
     {
       putback_tkn (tok);
-      if ((rc = cfg_assign_string_from_file (&text, section_data)) == CFGPARSER_FAIL)
+      if ((rc = parse_http_errmsg (&errmsg)) == CFGPARSER_FAIL)
 	return rc;
     }
   else if (tok->type == '\n')
@@ -1740,9 +2172,8 @@ parse_error_backend (void *call_data, void *section_data)
   range.end = last_token_locus_range ()->end;
 
   be = xbackend_create (BE_ERROR, 1, &range);
-  be->locus_str = format_locus_str (&range);
   be->v.error.status = status;
-  be->v.error.text = text;
+  be->v.error.msg = errmsg;
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1754,7 +2185,7 @@ parse_errorfile (void *call_data, void *section_data)
 {
   struct token *tok;
   int status;
-  char **http_err = call_data;
+  struct http_errmsg **http_err = call_data;
 
   if ((tok = gettkn_expect (T_NUMBER)) == NULL)
     return CFGPARSER_FAIL;
@@ -1765,7 +2196,58 @@ parse_errorfile (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  return cfg_assign_string_from_file (&http_err[status], section_data);
+  if (!http_err[status])
+    XZALLOC (http_err[status]);
+  return parse_http_errmsg (http_err[status]);
+}
+
+static int
+parse_errN (void *call_data, void *section_data)
+{
+  struct http_errmsg **http_err = call_data;
+
+  if (!*http_err)
+    XZALLOC (*http_err);
+  return parse_http_errmsg (*http_err);
+}
+
+static int
+parse_sendfile_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  struct token *tok;
+  BACKEND *be;
+  int fd;
+  struct locus_range range;
+  struct stat st;
+
+  range.beg = last_token_locus_range ()->beg;
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  range.end = last_token_locus_range ()->end;
+
+  if (stat (tok->str, &st))
+    {
+      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  if (!S_ISDIR (st.st_mode))
+    {
+      conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+  if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
+    {
+      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      return CFGPARSER_FAIL;
+    }
+
+  be = xbackend_create (BE_FILE, 1, &range);
+  be->v.file.wd = fd;
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return CFGPARSER_OK;
 }
 
 struct service_session
@@ -1839,7 +2321,7 @@ static int
 parse_session (void *call_data, void *section_data)
 {
   SERVICE *svc = call_data;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
   if (parser_loop (session_parsetab, svc, section_data, &range))
     return CFGPARSER_FAIL;
@@ -1847,12 +2329,14 @@ parse_session (void *call_data, void *section_data)
   if (svc->sess_type == SESS_NONE)
     {
       conf_error_at_locus_range (&range, "Session type not defined");
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
 
   if (svc->sess_ttl == 0)
     {
       conf_error_at_locus_range (&range, "Session TTL not defined");
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
 
@@ -1864,6 +2348,7 @@ parse_session (void *call_data, void *section_data)
       if (svc->sess_id == NULL)
 	{
 	  conf_error ("%s", "Session ID not defined");
+	  locus_range_unref (&range);
 	  return CFGPARSER_FAIL;
 	}
       break;
@@ -1872,6 +2357,7 @@ parse_session (void *call_data, void *section_data)
       break;
     }
 
+  locus_range_unref (&range);
   return CFGPARSER_OK;
 }
 
@@ -1894,9 +2380,9 @@ parse_match (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   if (tok->type == T_IDENT)
     {
-      if (strcasecmp (tok->str, "and") == 0)
+      if (c_strcasecmp (tok->str, "and") == 0)
 	op = BOOL_AND;
-      else if (strcasecmp (tok->str, "or") == 0)
+      else if (c_strcasecmp (tok->str, "or") == 0)
 	op = BOOL_OR;
       else
 	{
@@ -2017,10 +2503,8 @@ static int
 parse_cond (int op, SERVICE_COND *cond, void *section_data)
 {
   SERVICE_COND *subcond = service_cond_append (cond, COND_BOOL);
-  struct locus_range range;
-
   subcond->boolean.op = op;
-  return parser_loop (logcon_parsetab, subcond, section_data, &range);
+  return parser_loop (logcon_parsetab, subcond, section_data, NULL);
 }
 
 static int parse_else (void *call_data, void *section_data);
@@ -2360,12 +2844,12 @@ parse_rewrite (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   if (tok->type == T_IDENT)
     {
-      if (strcasecmp (tok->str, "response") == 0)
+      if (c_strcasecmp (tok->str, "response") == 0)
 	{
 	  table = response_rewrite_rule_parsetab;
 	  head = &rw[REWRITE_RESPONSE];
 	}
-      else if (strcasecmp (tok->str, "request") == 0)
+      else if (c_strcasecmp (tok->str, "request") == 0)
 	{
 	  table = rewrite_rule_parsetab;
 	  head = &rw[REWRITE_REQUEST];
@@ -2441,9 +2925,9 @@ parse_balancer (void *call_data, void *section_data)
 
   if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
     return CFGPARSER_FAIL;
-  if (strcasecmp (tok->str, "random") == 0)
+  if (c_strcasecmp (tok->str, "random") == 0)
     *t = BALANCER_ALGO_RANDOM;
-  else if (strcasecmp (tok->str, "iwrr") == 0)
+  else if (c_strcasecmp (tok->str, "iwrr") == 0)
     *t = BALANCER_ALGO_IWRR;
   else
     {
@@ -2476,7 +2960,7 @@ parse_log_suppress (void *call_data, void *section_data)
 
   do
     {
-      if (strlen (tok->str) == 1 && isdigit (tok->str[0]))
+      if (strlen (tok->str) == 1 && c_isdigit (tok->str[0]))
 	{
 	  n = tok->str[0] - '0';
 	  if (n <= 0 || n >= sizeof (status_table) / sizeof (status_table[0]))
@@ -2528,6 +3012,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .off = offsetof (SERVICE, rewrite)
   },
   {
+    .name = "RewriteErrors",
+    .parser =  cfg_assign_bool,
+    .off = offsetof (SERVICE, rewrite_errors)
+  },
+  {
     .name = "SetHeader",
     .parser = SETFN_SVC_NAME (set_header),
     .off = offsetof (SERVICE, rewrite)
@@ -2571,6 +3060,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "Error",
     .parser = parse_error_backend,
+    .off = offsetof (SERVICE, balancers)
+  },
+  {
+    .name = "SendFile",
+    .parser = parse_sendfile_backend,
     .off = offsetof (SERVICE, balancers)
   },
   {
@@ -2658,6 +3152,8 @@ new_service (BALANCER_ALGO algo)
   svc->sess_type = SESS_NONE;
   pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
   svc->balancer_algo = algo;
+  svc->rewrite_errors = -1;
+  locus_range_init (&svc->locus);
 
   DLIST_INIT (&svc->be_rem_head);
   pthread_cond_init (&svc->be_rem_cond, NULL);
@@ -2672,7 +3168,6 @@ parse_service (void *call_data, void *section_data)
   POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) section_data;
   struct token *tok;
   SERVICE *svc;
-  struct locus_range range;
 
   svc = new_service (dfl->balancer_algo);
 
@@ -2699,11 +3194,11 @@ parse_service (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  if (parser_loop (service_parsetab, svc, dfl, &range))
+  if (parser_loop (service_parsetab, svc, dfl, &svc->locus))
     return CFGPARSER_FAIL;
 
   SLIST_PUSH (head, svc, next);
-  svc->locus_str = format_locus_str (&range);
+
   return CFGPARSER_OK;
 }
 
@@ -2719,26 +3214,32 @@ parse_acme (void *call_data, void *section_data)
   int rc;
   static char sp_acme[] = "^/\\.well-known/acme-challenge/(.+)";
   int fd;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
 
-  range.beg = last_token_locus_range ()->beg;
+  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
+    {
+      locus_range_unref (&range);
+      return CFGPARSER_FAIL;
+    }
 
   if (stat (tok->str, &st))
     {
       conf_error ("can't stat %s: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
   if (!S_ISDIR (st.st_mode))
     {
       conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
   if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
     {
       conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      locus_range_unref (&range);
       return CFGPARSER_FAIL;
     }
 
@@ -2755,8 +3256,8 @@ parse_acme (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  range.end = last_token_locus_range ()->beg;
-  svc->locus_str = format_locus_str (&range);
+  locus_point_copy (&range.end, &last_token_locus_range ()->end);
+  svc->locus = range;
 
   /* Create ACME backend */
   be = xbackend_create (BE_ACME, 1, &range);
@@ -3012,11 +3513,11 @@ parse_header_options (void *call_data, void *section_data)
 	}
 
       name = tok->str;
-      if (strcasecmp (name, "none") == 0)
+      if (c_strcasecmp (name, "none") == 0)
 	*opt = 0;
       else
 	{
-	  if (strncasecmp (name, "no-", 3) == 0)
+	  if (c_strncasecmp (name, "no-", 3) == 0)
 	    {
 	      neg = 1;
 	      name += 3;
@@ -3089,6 +3590,12 @@ static CFGPARSER_TABLE http_common[] = {
     .name = "Rewrite",
     .parser = parse_rewrite,
     .off = offsetof (LISTENER, rewrite)
+  },
+
+  {
+    .name = "RewriteErrors",
+    .parser =  cfg_assign_bool,
+    .off = offsetof (LISTENER, rewrite_errors)
   },
   {
     .name = "SetHeader",
@@ -3187,63 +3694,63 @@ static CFGPARSER_TABLE http_deprecated[] = {
   /* Backward compatibility */
   {
     .name = "Err400",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
     .deprecated = 1,
     .message = "use \"ErrorFile 400\" instead"
   },
   {
     .name = "Err401",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
     .deprecated = 1,
     .message = "use \"ErrorFile 401\" instead"
   },
   {
     .name = "Err403",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
     .deprecated = 1,
     .message = "use \"ErrorFile 403\" instead"
   },
   {
     .name = "Err404",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
     .deprecated = 1,
     .message = "use \"ErrorFile 404\" instead"
   },
   {
     .name = "Err413",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
     .deprecated = 1,
     .message = "use \"ErrorFile 413\" instead"
   },
   {
     .name = "Err414",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
     .deprecated = 1,
     .message = "use \"ErrorFile 414\" instead"
   },
   {
     .name = "Err500",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
     .deprecated = 1,
     .message = "use \"ErrorFile 500\" instead"
   },
   {
     .name = "Err501",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
     .deprecated = 1,
     .message = "use \"ErrorFile 501\" instead"
   },
   {
     .name = "Err503",
-    .parser = cfg_assign_string_from_file,
+    .parser = parse_errN,
     .off = offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
     .deprecated = 1,
     .message = "use \"ErrorFile 503\" instead"
@@ -3288,9 +3795,11 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
   lst->log_level = dfl->log_level;
+  lst->rewrite_errors = -1;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   lst->clnt_check = -1;
+  locus_range_init (&lst->locus);
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
   SLIST_INIT (&lst->services);
@@ -3349,7 +3858,7 @@ forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
     {
       if (foreach_client_cert (&svc->cond, NULL, NULL))
 	{
-	  conf_error_at_locus_range (NULL, "%s: %s", svc->locus_str, msg);
+	  conf_error_at_locus_range (&svc->locus, "%s", msg);
 	  return 1;
 	}
     }
@@ -3357,8 +3866,7 @@ forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
 }
 
 static int
-resolve_listener_address (LISTENER *lst, char *defsrv,
-			  struct locus_range *range)
+resolve_listener_address (LISTENER *lst, char *defsrv)
 {
   if (lst->addr.ai_addr == NULL)
     {
@@ -3374,7 +3882,7 @@ resolve_listener_address (LISTENER *lst, char *defsrv,
       rc = getaddrinfo (lst->addr_str, service, &hints, &res);
       if (rc != 0)
 	{
-	  conf_error_at_locus_range (range, "bad listener address: %s",
+	  conf_error_at_locus_range (&lst->locus, "bad listener address: %s",
 				     gai_strerror (rc));
 	  return CFGPARSER_FAIL;
 	}
@@ -3404,7 +3912,6 @@ parse_listen_http (void *call_data, void *section_data)
   LISTENER *lst;
   LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range;
   struct token *tok;
 
   if ((lst = listener_alloc (dfl)) == NULL)
@@ -3424,18 +3931,16 @@ parse_listen_http (void *call_data, void *section_data)
   else
     putback_tkn (tok);
 
-  if (parser_loop (http_parsetab, lst, section_data, &range))
+  if (parser_loop (http_parsetab, lst, section_data, &lst->locus))
     return CFGPARSER_FAIL;
 
-  if (resolve_listener_address (lst, PORT_HTTP_STR, &range) != CFGPARSER_OK)
+  if (resolve_listener_address (lst, PORT_HTTP_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
   if (forbid_ssl_usage (&lst->services,
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
     return CFGPARSER_FAIL;
-
-  lst->locus_str = format_locus_str (&range);
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -4029,7 +4534,6 @@ client_cert_cb (X509 *x509, void *data)
       X509_STORE *store = SSL_CTX_get_cert_store (pc->ctx);
       if (X509_STORE_add_cert (store, x509) != 1)
 	{
-	  //FIXME
 	  openssl_error_at_locus_range (NULL, NULL, "X509_STORE_add_cert");
 	  return -1;
 	}
@@ -4052,9 +4556,9 @@ flush_service_client_cert (LISTENER *lst)
     {
       if (lst->clnt_check != -1)
 	{
-	  conf_error_at_locus_range (NULL, "%s: ClientCert in ListenHTTPS"
-				     "conflicts with that in Service",
-				     lst->locus_str);
+	  conf_error_at_locus_range (&lst->locus,
+				     "ClientCert in ListenHTTPS"
+				     " conflicts with that in Service");
 	  return -1;
 	}
       else
@@ -4078,7 +4582,6 @@ parse_listen_https (void *call_data, void *section_data)
   LISTENER *lst;
   LISTENER_HEAD *list_head = call_data;
   POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range;
   POUND_CTX *pc;
   struct stringbuf sb;
   struct token *tok;
@@ -4108,22 +4611,22 @@ parse_listen_https (void *call_data, void *section_data)
     SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
     SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
 
-  if (parser_loop (https_parsetab, lst, section_data, &range))
+  if (parser_loop (https_parsetab, lst, section_data, &lst->locus))
     return CFGPARSER_FAIL;
 
-  if (resolve_listener_address (lst, PORT_HTTPS_STR, &range) != CFGPARSER_OK)
+  if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
-
-  lst->locus_str = format_locus_str (&range);
 
   if (SLIST_EMPTY (&lst->ctx_head))
     {
-      conf_error_at_locus_range (&range, "Cert statement is missing");
+      conf_error_at_locus_range (&lst->locus, "Cert statement is missing");
       return CFGPARSER_FAIL;
     }
 
   if (flush_service_client_cert (lst) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
+    {
+      return CFGPARSER_FAIL;
+    }
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (!SLIST_EMPTY (&lst->ctx_head))
@@ -4238,7 +4741,6 @@ parse_control_listener (void *call_data, void *section_data)
   SERVICE *svc;
   BACKEND *be;
   int rc;
-  struct locus_range range;
 
   if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;
@@ -4246,12 +4748,12 @@ parse_control_listener (void *call_data, void *section_data)
   switch (tok->type)
     {
     case '\n':
-      rc = parser_loop (control_parsetab, lst, section_data, &range);
+      rc = parser_loop (control_parsetab, lst, section_data, &lst->locus);
       if (rc == CFGPARSER_OK)
 	{
 	  if (lst->addr.ai_addrlen == 0)
 	    {
-	      conf_error_at_locus_range (&range, "%s",
+	      conf_error_at_locus_range (&lst->locus, "%s",
 					 "Socket statement is missing");
 	      rc = CFGPARSER_FAIL;
 	    }
@@ -4259,10 +4761,10 @@ parse_control_listener (void *call_data, void *section_data)
       break;
 
     case T_STRING:
-      range.beg = last_token_locus_range ()->beg;
+      locus_point_copy (&lst->locus.beg, &last_token_locus_range ()->beg);
       putback_tkn (tok);
       rc = parse_control_socket (&lst->addr, section_data);
-      range.end = last_token_locus_range ()->end;
+      locus_point_copy (&lst->locus.end, &last_token_locus_range ()->end);
       break;
 
     default:
@@ -4275,21 +4777,19 @@ parse_control_listener (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
 
   lst->verb = 1; /* Need PUT and DELETE methods */
-  lst->locus_str = format_locus_str (&range);
   /* Register listener in the global listener list */
   SLIST_PUSH (&listeners, lst, next);
 
   /* Create service; there'll be only one backend so the balancing algorithm
      doesn't really matter. */
   svc = new_service (BALANCER_ALGO_RANDOM);
-  lst->locus_str = format_locus_str (&range);
+  locus_range_copy (&svc->locus, &lst->locus);
 
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
 
   /* Create backend */
-  be = xbackend_create (BE_CONTROL, 1, &range);
-  be->locus_str = format_locus_str (&range);
+  be = xbackend_create (BE_CONTROL, 1, &lst->locus);
   be->service = svc;
   /* Register backend in service */
   balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
@@ -4304,28 +4804,28 @@ parse_named_backend (void *call_data, void *section_data)
   NAMED_BACKEND_TABLE *tab = call_data;
   struct token *tok;
   BACKEND *be;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
   NAMED_BACKEND *olddef;
   char *name;
 
-  range.beg = last_token_locus_range ()->beg;
+  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
   name = xstrdup (tok->str);
 
-  be = parse_backend_internal (backend_parsetab, section_data, NULL);
+  be = parse_backend_internal (backend_parsetab, section_data);
   if (!be)
     return CFGPARSER_FAIL;
-  range.end = last_token_locus_range ()->end;
+  locus_point_copy (&range.end, &last_token_locus_range ()->end);
+  locus_range_copy (&be->locus, &range);
 
-  olddef = named_backend_insert (tab, name, &range, be);
+  olddef = named_backend_insert (tab, name, be);
   free (name);
   pthread_mutex_destroy (&be->mut);
-  free (be->locus_str);
+  locus_range_unref (&be->locus);
   free (be);
-  // FIXME: free address on failure only.
 
   if (olddef)
     {
@@ -4336,6 +4836,7 @@ parse_named_backend (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
+  locus_range_unref (&range);
   return CFGPARSER_OK;
 }
 
@@ -4362,9 +4863,9 @@ parse_combine_headers (void *call_data, void *section_data)
 	continue;
       if (tok->type == T_IDENT)
 	{
-	  if (strcasecmp (tok->str, "end") == 0)
+	  if (c_strcasecmp (tok->str, "end") == 0)
 	    break;
-	  if (strcasecmp (tok->str, "include") == 0)
+	  if (c_strcasecmp (tok->str, "include") == 0)
 	    {
 	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
 		return rc;
@@ -4484,7 +4985,7 @@ static int
 parse_resolver (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range;
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
   int rc = parser_loop (resolver_parsetab, &dfl->resolver, dfl, &range);
 #ifndef ENABLE_DYNAMIC_BACKENDS
   if (rc == CFGPARSER_OK)
@@ -4493,10 +4994,14 @@ parse_resolver (void *call_data, void *section_data)
 			       "pound compiled without support "
 			       "for dynamic backends");
 #endif
+  locus_range_unref (&range);
   return rc;
 }
 
 static CFGPARSER_TABLE top_level_parsetab[] = {
+  {
+    .type = KWT_TOPLEVEL
+  },
   {
     .name = "IncludeDir",
     .parser = cfg_parse_includedir
@@ -4686,6 +5191,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "LuaLoad",
     .parser = pndlua_parse_lua_load
   },
+  {
+    .name = "WatcherTTL",
+    .parser = cfg_assign_unsigned,
+    .data = &watcher_ttl
+  },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
@@ -4715,7 +5225,7 @@ str_is_ipv4 (const char *addr)
 	    return 0;
 	  digit_count = 0;
 	}
-      else if (!(isdigit (c) && ++digit_count <= 3))
+      else if (!(c_isdigit (c) && ++digit_count <= 3))
 	return 0;
     }
 
@@ -4732,9 +5242,9 @@ str_is_ipv6 (const char *addr)
 
   for (; (c = *addr) != 0; addr++)
     {
-      if (!isascii (c))
+      if (!c_isascii (c))
 	return 0;
-      else if (isxdigit (c))
+      else if (c_isxdigit (c))
 	{
 	  if (++dig_count > 4)
 	    return 0;
@@ -4758,15 +5268,15 @@ str_is_ip (const char *addr)
 {
   int c;
   int dot = 0;
-  for (; (c = *addr) != 0 && isascii (c); addr++)
+  for (; (c = *addr) != 0 && c_isascii (c); addr++)
     {
-      if (!isascii (c))
+      if (!c_isascii (c))
 	break;
-      else if (isxdigit (c))
+      else if (c_isxdigit (c))
 	return str_is_ipv6 (addr);
       else if (c == dot)
 	return str_is_ipv4 (addr);
-      else if (isdigit (c))
+      else if (c_isdigit (c))
 	dot = '.';
       else
 	break;
@@ -4873,15 +5383,16 @@ backend_finalize (BACKEND *be, NAMED_BACKEND_TABLE *tab)
       nb = named_backend_retrieve (tab, be->v.be_name);
       if (!nb)
 	{
-	  logmsg (LOG_ERR, "%s: named backend %s is not declared",
-		  be->locus_str, be->v.be_name);
+	  conf_error_at_locus_range (&be->locus,
+				     "named backend %s is not declared",
+				     be->v.be_name);
 	  return -1;
 	}
       free (be->v.be_name);
       be->be_type = BE_MATRIX;
       be->v.mtx = nb->bemtx;
       /* Hostname will be freed after resolving backend to be_regular.
-	 FIXME: use STRING_REF? */
+	 FIXME: use STRING? */
       be->v.mtx.hostname = xstrdup (be->v.mtx.hostname);
       if (be->priority == -1)
 	be->priority = nb->priority;
@@ -4997,9 +5508,8 @@ service_finalize (SERVICE *svc, void *data)
 				    BE_MASK (BE_MATRIX) |
 				    BE_MASK (BE_REDIRECT)))
 	    {
-	      conf_error_at_locus_range (NULL,
-			  "%s: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "%s",
 			  BITCOUNT (be_setup.be_class) == 1
 			    ? "multiple backends of this type are not allowed"
 			    : "service mixes backends of different types");
@@ -5008,16 +5518,14 @@ service_finalize (SERVICE *svc, void *data)
 
 	  if (be_setup.be_class & BE_MASK (BE_REDIRECT))
 	    {
-	      conf_error_at_locus_range (NULL,
-			  "%s: warning: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "warning: %s",
 			  (be_setup.be_class & (BE_MASK (BE_REGULAR) |
 						BE_MASK (BE_MATRIX)))
 			     ? "service mixes regular and redirect backends"
 			     : "service uses multiple redirect backends");
-	      conf_error_at_locus_range (NULL,
-			  "%s: %s",
-			  svc->locus_str,
+	      conf_error_at_locus_range (&svc->locus,
+			  "%s",
 			  "see section \"DEPRECATED FEATURES\" in pound(8)");
 	    }
 	}
@@ -5027,8 +5535,8 @@ service_finalize (SERVICE *svc, void *data)
 
   if (be_count == 0)
     {
-      conf_error_at_locus_range (NULL, "%s: warning: no backends defined",
-				 svc->locus_str);
+      conf_error_at_locus_range (&svc->locus, "%s",
+				 "warning: no backends defined");
     }
 
   service_lb_init (svc);
@@ -5167,7 +5675,8 @@ parse_config_file (char const *file, int nosyslog)
   if (cfgparser_open (file, NULL))
     return -1;
 
-  res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults, NULL);
+  res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults,
+		     NULL);
   if (res == 0)
     {
       if (cur_input)
@@ -5184,7 +5693,7 @@ parse_config_file (char const *file, int nosyslog)
 			   &pound_defaults.named_backend_table))
 	return -1;
       if (worker_min_count > worker_max_count)
-	abend ("WorkerMinCount is greater than WorkerMaxCount");
+	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
 	log_facility = pound_defaults.facility;
 
@@ -5324,6 +5833,24 @@ struct string_value pound_settings[] = {
 #endif
     }
   },
+  { "FS event monitoring", STRING_CONSTANT, { .s_const =
+#if WITH_INOTIFY
+				 "inotify"
+#elif WITH_KQUEUE
+                                 "kqueue"
+#else
+                                 "periodic"
+#endif
+    }
+  },
+  { "Lua support", STRING_CONSTANT, { .s_const =
+#if WITH_LUA
+				     "enabled"
+#else
+				     "disabled"
+#endif
+    }
+  },
 #if ! SET_DH_AUTO
   { "DH bits",         STRING_INT, { .s_int = DH_LEN } },
   { "RSA regeneration interval", STRING_INT, { .s_int = T_RSA_KEYS } },
@@ -5435,7 +5962,7 @@ config_parse (int argc, char **argv)
     }
 
   if (SLIST_EMPTY (&listeners))
-    abend ("no listeners defined");
+    abend (NULL, "no listeners defined");
 
   if (pid_file_option)
     pid_name = pid_file_option;

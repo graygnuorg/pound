@@ -875,7 +875,7 @@ get_num (const char *p, int i, unsigned *pn)
 {
   unsigned n = 0;
 
-  for (; p[i] && isdigit (p[i]); i++)
+  for (; p[i] && c_isdigit (p[i]); i++)
     n = n * 10 + p[i] - '0';
   *pn = n;
   return i;
@@ -1018,7 +1018,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	      state = fmts_copy;
 	      break;
 	    }
-	  if (isdigit (format[cur]))
+	  if (c_isdigit (format[cur]))
 	    {
 	      int pos = get_num (format, cur, &n);
 	      if (format[pos] == '$')
@@ -1067,7 +1067,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 
 	case fmts_width:
 	  /* Expect width -- %2$#_8 or %2$#_* */
-	  if (isdigit (format[cur]))
+	  if (c_isdigit (format[cur]))
 	    {
 	      cur = get_num (format, cur, &width);
 	      state = fmts_prec;
@@ -1084,7 +1084,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	case fmts_width_arg:
 	  /* Expect width argument position -- %2$#*_1$ */
 	  state = fmts_prec;
-	  if (isdigit(format[cur]))
+	  if (c_isdigit(format[cur]))
 	    {
 	      int pos = get_num (format, cur, &n);
 	      if (format[pos] == '$')
@@ -1121,7 +1121,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	  if (format[cur] == '.')
 	    {
 	      cur++;
-	      if (isdigit (format[cur]))
+	      if (c_isdigit (format[cur]))
 		{
 		  cur = get_num (format, cur, &prec);
 		}
@@ -1137,7 +1137,7 @@ func_printf (ACTUAL_ARG_HEAD const *head)
 	case fmts_prec_arg:
 	  /* Expect precision argument position -- %2$#*1$.*_3$ */
 	  state = fmts_conv;
-	  if (isdigit (format[cur]))
+	  if (c_isdigit (format[cur]))
 	    {
 	      int pos = get_num (format, cur, &n);
 	      if (format[pos] == '$')
@@ -1779,21 +1779,21 @@ tmpl_gettok (struct tmpl_input *inp)
       if ((c = tmpl_getchar (inp)) == 0)
 	return tmpl_input_token (inp, TMPL_TOK_EOF);
     }
-  while (isspace (c));
+  while (c_isspace (c));
 
   tmpl_input_less (inp, 1);
   tmpl_input_mark (inp);
   tmpl_getchar (inp);
 
-  if (isalpha (c))
+  if (c_isalpha (c))
     {
-      while ((c = tmpl_getchar (inp)) != 0 && (isalnum (c) || c == '_'))
+      while ((c = tmpl_getchar (inp)) != 0 && (c_isalnum (c) || c == '_'))
 	;
       tmpl_input_less (inp, 1);
       return tmpl_input_token (inp, TMPL_TOK_IDENT);
     }
 
-  if (isdigit (c))
+  if (c_isdigit (c))
     {
       long n = 0;
       //FIXME: move to tmpl_input_token
@@ -1804,7 +1804,7 @@ tmpl_gettok (struct tmpl_input *inp)
 	    return tmpl_input_error (inp, TMPL_ERR_RANGE);
 	  n = n * 10 + c;
 	}
-      while ((c = tmpl_getchar (inp)) != 0 && isdigit (c));
+      while ((c = tmpl_getchar (inp)) != 0 && c_isdigit (c));
       tmpl_input_less (inp, 1);
       inp->tok.type = TMPL_TOK_NUM;
       inp->tok.v.num = n;
@@ -1826,21 +1826,21 @@ tmpl_gettok (struct tmpl_input *inp)
     }
   else if (c == '.')
     {
-      if (isalpha (tmpl_lookahead (inp)))
+      if (c_isalpha (tmpl_lookahead (inp)))
 	{
 	  tmpl_input_mark (inp);
 	  while ((c = tmpl_getchar (inp)) != 0 &&
-		 (isalnum (c) || c == '_' || c == '-'))
+		 (c_isalnum (c) || c == '_' || c == '-'))
 	    ;
 	  tmpl_input_less (inp, 1);
 	  return tmpl_input_token (inp, TMPL_TOK_ATTR);
 	}
       return tmpl_input_token (inp, TMPL_TOK_DOT);
     }
-  else if (c == '-' && isdigit (tmpl_lookahead (inp)))
+  else if (c == '-' && c_isdigit (tmpl_lookahead (inp)))
     {
       long n = 0;
-      while ((c = tmpl_getchar (inp)) != 0 && isdigit (c))
+      while ((c = tmpl_getchar (inp)) != 0 && c_isdigit (c))
 	{
 	  c -= '0';
 	  if (-(LONG_MIN+1) - n < c)
@@ -1852,10 +1852,10 @@ tmpl_gettok (struct tmpl_input *inp)
       inp->tok.v.num = - n;
       return &inp->tok;
     }
-  else if (c == '$' && isalpha (tmpl_lookahead (inp)))
+  else if (c == '$' && c_isalpha (tmpl_lookahead (inp)))
     {
       tmpl_input_mark (inp);
-      while ((c = tmpl_getchar (inp)) != 0 && (isalnum (c) || c == '_'))
+      while ((c = tmpl_getchar (inp)) != 0 && (c_isalnum (c) || c == '_'))
 	;
       tmpl_input_less (inp, 1);
       return tmpl_input_token (inp, TMPL_TOK_VAR);
@@ -1877,7 +1877,7 @@ tmpl_gettok (struct tmpl_input *inp)
   else if (c == '{' && tmpl_lookahead (inp) == '{')
     {
       tmpl_getchar (inp);
-      if (tmpl_lookahead (inp) == '-' && isspace (inp->text[inp->off+1]))
+      if (tmpl_lookahead (inp) == '-' && c_isspace (inp->text[inp->off+1]))
 	inp->off += 2;
       return tmpl_input_token (inp, TMPL_TOK_BEG);
     }
@@ -1886,13 +1886,13 @@ tmpl_gettok (struct tmpl_input *inp)
       tmpl_getchar (inp);
       return tmpl_input_token (inp, TMPL_TOK_END);
     }
-  else if (c == '-' && inp->off > 2 && isspace (inp->text[inp->off-2]) &&
+  else if (c == '-' && inp->off > 2 && c_isspace (inp->text[inp->off-2]) &&
 	   inp->text[inp->off] == '}' && inp->text[inp->off+1] == '}')
     {
       tmpl_input_token (inp, TMPL_TOK_END);
       inp->off += 2;
       /* Skip leading whitespace */
-      while (inp->text[inp->off] && isspace (inp->text[inp->off]))
+      while (inp->text[inp->off] && c_isspace (inp->text[inp->off]))
 	inp->off++;
       return &inp->tok;
     }
@@ -1914,7 +1914,7 @@ tmpl_gettext (struct tmpl_input *inp)
     {
       if (c == '{' && tmpl_lookahead (inp) == c)
 	{
-	  if (inp->text[inp->off+1] == '-' && isspace (inp->text[inp->off+2]))
+	  if (inp->text[inp->off+1] == '-' && c_isspace (inp->text[inp->off+2]))
 	    {
 	      trim_right = 1;
 	    }
@@ -1934,7 +1934,7 @@ tmpl_gettext (struct tmpl_input *inp)
 
   if (trim_right)
     {
-      while (end > inp->start && isspace (inp->text[end-1]))
+      while (end > inp->start && c_isspace (inp->text[end-1]))
 	end--;
     }
 
@@ -2066,7 +2066,7 @@ scan_arg (struct tmpl_input *inp, TMPL_PIPELINE *head)
  again:
   if (apply_attr)
     {
-      if (!isspace (tmpl_lookahead (inp)))
+      if (!c_isspace (tmpl_lookahead (inp)))
 	{
 	  if ((tok = tmpl_gettok (inp))->type == TMPL_TOK_ATTR)
 	    {

@@ -21,7 +21,6 @@
 #include <assert.h>
 #include <dirent.h>
 #include <sys/stat.h>
-#include <ctype.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
@@ -33,6 +32,7 @@
 #include "list.h"
 #include "mem.h"
 #include "cfgparser.h"
+#include "cctype.h"
 
 extern char const *progname;
 
@@ -76,13 +76,13 @@ token_type_str (unsigned type)
       return "'\"'";
     }
 
-  if (isprint (type))
+  if (c_isprint (type))
     {
       buf[0] = buf[2] = '\'';
       buf[1] = type;
       buf[3] = 0;
     }
-  else if (iscntrl (type))
+  else if (c_iscntrl (type))
     {
       buf[0] = '^';
       buf[1] = type ^ 0100;
@@ -147,7 +147,7 @@ int
 kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval)
 {
   for (; kwt->name; kwt++)
-    if ((ci ? strcasecmp : strcmp) (kwt->name, name) == 0)
+    if ((ci ? c_strcasecmp : strcmp) (kwt->name, name) == 0)
       {
 	*retval = kwt->tok;
 	return 0;
@@ -179,7 +179,7 @@ void
 stringbuf_format_locus_point (struct stringbuf *sb,
 			      struct locus_point const *loc)
 {
-  stringbuf_printf (sb, "%s:%d", loc->filename, loc->line);
+  stringbuf_printf (sb, "%s:%d", string_ptr (loc->filename), loc->line);
   if (loc->col)
     stringbuf_printf (sb, ".%d", loc->col);
 }
@@ -188,7 +188,8 @@ static int
 same_file (struct locus_point const *a, struct locus_point const *b)
 {
   return a->filename == b->filename
-	 || (a->filename && b->filename && strcmp (a->filename, b->filename) == 0);
+	 || (a->filename && b->filename &&
+	     strcmp (string_ptr (a->filename), string_ptr (b->filename)) == 0);
 }
 
 void
@@ -270,39 +271,6 @@ conf_error_at_locus_point (struct locus_point const *loc, char const *fmt, ...)
   va_end (ap);
 }
 
-
-struct name_list
-{
-  struct name_list *next;
-  char name[1];
-};
-
-static struct name_list *name_list;
-
-static char const *
-pathname_alloc (char const *dir, char const *name)
-{
-  struct name_list *np;
-  size_t dirlen = 0;
-
-  /* Ignore the directory if the filename is absolute. */
-  if (name[0] == '/')
-    dir = NULL;
-
-  if (dir)
-    dirlen = strlen (dir) + 1;
-
-  np = xmalloc (sizeof (*np) + dirlen + strlen (name));
-  if (dir)
-    {
-      strcpy (np->name, dir);
-      np->name[dirlen-1] = '/';
-    }
-  strcpy (np->name + dirlen, name);
-  np->next = name_list;
-  name_list = np;
-  return np->name;
-}
 
 typedef DLIST_HEAD (, workdir) WORKDIR_HEAD;
 
@@ -416,7 +384,7 @@ char const *include_dir = SYSCONFDIR;
 WORKDIR *include_wd;
 
 WORKDIR *
-get_include_wd_at_locus_range (struct locus_range *locus)
+get_include_wd_at_locus_range (struct locus_range const *locus)
 {
   if (!include_wd)
     {
@@ -474,7 +442,7 @@ filename_resolve (const char *filename)
 
 void
 fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
-	     struct locus_range *loc)
+	     struct locus_range const *loc)
 {
   if (filename[0] == '/' || wd == NULL)
     conf_error_at_locus_range (loc, "can't open %s: %s",
@@ -515,6 +483,8 @@ input_close (struct cfginput *input)
   if (input)
     {
       prev = input->prev;
+      locus_range_unref (&input->token.locus);
+      locus_point_unref (&input->locus);
       fclose (input->file);
       stringbuf_free (&input->buf);
       free (input);
@@ -537,12 +507,9 @@ input_open (char const *filename, struct stat *st)
     }
   input->ino = st->st_ino;
   input->devno = st->st_dev;
-  if (include_wd == NULL || include_wd->fd == AT_FDCWD)
-    input->locus.filename = xstrdup (filename);
-  else
-    input->locus.filename = pathname_alloc (include_wd->name, filename);
-  input->locus.line = 1;
-  input->locus.col = 0;
+  locus_point_init (&input->locus, filename,
+		    (include_wd != NULL && include_wd->fd != AT_FDCWD)
+		    ? include_wd->name : NULL);
   return input;
 }
 
@@ -579,8 +546,10 @@ input_ungetc (struct cfginput *input, int c)
     }
 }
 
-#define is_ident_start(c) (isalpha (c) || c == '_')
-#define is_ident_cont(c) (is_ident_start (c) || isdigit (c))
+#define is_ident_start(c) (c_isalpha (c) || c == '_')
+#define is_ident_cont(c) (is_ident_start (c) || c_isdigit (c))
+
+static struct token *input_unput (struct cfginput *input);
 
 int
 input_gettkn (struct cfginput *input, struct token **tok)
@@ -591,14 +560,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 
   if (input->putback_index > 0)
     {
-      input->token = input->putback[--input->putback_index];
-      if (input->token.str != NULL)
-	{
-	  stringbuf_add_string (&input->buf, input->token.str);
-	  free (input->token.str);
-	  input->token.str = stringbuf_finish (&input->buf);
-	}
-      *tok = &input->token;
+      *tok = input_unput (input);
       return input->token.type;
     }
 
@@ -625,17 +587,17 @@ input_gettkn (struct cfginput *input, struct token **tok)
 
       if (c == '\n')
 	{
-	  input->token.locus.beg = input->locus;
+	  locus_point_copy (&input->token.locus.beg, &input->locus);
 	  input->token.locus.beg.line--;
 	  input->token.locus.beg.col = input->prev_col;
 	  input->token.type = c;
 	  break;
 	}
 
-      if (isspace (c))
+      if (c_isspace (c))
 	continue;
 
-      input->token.locus.beg = input->locus;
+      locus_point_copy (&input->token.locus.beg, &input->locus);
       if (c == '"')
 	{
 	  while ((c = input_getc (input)) != '"')
@@ -677,7 +639,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	      stringbuf_add_char (&input->buf, c);
 	    }
 	  while ((c = input_getc (input)) != EOF && is_ident_cont (c));
-	  if (c == EOF || isspace (c))
+	  if (c == EOF || c_isspace (c))
 	    {
 	      input_ungetc (input, c);
 	      input->token.type = T_IDENT;
@@ -687,7 +649,7 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	  /* It is a literal */
 	}
 
-      if (isdigit (c))
+      if (c_isdigit (c))
 	input->token.type = T_NUMBER;
       else
 	input->token.type = T_LITERAL;
@@ -695,17 +657,17 @@ input_gettkn (struct cfginput *input, struct token **tok)
       do
 	{
 	  stringbuf_add_char (&input->buf, c);
-	  if (!isdigit (c))
+	  if (!c_isdigit (c))
 	    input->token.type = T_LITERAL;
 	}
-      while ((c = input_getc (input)) != EOF && !isspace (c));
+      while ((c = input_getc (input)) != EOF && !c_isspace (c));
 
       input_ungetc (input, c);
       input->token.str = stringbuf_finish (&input->buf);
       break;
     }
  end:
-  input->token.locus.end = input->locus;
+  locus_point_copy (&input->token.locus.end, &input->locus);
   *tok = &input->token;
   return input->token.type;
 }
@@ -714,13 +676,27 @@ static void
 input_putback (struct cfginput *input, struct token *tok)
 {
   assert (input->putback_index < MAX_PUTBACK);
+  locus_range_ref (&tok->locus);
   input->putback[input->putback_index] = *tok;
   if (tok->type >= T__BASE && tok->type < T__END)
-    input->putback[input->putback_index].str = xstrdup (tok->str);
+    input->putback[input->putback_index].str = tok->str;
   else
     input->putback[input->putback_index].str = NULL;
   input->putback_index++;
 }
+
+static struct token *
+input_unput (struct cfginput *input)
+{
+  if (input->putback_index > 0)
+    {
+      locus_range_unref (&input->token.locus);
+      input->token = input->putback[--input->putback_index];
+      return &input->token;
+    }
+  return NULL;
+}
+
 
 struct cfginput *cur_input;
 
@@ -730,7 +706,7 @@ cur_token (void)
   return &cur_input->token;
 }
 
-struct locus_range *
+struct locus_range const *
 last_token_locus_range (void)
 {
   if (cur_input)
@@ -852,6 +828,23 @@ putback_tkn (struct token *tok)
   input_putback (cur_input, tok ? tok : cur_token ());
 }
 
+void
+putback_synth (int type, char const *str, struct locus_range *loc)
+{
+  struct token tok;
+  if (str)
+    {
+      stringbuf_reset (&cur_input->buf);
+      stringbuf_add_string (&cur_input->buf, str);
+    }
+  tok.type = type;
+  tok.str = stringbuf_finish (&cur_input->buf);
+  locus_range_init (&tok.locus);
+  if (loc)
+    locus_range_copy (&tok.locus, loc);
+  putback_tkn (&tok);
+}
+
 /*
  * Read from the input all material up to "End" (case-insensitive) on a
  * line by itself.  Leave the material in input->buf.  Return last character
@@ -862,20 +855,17 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 {
   int c;
   struct locus_range range;
-  
+  struct token *tok;
+
   range.beg = input->locus;
 
   stringbuf_reset (&input->buf);
 
   /* Drain putback */
-  while (input->putback_index > 0)
+  while ((tok = input_unput (input)) != NULL)
     {
-      struct token tkn = input->putback[--input->putback_index];
-      if (tkn.str != NULL)
-	{
-	  stringbuf_add_string (&input->buf, tkn.str);
-	  free (tkn.str);
-	}
+      stringbuf_add_string (&input->buf, tok->str);
+      free (tok->str);
       if (input->putback_index > 0)
 	stringbuf_add_char (&input->buf, ' ');
     }
@@ -896,7 +886,7 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 	  char *end = start + stringbuf_len (&input->buf);
 	  char *line;
 	  size_t linelen, len;
-	  
+
 	  for (line = end - 1; line > start; line--)
 	    {
 	      if (*line == '\n')
@@ -907,19 +897,9 @@ cfg_read_to_end (struct cfginput *input, char **ptr)
 	    }
 
 	  len = linelen = end - line;
-	  while (len > 0 && isspace (*line))
-	    {
-	      line++;
-	      len--;
-	    }
-	  
-	  while (len > 0 && isspace (end[-1]))
-	    {
-	      end--;
-	      len--;
-	    }
+	  line = c_trimws (line, &len);
 
-	  if (len == 3 && strncasecmp (line, "end", 3) == 0)
+	  if (len == 3 && c_strncasecmp (line, "end", 3) == 0)
 	    {
 	      stringbuf_truncate (&input->buf, stringbuf_len (&input->buf) -
 				  linelen);
@@ -948,9 +928,14 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
   CFGPARSER_TABLE *p;
 
   *ref = NULL;
-  for (p = tab; p->name; p++)
+  p = tab;
+  if (p->type == KWT_TOPLEVEL)
+    p++;
+  for (; p->name; p++)
     {
-      if (p->type == KWT_TABREF)
+      if (p->type == KWT_TOPLEVEL)
+	continue;
+      else if (p->type == KWT_TABREF)
 	{
 	  CFGPARSER_TABLE *result = parser_find (p->ref, name, buf, ref);
 	  if (result)
@@ -966,7 +951,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
 	      return result;
 	    }
 	}
-      else if (strcasecmp (p->name, name) == 0)
+      else if (c_strcasecmp (p->name, name) == 0)
 	{
 	  *ref = p;
 	  if (p->type == KWT_ALIAS)
@@ -991,17 +976,15 @@ static CFGPARSER_TABLE global_parsetab[] = {
 };
 
 int
-cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
-	   int single_statement,
-	   enum deprecation_mode handle_deprecated,
-	   struct locus_range *retrange)
+cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
+	    int single_statement,
+	    enum deprecation_mode handle_deprecated,
+	    struct locus_range *retrange)
 {
   struct token *tok;
 
-  if (retrange)
-    {
-      retrange->beg = last_token_locus_range ()->beg;
-    }
+  locus_point_copy (&retrange->beg, &last_token_locus_range ()->beg);
+  locus_point_init (&retrange->end, NULL, NULL);
 
   for (;;)
     {
@@ -1009,21 +992,20 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 
       if (type == EOF)
 	{
-	  if (retrange)
+	  if (ptab[0].type == KWT_TOPLEVEL)
+	    goto end;
+	  else
 	    {
 	      conf_error_at_locus_point (&retrange->beg,
 					 "unexpected end of file");
 	      return CFGPARSER_FAIL;
 	    }
-	  goto end;
 	}
       else if (type == T_ERROR)
 	return CFGPARSER_FAIL;
 
       if (retrange)
-	{
-	  retrange->end = last_token_locus_range ()->end;
-	}
+	locus_point_copy (&retrange->end, &last_token_locus_range ()->end);
 
       if (tok->type == T_IDENT)
 	{
@@ -1104,10 +1086,25 @@ cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 }
 
 int
+cfgparser (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
+	   int single_statement,
+	   enum deprecation_mode handle_deprecated,
+	   struct locus_range *retrange)
+{
+  struct locus_range range = LOCUS_RANGE_INITIALIZER;
+  int rc = cfgparser0 (ptab, call_data, section_data, single_statement,
+		       handle_deprecated, &range);
+  if (retrange)
+    locus_range_copy (retrange, &range);
+  locus_range_unref (&range);
+  return rc;
+}
+
+int
 cfgparser_open (char const *filename, char const *wd)
 {
   int rc;
-  
+
   if ((include_wd = workdir_get (wd)) == NULL)
     {
       conf_error ("can't open cwd: %s", strerror (errno));
@@ -1138,7 +1135,7 @@ cfgparser_parse (char const *filename, char const *wd,
 		 enum deprecation_mode handle_deprecated, int keepwd)
 {
   int rc;
-  
+
   if (cfgparser_open (filename, wd))
     return -1;
   rc = cfgparser_loop (tab, data, data, handle_deprecated, NULL);
@@ -1185,14 +1182,14 @@ cfg_parse_end (void *call_data, void *section_data)
 {
   return CFGPARSER_END;
 }
-  
+
 int
 cfg_int_set_one (void *call_data, void *section_data)
 {
   *(int*)call_data = 1;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_string (void *call_data, void *section_data)
 {
@@ -1246,7 +1243,7 @@ cfg_assign_string_from_file (void *call_data, void *section_data)
   *(char**)call_data = s;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_bool (void *call_data, void *section_data)
 {
@@ -1275,7 +1272,7 @@ cfg_assign_bool (void *call_data, void *section_data)
     }
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_unsigned (void *call_data, void *section_data)
 {
@@ -1296,7 +1293,7 @@ cfg_assign_unsigned (void *call_data, void *section_data)
   *(unsigned *)call_data = n;
   return 0;
 }
-  
+
 int
 cfg_assign_int (void *call_data, void *section_data)
   {
@@ -1357,7 +1354,7 @@ cfg_assign_mode (void *call_data, void *section_data)
   *(mode_t*)call_data = n;
   return CFGPARSER_OK;
 }
-  
+
 int
 cfg_assign_int_enum (int *dst, struct token *tok, struct kwtab *kwtab,
 		     char *what)
