@@ -48,7 +48,6 @@ endif
 if COND_LUA
   pound_SOURCES += pndlua.c
   LDADD += -llua -lm
-  AM_CPPFLAGS += -DWITH_LUA=1
 endif
 
 if COND_INOTIFY

@@ -5844,7 +5844,7 @@ struct string_value pound_settings[] = {
     }
   },
   { "Lua support", STRING_CONSTANT, { .s_const =
-#if WITH_LUA
+#if ENABLE_LUA
 				     "enabled"
 #else
 				     "disabled"
