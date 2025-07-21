@@ -287,19 +287,21 @@ submatch_realloc (struct submatch *sm, GENPAT re)
 }
 
 static void
-submatch_free (struct submatch *sm)
-{
-  free (sm->matchv);
-  free (sm->subject);
-  submatch_init (sm);
-}
-
-static void
 submatch_reset (struct submatch *sm)
 {
+  string_unref (sm->tag);
+  sm->tag = NULL;
   free (sm->subject);
   sm->subject = NULL;
   sm->matchn = 0;
+}
+
+static void
+submatch_free (struct submatch *sm)
+{
+  submatch_reset (sm);
+  free (sm->matchv);
+  submatch_init (sm);
 }
 
 void
@@ -320,13 +322,27 @@ submatch_queue_get (struct submatch_queue const *smq, int n)
 }
 
 static struct submatch *
-submatch_queue_push (struct submatch_queue *smq)
+submatch_queue_push (struct submatch_queue *smq, STRING *tag)
 {
   struct submatch *sm;
   smq->cur = (smq->cur + 1) % SMQ_SIZE;
   sm = submatch_queue_get (smq, 0);
   submatch_reset (sm);
+  sm->tag = string_ref (tag);
   return sm;
+}
+
+static int
+submatch_queue_find (struct submatch_queue *smq, char const *tag, size_t len)
+{
+  int i;
+  for (i = 0; i < SMQ_SIZE; i++)
+    {
+      char const *s = string_ptr (submatch_queue_get (smq, i)->tag);
+      if (s && strlen (s) == len && memcmp (s, tag, len) == 0)
+	return i;
+    }
+  return -1;
 }
 
 static int
@@ -334,7 +350,6 @@ submatch_exec (GENPAT re, char const *subject, struct submatch *sm)
 {
   int res;
 
-  submatch_free (sm);
   if (submatch_realloc (sm, re))
     {
       lognomem ();
@@ -636,19 +651,42 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	      if (str[0] == '$' && *p == '(')
 		{
 		  long n;
-		  errno = 0;
-		  n = strtoul (p + 1, &p, 10);
-		  if (errno || *p != ')')
+
+		  p++;
+		  len = strcspn (p, "()");
+		  if (p[len] != ')')
 		    {
-		      int len = str - start + 1;
 		      logmsg (LOG_WARNING,
 			      "%s \"%s\": missing closing parenthesis in"
-			      " reference started in position %d ",
-			      what, start, len);
+			      " reference started at offset %ld",
+			      what, start, str - start + 1);
+		      p += len;
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      result = -1;
 		      continue;
+		    }
+
+		  if (c_isdigit (*p))
+		    {
+		      errno = 0;
+		      n = strtoul (p, &p, 10);
+		      if (errno || *p != ')')
+			{
+			  logmsg (LOG_WARNING,
+				  "%s \"%s\": invalid reference number "
+				  "at offset %ld",
+				  what, start, p - start + 1);
+			  stringbuf_add (sb, str, p - start);
+			  str = p;
+			  result = -1;
+			  continue;
+			}
+		    }
+		  else
+		    {
+		      n = submatch_queue_find (&phttp->smq, p, len);
+		      p += len;
 		    }
 		  if (n < 0 || n >= SMQ_SIZE)
 		    {
@@ -669,10 +707,10 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 		{
 		  if (*p != '}')
 		    {
-		      int n = str - start + 1;
 		      logmsg (LOG_WARNING,
 			      "%s \"%s\": missing closing brace in reference"
-			      " started in position %d", what, start, n);
+			      " started at offset %ld",
+			      what, start, str - start + 1);
 		      stringbuf_add (sb, str, p - str);
 		      str = p;
 		      result = -1;
@@ -706,7 +744,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	{
 	  int n = str - start + 1;
 	  logmsg (LOG_WARNING,
-		  "%s \"%s\": unescaped %% character in position %d",
+		  "%s \"%s\": unescaped %% character at offset %d",
 		  what, start, n);
 	  stringbuf_add_char (sb, *str);
 	  str++;
@@ -3249,21 +3287,24 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (http_request_get_url (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str,
+			     submatch_queue_push (&phttp->smq, cond->tag));
       break;
 
     case COND_PATH:
       if (http_request_get_path (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str,
+			     submatch_queue_push (&phttp->smq, cond->tag));
       break;
 
     case COND_QUERY:
       if (http_request_get_query (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (cond->re, str, submatch_queue_push (&phttp->smq));
+	res = submatch_exec (cond->re, str,
+			     submatch_queue_push (&phttp->smq, cond->tag));
       break;
 
     case COND_QUERY_PARAM:
@@ -3284,18 +3325,18 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    res = 0;
 	  else
 	    res = submatch_exec (cond->sm.re, str,
-				 submatch_queue_push (&phttp->smq));
+				 submatch_queue_push (&phttp->smq, cond->tag));
 	}
       break;
 
     case COND_HDR:
       res = match_headers (&req->headers, cond->re,
-			   submatch_queue_push (&phttp->smq));
+			   submatch_queue_push (&phttp->smq, cond->tag));
       break;
 
     case COND_HOST:
       res = match_headers (&req->headers, cond->re,
-			   submatch_queue_push (&phttp->smq));
+			   submatch_queue_push (&phttp->smq, cond->tag));
       if (res)
 	{
 	  /*
@@ -3353,7 +3394,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	if (subj)
 	  {
 	    res = submatch_exec (cond->sm.re, subj,
-				 submatch_queue_push (&phttp->smq));
+				 submatch_queue_push (&phttp->smq, cond->tag));
 	    free (subj);
 	  }
 	else

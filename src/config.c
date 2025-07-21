@@ -1400,6 +1400,7 @@ service_cond_free (SERVICE_COND *sc)
 	 operates on one of cond types handled above. */
       abort ();
     }
+  string_unref (sc->tag);
   free (sc);
 }
 
@@ -1435,7 +1436,7 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 
 static int
 parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
-		  char **from_file, int *watch)
+		  char **from_file, int *watch, STRING **tag)
 {
   enum
   {
@@ -1450,6 +1451,7 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     MATCH_FILEWATCH,
     MATCH_POSIX,
     MATCH_PCRE,
+    MATCH_TAG
   };
 
   static struct config_option optab[] = {
@@ -1465,6 +1467,7 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     { "posix",     MATCH_POSIX },
     { "pcre",      MATCH_PCRE },
     { "perl",      MATCH_PCRE },
+    { "tag",       MATCH_TAG, 1 },
     { NULL }
   };
 
@@ -1536,6 +1539,16 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 	  return CFGPARSER_FAIL;
 #endif
 	  break;
+
+	case MATCH_TAG:
+	  if (tag)
+	    *tag = string_init (arg);
+	  else
+	    {
+	      conf_error ("unexpected token: %s", "-tag");
+	      return CFGPARSER_FAIL;
+	    }
+	  break;
 	}
     }
   return CFGPARSER_OK;
@@ -1604,7 +1617,7 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
   struct token *tok;
   int rc;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL, NULL))
     return CFGPARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -1683,6 +1696,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 	}
 
       hc = service_cond_alloc (cond_type);
+      hc->tag = string_ref (cond->tag);
       rc = genpat_compile (&hc->re, gpt, expr, flags);
       if (rc)
 	{
@@ -1789,8 +1803,10 @@ parse_cond_matcher (SERVICE_COND *top_cond,
   char *from_file;
   int watch;
   STRING *ref;
+  STRING *tag = NULL;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file, &watch))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file,
+			&watch, &tag))
     return CFGPARSER_FAIL;
 
   if (from_file)
@@ -1810,6 +1826,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
       if (watch)
 	{
 	  cond = service_cond_append (top_cond, COND_DYN);
+	  cond->tag = tag;
 	  cond->dyn.boolean.op = BOOL_OR;
 	  cond->dyn.string = ref;
 	  cond->dyn.cond_type = type;
@@ -1821,6 +1838,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
       else
 	{
 	  cond = service_cond_append (top_cond, COND_BOOL);
+	  cond->tag = tag;
 	  cond->boolean.op = BOOL_OR;
 	  rc = dyncond_read_immediate (cond, from_file,
 				       ref, type, gp_type, flags);
@@ -1839,6 +1857,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
 
       xstringbuf_init (&sb);
       cond = service_cond_append (top_cond, type);
+      cond->tag = tag;
       switch (type)
 	{
 	case COND_HOST:
@@ -5822,9 +5841,9 @@ struct string_value pound_settings[] = {
 #if WITH_INOTIFY
 				 "inotify"
 #elif WITH_KQUEUE
-                                 "kqueue"
+				 "kqueue"
 #else
-                                 "periodic"
+				 "periodic"
 #endif
     }
   },

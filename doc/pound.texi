@@ -1042,23 +1042,49 @@ End
 @end group
 @end example
 
+@cindex tagged statements
+@cindex referring to subexpressions
+@cindex referring to previous conditionals
 When several matching statements are used, these forms refer to the
-last one that matched.  Subexpressions in prior statements can be referred to
-using the @samp{$@var{i}(@var{j})} construct.  Here, @var{j} is the
-0-based number of the statement, counted from the last one upwards.
-For example, given the following statements:
+last matched one.  Subexpressions in prior statements can be referred to
+using the @samp{$@var{i}(@var{j})} construct.  Here, @var{j} is either
+the @dfn{tag} of the expression to refer to (if the statement was
+tagged, @pxref{tag}), or the 0-based number of the statement, counted
+from the last one upwards.  For example, consider the following statements:
 
 @example
 @group
-Host -re "www\.(.+)"
-Header -icase "^Content-Type: *(.*)"
-Path "^/static(/.*)?"
+Host -tag "host" -re "(www\\.)?(.+)"
+Header -tag "type" -icase "^Content-Type:[[:space:]]*(([^/]+)/([^;]+)).*"
+Path -tag "dir" "^/static(/.*)?"
 @end group
 @end example
 
+If the incoming request was @samp{GET /static/index.html} with the two
+headers
+
+@example
+Host: example.org
+Content-Type: text/html
+@end example
+
 @noindent
-@samp{$1} refers to the subexpression of @code{Path}, @samp{$1(1)}
-to that of @code{Header}, and @code{$1(2)} to that of @code{Host}.
+then, the backreferences and the corresponding strings will be:
+
+@example
+$1 @result{} /index.html
+$1(dir) @result{} /index.html
+$1(1) @result{} text/html
+$2(1) @result{} text
+$3(1) @result{} html
+$1(type) @result{} text/html
+$2(type) @result{} text
+$3(type) @result{} html
+$1(2) @result{} www.
+$2(2) @result{} example.org
+$1(host) @result{} www.
+$2(host) @result{} example.org
+@end example
 
 @cindex request accessor
 String arguments to @code{Set} statements can also contain
@@ -2545,8 +2571,28 @@ Path "^/static(/.*)?"
 @end group
 @end example
 
+@noindent
 @code{$1} refers to the subgroup of @code{Path}, @code{$1(1)} refers to that of
 @code{Header}, and @code{$1(2)} to that of @code{Host}.
+
+@cindex tagged statements
+Conditional statements can also be tagged (@pxref{tag}).  When referring to a
+subexpression in such a statement, the form @code{$@var{n}(@var{t})}
+can be used, where @var{t} is the tag.  For example, after tagging the
+statements in the example above:
+
+@example
+@group
+Host -tag "host" -re "www\\.(.+)"
+Header -tag "type" -re -icase "^Content-Type: *(.*)"
+Path -tag "dir" "^/static(/.*)?"
+@end group
+@end example
+
+@noindent
+the corresponding strings can be referred to as: @code{$1} or
+@code{$1(dir)}, @code{$1(type)}, and @code{$1(host)},
+correspondingly.
 
 Curly braces may be used to avoid incorrectly parsing text fragment
 that follows the reference as being its part.  This is useful if the
@@ -3862,75 +3908,97 @@ instructed otherwise by @var{options} (see below).
 @end deffn
 
 In these directives, @var{options} is a whitespace-delimited list of
-zero or more flags from the following table:
+zero or more options discussed below:
 
-@float Table, conditional-option
-@caption{Conditional directive flags}
-@multitable @columnfractions .30 .70
-@headitem Flag @tab Meaning
+@anchor{conditional-option}
+@deffn {Conditional option} -beg
+Exact match at the beginning of string (prefix match).
+@end deffn
 
-@kwindex -beg, header matching flag
-@cindex prefix match, headers
-@item @code{-beg} @tab Exact match at the beginning of string (prefix match).
+@deffn {Conditional option} -case
+@cindex case insensitive matching
+Case-sensitive comparison.
+@end deffn
 
-@kwindex -case, header matching flag
-@cindex case insensitive match, headers
-@item @code{-case} @tab Case-sensitive comparison.
+@deffn {Conditional option} -contain
+@cindex substring matching
+Match if @var{pattern} is a substring of the original value.
+@end deffn
 
-@kwindex -contain, header matching flag
-@cindex substring match, headers
-@item @code{-contain} @tab Match if @var{pattern} is a substring of
-the original value.
+@deffn {Conditional option} -end
+@cindex suffix matching
+Exact match at the end of string (suffix match).
+@end deffn
 
-@kwindex -end, header matching flag
-@cindex suffix match, headers
-@item @code{-end} @tab Exact match at the end of string (suffix match).
+@deffn {Conditional option} -exact
+@cindex exact matching
+Exact string match.
+@end deffn
 
-@kwindex -exact, header matching flag
-@cindex exact match, headers
-@item @code{-exact} @tab Use exact string match.
-
-@kwindex -file, header matching flag
-@cindex file lookup, headers
 @anchor{-file}
-@item @code{-file} @tab Treat @var{pattern} as
-the name of a file to read patterns from.  If the name is relative, it
-will be looked up in the @ref{include directory}.  Patterns are read
-from the file line by line.  Leading and trailing whitespace is
-removed.  Empty lines and comments (lines starting with @code{#}) are
-ignored.
+@deffn {Conditional option} -file
+@cindex file lookup
+Treat @var{pattern} as the name of a file to read patterns from.  If
+the name is relative, it will be looked up in the @ref{include
+directory}.  Patterns are read from the file line by line.  Leading
+and trailing whitespace is removed.  Empty lines and comments (lines
+starting with @code{#}) are ignored.
+@end deffn
 
-@kwindex -filewatch, header matching flag
-@item @code{-filewatch} @tab Same as @code{-file}, but the file will
-be monitored and read again if any change occurs.
+@deffn {Conditional option} -filewatch
+Same as @code{-file}, but the file will be monitored for changes and
+read again as soon as such are detected.  If possible, this uses
+OS-specific API (@code{inotify} on GNU/Linux and @code{kqueue} on
+various BSD systems).  On systems that don't provide such an API
+the file will be checked for changes periodically.  The interval
+between two successive checks is defined by the @code{WatcherTTL}
+setting (@pxref{Timeouts, WatcherTTL}).
+@end deffn
 
-@kwindex -icase, header matching flag
-@cindex case sensitive match, headers
-@item @code{-icase} @tab Case-insensitive comparison.
+@deffn {Conditional option} -icase
+@cindex case sensitive matching
+Case-insensitive comparison.
+@end deffn
 
-@kwindex -pcre, header matching flag
+@deffn {Conditional option} -pcre
+@deffnx {Conditional option} -perl
 @cindex Perl-compatible regular expression match, headers
 @cindex PCRE match, headers
-@item @code{-pcre} @tab Use Perl-compatible regular expression.
-@pxref{Regular Expressions}.
+Use Perl-compatible regular expression.  @xref{Regular Expressions}.
+@end deffn
 
-@kwindex -perl, header matching flag
-@cindex Perl-compatible regular expression match, headers
-@cindex PCRE match, headers
-@item @code{-perl} @tab Same as @code{-pcre}.
+@deffn {Conditional option} -posix
+@cindex posix regular expression matching
+Use POSIX extended regular expression. @xref{Regular Expressions}.
+@end deffn
 
-@kwindex -posix, header matching flag
-@cindex posix regular expression match, headers
-@item @code{-posix} @tab Use POSIX extended regular expression.
-@pxref{Regular Expressions}.
+@deffn {Conditional option} -re
+@cindex regular expression matching
+Use regular expression match.  This assumes the default regular
+expression type, as set by the @code{RegexType} directive
+(@pxref{Regular Expressions}).
+@end deffn
 
-@kwindex -re, header matching flag
-@cindex regular expression match, headers
-@item @code{-re} @tab Use regular expression match.  This assumes the
-default regular expression type, as set by the @code{RegexType}
-directive (@pxref{Regular Expressions}).
-@end multitable
-@end float
+@anchor{tag}
+@deffn {Conditional option} -tag "@var{t}"
+Tag this conditional with string @var{t}.  The tag can be used by
+another statements to refer to substrings obtained when matching this
+pattern.
+
+For example:
+
+@example
+@group
+Host -tag host -re "(www\\.)?(example.(org|com))"
+Header "Content-Type" -tag "type" -re -icase "^application/(.+)"
+Path -tag "path" -re "/public/(.+)"
+SetPath "$3(host)/$1(type)$1(path)"
+@end group
+@end example
+
+@xref{Backreference Expansion}, for a detailed discussion of how
+backreferences are expanded in strings.
+@end deffn
 
 The following options are mutually exclusive: @code{-beg}, @code{-contain},
 @code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),

@@ -745,6 +745,7 @@ struct pass_file
 typedef struct _service_cond
 {
   enum service_cond_type type;
+  STRING *tag;
   WATCHER *watcher;
   union
   {
@@ -969,6 +970,7 @@ struct submatch
   size_t matchmax;
   POUND_REGMATCH *matchv;
   char *subject;
+  STRING *tag;
 };
 
 #define SMQ_SIZE 8

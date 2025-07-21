@@ -1160,16 +1160,26 @@ statement.  Numbering of subexpressions starts at 1 (\fB$0\fR refers
 to the entire matching string).  Numbering of matches starts
 at 0.
 .IP
+Conditional statements can also be tagged using the
+.BI -tag " T "
+option.  When referring to a
+subexpression in such a statement, the form
+\fB$\fIN\fB(\fIT\fB)\fR can be used.
+.IP
 For example, given the following statements
 .IP
 .EX
-Host -re "www\\.(.+)"
-Header -re -icase "^Content-Type: *(.*)"
-Path "^/static(/.*)?"
+Host -tag "host" -re "www\\.(.+)"
+Header -tag "type" -re -icase "^Content-Type: *(.*)"
+Path -tag "dir" "^/static(/.*)?"
 .EE
 .IP
-\fB$1\fR refers to the subgroup of \fBPath\fR, \fB$1(1)\fR - to that of
-\fBHeader\fR, and \fB$1(2)\fR - to that of \fBHost\fR.
+.BR $1 " or " $1(dir)
+refers to the subgroup of \fBPath\fR,
+.BR $1(1) " or " $1(type)
+- to that of \fBHeader\fR, and
+.BR $1(2) " or " $1(host)
+- to that of \fBHost\fR.
 .IP
 Curly braces may be used to avoid incorrectly parsing text fragment
 that follows the reference as being its part.  This is useful if the
@@ -1606,6 +1616,13 @@ settings.
 Use regular expression matching, as set by the
 .B RegexType
 statement.
+.TP
+\fB\-tag "\fIT\fB"
+Tag the statement with string \fIT\fR.  This string can be used in
+subsequent modification statements to refer to a subexpression of this
+statement's pattern, using the following syntax:
+.BI $ I ( T )\fR,
+where \fII\fR is the ordinal number of the subexpression.
 .PP
 For example, the following will match any request whose \fBHost\fR
 header begins with "www." (case-insensitive):
