@@ -53,7 +53,6 @@ string_ninit (char const *s, size_t n)
   STRING *str = string_alloc (n);
   memcpy (str->str, s, n);
   str->str[n] = 0;
-  string_ref (str);
   return str;
 }
 
