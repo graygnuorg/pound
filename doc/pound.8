@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 15, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "July 21, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -753,12 +753,13 @@ Same as above, but \fIfilename\fR will be watched for changes during
 the runtime.  Once a change is detected, the file will be re-read and
 the ACL updated.
 .IP
-If possible, this uses
-.BR inotify (7).
-On systems that does not support
-.BR inotify ,
-the file will be checked for changes periodically.  The chech interval
-is defined by the
+If possible, this uses OS-specific API
+.RB ( inotify (7),
+on GNU/Linux and
+.BR kqueue (7)
+on *BSD systems).  On systems that don't provide such an API
+the file will be checked for changes periodically.  The interval
+between two successive checks is defined by the
 .B WatcherTTL
 setting.
 .TP
@@ -802,10 +803,12 @@ effect until next
 statement or end of the configuration file, whichever occurs first.
 .TP
 \fBWatcherTTL \fIN\fR
-If file reference ACLs (i.e. \fIACL -filewatch\fR) are used on a
-system that doesn't support
-.BR inotify (7)
-API, this directive defines the interval between two successive checks
+If conditions with \fB-filewatch\fR flag are used, and the underlying
+operating system doesn't provide file system monitoring API
+.RB ( inotify
+or
+.BR kqueue ),
+this directive defines the interval between two successive checks
 of file modification times.
 .SS Control socket
 .B Pound
@@ -1451,12 +1454,13 @@ Same as above, but \fIfilename\fR will be watched for changes during
 the runtime.  Once a change is detected, the file will be re-read and
 the ACL updated.
 .IP
-If possible, this uses
-.BR inotify (7).
-On systems that does not support
-.BR inotify ,
-the file will be checked for changes periodically.  The chech interval
-is defined by the
+If possible, this uses OS-specific filesystem monitoring API
+.RB ( inotify (7),
+on GNU/Linux and
+.BR kqueue (7)
+on *BSD systems).  On systems that don't provide such API,
+the file will be checked for changes periodically, in intervals
+defined by the
 .B WatcherTTL
 setting.
 .TP
@@ -1489,6 +1493,20 @@ The request must contain at least one header matching the given
 \fIpattern\fR.  By default, \fIpattern\fR is treated as
 case-insensitive extended regular expression.  This can be changed by
 \fIoptions\fR, described below.
+.TP
+\fBHeader\fR "\fIName\fR" [\fIoptions\fR] "\fIvalue\fR"
+Alternative form of the \fBHeader\fR statement.  Equivalent to
+.IP
+.EX
+\fBHeader\fR [\fIoptions\fR] "\fIName\fB:[[:space:]]*\fIvalue\fR"
+.EE
+.IP
+This form makes it possible to use \fB\-file\fR or \fB\-filewatch\fR
+flags, e.g.:
+.IP
+.EX
+Header Content-Type -file "conttype.txt"
+.EE
 .TP
 \fBHost\fR [\fIoptions\fR] "\fIhostname\fR"
 The request must contain a \fBHost\fR header whose value matches
@@ -1555,6 +1573,20 @@ directory\fR (see the discussion of the \fBIncludeDir\fR directory
 above).  Patterns are read from the file line by line.  Leading and
 trailing whitespace is removed.  Empty
 lines and comments (lines starting with \fB#\fR) are ignored.
+.TP
+.B \-filewatch
+Same as \fB\-file\fR, except that the file will be monitored for
+changes and re-read as soon as these occur.
+.IP
+If possible, this uses OS-specific API
+.RB ( inotify (7),
+on GNU/Linux and
+.BR kqueue (7)
+on *BSD systems).  On systems that don't provide such an API
+the file will be checked for changes periodically.  The interval
+between two successive checks is defined by the
+.B WatcherTTL
+setting.
 .TP
 .B \-icase
 Case-insensitive comparison.
