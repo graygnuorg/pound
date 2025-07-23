@@ -51,9 +51,8 @@ end
 #:mtime sleep 1
 
 run echo 127.0.0.2 >> aclfile
+logtail "file reloaded"
 end
-
-#:mtime sleep 2
 
 GET /echo/foo
 Host: example.org
@@ -63,9 +62,8 @@ end
 end
 
 run rm aclfile
+logtail "file removed"
 end
-
-#:mtime sleep 2
 
 GET /echo/foo
 Host: example.org
@@ -75,9 +73,8 @@ end
 end
 
 run cp aclfile.full aclfile
+logtail "file restored"
 end
-
-#:mtime sleep 2
 
 GET /echo/foo
 Host: example.org

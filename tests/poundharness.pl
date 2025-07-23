@@ -190,7 +190,7 @@ GetOptions('config|f=s' => \$config,
 	   'startup-timeout|t=n' => \$startup_timeout,
 	   'include-dir=s' => \$include_dir,
 	   'fakedns=s' => \$fakedns,
-           'valgrind=s' => \$valgrind,
+	   'valgrind=s' => \$valgrind,
 	   'source-address|a=s@' => sub {
 	       my (undef, $ip) = @_;
 	       assert_source_ip($ip);
@@ -491,9 +491,11 @@ sub runner {
     }
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
+    STDOUT->autoflush(1);
+    STDERR->autoflush(1);
     my @cmd = (
-	'pound', '-p', $pid_file, '-f', $config, '-v',
-	 '-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
+	'pound', '-p', $pid_file, '-f', $config, '-v', '-e',
+	'-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
     );
     if ($valgrind) {
 	unshift @cmd, 'valgrind', '--log-file=' . $valgrind;
@@ -1080,6 +1082,11 @@ sub parse_runcom {
 	    next;
 	}
 
+	if (/^logtail\s+\"(.+)\"(:?\s+([[:digit:]]+))?\s*$/) {
+	    $self->{RUNCOM}{tail} = [ $log_file, $1, $2 ];
+	    next;
+	}
+
 	$self->syntax_error;
     }
     $self->{eof} = 1;
@@ -1096,15 +1103,38 @@ sub runcom {
 		    $self->{RUNCOM}{command});
     close $child_stdin;
 
+    my $tail;
+    if ($self->{RUNCOM}{tail}) {
+	$tail = Tail->new(@{$self->{RUNCOM}{tail}});
+    }
+
     my $sel = IO::Select->new();
     $sel->add($child_stdout, $child_stderr);
     my $CHUNK_SIZE = 1000;
     my @ready;
     my %data = ( $child_stdout => '', $child_stderr => '' );
+    my $timeout = $self->{RUNCOM}{timeout};
+    my @args;
+    push @args, 1 if $timeout;
+    my $start = time;
+    while (1) {
+	$! = 0;
+	@ready = $sel->can_read(@args);
+	unless (@ready) {
+	    if ($!) {
+		$self->transcript("waiting for output: $!",
+				  locus => $self->{RUNCOM});
+		last;
+	    }
+	    last unless $timeout;
+	}
+	if ($timeout && time - $start > $timeout) {
+	    $self->transcript("timed out", locus => $self->{RUNCOM});
+	    kill 'KILL', $pid if defined($status_codes{$pid});
+	    last;
+	}
 
-    while (@ready = $sel->can_read) {
 	foreach my $fh (@ready) {
-	    my $data;
 	    while (1) {
 		my $len = sysread($fh, $data{$fh}, $CHUNK_SIZE,
 				  length($data{$fh}));
@@ -1168,6 +1198,14 @@ sub runcom {
 	    $self->transcript("stderr differs:\nrx: {$s}",
 			      locus => $self->{RUNCOM});
 	    $ok = 0;
+	}
+    }
+
+    if ($ok && $tail) {
+	$ok = $tail->wait;
+	if ($ok == 0) {
+	    $self->transcript("expected string didn't appear in logfile");
+	    $self->{failures}++;
 	}
     }
 
@@ -1296,6 +1334,40 @@ sub parse_expect_body {
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file");
+}
+
+package Tail;
+use strict;
+use warnings;
+use Carp;
+use Fcntl qw(:seek);
+
+sub new {
+    my ($class, $file, $expect, $ttl) = @_;
+    open(my $fh, '<', $file) or croak "can't open $file: $!";
+    seek $fh, 0, SEEK_END;
+    return bless { file => $file, fh => $fh, expect => $expect,
+		   ttl => $ttl // 2 }, $class;
+}
+
+sub wait {
+    my $self = shift;
+    my $line = '';
+    my $fh = $self->{fh};
+    my $start = time;
+    while (1) {
+	if (my $s = <$fh>) {
+	    $line .= $s;
+	    if ($line =~ /\n/m) {
+		chomp($line);
+		return 1 if $line =~ /$self->{expect}/;
+		$line = '';
+	    }
+	} elsif (time - $start >= $self->{ttl}) {
+	    return 0;
+	}
+	sleep 0.2;
+    }
 }
 
 package Stats;
@@ -2134,6 +2206,12 @@ it with a backslash.
 
 Expect text on stderr.  See the description of B<stdout> above for
 its syntax.
+
+=item B<logtail> "I<expect>" [I<T>]
+Wait for a line matching I<expect> to appear in the pound log file.  The
+optional argument I<T> sets time to wait, in seconds.  The default is 2
+seconds.  The test will fail if no matching string appears in the log within
+that time.
 
 =back
 

@@ -119,10 +119,11 @@ watcher_open_error (struct watcher *watcher, int ec)
 static void
 watcher_read_unlocked (struct watcher *watcher)
 {
-  watcher_log (LOG_INFO, watcher, "re-reading");
   watcher->clear (watcher->obj);
   if (watcher->read (watcher->obj, watcher->filename, watcher->wd) == -1)
     watcher_open_error (watcher, errno);
+  else
+    watcher_log (LOG_INFO, watcher, "file reloaded");
 }
 
 void

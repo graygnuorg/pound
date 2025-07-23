@@ -5904,6 +5904,8 @@ config_parse (int argc, char **argv)
 
       case 'e':
 	stderr_option = foreground_option = 1;
+	setlinebuf (stderr);
+	setlinebuf (stdout);
 	break;
 
       case 'F':
