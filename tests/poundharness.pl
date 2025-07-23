@@ -1096,17 +1096,17 @@ sub parse_runcom {
 sub runcom {
     my $self = shift;
 
+    my $tail;
+    if ($self->{RUNCOM}{tail}) {
+	$tail = Tail->new(@{$self->{RUNCOM}{tail}});
+    }
+
     my ($child_stdin, $child_stdout, $child_stderr);
     $child_stderr = gensym();
     %status_codes = ();
     my $pid = open3($child_stdin, $child_stdout, $child_stderr,
 		    $self->{RUNCOM}{command});
     close $child_stdin;
-
-    my $tail;
-    if ($self->{RUNCOM}{tail}) {
-	$tail = Tail->new(@{$self->{RUNCOM}{tail}});
-    }
 
     my $sel = IO::Select->new();
     $sel->add($child_stdout, $child_stderr);
@@ -1365,6 +1365,9 @@ sub wait {
 	    }
 	} elsif (time - $start >= $self->{ttl}) {
 	    return 0;
+	} else {
+	    # Clear EOF indicator
+	    seek($fh, 0, 1);
 	}
 	sleep 0.2;
     }
