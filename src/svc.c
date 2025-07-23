@@ -1837,7 +1837,7 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
   /* This generates a EC_KEY structure with no key, but a group defined */
   EC_KEY *ecdh;
   if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-    abend ("Unable to generate temp ECDH key");
+    abend (NULL, "Unable to generate temp ECDH key");
 
   SSL_CTX_set_tmp_ecdh (ctx, ecdh);
   SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
