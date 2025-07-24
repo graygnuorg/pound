@@ -35,7 +35,7 @@ end
 # Make sure file mtime is at least one second past its initial value
 #:mtime sleep 1
 run echo example.org > hostfile
-logtail "file restored"
+logtail "file reloaded"
 end
 
 GET /echo/foo

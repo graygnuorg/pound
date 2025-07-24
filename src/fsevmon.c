@@ -134,7 +134,7 @@ sentinel_setup (FSEVMON *evmon, struct watchpoint *wp)
   struct stat st;
 
   watcher_log (LOG_INFO, watcher, "file removed");
-  watcher->clear (watcher->obj);
+  watcher_clear (watcher);
   fsevmon_watchpoint_uninstall (evmon, wp);
   watcher->mode = WATCHER_NOFILE;
   sentinel = watchpoint_dir_locate (evmon, watcher->wd);

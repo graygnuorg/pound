@@ -61,7 +61,7 @@ end
 end
 
 run rm aclfile
-logtail "file removed"
+logtail "content cleared"
 end
 
 GET /echo/foo
@@ -72,7 +72,7 @@ end
 end
 
 run cp aclfile.full aclfile
-logtail "file restored"
+logtail "file reloaded"
 end
 
 GET /echo/foo

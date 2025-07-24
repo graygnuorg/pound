@@ -23,6 +23,7 @@ unsigned watcher_ttl = 180;
 
 static void watcher_stat (struct watcher *watcher);
 static void watcher_read_unlocked (struct watcher *watcher);
+static void watcher_clear_unlocked (struct watcher *watcher);
 
 void
 watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
@@ -70,7 +71,7 @@ job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
 	  if (mtime)
 	    {
 	      watcher_log (LOG_INFO, watcher, "file removed");
-	      watcher->clear (watcher->obj);
+	      watcher_clear_unlocked (watcher);
 	    }
 	}
       pthread_rwlock_unlock (&watcher->rwl);
@@ -124,6 +125,21 @@ watcher_read_unlocked (struct watcher *watcher)
     watcher_open_error (watcher, errno);
   else
     watcher_log (LOG_INFO, watcher, "file reloaded");
+}
+
+static void
+watcher_clear_unlocked (struct watcher *watcher)
+{
+  watcher->clear (watcher->obj);
+  watcher_log (LOG_INFO, watcher, "content cleared");
+}
+
+void
+watcher_clear (struct watcher *watcher)
+{
+  pthread_rwlock_wrlock (&watcher->rwl);
+  watcher_clear_unlocked (watcher);
+  pthread_rwlock_unlock (&watcher->rwl);
 }
 
 void

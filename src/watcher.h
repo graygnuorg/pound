@@ -70,6 +70,7 @@ extern WATCHPOINT_HEAD watch_head;
 void workdir_set_compat_mode (WORKDIR *wd);
 
 void watcher_reread (struct watcher *watcher);
+void watcher_clear (struct watcher *watcher);
 void watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
   ATTR_PRINTFLIKE(3,4);
 
