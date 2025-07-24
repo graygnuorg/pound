@@ -17,7 +17,6 @@ use strict;
 use warnings;
 use Socket qw(:DEFAULT :crlf);
 use threads;
-use threads::shared;
 use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
@@ -90,7 +89,6 @@ sub cleanup {
 ## -----------------------------------
 
 my %status_codes;
-share(%status_codes);
 
 $SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
 
@@ -1103,7 +1101,6 @@ sub runcom {
 
     my ($child_stdin, $child_stdout, $child_stderr);
     $child_stderr = gensym();
-    %status_codes = ();
     my $pid = open3($child_stdin, $child_stdout, $child_stderr,
 		    $self->{RUNCOM}{command});
     close $child_stdin;
@@ -1130,7 +1127,7 @@ sub runcom {
 	}
 	if ($timeout && time - $start > $timeout) {
 	    $self->transcript("timed out", locus => $self->{RUNCOM});
-	    kill 'KILL', $pid if defined($status_codes{$pid});
+	    kill 'KILL', $pid unless defined($status_codes{$pid});
 	    last;
 	}
 
@@ -1154,11 +1151,12 @@ sub runcom {
 
     my $code;
     if (!defined($status_codes{$pid})) {
-	die "failed to execute " . $self->{RUNCOM}{command} . ": $!";
+	die "failed to execute $self->{RUNCOM}{command}";
     } elsif ($status_codes{$pid} & 127) {
 	die "\"".$self->{RUNCOM}{command}."\" terminated on signal ".($status_codes{$pid} & 127);
     } else {
 	$code = $status_codes{$pid} >> 8;
+	delete $status_codes{$pid};
     }
 
     $self->transcript_ml(
@@ -1848,7 +1846,6 @@ sub request {
     local $SIG{CHLD} = sub {};
     my ($child_stdin, $child_stdout, $child_stderr);
     $child_stderr = gensym();
-    %status_codes = ();
     my $pid = open3($child_stdin, $child_stdout, $child_stderr,
 		    'poundctl', '-f', $self->{config}, '-j', $command, $arg);
     close $child_stdin;
