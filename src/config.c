@@ -4109,6 +4109,7 @@ https_parse_cert (void *call_data, void *section_data)
   struct token *tok;
   struct stat st;
   char *certname;
+  int rc = CFGPARSER_OK;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -4122,7 +4123,6 @@ https_parse_cert (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  int rc = CFGPARSER_OK;
   if (S_ISREG (st.st_mode))
     {
       rc = load_cert (certname, lst);

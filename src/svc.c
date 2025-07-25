@@ -3011,8 +3011,8 @@ find_endpoint (int method, const char *uri, int *errcode)
       }
 
   if (cp == NULL)
-    /* FIXME: Should be 405, instead of 400 (HTTP_STATUS_BAD_REQUEST) */
-    *errcode = uri_match ? HTTP_STATUS_BAD_REQUEST : HTTP_STATUS_NOT_FOUND;
+    *errcode = uri_match ? HTTP_STATUS_METHOD_NOT_ALLOWED
+                         : HTTP_STATUS_NOT_FOUND;
   return cp;
 }
 

@@ -536,7 +536,7 @@ dns_generic_addr_lookup (char const *name, int family,
       break;
 
     default:
-      abort (); // FIXME
+      abort ();
     }
 
   return dns_generic_lookup (name, rr_type, rr_name, rr_conv, presp);

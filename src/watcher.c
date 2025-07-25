@@ -90,7 +90,6 @@ watchpoint_free (struct watchpoint *wp)
 void
 watchpoint_set_compat_mode (struct watchpoint *wp)
 {
-  // FIXME: Remove existing watcher
   wp->watcher->mode = WATCHER_COMPAT;
   wp->watcher->mtime = 0;
   watcher_stat (wp->watcher);
