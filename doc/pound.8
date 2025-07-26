@@ -1531,7 +1531,7 @@ defined by the
 .B WatcherTTL
 setting.
 .TP
-\fBBasicAuth\fR "\fIfilename\fR"
+\fBBasicAuth\fR [\fIoption\fR] "\fIfilename\fR"
 Evaluates to true if the incoming request passes basic authorization
 as described in RFC 7617.  \fIfilename\fR is the name of a plain text
 file containing usernames and passwords, created with
@@ -1546,6 +1546,15 @@ reload it when it changes.
 See the section entitled
 .BR "BASIC AUTHENTICATION" ,
 for a detailed discussion.
+.IP
+For consistency with other conditions,
+.B BasicAuth
+accepts an option:
+.B \-file
+or
+.BR \-filewatch .
+The latter is the default and normally need not be specified
+explicitly.  The former can be used to disable file change monitoring.
 .TP
 \fBClientCert \fR"\fIfilename\fR"
 Evaluates to \fItrue\fR if the client presented the certificate

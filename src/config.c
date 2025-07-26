@@ -463,7 +463,7 @@ sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
 }
 
 static int
-dynacl_read (void *obj, char *filename, WORKDIR *wd)
+dynacl_read (void *obj, char const *filename, WORKDIR *wd)
 {
   return config_parse_acl_file (obj, filename, wd);
 }
@@ -1322,7 +1322,7 @@ parse_use_backend (void *call_data, void *section_data)
 
   be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
   be->v.be_name = xstrdup (tok->str);
-  locus_range_copy(&be->locus, &tok->locus);
+  locus_range_copy (&be->locus, &tok->locus);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1728,7 +1728,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 }
 
 static int
-dyncond_read (void *obj, char *filename, WORKDIR *wd)
+dyncond_read (void *obj, char const *filename, WORKDIR *wd)
 {
   SERVICE_COND *cond = obj;
   return dyncond_read_internal (cond, filename, wd,
@@ -2039,12 +2039,52 @@ static int
 parse_cond_basic_auth (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_BASIC_AUTH);
+  struct locus_range loc = LOCUS_RANGE_INITIALIZER;
   struct token *tok;
+  int opt;
+  char const *filename;
+  void *wt;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
-  if (watcher_register (cond, tok->str, &tok->locus,
-			basic_auth_read, basic_auth_clear) == NULL)
+
+  if (filename)
+    {
+      locus_range_copy (&loc, last_token_locus_range ());
+      if (! (opt & OPT_WATCH))
+	{
+	  char const *basename;
+	  WORKDIR *wd;
+	  int rc;
+
+	  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+	    return CFGPARSER_FAIL;
+	  rc = basic_auth_read (cond, basename, wd);
+	  workdir_unref (wd);
+	  if (rc == -1)
+	    {
+	      if (errno == ENOENT)
+		conf_error ("file %s does not exist", filename);
+	      else
+		conf_error ("can't open %s: %s", filename, strerror (errno));
+	      return CFGPARSER_FAIL;
+	    }
+	  locus_range_unref (&loc);
+	  return CFGPARSER_OK;
+	}
+    }
+  else if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  else
+    {
+      filename = tok->str;
+      locus_range_copy (&loc, &tok->locus);
+    }
+
+  wt = watcher_register (cond, filename, &loc,
+			 basic_auth_read, basic_auth_clear);
+  locus_range_unref (&loc);
+  if (wt == NULL)
     return CFGPARSER_FAIL;
   return CFGPARSER_OK;
 }

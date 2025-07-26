@@ -28,7 +28,7 @@ struct watcher
 {
   enum watcher_mode mode;
   void *obj;
-  int (*read) (void *, char *, WORKDIR *);
+  int (*read) (void *, char const *, WORKDIR *);
   void (*clear) (void *);
   WORKDIR *wd;                /* Working directory. */
   char *filename;             /* Filename relative to wd. */
@@ -63,7 +63,7 @@ struct watchpoint
 
 typedef struct fsevmon FSEVMON;
 
-typedef DLIST_HEAD (,watchpoint) WATCHPOINT_HEAD; 
+typedef DLIST_HEAD (,watchpoint) WATCHPOINT_HEAD;
 
 extern WATCHPOINT_HEAD watch_head;
 

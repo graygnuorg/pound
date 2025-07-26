@@ -430,7 +430,7 @@ void watcher_lock (WATCHER *);
 void watcher_unlock (WATCHER *);
 WATCHER *watcher_register (void *obj, char
 			   const *filename, struct locus_range const *loc,
-			   int (*read) (void *, char *, WORKDIR *),
+			   int (*read) (void *, char const *, WORKDIR *),
 			   void (*clear) (void *));
 int watcher_setup (void);
 
@@ -1327,7 +1327,7 @@ int foreach_service (SERVICE_ITERATOR itr, void *data);
 typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
 int foreach_backend (BACKEND_ITERATOR itr, void *data);
 
-int basic_auth_read (void *obj, char *filename, WORKDIR *wd);
+int basic_auth_read (void *obj, char const *filename, WORKDIR *wd);
 void basic_auth_clear (void *obj);
 int basic_auth (struct pass_file *pwf, struct http_request *req);
 

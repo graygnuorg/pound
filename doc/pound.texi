@@ -3818,18 +3818,23 @@ the file contents once, at the program startup.  The one with
 @xref{File-based Conditions}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} BasicAuth "@var{filename}"
+@deffn {Request Conditional} BasicAuth [@var{option}] "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
 file containing usernames and passwords, created with @command{htpasswd}
 or similar utility.  Unless the name starts with a slash, it is taken
 relative to the @code{IncludeDir} directory (@pxref{include
 directory}).
-The file is cached in the memory on the first authorization attempt,
-so that further authorizations do not result in disk operations.  The
-file will be reloaded if changed (@pxref{File-based Conditions}).
+The file is cached in the memory at startup, so that further
+authorizations do not result in disk operations.  The file will be
+reloaded if changed (@pxref{File-based Conditions}).
 
-@xref{Authentication}.
+@xref{Authentication}, for a detailed description.
+
+For consistency with other conditions, @code{BasicAuth} accepts the
+following options: @option{-file} and @option{-filewatch}.  The
+latter enables the default behavior and so need not be specified
+explicitly.  The former disables file change monitoring.
 @end deffn
 
 @deffn {Request Conditional} Header [@var{options}] "@var{pattern}"
@@ -4441,18 +4446,23 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Service Conditional} BasicAuth "@var{filename}"
+@deffn {Service Conditional} BasicAuth [@var{option}] "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
 file containing usernames and passwords, created with @command{htpasswd}
 or similar utility.  Unless the name starts with a slash, it is taken
 relative to the @code{IncludeDir} directory (@pxref{include directory}).
-The file is cached in the memory on the first authorization attempt,
-so that further authorizations do not result in disk operations.  The
-file will be rescanned if @command{pound} notices that its
-modification time has changed.
+The file is cached in the memory at startup, so that further
+authorizations do not result in disk operations.  The file will be
+rescanned upon any change.  @xref{File-based Conditions}, for a
+detailed description of this feature.
 
-@xref{Authentication}.
+@xref{Authentication}, for a detailed description.
+
+For consistency with other conditions, @code{BasicAuth} accepts the
+following options: @option{-file} and @option{-filewatch}.  The
+latter enables the default behavior and so need not be specified
+explicitly.  The former disables file change monitoring.
 @end deffn
 
 @anchor{ClientCert conditional}

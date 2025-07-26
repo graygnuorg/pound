@@ -289,7 +289,7 @@ auth_match (const char *pass, const char *hash)
 }
 
 int
-basic_auth_read (void *obj, char *filename, WORKDIR *wd)
+basic_auth_read (void *obj, char const *filename, WORKDIR *wd)
 {
   SERVICE_COND *cond = obj;
   struct pass_file *pwf = &cond->pwfile;

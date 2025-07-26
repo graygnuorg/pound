@@ -67,8 +67,9 @@ StringMatch, URL.
 
 * Changes to the "BasicAuth" statement
 
-The file supplied as an argument to the "BasicAuth" statement is
-handled as if it was given using the -filewatch flag (see above).
+The statement takes an option: -filewatch or -file.  The option
+-filewatch is the default (see above).  The -file option can be used
+to disable file change monitoring.
 
 * Changes to the "Header" statement
 

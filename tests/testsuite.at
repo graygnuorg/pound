@@ -91,6 +91,7 @@ AT_BANNER([Dynamically updated conditions])
 m4_include([dynacl.at])
 m4_include([ndynacl.at])
 m4_include([dynpat.at])
+m4_include([dynbauth.at])
 
 AT_BANNER([Includes])
 m4_include([include.at])

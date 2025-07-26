@@ -232,7 +232,7 @@ watcher_unlock (struct watcher *dp)
 struct watcher *
 watcher_register (void *obj, char const *filename,
 		  struct locus_range const *loc,
-		  int (*read) (void *, char *, WORKDIR *),
+		  int (*read) (void *, char const *, WORKDIR *),
 		  void (*clear) (void *))
 {
   struct watchpoint *wp;
