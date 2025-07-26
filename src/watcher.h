@@ -34,7 +34,7 @@ struct watcher
   char *filename;             /* Filename relative to wd. */
   struct locus_range locus;
   pthread_rwlock_t rwl;       /* Locker. */
-  time_t mtime;               /* File mtime.  Used if inotify is
+  struct timespec mtim;       /* File mtime.  Used if inotify is
 				 not available. */
   int flags;
 };

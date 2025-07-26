@@ -49,26 +49,44 @@ watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
   stringbuf_free (&sb);
 }
 
+static inline int
+mtim_init (struct timespec *ts)
+{
+  memset (ts, 0, sizeof *ts);
+}
+
+static inline int
+mtim_is_zero (struct timespec *ts)
+{
+  return ts->tv_sec == 0;
+}
+
+static inline int
+mtim_is_newer (struct timespec *ts, struct timespec *ref)
+{
+  return timespec_cmp (ts, ref) > 0;
+}
+
 static void
 job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
 {
   struct watcher *watcher = arg;
   if (ctl == job_ctl_run)
     {
-      time_t mtime;
+      struct timespec mtim;
 
       pthread_rwlock_wrlock (&watcher->rwl);
-      mtime = watcher->mtime;
+      mtim = watcher->mtim;
       watcher_stat (watcher);
-      if (watcher->mtime > mtime)
+      if (mtim_is_newer (&watcher->mtim, &mtim))
 	{
-	  if (mtime == 0)
+	  if (mtim_is_zero (&mtim))
 	    watcher_log (LOG_INFO, watcher, "file restored");
 	  watcher_read_unlocked (watcher);
 	}
-      else if (watcher->mtime == 0)
+      else if (mtim_is_zero (&watcher->mtim))
 	{
-	  if (mtime)
+	  if (!mtim_is_zero (&mtim))
 	    {
 	      watcher_log (LOG_INFO, watcher, "file removed");
 	      watcher_clear_unlocked (watcher);
@@ -91,7 +109,7 @@ void
 watchpoint_set_compat_mode (struct watchpoint *wp)
 {
   wp->watcher->mode = WATCHER_COMPAT;
-  wp->watcher->mtime = 0;
+  mtim_init (&wp->watcher->mtim);
   watcher_stat (wp->watcher);
   job_enqueue_after (watcher_ttl, job_watcher_check, wp->watcher);
 }
@@ -100,14 +118,18 @@ static void
 watcher_stat (struct watcher *watcher)
 {
   struct stat st;
-  watcher->mtime = 0;
+  mtim_init (&watcher->mtim);
   if (fstatat (watcher->wd->fd, watcher->filename, &st, 0))
     {
       if (errno != ENOENT)
 	watcher_log (LOG_ERR, watcher, "can't stat: %s", strerror (errno));
     }
   else
-    watcher->mtime = st.st_mtime;
+#if HAVE_STRUCT_STAT_ST_MTIM
+    watcher->mtim = st.st_mtim;
+#else
+    watcher->mtim.tv_sec = st.st_mtime;
+#endif
 }
 
 static inline void
