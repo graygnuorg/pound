@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 25, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "July 26, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -580,17 +580,17 @@ In file reference form, the statement is:
 .IP
 .RS
 .EX
-TrustedIP -file "\fIfilename\fR"
+TrustedIP \-file "\fIfilename\fR"
 .EE
 or
 .EX
-TrustedIP -filewatch "\fIfilename\fR"
+TrustedIP \-filewatch "\fIfilename\fR"
 .EE
 .RE
 .IP
 and the list of IP addresses is read from file \fIfilename\fR.  When
 used with
-.BR -filewatch ,
+.BR \-filewatch ,
 the file will be watched for changes and reloaded when such occur.
 .IP
 In ACL reference form, this statement takes single argument, the name of
@@ -741,7 +741,7 @@ Named ACLs can be used in \fBService\fR definitions to make services
 available from certain IP addresses only.
 .RE
 .TP
-\fBACL\fR "\fIname\fR" -file "\fIfilename\fR"
+\fBACL\fR "\fIname\fR" \fB\-file\fR "\fIfilename\fR"
 Same as above, but reads ACL definition from file \fIfilename\fR.
 The name is taken relative to the \fBIncludeDir\fR directory, unless
 it starts with a slash.
@@ -749,7 +749,7 @@ it starts with a slash.
 The ACL file should contain one CIDR per line.  Empty lines and
 comments are allowed.
 .TP
-\fBACL\fR "\fIname\fR" -filewatch "\fIfilename\fR"
+\fBACL\fR "\fIname\fR" \fB\-filewatch\fR "\fIfilename\fR"
 Same as above, but \fIfilename\fR will be watched for changes during
 the runtime.  Once a change is detected, the file will be reloaded and
 the ACL updated.
@@ -804,7 +804,7 @@ effect until next
 statement or end of the configuration file, whichever occurs first.
 .TP
 \fBWatcherTTL \fIN\fR
-If conditions with \fB-filewatch\fR flag are used, and the underlying
+If conditions with \fB\-filewatch\fR flag are used, and the underlying
 operating system doesn't provide file system monitoring API
 .RB ( inotify
 or
@@ -1508,7 +1508,7 @@ keyword on a line by itself.
 Semantically it is equivalent to the named ACL reference described
 above.
 .TP
-\fBACL\fR -file "\fIfilename\fR"
+\fBACL\fR \fB\-file\fR "\fIfilename\fR"
 Same as above, but reads ACL definition from file \fIfilename\fR.
 The name is taken relative to the \fBIncludeDir\fR directory, unless
 it starts with a slash.
@@ -1516,7 +1516,7 @@ it starts with a slash.
 The ACL file should contain one CIDR per line.  CIDRs need not be
 quoted.  Empty lines and comments are allowed.
 .TP
-\fBACL\fR -filewatch "\fIfilename\fR"
+\fBACL\fR \fB\-filewatch\fR "\fIfilename\fR"
 Same as above, but \fIfilename\fR will be watched for changes during
 the runtime.  Once a change is detected, the file will be reloaded and
 the ACL updated.
@@ -1537,11 +1537,11 @@ as described in RFC 7617.  \fIfilename\fR is the name of a plain text
 file containing usernames and passwords, created with
 .BR htpasswd (1)
 or similar utility.  Unless it starts with a slash, it is taken
-relative to the \fBIncludeDir\fR directory.  The file is cached in
-the memory on the first authorization attempt, so that further
-authorizations do not result in disk operations.  The file will
-be rescanned if \fBPound\fR notices that its modification time has
-changed.
+relative to the \fBIncludeDir\fR directory.  The file is read at
+startup and cached in memory, so that authorizations normally don't
+result in disk operations.  \fBPound\fR will monitor the file using
+the same mechanism as for \fBACL \-filewatch\fR (see above), and
+reload it when it changes.
 .IP
 See the section entitled
 .BR "BASIC AUTHENTICATION" ,
@@ -2992,11 +2992,11 @@ refers to the named ACL \fIname\fR (which must be defined earlier),
 .IP
 .RS
 .EX
-TrustedIP -file "\fIname\fR"
+TrustedIP \-file "\fIname\fR"
 .EE
 or
 .EX
-TrustedIP -filewatch "\fIname\fR"
+TrustedIP \-filewatch "\fIname\fR"
 .EE
 .RE
 .IP
@@ -3206,7 +3206,7 @@ special features, such as
 .BR BasicAuth ,
 .BR SendFile ,
 and request matching directives with the
-.B -filewatch
+.B \-filewatch
 option.  The only disk write
 .B pound
 ever does, is saving its PID in the pid file at startup.

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-25
+Pound -- history of user-visible changes. 2025-07-26
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -64,6 +64,11 @@ i.e.:
 In addition to ACL, the -filewatch flag discussed above can be used with
 the following request matching directives: Header, Path, Query, QueryParam,
 StringMatch, URL.
+
+* Changes to the "BasicAuth" statement
+
+The file supplied as an argument to the "BasicAuth" statement is
+handled as if it was given using the -filewatch flag (see above).
 
 * Changes to the "Header" statement
 

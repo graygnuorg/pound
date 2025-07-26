@@ -735,10 +735,6 @@ typedef SLIST_HEAD(,user_pass) USER_PASS_HEAD;
 
 struct pass_file
 {
-  WORKDIR *wd;
-  char *filename;
-  struct locus_range locus;
-  struct timespec mtim;
   USER_PASS_HEAD head;
 };
 
@@ -1331,6 +1327,8 @@ int foreach_service (SERVICE_ITERATOR itr, void *data);
 typedef int (*BACKEND_ITERATOR) (BACKEND *, void *);
 int foreach_backend (BACKEND_ITERATOR itr, void *data);
 
+int basic_auth_read (void *obj, char *filename, WORKDIR *wd);
+void basic_auth_clear (void *obj);
 int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);

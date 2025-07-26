@@ -19,7 +19,7 @@
 #include "extern.h"
 #include "watcher.h"
 
-unsigned watcher_ttl = 180;
+unsigned watcher_ttl = 60;
 
 static void watcher_stat (struct watcher *watcher);
 static void watcher_read_unlocked (struct watcher *watcher);
@@ -49,7 +49,7 @@ watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
   stringbuf_free (&sb);
 }
 
-static inline int
+static inline void
 mtim_init (struct timespec *ts)
 {
   memset (ts, 0, sizeof *ts);
@@ -261,7 +261,7 @@ watcher_register (void *obj, char const *filename,
   pthread_rwlock_init (&wp->watcher->rwl, NULL);
 
   rc = wp->watcher->read (wp->watcher->obj, wp->watcher->filename,
-			 wp->watcher->wd);
+			  wp->watcher->wd);
   if (rc == -1)
     {
       if (errno == ENOENT)

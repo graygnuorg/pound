@@ -760,6 +760,7 @@ End
 
 @menu
 * Regular Expressions::
+* File-based Conditions::
 * ACL::
 @end menu
 
@@ -801,6 +802,59 @@ example:
 @example
 Host -pcre -icase "(?<!www\\.)example.org"
 @end example
+
+@node File-based Conditions
+@subsection File-based Conditions
+@kwindex -file
+@kwindex -filewatch
+@cindex file monitoring
+  Most conditional directives take @option{-file} and
+@option{-filewatch} options.  When specified either option, the
+argument immediately following it is treated as the name of a file
+from which to read the list of regular expression patterns or other
+conditional parameters, depending on the directive.  The file is read
+at startup and cached in memory, so that applying the conditional does
+not result in disk accesses.
+
+If the @option{-file} option is used, the file is read at startup and its
+contents is remembered for the lifetime of the program.  It is an error
+if the file does not exist.  Any errors in the file are treated as
+configuration file errors and cause immediate program termination.
+
+In the contrast, if the @option{-filewatch} option is used, the file
+is read at startup and a file system monitor is set up to catch its
+modifications.  Once a change to the file is detected, it will be
+reloaded without interrupting the operation of the server.
+Consequently, when the @option{-filewatch} option is used, it is OK if
+the file does not exist at startup.  Furthermore, any errors in the
+file contents are reported, but don't cause program termination.
+
+@cindex inotify
+@cindex kqueue
+  The support for that option depends on the operating system.  On
+GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
+@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
+man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
+uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
+mechanism,kqueue(2),kqueue(2) man page}.}.  To check which API your
+@command{pound} binary is compiled with, examine the output of
+@command{pound -V}.
+
+@kwindex WatcherTTL
+  Both @code{inotify} and @code{kqueue} allow @command{pound} to react
+immediately on file system changes.  On systems that don't support
+either API, @command{pound} falls back to periodic checking of file
+modification time (@dfn{mtime}).  In that case, the reload is
+initiated if @code{mtime} changes.  The interval between two
+succeeding checks is defined by the @code{WatcherTTL} statement
+(@pxref{Timeouts, WatcherTTL}) and defaults to 60 seconds.
+
+  Following is a list of conditional statements that implement file
+monitoring support: @code{BasicAuth}, @code{Header}, @code{Host},
+@code{Path}, @code{Query}, @code{QueryParam}, @code{StringMatch},
+@code{URL}.
+
+@xref{request matching directives}, for a detailed discussion of these.
 
 @node ACL
 @subsection ACL
@@ -860,35 +914,8 @@ as configuration file errors and cause immediate program termination.
 @anchor{ACL filewatch}
 @kwindex -filewatch
   If the @option{-filewatch} keyword is used, the file is read at
-startup and is being monitored for changes during the runtime.  Once
-the file changes, it is re-read and the ACL is reconstructed from its
-new contents.  If the file is removed, the ACL is cleared (which means
-that it will evaluate to false during request matching), and a file
-creation monitor is installed.  Once the file is re-created, the
-monitor will wake up, the file will be rescanned and the ACL updated
-accordingly.
-
-  Consequently, when @option{-filewatch} form is used, it is OK if the
-file does not exist at startup.  Furthermore, any errors in the file
-contents are reported, but don't cause program termination.
-
-@cindex inotify
-@cindex kqueue
-  The support for that option depends on the operating system.  On
-GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
-@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
-man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
-uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
-mechanism,kqueue(2),kqueue(2) man page}.}.  To check, which API your
-@command{pound} binary is compiled with, examine the output of
-@command{pound -V}.
-
-Both @code{inotify} and @code{kqueue} allow @command{pound} to react
-immediately on the file system changes.  On systems that don't support
-either API, @command{pound} falls back to periodic checking for
-changes in file modification time.  The interval between two
-succeeding checks is defined by the @code{WatcherTTL} statement
-(@pxref{Timeouts, WatcherTTL}).
+startup and is then being monitored for changes during the runtime.
+@xref{File-based Conditions}, for details.
 
 @anchor{ACL reference}
   The third syntax form for @code{ACL} statements is @dfn{ACL
@@ -1216,10 +1243,10 @@ This hash must be prefixed by @samp{@{SHA@}}.
 @item @command{Apache}-style @samp{APR1} hash.
 @end itemize
 
- Password file is read on the first authorization attempt, after which
-its contents is stored in memory.  @command{Pound} will re-read it if
-it notices that the file's modification file has changed, so you need
-not restart the daemon if you do any changes to the file.
+ Password file is read at startup, after which its contents is stored
+in memory.  @command{Pound} will re-read it if it notices that the
+file has changed, so you need not restart the daemon if you do any
+changes to the file.
 
  Thus, if you put the @code{BasicAuth} statement in each service that
 must be accessible to authorized users only, that would do the first
@@ -2191,7 +2218,9 @@ TrustedIP -filewatch "@var{filename}"
 @end example
 
 @noindent
-reads CIDR definitions from file @var{filename}.
+reads CIDR definitions from file @var{filename} (@xref{File-based
+Conditions}, for a discussion of the difference between @option{-file}
+and @option{-filewatch}).
 
 If needed, the @code{ForwardedHeader} statement may be used to declare
 the name of the header to use instead of @code{X-Forwarded-For}.  As
@@ -2988,10 +3017,8 @@ The syntax of the file is similar to the described above, except that
 CIDRs need not be quoted and @code{Include} statements are not
 allowed.  The form with @code{-file} reads the file contents once, at
 the program startup.  The one with @code{-filewatch} reads it and then
-monitors that file for changes.  Any change to the file causes it to
-be read again, thus the ACLs are updated automatically without the
-need to restart the program.  @xref{File reference ACL}, for a
-detailed discussion of this feature.
+monitors that file for changes.  @xref{File-based Conditions}, for a
+detailed discussion.
 @end deffn
 
 @node File inclusion
@@ -3012,8 +3039,8 @@ Set the @dfn{include directory}, i.e. the directory where
 @command{pound} looks for relative file names that appear in other
 configuration directives: @code{Include}, @code{BasicAuth},
 @code{ErrorFile} (or @code{Err400} through @code{Err503}), as well as
-in the argument to @option{-file} option in service matching directives
-(@pxref{-file}).
+in the argument to @option{-file} (@option{-filewatch}) option in
+service matching directives (@xref{-file}, and @pxref{File-based Conditions}).
 
 The default value is the system configuration directory as set at
 compile time (you can check its value in the output of @command{pound
@@ -3278,7 +3305,7 @@ successive checks of file modification times.  @xref{ACL filewatch},
 for a detailed discussion of this feature and situations when this
 setting might be useful.
 
-The default value is 180 seconds.
+The default value is 60 seconds.
 @end deffn
 
 @deffn {Global directive} WSTimeOut @var{n}
@@ -3752,7 +3779,13 @@ is found whose @var{conditional_directives} yield @samp{true}, or
  @dfn{Request matching directives} or @dfn{request conditionals} are special
 statements that, being applied to a HTTP request, yield @samp{true} or
 @samp{false} depending on whether the request satisfies the condition
-described in the directive.  The following conditionals are available:
+described in the directive.
+
+All directive described below can read a list of conditions from a
+disk file and reload that list upon any changes.  @xref{File-based
+Conditions}, for a detailed discussion of this feature.
+
+The following conditionals are available:
 
 @deffn {Request Conditional} ACL "@var{name}"
 Returns @samp{true} if the source IP matches one of the CIDRs from the
@@ -3782,10 +3815,7 @@ and comments are allowed.  If @var{filename} is relative, it is looked
 up in the @ref{include directory}.  The form with @code{-file} reads
 the file contents once, at the program startup.  The one with
 @code{-filewatch} reads it and then monitors that file for changes.
-Any change to the file causes it to be read again, thus the ACLs are
-updated automatically without the need to restart the program.
-
-@xref{File reference ACL}, for a detailed discussion of this feature.
+@xref{File-based Conditions}, for a detailed discussion.
 @end deffn
 
 @deffn {Request Conditional} BasicAuth "@var{filename}"
@@ -3793,11 +3823,11 @@ Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
 file containing usernames and passwords, created with @command{htpasswd}
 or similar utility.  Unless the name starts with a slash, it is taken
-relative to the @code{IncludeDir} directory (@pxref{include directory}).
+relative to the @code{IncludeDir} directory (@pxref{include
+directory}).
 The file is cached in the memory on the first authorization attempt,
 so that further authorizations do not result in disk operations.  The
-file will be re-scanned if @command{pound} notices that its
-modification time has changed.
+file will be reloaded if changed (@pxref{File-based Conditions}).
 
 @xref{Authentication}.
 @end deffn
@@ -3939,12 +3969,8 @@ starting with @code{#}) are ignored.
 
 @deffn {Conditional option} -filewatch
 Same as @code{-file}, but the file will be monitored for changes and
-read again as soon as such are detected.  If possible, this uses
-OS-specific API (@code{inotify} on GNU/Linux and @code{kqueue} on
-various BSD systems).  On systems that don't provide such an API
-the file will be checked for changes periodically.  The interval
-between two successive checks is defined by the @code{WatcherTTL}
-setting (@pxref{Timeouts, WatcherTTL}).
+reloaded as soon as such are detected.  @xref{File-based
+Conditions}, for a detailed description.
 @end deffn
 
 @deffn {Conditional option} -icase
@@ -4389,6 +4415,18 @@ CIDRs from the named access control list @var{name}.  The ACL itself
 must have been defined earlier (@pxref{ACL definition}).
 
 @xref{ACL}, for a detailed discussion.
+@end deffn
+
+@deffn {Service Conditional} ACL @option{-file} "@var{filename}"
+@deffnx {Service Conditional} ACL @option{-filewatch} "@var{filename}"
+Reads ACL definitions from the file @var{filename}.  The file shall contain
+unquoted CIDR definitions, each one on a separate line.  Empty
+lines and comments (starting with @samp{#} and ending at the nearest
+newline) are ignored.
+
+If the @option{-filewatch} option is used, the file will be monitored
+and reloaded automatically as soon as it changes.  @xref{File-based
+Conditions}, for a detailed discussion.
 @end deffn
 
 @deffn {Service Conditional} ACL
