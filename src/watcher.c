@@ -236,7 +236,6 @@ watcher_register (void *obj, char const *filename,
 		  void (*clear) (void *))
 {
   struct watchpoint *wp;
-  char const *basename;
   int rc;
   enum watcher_mode mode;
 
@@ -248,14 +247,29 @@ watcher_register (void *obj, char const *filename,
   wp->watcher->read = read;
   wp->watcher->clear = clear;
 
-  basename = filename_split_wd (filename, &wp->watcher->wd);
-  if (!basename)
+  if (root_jail)
     {
-      conf_error_at_locus_range (loc, "can't register watcher");
-      free (wp);
-      return NULL;
+      char const *basename = filename_split_wd (filename, &wp->watcher->wd);
+      if (!basename)
+	{
+	  conf_error_at_locus_range (loc, "can't register watcher");
+	  free (wp);
+	  return NULL;
+	}
+      wp->watcher->filename = xstrdup (basename);
     }
-  wp->watcher->filename = xstrdup (basename);
+  else
+    {
+      WORKDIR *wd = get_include_wd_at_locus_range (loc);
+      if (!wd)
+	{
+	  free (wp);
+	  return NULL;
+	}
+      wp->watcher->wd = workdir_ref (wd);
+      wp->watcher->filename = xstrdup (filename);
+    }
+
   locus_range_init (&wp->watcher->locus);
   locus_range_copy (&wp->watcher->locus, loc);
   pthread_rwlock_init (&wp->watcher->rwl, NULL);
