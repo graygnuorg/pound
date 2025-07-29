@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-26
+Pound -- history of user-visible changes. 2025-07-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.16.90 (git)
+Version 4.17, 2025-07-29
 
 * Tagging conditional statements
 
@@ -17,7 +17,7 @@ using the following option:
    -tag "T"
 
 where T is an arbitrary string.  This tag can then be used to refer to
-the subexpression obtained as a result of matching, for example:
+a subexpression obtained as a result of matching, for example:
 
    Path -tag "dir" -re "^/static(/.*)"
    Header -tag "type" "Content-Type:([^/]+)/([^;]+)"
@@ -89,11 +89,11 @@ and sends back the contents of that file, if it exists.  Default
 content type is "text/plain".  Both parameters can be changed using
 request (for file name), and response (for content type) rewriting.
 
-Syntax is:
+The syntax is:
 
 	 SendFile DIR
 
-the DIR argument specifying the directory from which to serve files.
+where DIR specifies the directory from which to serve files.
 
 * Error file contents
 
@@ -109,7 +109,7 @@ of that response can be replaced with an arbitrary custom page.  For
 this to work, the listener must define a custom page for the
 status code in question using the ErrorFile statement, and error
 response rewriting must be explicitly enabled.  The latter is done
-using the following statement:
+with the following statement:
 
    RewriteErrors on
 
@@ -122,7 +122,7 @@ Service blocks, the latter overriding the former.
 
 When using -file with one of the following pattern types: -exact, -beg,
 -end, -contain, only first pattern from the file was compiled using the
-requested pattern type.  Remaining patterns were treated as POSIX regular
+requested pattern type.  Remaining ones were treated as POSIX regular
 expressions.
 
 
