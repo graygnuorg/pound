@@ -376,10 +376,10 @@
    ;; Special sections
    (list "^[ \t]*\\(Rewrite\\)[ \t]+\\(request\\|response\\)\\>"
 	 '(1 font-lock-keyword-face)
-	 '(1 font-lock-constant-face))
-   (list "^[ \t]*\\(Match\\)[ \t]+\\(and\\|or\\)\\>"
+	 '(2 font-lock-constant-face))
+   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)[ \t]+\\(and\\|or\\)\\>"
 	 '(1 font-lock-keyword-face)
-	 '(1 font-lock-constant-face))
+	 '(2 font-lock-constant-face))
 
    ;; Sections
    (list (concat "^[ \t]*"
@@ -395,7 +395,6 @@
   '("Backend"
     "Service"
     "CombineHeaders"
-    "Match"
     "Resolver"
     "Rewrite"
     "Session"))
@@ -408,9 +407,12 @@
   (concat "^[ \t]*"
 	  "\\("
 	  (regexp-opt (append pound-true-sections (list "End")) 'words)
-	  "\\|\\("
-	  (regexp-opt pound-maybe-sections 1)
-	  "[ \t]*\\(?:#.*\\)?$\\)\\)"))
+	  "\\|\\(?:"
+	  (regexp-opt pound-maybe-sections)
+	  "\\|"
+	  "\\(?:\\(?:not[ \t]+\\)*Match\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)"
+	  "\\)"
+	  "[ \t]*\\(?:#.*\\)?$\\)"))
 
 (defun pound-scan (limit stk)
   (catch 'ret
@@ -426,16 +428,17 @@
     stk))
 
 (defun pound-get-context ()
-  (let ((start (point)))
-    (cond
-     ((re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\)[ \t]*\\(?:#.*\\)?$" nil t)
-      (pound-scan start (list (marker-position (nth 2 (match-data))))))
-     ((re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
-      (let ((pos (marker-position (nth 2 (match-data)))))
-	(forward-line)
-	(pound-scan start (list pos))))
-     (t
-      '()))))
+  (save-excursion
+    (let* ((start (point))
+	   (ctx (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\)[ \t]*\\(?:#.*\\)?$" nil t)
+		    (pound-scan start (list (marker-position (nth 2 (match-data))))))))
+      (if ctx
+	  ctx
+	(goto-char start)
+	(if (re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
+	    (let ((pos (marker-position (nth 2 (match-data)))))
+	      (forward-line)
+	      (pound-scan start (list pos))))))))
 
 (defun pound-indent-level ()
   (save-excursion
