@@ -4280,10 +4280,16 @@ Specifies whether the listener must ask for the client's HTTPS
 certificate.  Allowed values for @var{mode} are:
 
 @enumerate 0
-@item Never ask for the certificate (the default).
-@item Ask for the client certificate.
-@item Ask and fail, if no certificate was presented.
-@item Ask but do not verify.
+@item
+Never ask for the certificate (the default).
+@item
+Ask for the client certificate.  It is OK if the client doesn't
+present it.
+@item
+Ask for the client certificate.  Fail if the client doesn't
+present it.
+@item
+Ask for the client certificate, but don't verify it.
 @end enumerate
 
 @var{Depth} is the depth of verification for a client certificate (up
