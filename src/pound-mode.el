@@ -1,17 +1,17 @@
 ;;; mfl-mode.el --- major mode for editing MFL sources
 
 ;; Authors: 2025 Sergey Poznyakoff
-;; Version: 0.3
+;; Version: 0.4
 ;; Keywords: Pound
 
 ;; This file is part of Pound
 ;; Copyright (C) 2025 Sergey Poznyakoff
- 
+
 ;; Pound is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
 ;; the Free Software Foundation; either version 3 of the License, or
 ;; (at your option) any later version.
- 
+
 ;; Pound is distributed in the hope that it will be useful,
 ;; but WITHOUT ANY WARRANTY; without even the implied warranty of
 ;; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -75,7 +75,7 @@
     "Service"
     "ListenHTTP"
     "ListenHTTPS"))
-    
+
 (defvar pound-section-keywords
   '("ACL"
     "ConfigText"
@@ -106,7 +106,7 @@
     "Err500"
     "Err501"
     "Err503"))
-    
+
 
 (defvar pound-matcher-keywords-1
   '("ACL"
@@ -214,22 +214,84 @@
 ))
 
 (defvar pound-match-flags
-  '("-file"      
-    "-filewatch" 
-    "-re"        
-    "-exact"     
-    "-beg"       
-    "-end"       
-    "-contain"   
-    "-icase"     
-    "-case"      
-    "-posix"     
-    "-pcre"      
-    "-perl"      
+  '("-file"
+    "-filewatch"
+    "-re"
+    "-exact"
+    "-beg"
+    "-end"
+    "-contain"
+    "-icase"
+    "-case"
+    "-posix"
+    "-pcre"
+    "-perl"
     "-tag"))
+
+(defconst pound-boolean
+  '("yes"
+    "true"
+    "on"
+    "no"
+    "false"
+    "off"))
+
+(defconst pound-log-facilities
+  '("auth"
+    "authpriv"
+    "cron"
+    "daemon"
+    "ftp"
+    "kern"
+    "lpr"
+    "mail"
+    "news"
+    "syslog"
+    "user"
+    "uucp"
+    "local0"
+    "local1"
+    "local2"
+    "local3"
+    "local4"
+    "local5"
+    "local6"
+    "local7"))
+
+(defvar pound-statements
+  (append
+   pound-matcher-keywords-1
+   pound-matcher-keywords-2
+   pound-statement-keywords
+   pound-deprecated-statements))
 
 (defconst pound-font-lock-keywords
   (list
+   ;; Boolean values
+   (list
+    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (regexp-opt pound-boolean 'words)
+    nil nil '(0 font-lock-constant-face))
+   ;; Numeric constants
+   (list
+    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    "\\<[0-9]+\\>"
+    nil nil '(0 font-lock-constant-face))
+   ;; IPv4 addresses
+   (list
+    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    "\\<[0-9]\\{1,3\\}\\(?:\\.[0-9]\\{1,3\\}\\)\\{3\\}\\>"
+    nil nil '(0 font-lock-constant-face))
+   ;; IPv6 addresses
+   (list
+    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    "\\<[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{7\\}\\>"
+    nil nil '(0 font-lock-constant-face))
+   (list
+    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    "\\<\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)?:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{5\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,2\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{4\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,3\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{3\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,4\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{2\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,5\\}::[0-9a-fA-F]\\{1,4\\}\\)\\|\\(?::\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{1,7\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{7\\}\\)\\>"
+    nil nil '(0 font-lock-constant-face))
+
    ;; Deprecated statements
    (list (concat "^[ \t]*"
 		  (regexp-opt pound-deprecated-statements 1)
@@ -264,32 +326,36 @@
    ;; Keywords
    '("\\<Family\\>"
      "\\<any\\|unix\\|inet\\|inet6\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<Disable\\>"
      "\\<SSLv2\\|SSLv3\\|TLSv1_1\\|TLSv1_2\\|TLSv1\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<Resolve\\>"
      "\\<immediate\\|first\\|all\\|srv\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<Type\\>"
      "\\<IP\\|COOKIE\\|URL\\|PARM\\|BASIC\\|HEADER\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<LogSuppress\\>"
      "\\<all\\|info\\|success\\|redirect\\|clterr\\|srverr\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<HeaderOptions\\>"
      "\\<forwarded\\|ssl\\|all\\>"
-     nil nil (0 font-lock-builtin-face))
+     nil nil (0 font-lock-constant-face))
 
    '("\\<RegexType\\>"
      "\\<posix\\|pcre\\|perl\\>"
-     nil nil (0 font-lock-builtin-face))
-   
+     nil nil (0 font-lock-constant-face))
+
+   (list "\\<LogFacility\\>"
+	 (regexp-opt pound-log-facilities 'words)
+	 nil nil '(0 font-lock-constant-face))
+
    ;; Reqular keywords
    (list (concat "^[ \t]*"
 		  (regexp-opt pound-statement-keywords 1)
@@ -300,7 +366,7 @@
 		  (regexp-opt pound-statement-keywords 1)
 		  "[ \t]*\\(?:#.*\\)?$")
 	  '(1 font-lock-keyword-face))
-   
+
    ;; Named sections
    (list (concat "^[ \t]*"
 		  (regexp-opt pound-named-section-keywords 1)
@@ -426,6 +492,8 @@
 (defvar pound-mode-syntax-table
   (let ((syntab (make-syntax-table)))
     (modify-syntax-entry ?_ "\w" syntab)
+    (modify-syntax-entry ?: "\w" syntab)
+    (modify-syntax-entry ?. "\w" syntab)
     (modify-syntax-entry ?\" "\"" syntab)
     (modify-syntax-entry ?\# "<" syntab)
     (modify-syntax-entry ?\n ">" syntab)
@@ -439,7 +507,7 @@
     (define-key map "\C-c\C-c" 'pound-lint)
     (define-key map "\e\C-\\" 'indent-region)
     map))
-    
+
 ;;;###autoload
 (defun pound-mode ()
   "Major mode for editing pound configuration files.
@@ -467,5 +535,3 @@ Other key bindings are:
 
 (provide 'pound-mode)
 ;;; pound-mode ends
-
-  
