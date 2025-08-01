@@ -269,26 +269,26 @@
   (list
    ;; Boolean values
    (list
-    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (concat "^[ \t]*" (regexp-opt pound-statements))
     (regexp-opt pound-boolean 'words)
     nil nil '(0 font-lock-constant-face))
    ;; Numeric constants
    (list
-    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (concat "^[ \t]*" (regexp-opt pound-statements))
     "\\<[0-9]+\\>"
     nil nil '(0 font-lock-constant-face))
    ;; IPv4 addresses
    (list
-    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (concat "^[ \t]*" (regexp-opt pound-statements))
     "\\<[0-9]\\{1,3\\}\\(?:\\.[0-9]\\{1,3\\}\\)\\{3\\}\\>"
     nil nil '(0 font-lock-constant-face))
    ;; IPv6 addresses
    (list
-    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (concat "^[ \t]*" (regexp-opt pound-statements))
     "\\<[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{7\\}\\>"
     nil nil '(0 font-lock-constant-face))
    (list
-    (concat "^[ \t]*" (regexp-opt pound-statements 1))
+    (concat "^[ \t]*" (regexp-opt pound-statements))
     "\\<\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)?:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{5\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,2\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{4\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,3\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{3\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,4\\}:\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{2\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{0,5\\}::[0-9a-fA-F]\\{1,4\\}\\)\\|\\(?::\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{1,7\\}\\)\\|\\(?:[0-9a-fA-F]\\{1,4\\}\\(?::[0-9a-fA-F]\\{1,4\\}\\)\\{7\\}\\)\\>"
     nil nil '(0 font-lock-constant-face))
 
