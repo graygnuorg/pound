@@ -159,6 +159,7 @@
     "HeaderOption"
     "ID"
     "IgnoreSRVWeight"
+    "Include"
     "IncludeDir"
     "LogFacility"
     "LogFormat"
