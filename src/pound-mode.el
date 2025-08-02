@@ -65,7 +65,7 @@
   :type 'string
   :group 'pound-lint)
 
-(defcustom pound-include-dir nil
+(defcustom pound-include-dir ""
   "*Include directory to use instead of the default"
   :type 'string
   :group 'pound-lint)
@@ -488,8 +488,11 @@
   (interactive "*")
   (compile (concat
 	    pound-command
-	    (if pound-include-dir
-		(concat "-Winclude-dir=" pound-include-dir))
+	    (cond
+	     ((string= pound-include-dir "") "")
+	     ((string= pound-include-dir ".") " -Wno-include-dir")
+	     (t
+	      (concat " -Winclude-dir=" pound-include-dir)))
 	    " -c -f "
 	    (buffer-file-name))))
 
