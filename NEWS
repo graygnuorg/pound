@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-29
+Pound -- history of user-visible changes. 2025-08-02
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,13 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.17.90 (git)
+
+* Emacs mode for editing pound configuration files
+
+* Include statement accepts globbing patterns
+
 
 Version 4.17, 2025-07-29
 

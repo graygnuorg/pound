@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 26, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "August 2, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -702,11 +702,18 @@ can be changed in the command line using the
 \fB\-W include\-dir=\fIname\fR option or reset to the current working
 directory using the \fB\-W no\-include\-dir\fR option (see the
 discussion of \fB\-W\fR below).
+.IP
+The directory set by \fBIncludeDir\fR statement remains in effect
+until next \fBIncludeDir\fR statement is encountered, or end of input,
+whichever occurs first.
 .TP
 \fBInclude\fR "\fIfile\fR"
 Include the file as though it were part of the configuration file.  If
 \fIfile\fR is a relative file name, it will be looked in the \fIinclude
-directory\fR (see above).
+directory\fR (see above).  If \fIfile\fR is a shell globbing pattern
+.RB ( glob (7)),
+all regular files matching that pattern will be included.  The list or
+files will be sorted lexicographically.
 .IP
 This directive is allowed both at topmost level and in any subsections
 of the configuration file.

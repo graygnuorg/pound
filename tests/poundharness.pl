@@ -287,6 +287,11 @@ sub dequote {
     return $arg;
 }
 
+sub isglob {
+    my $arg = shift;
+    return $arg =~ m/(?<!\\)[*?\[\]]/;
+}
+
 sub addport {
     my ($infile, $outfile, $port) = @_;
     open(my $in, '<', $infile)
@@ -375,10 +380,19 @@ EOT
 	    next;
 	} elsif (/^(?<indent>\s*)Include\s+(?<arg>.+)/) {
 	    my $arg = dequote($+{arg});
-	    my $file = $arg . '.pha';
-	    preproc($arg, $file, 0, $state[0]);
-	    print $out "$+{indent}# Edited by $0\n";
-	    $_ = "$+{indent}Include \"$file\"";
+	    if (isglob($arg)) {
+		foreach my $file (glob $arg) {
+		    my $outfile = $file . '.pha';
+		    preproc($file, $outfile, 0, $state[0]);
+		}
+		print $out "$+{indent}# Edited by $0\n";
+		$_ = "$+{indent}Include \"$arg.pha\"";
+	    } else {
+		my $file = $arg . '.pha';
+		preproc($arg, $file, 0, $state[0]);
+		print $out "$+{indent}# Edited by $0\n";
+		$_ = "$+{indent}Include \"$file\"";
+	    }
 	} elsif (/^\s*Service/i) {
 	    unshift @state, ST_SERVICE;
 	} elsif (/^\s*Session/i) {
@@ -1963,6 +1977,9 @@ B<Include> statements are processed in the following manner: the file
 supplied as the argument is preprocessed and the result is written to
 a file with the name obtained by appending suffix C<.pha> to the original
 name.  An B<Include> statement with this name is output.
+
+If B<Include> argument is a shell globbing pattern, all files matching that
+pattern are processed as described.
 
 When a B<Host> statement with exact comparison method is encountered,
 a colon and actual port number of the enclosing listener is appended

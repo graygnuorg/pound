@@ -882,8 +882,8 @@ End
 @end group
 @end example
 
-  For convenience, @code{Include} statements can also be used between
-@code{ACL} and @code{End}.
+  For convenience, @code{Include} statements (@pxref{File inclusion})
+can also be used between @code{ACL} and @code{End}.
 
 @anchor{File reference ACL}
 @kwindex -file
@@ -2988,7 +2988,8 @@ The statement has two forms: immediate and file reference ACL.  In
 @dfn{immediate} form, the CIDR list follows the @code{ACL} line and
 is terminated with an @code{End} directive on a line by itself.  Each
 non-empty line contains a CIDR enclosed in double quotes.  Comments
-and @code{Include} statements are allowed.  For example:
+and @code{Include} statements (@pxref{File inclusion}) are allowed.
+For example:
 
 @example
 @group
@@ -3027,7 +3028,9 @@ detailed discussion.
 @deffn {Global directive} Include "@var{file}"
 Include @var{file} as if it were part of the configuration file.  If
 @var{file} is a relative file name, it will be looked in the @dfn{include
-directory} (see below).
+directory} (see below).  If @var{file} is a shell globbing pattern,
+all regular files matching that pattern will be included, in
+lexicographical order.
 
 This directive is allowed both at topmost level and in any subsections
 of the configuration file.
@@ -3041,6 +3044,10 @@ configuration directives: @code{Include}, @code{BasicAuth},
 @code{ErrorFile} (or @code{Err400} through @code{Err503}), as well as
 in the argument to @option{-file} (@option{-filewatch}) option in
 service matching directives (@xref{-file}, and @pxref{File-based Conditions}).
+
+This directive can appear multiple times.  In that case, the directory
+set by each @code{IncludeDir} remains in effect until next one
+redefines it.
 
 The default value is the system configuration directory as set at
 compile time (you can check its value in the output of @command{pound

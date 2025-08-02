@@ -97,6 +97,7 @@ TESTSUITE_AT = \
  https.at\
  include.at\
  incldir.at\
+ inclglob.at\
  inclnest.at\
  inclscope.at\
  invenc.at\
