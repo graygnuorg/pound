@@ -760,6 +760,7 @@ End
 
 @menu
 * Regular Expressions::
+* File-based Conditions::
 * ACL::
 @end menu
 
@@ -802,6 +803,59 @@ example:
 Host -pcre -icase "(?<!www\\.)example.org"
 @end example
 
+@node File-based Conditions
+@subsection File-based Conditions
+@kwindex -file
+@kwindex -filewatch
+@cindex file monitoring
+  Most conditional directives take @option{-file} and
+@option{-filewatch} options.  When specified either option, the
+argument immediately following it is treated as the name of a file
+from which to read the list of regular expression patterns or other
+conditional parameters, depending on the directive.  The file is read
+at startup and cached in memory, so that applying the conditional does
+not result in disk accesses.
+
+If the @option{-file} option is used, the file is read at startup and its
+contents is remembered for the lifetime of the program.  It is an error
+if the file does not exist.  Any errors in the file are treated as
+configuration file errors and cause immediate program termination.
+
+In the contrast, if the @option{-filewatch} option is used, the file
+is read at startup and a file system monitor is set up to catch its
+modifications.  Once a change to the file is detected, it will be
+reloaded without interrupting the operation of the server.
+Consequently, when the @option{-filewatch} option is used, it is OK if
+the file does not exist at startup.  Furthermore, any errors in the
+file contents are reported, but don't cause program termination.
+
+@cindex inotify
+@cindex kqueue
+  The support for that option depends on the operating system.  On
+GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
+@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
+man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
+uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
+mechanism,kqueue(2),kqueue(2) man page}.}.  To check which API your
+@command{pound} binary is compiled with, examine the output of
+@command{pound -V}.
+
+@kwindex WatcherTTL
+  Both @code{inotify} and @code{kqueue} allow @command{pound} to react
+immediately on file system changes.  On systems that don't support
+either API, @command{pound} falls back to periodic checking of file
+modification time (@dfn{mtime}).  In that case, the reload is
+initiated if @code{mtime} changes.  The interval between two
+succeeding checks is defined by the @code{WatcherTTL} statement
+(@pxref{Timeouts, WatcherTTL}) and defaults to 60 seconds.
+
+  Following is a list of conditional statements that implement file
+monitoring support: @code{BasicAuth}, @code{Header}, @code{Host},
+@code{Path}, @code{Query}, @code{QueryParam}, @code{StringMatch},
+@code{URL}.
+
+@xref{request matching directives}, for a detailed discussion of these.
+
 @node ACL
 @subsection ACL
 @cindex ACL
@@ -828,8 +882,8 @@ End
 @end group
 @end example
 
-  For convenience, @code{Include} statements can also be used between
-@code{ACL} and @code{End}.
+  For convenience, @code{Include} statements (@pxref{File inclusion})
+can also be used between @code{ACL} and @code{End}.
 
 @anchor{File reference ACL}
 @kwindex -file
@@ -860,35 +914,8 @@ as configuration file errors and cause immediate program termination.
 @anchor{ACL filewatch}
 @kwindex -filewatch
   If the @option{-filewatch} keyword is used, the file is read at
-startup and is being monitored for changes during the runtime.  Once
-the file changes, it is re-read and the ACL is reconstructed from its
-new contents.  If the file is removed, the ACL is cleared (which means
-that it will evaluate to false during request matching), and a file
-creation monitor is installed.  Once the file is re-created, the
-monitor will wake up, the file will be rescanned and the ACL updated
-accordingly.
-
-  Consequently, when @option{-filewatch} form is used, it is OK if the
-file does not exist at startup.  Furthermore, any errors in the file
-contents are reported, but don't cause program termination.
-
-@cindex inotify
-@cindex kqueue
-  The support for that option depends on the operating system.  On
-GNU/Linux systems, @command{pound} uses @code{inotify} kernel API
-@footnote{@xref{inotify,, monitoring file system events, inotify(7), inotify(7)
-man page}.}.  On BSD systems (FreeBSD, OpenBSD, NetBSD, Darwin), it
-uses @code{kqueue}@footnote{@pxref{kqueue,,kernel event notification
-mechanism,kqueue(2),kqueue(2) man page}.}.  To check, which API your
-@command{pound} binary is compiled with, examine the output of
-@command{pound -V}.
-
-Both @code{inotify} and @code{kqueue} allow @command{pound} to react
-immediately on the file system changes.  On systems that don't support
-either API, @command{pound} falls back to periodic checking for
-changes in file modification time.  The interval between two
-succeeding checks is defined by the @code{WatcherTTL} statement
-(@pxref{Timeouts, WatcherTTL}).
+startup and is then being monitored for changes during the runtime.
+@xref{File-based Conditions}, for details.
 
 @anchor{ACL reference}
   The third syntax form for @code{ACL} statements is @dfn{ACL
@@ -1042,23 +1069,49 @@ End
 @end group
 @end example
 
+@cindex tagged statements
+@cindex referring to subexpressions
+@cindex referring to previous conditionals
 When several matching statements are used, these forms refer to the
-last one that matched.  Subexpressions in prior statements can be referred to
-using the @samp{$@var{i}(@var{j})} construct.  Here, @var{j} is the
-0-based number of the statement, counted from the last one upwards.
-For example, given the following statements:
+last matched one.  Subexpressions in prior statements can be referred to
+using the @samp{$@var{i}(@var{j})} construct.  Here, @var{j} is either
+the @dfn{tag} of the expression to refer to (if the statement was
+tagged, @pxref{tag}), or the 0-based number of the statement, counted
+from the last one upwards.  For example, consider the following statements:
 
 @example
 @group
-Host -re "www\.(.+)"
-Header -icase "^Content-Type: *(.*)"
-Path "^/static(/.*)?"
+Host -tag "host" -re "(www\\.)?(.+)"
+Header -tag "type" -icase "^Content-Type:[[:space:]]*(([^/]+)/([^;]+)).*"
+Path -tag "dir" "^/static(/.*)?"
 @end group
 @end example
 
+If the incoming request was @samp{GET /static/index.html} with the two
+headers
+
+@example
+Host: example.org
+Content-Type: text/html
+@end example
+
 @noindent
-@samp{$1} refers to the subexpression of @code{Path}, @samp{$1(1)}
-to that of @code{Header}, and @code{$1(2)} to that of @code{Host}.
+then, the backreferences and the corresponding strings will be:
+
+@example
+$1 @result{} /index.html
+$1(dir) @result{} /index.html
+$1(1) @result{} text/html
+$2(1) @result{} text
+$3(1) @result{} html
+$1(type) @result{} text/html
+$2(type) @result{} text
+$3(type) @result{} html
+$1(2) @result{} www.
+$2(2) @result{} example.org
+$1(host) @result{} www.
+$2(host) @result{} example.org
+@end example
 
 @cindex request accessor
 String arguments to @code{Set} statements can also contain
@@ -1190,10 +1243,10 @@ This hash must be prefixed by @samp{@{SHA@}}.
 @item @command{Apache}-style @samp{APR1} hash.
 @end itemize
 
- Password file is read on the first authorization attempt, after which
-its contents is stored in memory.  @command{Pound} will re-read it if
-it notices that the file's modification file has changed, so you need
-not restart the daemon if you do any changes to the file.
+ Password file is read at startup, after which its contents is stored
+in memory.  @command{Pound} will re-read it if it notices that the
+file has changed, so you need not restart the daemon if you do any
+changes to the file.
 
  Thus, if you put the @code{BasicAuth} statement in each service that
 must be accessible to authorized users only, that would do the first
@@ -2165,7 +2218,9 @@ TrustedIP -filewatch "@var{filename}"
 @end example
 
 @noindent
-reads CIDR definitions from file @var{filename}.
+reads CIDR definitions from file @var{filename} (@xref{File-based
+Conditions}, for a discussion of the difference between @option{-file}
+and @option{-filewatch}).
 
 If needed, the @code{ForwardedHeader} statement may be used to declare
 the name of the header to use instead of @code{X-Forwarded-For}.  As
@@ -2545,8 +2600,28 @@ Path "^/static(/.*)?"
 @end group
 @end example
 
+@noindent
 @code{$1} refers to the subgroup of @code{Path}, @code{$1(1)} refers to that of
 @code{Header}, and @code{$1(2)} to that of @code{Host}.
+
+@cindex tagged statements
+Conditional statements can also be tagged (@pxref{tag}).  When referring to a
+subexpression in such a statement, the form @code{$@var{n}(@var{t})}
+can be used, where @var{t} is the tag.  For example, after tagging the
+statements in the example above:
+
+@example
+@group
+Host -tag "host" -re "www\\.(.+)"
+Header -tag "type" -re -icase "^Content-Type: *(.*)"
+Path -tag "dir" "^/static(/.*)?"
+@end group
+@end example
+
+@noindent
+the corresponding strings can be referred to as: @code{$1} or
+@code{$1(dir)}, @code{$1(type)}, and @code{$1(host)},
+correspondingly.
 
 Curly braces may be used to avoid incorrectly parsing text fragment
 that follows the reference as being its part.  This is useful if the
@@ -2761,13 +2836,15 @@ Sets default header addition options.  One or more arguments are
 allowed, each being one of:
 
 @table @code
-@item off
+@item none
 Disable additional headers.
 
+@kwindex forwarded
 @item forwarded
 Add @code{X-Forwarded-For}, @code{X-Forwarded-Proto}, and
 @code{X-Forwarded-Port} headers.
 
+@kwindex ssl
 @item ssl
 Pass information about SSL certificates in a set of @code{X-SSL-*}
 headers.  This will add the following headers:
@@ -2795,6 +2872,11 @@ Start of validity date for the certificate.
 Certificate serial number (in decimal).
 @end table
 @end table
+
+@kwindex no-forwarded
+@kwindex no-ssl
+The options @code{forwarded}, and @code{ssl} can be prefixed with
+@code{no-} to disable their effect.
 
 The default is:
 
@@ -2906,7 +2988,8 @@ The statement has two forms: immediate and file reference ACL.  In
 @dfn{immediate} form, the CIDR list follows the @code{ACL} line and
 is terminated with an @code{End} directive on a line by itself.  Each
 non-empty line contains a CIDR enclosed in double quotes.  Comments
-and @code{Include} statements are allowed.  For example:
+and @code{Include} statements (@pxref{File inclusion}) are allowed.
+For example:
 
 @example
 @group
@@ -2935,10 +3018,8 @@ The syntax of the file is similar to the described above, except that
 CIDRs need not be quoted and @code{Include} statements are not
 allowed.  The form with @code{-file} reads the file contents once, at
 the program startup.  The one with @code{-filewatch} reads it and then
-monitors that file for changes.  Any change to the file causes it to
-be read again, thus the ACLs are updated automatically without the
-need to restart the program.  @xref{File reference ACL}, for a
-detailed discussion of this feature.
+monitors that file for changes.  @xref{File-based Conditions}, for a
+detailed discussion.
 @end deffn
 
 @node File inclusion
@@ -2947,7 +3028,9 @@ detailed discussion of this feature.
 @deffn {Global directive} Include "@var{file}"
 Include @var{file} as if it were part of the configuration file.  If
 @var{file} is a relative file name, it will be looked in the @dfn{include
-directory} (see below).
+directory} (see below).  If @var{file} is a shell globbing pattern,
+all regular files matching that pattern will be included, in
+lexicographical order.
 
 This directive is allowed both at topmost level and in any subsections
 of the configuration file.
@@ -2959,8 +3042,12 @@ Set the @dfn{include directory}, i.e. the directory where
 @command{pound} looks for relative file names that appear in other
 configuration directives: @code{Include}, @code{BasicAuth},
 @code{ErrorFile} (or @code{Err400} through @code{Err503}), as well as
-in the argument to @option{-file} option in service matching directives
-(@pxref{-file}).
+in the argument to @option{-file} (@option{-filewatch}) option in
+service matching directives (@xref{-file}, and @pxref{File-based Conditions}).
+
+This directive can appear multiple times.  In that case, the directory
+set by each @code{IncludeDir} remains in effect until next one
+redefines it.
 
 The default value is the system configuration directory as set at
 compile time (you can check its value in the output of @command{pound
@@ -3225,7 +3312,7 @@ successive checks of file modification times.  @xref{ACL filewatch},
 for a detailed discussion of this feature and situations when this
 setting might be useful.
 
-The default value is 180 seconds.
+The default value is 60 seconds.
 @end deffn
 
 @deffn {Global directive} WSTimeOut @var{n}
@@ -3699,7 +3786,13 @@ is found whose @var{conditional_directives} yield @samp{true}, or
  @dfn{Request matching directives} or @dfn{request conditionals} are special
 statements that, being applied to a HTTP request, yield @samp{true} or
 @samp{false} depending on whether the request satisfies the condition
-described in the directive.  The following conditionals are available:
+described in the directive.
+
+All directive described below can read a list of conditions from a
+disk file and reload that list upon any changes.  @xref{File-based
+Conditions}, for a detailed discussion of this feature.
+
+The following conditionals are available:
 
 @deffn {Request Conditional} ACL "@var{name}"
 Returns @samp{true} if the source IP matches one of the CIDRs from the
@@ -3729,24 +3822,26 @@ and comments are allowed.  If @var{filename} is relative, it is looked
 up in the @ref{include directory}.  The form with @code{-file} reads
 the file contents once, at the program startup.  The one with
 @code{-filewatch} reads it and then monitors that file for changes.
-Any change to the file causes it to be read again, thus the ACLs are
-updated automatically without the need to restart the program.
-
-@xref{File reference ACL}, for a detailed discussion of this feature.
+@xref{File-based Conditions}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} BasicAuth "@var{filename}"
+@deffn {Request Conditional} BasicAuth [@var{option}] "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
 file containing usernames and passwords, created with @command{htpasswd}
 or similar utility.  Unless the name starts with a slash, it is taken
-relative to the @code{IncludeDir} directory (@pxref{include directory}).
-The file is cached in the memory on the first authorization attempt,
-so that further authorizations do not result in disk operations.  The
-file will be re-scanned if @command{pound} notices that its
-modification time has changed.
+relative to the @code{IncludeDir} directory (@pxref{include
+directory}).
+The file is cached in the memory at startup, so that further
+authorizations do not result in disk operations.  The file will be
+reloaded if changed (@pxref{File-based Conditions}).
 
-@xref{Authentication}.
+@xref{Authentication}, for a detailed description.
+
+For consistency with other conditions, @code{BasicAuth} accepts the
+following options: @option{-file} and @option{-filewatch}.  The
+latter enables the default behavior and so need not be specified
+explicitly.  The former disables file change monitoring.
 @end deffn
 
 @deffn {Request Conditional} Header [@var{options}] "@var{pattern}"
@@ -3762,24 +3857,19 @@ the file to read patterns from, if @var{options} is @code{-file} or
 An example of @code{Header} statement in first form:
 
 @example
-Header "^Content-Type:[[:space:]]+text/.*"
+Header "^Content-Type:[[:space:]]*text/.+"
 @end example
 
 Here's the corresponding statement in second form:
 
 @example
-Header "Content-Type" "text/.*"
+Header "Content-Type" "text/.+"
 @end example
 
 In both forms, @var{pattern} is treated as case-insensitive POSIX
 extended regular expression.  This can be changed by @var{options},
 described below.
 
-The following list of differences will help you select the right form
-to use:
-
-@enumerate 1
-@item
 In first form, pattern modification options, such as @code{-beg} or
 @code{-contain} apply to entire header line.  In second form, they
 apply to header value only.  For example, you can write:
@@ -3789,8 +3879,8 @@ Header "Content-Type" -beg "text/"
 @end example
 
 @noindent
-to match a request whose @samp{Content-Type} header value begins with
-@samp{text/}, or
+to match a request whose @samp{Content-Type} header @emph{value}
+begins with @samp{text/}, or
 
 @example
 Header -contain "forwarded"
@@ -3799,16 +3889,6 @@ Header -contain "forwarded"
 @noindent
 to match requests that contain any header with the word
 @samp{forwarded} anywhere, be it header field name or its value.
-
-@item
-Only the second form can be used to match against a list of patterns
-from a file, e.g.:
-
-@example
-Header "User-Agent" -file "user-agents.pat"
-@end example
-@end enumerate
-
 @end deffn
 
 @deffn {Request Conditional} Host [@var{options}] "@var{hostname}"
@@ -3862,75 +3942,93 @@ instructed otherwise by @var{options} (see below).
 @end deffn
 
 In these directives, @var{options} is a whitespace-delimited list of
-zero or more flags from the following table:
+zero or more options discussed below:
 
-@float Table, conditional-option
-@caption{Conditional directive flags}
-@multitable @columnfractions .30 .70
-@headitem Flag @tab Meaning
+@anchor{conditional-option}
+@deffn {Conditional option} -beg
+Exact match at the beginning of string (prefix match).
+@end deffn
 
-@kwindex -beg, header matching flag
-@cindex prefix match, headers
-@item @code{-beg} @tab Exact match at the beginning of string (prefix match).
+@deffn {Conditional option} -case
+@cindex case insensitive matching
+Case-sensitive comparison.
+@end deffn
 
-@kwindex -case, header matching flag
-@cindex case insensitive match, headers
-@item @code{-case} @tab Case-sensitive comparison.
+@deffn {Conditional option} -contain
+@cindex substring matching
+Match if @var{pattern} is a substring of the original value.
+@end deffn
 
-@kwindex -contain, header matching flag
-@cindex substring match, headers
-@item @code{-contain} @tab Match if @var{pattern} is a substring of
-the original value.
+@deffn {Conditional option} -end
+@cindex suffix matching
+Exact match at the end of string (suffix match).
+@end deffn
 
-@kwindex -end, header matching flag
-@cindex suffix match, headers
-@item @code{-end} @tab Exact match at the end of string (suffix match).
+@deffn {Conditional option} -exact
+@cindex exact matching
+Exact string match.
+@end deffn
 
-@kwindex -exact, header matching flag
-@cindex exact match, headers
-@item @code{-exact} @tab Use exact string match.
-
-@kwindex -file, header matching flag
-@cindex file lookup, headers
 @anchor{-file}
-@item @code{-file} @tab Treat @var{pattern} as
-the name of a file to read patterns from.  If the name is relative, it
-will be looked up in the @ref{include directory}.  Patterns are read
-from the file line by line.  Leading and trailing whitespace is
-removed.  Empty lines and comments (lines starting with @code{#}) are
-ignored.
+@deffn {Conditional option} -file
+@cindex file lookup
+Treat @var{pattern} as the name of a file to read patterns from.  If
+the name is relative, it will be looked up in the @ref{include
+directory}.  Patterns are read from the file line by line.  Leading
+and trailing whitespace is removed.  Empty lines and comments (lines
+starting with @code{#}) are ignored.
+@end deffn
 
-@kwindex -filewatch, header matching flag
-@item @code{-filewatch} @tab Same as @code{-file}, but the file will
-be monitored and read again if any change occurs.
+@deffn {Conditional option} -filewatch
+Same as @code{-file}, but the file will be monitored for changes and
+reloaded as soon as such are detected.  @xref{File-based
+Conditions}, for a detailed description.
+@end deffn
 
-@kwindex -icase, header matching flag
-@cindex case sensitive match, headers
-@item @code{-icase} @tab Case-insensitive comparison.
+@deffn {Conditional option} -icase
+@cindex case sensitive matching
+Case-insensitive comparison.
+@end deffn
 
-@kwindex -pcre, header matching flag
+@deffn {Conditional option} -pcre
+@deffnx {Conditional option} -perl
 @cindex Perl-compatible regular expression match, headers
 @cindex PCRE match, headers
-@item @code{-pcre} @tab Use Perl-compatible regular expression.
-@pxref{Regular Expressions}.
+Use Perl-compatible regular expression.  @xref{Regular Expressions}.
+@end deffn
 
-@kwindex -perl, header matching flag
-@cindex Perl-compatible regular expression match, headers
-@cindex PCRE match, headers
-@item @code{-perl} @tab Same as @code{-pcre}.
+@deffn {Conditional option} -posix
+@cindex posix regular expression matching
+Use POSIX extended regular expression. @xref{Regular Expressions}.
+@end deffn
 
-@kwindex -posix, header matching flag
-@cindex posix regular expression match, headers
-@item @code{-posix} @tab Use POSIX extended regular expression.
-@pxref{Regular Expressions}.
+@deffn {Conditional option} -re
+@cindex regular expression matching
+Use regular expression match.  This assumes the default regular
+expression type, as set by the @code{RegexType} directive
+(@pxref{Regular Expressions}).
+@end deffn
 
-@kwindex -re, header matching flag
-@cindex regular expression match, headers
-@item @code{-re} @tab Use regular expression match.  This assumes the
-default regular expression type, as set by the @code{RegexType}
-directive (@pxref{Regular Expressions}).
-@end multitable
-@end float
+@anchor{tag}
+@deffn {Conditional option} -tag "@var{t}"
+Tag this conditional with string @var{t}.  The tag can be used by
+another statements to refer to substrings obtained when matching this
+pattern.
+
+For example:
+
+@example
+@group
+Host -tag host -re "(www\\.)?(example.(org|com))"
+Header "Content-Type" -tag "type" -re -icase "^application/(.+)"
+Path -tag "path" -re "/public/(.+)"
+SetPath "$3(host)/$1(type)$1(path)"
+@end group
+@end example
+
+@xref{Backreference Expansion}, for a detailed discussion of how
+backreferences are expanded in strings.
+@end deffn
 
 The following options are mutually exclusive: @code{-beg}, @code{-contain},
 @code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),
@@ -4189,10 +4287,16 @@ Specifies whether the listener must ask for the client's HTTPS
 certificate.  Allowed values for @var{mode} are:
 
 @enumerate 0
-@item Never ask for the certificate (the default).
-@item Ask for the client certificate.
-@item Ask and fail, if no certificate was presented.
-@item Ask but do not verify.
+@item
+Never ask for the certificate (the default).
+@item
+Ask for the client certificate.  It is OK if the client doesn't
+present it.
+@item
+Ask for the client certificate.  Fail if the client doesn't
+present it.
+@item
+Ask for the client certificate, but don't verify it.
 @end enumerate
 
 @var{Depth} is the depth of verification for a client certificate (up
@@ -4331,6 +4435,18 @@ must have been defined earlier (@pxref{ACL definition}).
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
+@deffn {Service Conditional} ACL @option{-file} "@var{filename}"
+@deffnx {Service Conditional} ACL @option{-filewatch} "@var{filename}"
+Reads ACL definitions from the file @var{filename}.  The file shall contain
+unquoted CIDR definitions, each one on a separate line.  Empty
+lines and comments (starting with @samp{#} and ending at the nearest
+newline) are ignored.
+
+If the @option{-filewatch} option is used, the file will be monitored
+and reloaded automatically as soon as it changes.  @xref{File-based
+Conditions}, for a detailed discussion.
+@end deffn
+
 @deffn {Service Conditional} ACL
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
@@ -4343,18 +4459,23 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Service Conditional} BasicAuth "@var{filename}"
+@deffn {Service Conditional} BasicAuth [@var{option}] "@var{filename}"
 Evaluates to @samp{true}, if the incoming request passes basic authorization
 as described in RFC 7617.  @var{Filename} is the name of a plain text
 file containing usernames and passwords, created with @command{htpasswd}
 or similar utility.  Unless the name starts with a slash, it is taken
 relative to the @code{IncludeDir} directory (@pxref{include directory}).
-The file is cached in the memory on the first authorization attempt,
-so that further authorizations do not result in disk operations.  The
-file will be rescanned if @command{pound} notices that its
-modification time has changed.
+The file is cached in the memory at startup, so that further
+authorizations do not result in disk operations.  The file will be
+rescanned upon any change.  @xref{File-based Conditions}, for a
+detailed description of this feature.
 
-@xref{Authentication}.
+@xref{Authentication}, for a detailed description.
+
+For consistency with other conditions, @code{BasicAuth} accepts the
+following options: @option{-file} and @option{-filewatch}.  The
+latter enables the default behavior and so need not be specified
+explicitly.  The former disables file change monitoring.
 @end deffn
 
 @anchor{ClientCert conditional}

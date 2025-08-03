@@ -1837,7 +1837,7 @@ POUND_SSL_CTX_init (SSL_CTX *ctx)
   /* This generates a EC_KEY structure with no key, but a group defined */
   EC_KEY *ecdh;
   if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-    abend ("Unable to generate temp ECDH key");
+    abend (NULL, "Unable to generate temp ECDH key");
 
   SSL_CTX_set_tmp_ecdh (ctx, ecdh);
   SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
@@ -3011,8 +3011,8 @@ find_endpoint (int method, const char *uri, int *errcode)
       }
 
   if (cp == NULL)
-    /* FIXME: Should be 405, instead of 400 (HTTP_STATUS_BAD_REQUEST) */
-    *errcode = uri_match ? HTTP_STATUS_BAD_REQUEST : HTTP_STATUS_NOT_FOUND;
+    *errcode = uri_match ? HTTP_STATUS_METHOD_NOT_ALLOWED
+                         : HTTP_STATUS_NOT_FOUND;
   return cp;
 }
 

@@ -17,7 +17,6 @@ use strict;
 use warnings;
 use Socket qw(:DEFAULT :crlf);
 use threads;
-use threads::shared;
 use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
@@ -90,7 +89,6 @@ sub cleanup {
 ## -----------------------------------
 
 my %status_codes;
-share(%status_codes);
 
 $SIG{QUIT} = $SIG{HUP} = $SIG{TERM} = $SIG{INT} = \&cleanup;
 
@@ -190,7 +188,7 @@ GetOptions('config|f=s' => \$config,
 	   'startup-timeout|t=n' => \$startup_timeout,
 	   'include-dir=s' => \$include_dir,
 	   'fakedns=s' => \$fakedns,
-           'valgrind=s' => \$valgrind,
+	   'valgrind=s' => \$valgrind,
 	   'source-address|a=s@' => sub {
 	       my (undef, $ip) = @_;
 	       assert_source_ip($ip);
@@ -289,6 +287,11 @@ sub dequote {
     return $arg;
 }
 
+sub isglob {
+    my $arg = shift;
+    return $arg =~ m/(?<!\\)[*?\[\]]/;
+}
+
 sub addport {
     my ($infile, $outfile, $port) = @_;
     open(my $in, '<', $infile)
@@ -377,10 +380,19 @@ EOT
 	    next;
 	} elsif (/^(?<indent>\s*)Include\s+(?<arg>.+)/) {
 	    my $arg = dequote($+{arg});
-	    my $file = $arg . '.pha';
-	    preproc($arg, $file, 0, $state[0]);
-	    print $out "$+{indent}# Edited by $0\n";
-	    $_ = "$+{indent}Include \"$file\"";
+	    if (isglob($arg)) {
+		foreach my $file (glob $arg) {
+		    my $outfile = $file . '.pha';
+		    preproc($file, $outfile, 0, $state[0]);
+		}
+		print $out "$+{indent}# Edited by $0\n";
+		$_ = "$+{indent}Include \"$arg.pha\"";
+	    } else {
+		my $file = $arg . '.pha';
+		preproc($arg, $file, 0, $state[0]);
+		print $out "$+{indent}# Edited by $0\n";
+		$_ = "$+{indent}Include \"$file\"";
+	    }
 	} elsif (/^\s*Service/i) {
 	    unshift @state, ST_SERVICE;
 	} elsif (/^\s*Session/i) {
@@ -491,9 +503,11 @@ sub runner {
     }
     open(STDOUT, '>', $log_file);
     open(STDERR, ">&STDOUT");
+    STDOUT->autoflush(1);
+    STDERR->autoflush(1);
     my @cmd = (
-	'pound', '-p', $pid_file, '-f', $config, '-v',
-	 '-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
+	'pound', '-p', $pid_file, '-f', $config, '-v', '-e',
+	'-W', $include_dir ? "include-dir=$include_dir" : 'no-include-dir'
     );
     if ($valgrind) {
 	unshift @cmd, 'valgrind', '--log-file=' . $valgrind;
@@ -1080,6 +1094,11 @@ sub parse_runcom {
 	    next;
 	}
 
+	if (/^logtail\s+\"(.+)\"(:?\s+([[:digit:]]+))?\s*$/) {
+	    $self->{RUNCOM}{tail} = [ $log_file, $1, $2 ];
+	    next;
+	}
+
 	$self->syntax_error;
     }
     $self->{eof} = 1;
@@ -1089,9 +1108,13 @@ sub parse_runcom {
 sub runcom {
     my $self = shift;
 
+    my $tail;
+    if ($self->{RUNCOM}{tail}) {
+	$tail = Tail->new(@{$self->{RUNCOM}{tail}});
+    }
+
     my ($child_stdin, $child_stdout, $child_stderr);
     $child_stderr = gensym();
-    %status_codes = ();
     my $pid = open3($child_stdin, $child_stdout, $child_stderr,
 		    $self->{RUNCOM}{command});
     close $child_stdin;
@@ -1101,10 +1124,28 @@ sub runcom {
     my $CHUNK_SIZE = 1000;
     my @ready;
     my %data = ( $child_stdout => '', $child_stderr => '' );
+    my $timeout = $self->{RUNCOM}{timeout};
+    my @args;
+    push @args, 1 if $timeout;
+    my $start = time;
+    while (1) {
+	$! = 0;
+	@ready = $sel->can_read(@args);
+	unless (@ready) {
+	    if ($!) {
+		$self->transcript("waiting for output: $!",
+				  locus => $self->{RUNCOM});
+		last;
+	    }
+	    last unless $timeout;
+	}
+	if ($timeout && time - $start > $timeout) {
+	    $self->transcript("timed out", locus => $self->{RUNCOM});
+	    kill 'KILL', $pid unless defined($status_codes{$pid});
+	    last;
+	}
 
-    while (@ready = $sel->can_read) {
 	foreach my $fh (@ready) {
-	    my $data;
 	    while (1) {
 		my $len = sysread($fh, $data{$fh}, $CHUNK_SIZE,
 				  length($data{$fh}));
@@ -1124,11 +1165,12 @@ sub runcom {
 
     my $code;
     if (!defined($status_codes{$pid})) {
-	die "failed to execute " . $self->{RUNCOM}{command} . ": $!";
+	die "failed to execute $self->{RUNCOM}{command}";
     } elsif ($status_codes{$pid} & 127) {
 	die "\"".$self->{RUNCOM}{command}."\" terminated on signal ".($status_codes{$pid} & 127);
     } else {
 	$code = $status_codes{$pid} >> 8;
+	delete $status_codes{$pid};
     }
 
     $self->transcript_ml(
@@ -1168,6 +1210,14 @@ sub runcom {
 	    $self->transcript("stderr differs:\nrx: {$s}",
 			      locus => $self->{RUNCOM});
 	    $ok = 0;
+	}
+    }
+
+    if ($ok && $tail) {
+	$ok = $tail->wait;
+	if ($ok == 0) {
+	    $self->transcript("expected string didn't appear in logfile");
+	    $self->{failures}++;
 	}
     }
 
@@ -1296,6 +1346,43 @@ sub parse_expect_body {
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file");
+}
+
+package Tail;
+use strict;
+use warnings;
+use Carp;
+use Fcntl qw(:seek);
+
+sub new {
+    my ($class, $file, $expect, $ttl) = @_;
+    open(my $fh, '<', $file) or croak "can't open $file: $!";
+    seek $fh, 0, SEEK_END;
+    return bless { file => $file, fh => $fh, expect => $expect,
+		   ttl => $ttl // 2 }, $class;
+}
+
+sub wait {
+    my $self = shift;
+    my $line = '';
+    my $fh = $self->{fh};
+    my $start = time;
+    while (1) {
+	if (my $s = <$fh>) {
+	    $line .= $s;
+	    if ($line =~ /\n/m) {
+		chomp($line);
+		return 1 if $line =~ /$self->{expect}/;
+		$line = '';
+	    }
+	} elsif (time - $start >= $self->{ttl}) {
+	    return 0;
+	} else {
+	    # Clear EOF indicator
+	    seek($fh, 0, 1);
+	}
+	sleep 0.2;
+    }
 }
 
 package Stats;
@@ -1773,7 +1860,6 @@ sub request {
     local $SIG{CHLD} = sub {};
     my ($child_stdin, $child_stdout, $child_stderr);
     $child_stderr = gensym();
-    %status_codes = ();
     my $pid = open3($child_stdin, $child_stdout, $child_stderr,
 		    'poundctl', '-f', $self->{config}, '-j', $command, $arg);
     close $child_stdin;
@@ -1891,6 +1977,9 @@ B<Include> statements are processed in the following manner: the file
 supplied as the argument is preprocessed and the result is written to
 a file with the name obtained by appending suffix C<.pha> to the original
 name.  An B<Include> statement with this name is output.
+
+If B<Include> argument is a shell globbing pattern, all files matching that
+pattern are processed as described.
 
 When a B<Host> statement with exact comparison method is encountered,
 a colon and actual port number of the enclosing listener is appended
@@ -2134,6 +2223,12 @@ it with a backslash.
 
 Expect text on stderr.  See the description of B<stdout> above for
 its syntax.
+
+=item B<logtail> "I<expect>" [I<T>]
+Wait for a line matching I<expect> to appear in the pound log file.  The
+optional argument I<T> sets time to wait, in seconds.  The default is 2
+seconds.  The test will fail if no matching string appears in the log within
+that time.
 
 =back
 

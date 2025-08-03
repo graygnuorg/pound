@@ -29,6 +29,7 @@
 #include <fcntl.h>
 #include <limits.h>
 #include <syslog.h>
+#include <glob.h>
 #include "list.h"
 #include "mem.h"
 #include "cfgparser.h"
@@ -455,6 +456,63 @@ fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
 /*
  * Input scanner.
  */
+struct input_dir
+{
+  struct input_dir *prev;
+  WORKDIR *wd;
+  glob_t *glob;
+  size_t idx;
+};
+
+static struct input_dir *input_dir_tos;
+
+static inline WORKDIR *
+input_workdir (void)
+{
+  return input_dir_tos
+	   ? input_dir_tos->wd
+	   : get_include_wd_at_locus_range (last_token_locus_range ());
+}
+
+static void
+input_dir_push (WORKDIR *wd, glob_t *glob)
+{
+  struct input_dir *dir;
+  XZALLOC (dir);
+  dir->wd = workdir_ref (wd);
+  dir->glob = glob;
+  dir->idx = 0;
+  dir->prev = input_dir_tos;
+  input_dir_tos = dir;
+}
+
+static void
+input_dir_pop (void)
+{
+  struct input_dir *dir = input_dir_tos;
+  input_dir_tos = dir->prev;
+  workdir_unref (dir->wd);
+  globfree (dir->glob);
+  free (dir->glob);
+  free (dir);
+}
+
+static char const *
+input_dir_next_name (void)
+{
+  if (input_dir_tos)
+    {
+      while (input_dir_tos->idx < input_dir_tos->glob->gl_pathc)
+	{
+	  char const *name = input_dir_tos->glob->gl_pathv[input_dir_tos->idx++];
+	  if (name[strlen(name)-1] != '/')
+	    return name;
+	}
+      input_dir_pop ();
+    }
+  return NULL;
+}
+
 #define MAX_PUTBACK 3
 
 /* Input stream */
@@ -497,8 +555,7 @@ input_open (char const *filename, struct stat *st)
 {
   struct cfginput *input;
 
-  input = xmalloc (sizeof (*input));
-  memset (input, 0, sizeof (*input));
+  XZALLOC (input);
   if ((input->file = fopen_include (filename)) == 0)
     {
       conf_error ("can't open %s: %s", filename, strerror (errno));
@@ -716,25 +773,71 @@ last_token_locus_range (void)
 }
 
 static int
-push_input (const char *filename)
+globat (int wd, const char *restrict pattern, int flags,
+	int (*errfunc)(const char *epath, int eerrno),
+	glob_t *restrict pglob)
+{
+  int curfd;
+  int ret;
+
+  if (wd == AT_FDCWD)
+    curfd = AT_FDCWD;
+  else
+    {
+      curfd = openat (AT_FDCWD, ".", O_DIRECTORY | O_RDONLY | O_NDELAY);
+      if (curfd == -1)
+	return GLOB_ABORTED;
+
+      if (fchdir (wd))
+	{
+	  close (curfd);
+	  return GLOB_ABORTED;
+	}
+    }
+
+  ret = glob (pattern, flags, errfunc, pglob);
+
+  if (curfd != AT_FDCWD)
+    {
+      if (fchdir (curfd))
+	{
+	  int ec = errno;
+	  globfree (pglob);
+	  close (curfd);
+	  errno = ec;
+	  return -1;
+	}
+      close (curfd);
+    }
+  return ret;
+}
+
+static int
+push_input (WORKDIR *wd, const char *filename)
 {
   struct stat st;
   struct cfginput *input;
-  int fd = AT_FDCWD;
 
-  if (filename[0] != '/')
+  if (fstatat (wd->fd, filename, &st, 0))
     {
-      if (get_include_wd () == NULL)
-	return -1;
-      fd = include_wd->fd;
-    }
+      if (errno == ENOENT)
+	{
+	  int rc;
+	  glob_t *glob;
+	  XZALLOC (glob);
+	  rc = globat (wd->fd, filename, GLOB_ERR | GLOB_MARK, NULL, glob);
+	  if (rc == 0)
+	    {
+	      input_dir_push (wd, glob);
+	      return push_input (input_workdir (), input_dir_next_name ());
+	    }
+	  errno = ENOENT;
+	}
 
-  if (fstatat (fd, filename, &st, 0))
-    {
-      if (fd == AT_FDCWD || filename[0] == '/')
+      if (filename[0] == '/')
 	conf_error ("can't stat %s: %s", filename, strerror (errno));
       else
-	conf_error ("can't stat %s/%s: %s", include_wd->name, filename,
+	conf_error ("can't stat %s/%s: %s", wd->name, filename,
 		    strerror (errno));
       return -1;
     }
@@ -746,7 +849,8 @@ push_input (const char *filename)
 	  if (input->prev)
 	    {
 	      conf_error ("%s already included", filename);
-	      conf_error_at_locus_point (&input->prev->locus, "here is the location of original inclusion");
+	      conf_error_at_locus_point (&input->prev->locus,
+					 "here is the location of original inclusion");
 	    }
 	  else
 	    {
@@ -768,7 +872,10 @@ push_input (const char *filename)
 static void
 pop_input (void)
 {
+  char const *name;
   cur_input = input_close (cur_input);
+  if ((name = input_dir_next_name ()) != NULL)
+    push_input (input_workdir (), name);
 }
 
 static int
@@ -1110,7 +1217,7 @@ cfgparser_open (char const *filename, char const *wd)
       conf_error ("can't open cwd: %s", strerror (errno));
       return -1;
     }
-  rc = push_input (filename);
+  rc = push_input (include_wd, filename);
 
   /* Make sure an attempt to open include_dir will be made if needed. */
   workdir_unref (include_wd);
@@ -1172,7 +1279,7 @@ cfg_parse_include (void *call_data, void *section_data)
   struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return CFGPARSER_FAIL;
-  if (push_input (tok->str))
+  if (push_input (get_include_wd_at_locus_range (&tok->locus), tok->str))
     return CFGPARSER_FAIL;
   return CFGPARSER_OK_NONL;
 }

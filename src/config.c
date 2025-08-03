@@ -463,7 +463,7 @@ sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
 }
 
 static int
-dynacl_read (void *obj, char *filename, WORKDIR *wd)
+dynacl_read (void *obj, char const *filename, WORKDIR *wd)
 {
   return config_parse_acl_file (obj, filename, wd);
 }
@@ -1322,7 +1322,7 @@ parse_use_backend (void *call_data, void *section_data)
 
   be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
   be->v.be_name = xstrdup (tok->str);
-  locus_range_copy(&be->locus, &tok->locus);
+  locus_range_copy (&be->locus, &tok->locus);
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
@@ -1400,6 +1400,7 @@ service_cond_free (SERVICE_COND *sc)
 	 operates on one of cond types handled above. */
       abort ();
     }
+  string_unref (sc->tag);
   free (sc);
 }
 
@@ -1435,7 +1436,7 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
 
 static int
 parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
-		  char **from_file, int *watch)
+		  char **from_file, int *watch, STRING **tag)
 {
   enum
   {
@@ -1450,6 +1451,7 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     MATCH_FILEWATCH,
     MATCH_POSIX,
     MATCH_PCRE,
+    MATCH_TAG
   };
 
   static struct config_option optab[] = {
@@ -1465,6 +1467,7 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     { "posix",     MATCH_POSIX },
     { "pcre",      MATCH_PCRE },
     { "perl",      MATCH_PCRE },
+    { "tag",       MATCH_TAG, 1 },
     { NULL }
   };
 
@@ -1536,6 +1539,16 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 	  return CFGPARSER_FAIL;
 #endif
 	  break;
+
+	case MATCH_TAG:
+	  if (tag)
+	    *tag = string_init (arg);
+	  else
+	    {
+	      conf_error ("unexpected token: %s", "-tag");
+	      return CFGPARSER_FAIL;
+	    }
+	  break;
 	}
     }
   return CFGPARSER_OK;
@@ -1604,7 +1617,7 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
   struct token *tok;
   int rc;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL, NULL))
     return CFGPARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -1683,6 +1696,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 	}
 
       hc = service_cond_alloc (cond_type);
+      hc->tag = string_ref (cond->tag);
       rc = genpat_compile (&hc->re, gpt, expr, flags);
       if (rc)
 	{
@@ -1714,7 +1728,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 }
 
 static int
-dyncond_read (void *obj, char *filename, WORKDIR *wd)
+dyncond_read (void *obj, char const *filename, WORKDIR *wd)
 {
   SERVICE_COND *cond = obj;
   return dyncond_read_internal (cond, filename, wd,
@@ -1789,8 +1803,10 @@ parse_cond_matcher (SERVICE_COND *top_cond,
   char *from_file;
   int watch;
   STRING *ref;
+  STRING *tag = NULL;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file, &watch))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file,
+			&watch, &tag))
     return CFGPARSER_FAIL;
 
   if (from_file)
@@ -1810,6 +1826,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
       if (watch)
 	{
 	  cond = service_cond_append (top_cond, COND_DYN);
+	  cond->tag = tag;
 	  cond->dyn.boolean.op = BOOL_OR;
 	  cond->dyn.string = ref;
 	  cond->dyn.cond_type = type;
@@ -1821,6 +1838,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
       else
 	{
 	  cond = service_cond_append (top_cond, COND_BOOL);
+	  cond->tag = tag;
 	  cond->boolean.op = BOOL_OR;
 	  rc = dyncond_read_immediate (cond, from_file,
 				       ref, type, gp_type, flags);
@@ -1839,6 +1857,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
 
       xstringbuf_init (&sb);
       cond = service_cond_append (top_cond, type);
+      cond->tag = tag;
       switch (type)
 	{
 	case COND_HOST:
@@ -2020,12 +2039,53 @@ static int
 parse_cond_basic_auth (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_BASIC_AUTH);
+  struct locus_range loc = LOCUS_RANGE_INITIALIZER;
   struct token *tok;
+  int opt;
+  char const *filename;
+  void *wt;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
+  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
-  locus_range_copy (&cond->pwfile.locus, &tok->locus);
-  cond->pwfile.filename = xstrdup (tok->str);
+
+  if (filename)
+    {
+      locus_range_copy (&loc, last_token_locus_range ());
+      if (! (opt & OPT_WATCH))
+	{
+	  char const *basename;
+	  WORKDIR *wd;
+	  int rc;
+
+	  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+	    return CFGPARSER_FAIL;
+	  rc = basic_auth_read (cond, basename, wd);
+	  workdir_unref (wd);
+	  if (rc == -1)
+	    {
+	      if (errno == ENOENT)
+		conf_error ("file %s does not exist", filename);
+	      else
+		conf_error ("can't open %s: %s", filename, strerror (errno));
+	      return CFGPARSER_FAIL;
+	    }
+	  locus_range_unref (&loc);
+	  return CFGPARSER_OK;
+	}
+    }
+  else if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  else
+    {
+      filename = tok->str;
+      locus_range_copy (&loc, &tok->locus);
+    }
+
+  wt = watcher_register (cond, filename, &loc,
+			 basic_auth_read, basic_auth_clear);
+  locus_range_unref (&loc);
+  if (wt == NULL)
+    return CFGPARSER_FAIL;
   return CFGPARSER_OK;
 }
 
@@ -4101,6 +4161,7 @@ https_parse_cert (void *call_data, void *section_data)
   struct token *tok;
   struct stat st;
   char *certname;
+  int rc = CFGPARSER_OK;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -4114,7 +4175,6 @@ https_parse_cert (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  int rc = CFGPARSER_OK;
   if (S_ISREG (st.st_mode))
     {
       rc = load_cert (certname, lst);
@@ -5544,113 +5604,6 @@ service_finalize (SERVICE *svc, void *data)
   return 0;
 }
 
-/*
- * Fix-up password file structures for use in restricted chroot
- * environment.
- */
-static int
-cond_pass_file_fixup (SERVICE_COND *cond)
-{
-  int rc = 0;
-
-  switch (cond->type)
-    {
-    case COND_BASIC_AUTH:
-      if (cond->pwfile.filename[0] == '/')
-	{
-	  if (root_jail)
-	    {
-	      /* Split file name into directory and base name, */
-	      char *p = strrchr (cond->pwfile.filename, '/');
-	      if (p != NULL)
-		{
-		  char *dir = cond->pwfile.filename;
-		  *p++ = 0;
-		  cond->pwfile.filename = xstrdup (p);
-		  if ((cond->pwfile.wd = workdir_get (dir)) == NULL)
-		    {
-		      conf_error_at_locus_range (&cond->pwfile.locus,
-						 "can't open directory %s: %s",
-						 dir,
-						 strerror (errno));
-		      free (dir);
-		      rc = -1;
-		      break;
-		    }
-		  free (dir);
-		}
-	    }
-	}
-      else
-	{
-	  WORKDIR *wd = get_include_wd_at_locus_range (&cond->pwfile.locus);
-	  if (!wd)
-	    {
-	      rc = -1;
-	      break;
-	    }
-	  cond->pwfile.wd = workdir_ref (wd);
-	}
-      break;
-
-    case COND_BOOL:
-      {
-	SERVICE_COND *subcond;
-	SLIST_FOREACH (subcond, &cond->boolean.head, next)
-	  {
-	    if ((rc = cond_pass_file_fixup (subcond)) != 0)
-	      break;
-	  }
-      }
-      break;
-
-    default:
-      break;
-    }
-  return rc;
-}
-
-static int
-rule_pass_file_fixup (REWRITE_RULE *rule)
-{
-  int rc = 0;
-  do
-    {
-      if ((rc = cond_pass_file_fixup (&rule->cond)) != 0)
-	break;
-    }
-  while ((rule = rule->iffalse) != NULL);
-  return rc;
-}
-
-static int
-pass_file_fixup (REWRITE_RULE_HEAD *head)
-{
-  REWRITE_RULE *rule;
-  int rc = 0;
-
-  SLIST_FOREACH (rule, head, next)
-    {
-      if ((rc = rule_pass_file_fixup (rule)) != 0)
-	break;
-    }
-  return rc;
-}
-
-static int
-service_pass_file_fixup (SERVICE *svc, void *data)
-{
-  if (cond_pass_file_fixup (&svc->cond))
-    return -1;
-  return pass_file_fixup (&svc->rewrite[REWRITE_REQUEST]);
-}
-
-static int
-listener_pass_file_fixup (LISTENER *lstn, void *data)
-{
-  return pass_file_fixup (&lstn->rewrite[REWRITE_REQUEST]);
-}
-
 int
 parse_config_file (char const *file, int nosyslog)
 {
@@ -5696,10 +5649,6 @@ parse_config_file (char const *file, int nosyslog)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
 	log_facility = pound_defaults.facility;
-
-      if (foreach_listener (listener_pass_file_fixup, NULL)
-	  || foreach_service (service_pass_file_fixup, NULL))
-	return -1;
     }
   named_backend_table_free (&pound_defaults.named_backend_table);
   cfgparser_finish (root_jail || daemonize);
@@ -5837,9 +5786,9 @@ struct string_value pound_settings[] = {
 #if WITH_INOTIFY
 				 "inotify"
 #elif WITH_KQUEUE
-                                 "kqueue"
+				 "kqueue"
 #else
-                                 "periodic"
+				 "periodic"
 #endif
     }
   },
@@ -5908,6 +5857,8 @@ config_parse (int argc, char **argv)
 
       case 'e':
 	stderr_option = foreground_option = 1;
+	setlinebuf (stderr);
+	setlinebuf (stdout);
 	break;
 
       case 'F':

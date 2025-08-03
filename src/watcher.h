@@ -28,13 +28,13 @@ struct watcher
 {
   enum watcher_mode mode;
   void *obj;
-  int (*read) (void *, char *, WORKDIR *);
+  int (*read) (void *, char const *, WORKDIR *);
   void (*clear) (void *);
   WORKDIR *wd;                /* Working directory. */
   char *filename;             /* Filename relative to wd. */
   struct locus_range locus;
   pthread_rwlock_t rwl;       /* Locker. */
-  time_t mtime;               /* File mtime.  Used if inotify is
+  struct timespec mtim;       /* File mtime.  Used if inotify is
 				 not available. */
   int flags;
 };
@@ -63,13 +63,14 @@ struct watchpoint
 
 typedef struct fsevmon FSEVMON;
 
-typedef DLIST_HEAD (,watchpoint) WATCHPOINT_HEAD; 
+typedef DLIST_HEAD (,watchpoint) WATCHPOINT_HEAD;
 
 extern WATCHPOINT_HEAD watch_head;
 
 void workdir_set_compat_mode (WORKDIR *wd);
 
 void watcher_reread (struct watcher *watcher);
+void watcher_clear (struct watcher *watcher);
 void watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
   ATTR_PRINTFLIKE(3,4);
 

@@ -19,10 +19,11 @@
 #include "extern.h"
 #include "watcher.h"
 
-unsigned watcher_ttl = 180;
+unsigned watcher_ttl = 60;
 
 static void watcher_stat (struct watcher *watcher);
 static void watcher_read_unlocked (struct watcher *watcher);
+static void watcher_clear_unlocked (struct watcher *watcher);
 
 void
 watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
@@ -48,29 +49,47 @@ watcher_log (int pri, struct watcher *watcher, char const *fmt, ...)
   stringbuf_free (&sb);
 }
 
+static inline void
+mtim_init (struct timespec *ts)
+{
+  memset (ts, 0, sizeof *ts);
+}
+
+static inline int
+mtim_is_zero (struct timespec *ts)
+{
+  return ts->tv_sec == 0;
+}
+
+static inline int
+mtim_is_newer (struct timespec *ts, struct timespec *ref)
+{
+  return timespec_cmp (ts, ref) > 0;
+}
+
 static void
 job_watcher_check (enum job_ctl ctl, void *arg, const struct timespec *ts)
 {
   struct watcher *watcher = arg;
   if (ctl == job_ctl_run)
     {
-      time_t mtime;
+      struct timespec mtim;
 
       pthread_rwlock_wrlock (&watcher->rwl);
-      mtime = watcher->mtime;
+      mtim = watcher->mtim;
       watcher_stat (watcher);
-      if (watcher->mtime > mtime)
+      if (mtim_is_newer (&watcher->mtim, &mtim))
 	{
-	  if (mtime == 0)
+	  if (mtim_is_zero (&mtim))
 	    watcher_log (LOG_INFO, watcher, "file restored");
 	  watcher_read_unlocked (watcher);
 	}
-      else if (watcher->mtime == 0)
+      else if (mtim_is_zero (&watcher->mtim))
 	{
-	  if (mtime)
+	  if (!mtim_is_zero (&mtim))
 	    {
 	      watcher_log (LOG_INFO, watcher, "file removed");
-	      watcher->clear (watcher->obj);
+	      watcher_clear_unlocked (watcher);
 	    }
 	}
       pthread_rwlock_unlock (&watcher->rwl);
@@ -89,9 +108,8 @@ watchpoint_free (struct watchpoint *wp)
 void
 watchpoint_set_compat_mode (struct watchpoint *wp)
 {
-  // FIXME: Remove existing watcher
   wp->watcher->mode = WATCHER_COMPAT;
-  wp->watcher->mtime = 0;
+  mtim_init (&wp->watcher->mtim);
   watcher_stat (wp->watcher);
   job_enqueue_after (watcher_ttl, job_watcher_check, wp->watcher);
 }
@@ -100,14 +118,18 @@ static void
 watcher_stat (struct watcher *watcher)
 {
   struct stat st;
-  watcher->mtime = 0;
+  mtim_init (&watcher->mtim);
   if (fstatat (watcher->wd->fd, watcher->filename, &st, 0))
     {
       if (errno != ENOENT)
 	watcher_log (LOG_ERR, watcher, "can't stat: %s", strerror (errno));
     }
   else
-    watcher->mtime = st.st_mtime;
+#if HAVE_STRUCT_STAT_ST_MTIM
+    watcher->mtim = st.st_mtim;
+#else
+    watcher->mtim.tv_sec = st.st_mtime;
+#endif
 }
 
 static inline void
@@ -119,10 +141,26 @@ watcher_open_error (struct watcher *watcher, int ec)
 static void
 watcher_read_unlocked (struct watcher *watcher)
 {
-  watcher_log (LOG_INFO, watcher, "re-reading");
   watcher->clear (watcher->obj);
   if (watcher->read (watcher->obj, watcher->filename, watcher->wd) == -1)
     watcher_open_error (watcher, errno);
+  else
+    watcher_log (LOG_INFO, watcher, "file reloaded");
+}
+
+static void
+watcher_clear_unlocked (struct watcher *watcher)
+{
+  watcher->clear (watcher->obj);
+  watcher_log (LOG_INFO, watcher, "content cleared");
+}
+
+void
+watcher_clear (struct watcher *watcher)
+{
+  pthread_rwlock_wrlock (&watcher->rwl);
+  watcher_clear_unlocked (watcher);
+  pthread_rwlock_unlock (&watcher->rwl);
 }
 
 void
@@ -194,11 +232,10 @@ watcher_unlock (struct watcher *dp)
 struct watcher *
 watcher_register (void *obj, char const *filename,
 		  struct locus_range const *loc,
-		  int (*read) (void *, char *, WORKDIR *),
+		  int (*read) (void *, char const *, WORKDIR *),
 		  void (*clear) (void *))
 {
   struct watchpoint *wp;
-  char const *basename;
   int rc;
   enum watcher_mode mode;
 
@@ -210,20 +247,35 @@ watcher_register (void *obj, char const *filename,
   wp->watcher->read = read;
   wp->watcher->clear = clear;
 
-  basename = filename_split_wd (filename, &wp->watcher->wd);
-  if (!basename)
+  if (root_jail)
     {
-      conf_error_at_locus_range (loc, "can't register watcher");
-      free (wp);
-      return NULL;
+      char const *basename = filename_split_wd (filename, &wp->watcher->wd);
+      if (!basename)
+	{
+	  conf_error_at_locus_range (loc, "can't register watcher");
+	  free (wp);
+	  return NULL;
+	}
+      wp->watcher->filename = xstrdup (basename);
     }
-  wp->watcher->filename = xstrdup (basename);
+  else
+    {
+      WORKDIR *wd = get_include_wd_at_locus_range (loc);
+      if (!wd)
+	{
+	  free (wp);
+	  return NULL;
+	}
+      wp->watcher->wd = workdir_ref (wd);
+      wp->watcher->filename = xstrdup (filename);
+    }
+
   locus_range_init (&wp->watcher->locus);
   locus_range_copy (&wp->watcher->locus, loc);
   pthread_rwlock_init (&wp->watcher->rwl, NULL);
 
   rc = wp->watcher->read (wp->watcher->obj, wp->watcher->filename,
-			 wp->watcher->wd);
+			  wp->watcher->wd);
   if (rc == -1)
     {
       if (errno == ENOENT)

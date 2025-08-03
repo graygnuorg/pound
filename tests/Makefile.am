@@ -81,6 +81,7 @@ TESTSUITE_AT = \
  dyn_srv_0.at\
  dyn_srv_ttl.at\
  dynacl.at\
+ dynbauth.at\
  dynpat.at\
  echo.at\
  err503.at\
@@ -96,6 +97,7 @@ TESTSUITE_AT = \
  https.at\
  include.at\
  incldir.at\
+ inclglob.at\
  inclnest.at\
  inclscope.at\
  invenc.at\

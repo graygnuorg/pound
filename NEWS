@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-07-18
+Pound -- history of user-visible changes. 2025-08-02
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,28 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.16.90 (git)
+Version 4.17.90 (git)
+
+* Emacs mode for editing pound configuration files
+
+* Include statement accepts globbing patterns
+
+
+Version 4.17, 2025-07-29
+
+* Tagging conditional statements
+
+All conditional statements that match against a pattern can be tagged
+using the following option:
+
+   -tag "T"
+
+where T is an arbitrary string.  This tag can then be used to refer to
+a subexpression obtained as a result of matching, for example:
+
+   Path -tag "dir" -re "^/static(/.*)"
+   Header -tag "type" "Content-Type:([^/]+)/([^;]+)"
+   SetPath "/assets/$1(type).$2(type)$1(dir)"
 
 * Changes to the "ACL" statements
 
@@ -29,7 +50,7 @@ Two new forms of the ACL statements are provided:
    immediately, pound relies on filesystem monitoring API provided by
    the operating system - inotify on GNU/Linux systems and kqueue on
    BSD.  On systems not supporting either interface, the file will be
-   checked periodically.  The interval between successive checks is
+   checked periodically.  The interval between two successive checks is
    defined by the WatcherTTL global directive.
 
 The corresponding new forms are implemented for all ACL statements,
@@ -45,6 +66,18 @@ i.e.:
    TrustedIP -file "filename"
    TrustedIP -filewatch "filename"
 
+* Use of "-filewatch" with request matching directives
+
+In addition to ACL, the -filewatch flag discussed above can be used with
+the following request matching directives: Header, Path, Query, QueryParam,
+StringMatch, URL.
+
+* Changes to the "BasicAuth" statement
+
+The statement takes an option: -filewatch or -file.  The option
+-filewatch is the default (see above).  The -file option can be used
+to disable file change monitoring.
+
 * Changes to the "Header" statement
 
 New statement form is introduced:
@@ -56,19 +89,6 @@ e.g.
 
     Header "Content-Type" -beg "text/"
 
-Besides, it is now possible to match against a pattern list read from
-a file:
-
-    Header "User-Agent" -file "agents.txt"
-
-The -filewatch option is also accepted.  If used, the file will be
-monitored and the pattern list reconstructed each time it changes.
-
-* Changes to other request matching directives
-
-The following request matching directives support the -filewatch
-flag, discussed above: URL, Path, Query, QueryParam, StringMatch.
-
 * New special backend "SendFile"
 
 This backend treats the path part of the request as local file name
@@ -76,11 +96,11 @@ and sends back the contents of that file, if it exists.  Default
 content type is "text/plain".  Both parameters can be changed using
 request (for file name), and response (for content type) rewriting.
 
-Syntax is:
+The syntax is:
 
 	 SendFile DIR
 
-the DIR argument specifying the directory from which to serve files.
+where DIR specifies the directory from which to serve files.
 
 * Error file contents
 
@@ -96,7 +116,7 @@ of that response can be replaced with an arbitrary custom page.  For
 this to work, the listener must define a custom page for the
 status code in question using the ErrorFile statement, and error
 response rewriting must be explicitly enabled.  The latter is done
-using the following statement:
+with the following statement:
 
    RewriteErrors on
 
@@ -109,7 +129,7 @@ Service blocks, the latter overriding the former.
 
 When using -file with one of the following pattern types: -exact, -beg,
 -end, -contain, only first pattern from the file was compiled using the
-requested pattern type.  Remaining patterns were treated as POSIX regular
+requested pattern type.  Remaining ones were treated as POSIX regular
 expressions.
 
 
