@@ -437,7 +437,7 @@
       (if ctx
 	  ctx
 	(goto-char start)
-	(if (re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
+	(if (re-search-backward "^[ \t]*\\(\\(?:\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)\\|\\(?:TrustedIP[ \t]*\\(?:#.*\\)?$\\)\\)" nil t)
 	    (let ((pos (marker-position (nth 2 (match-data)))))
 	      (forward-line)
 	      (pound-scan start (list pos))))))))
