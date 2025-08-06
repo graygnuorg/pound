@@ -142,6 +142,7 @@ TESTSUITE_AT = \
  sessurl.at\
  set.at\
  stringmatch.at\
+ tbf.at\
  template.at\
  url.at\
  virthost.at\

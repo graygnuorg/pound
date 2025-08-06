@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-08-02
+Pound -- history of user-visible changes. 2025-08-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -12,6 +12,21 @@ Version 4.17.90 (git)
 * Emacs mode for editing pound configuration files
 
 * Include statement accepts globbing patterns
+
+* TBF statement
+
+This is a conditional statement that implements token bucket filter.
+Its arguments are: the id of the buffer (a string, subject to to
+backreference expansion and request accessor interpretation), maximum
+allowed rate (requests per second) and a burst size (requests).  TBF
+evaluates to true if the token bucket allows to accept the request and
+to false otherwise.
+
+* New request accessor: remoteip
+
+%[remoteip 0]  expands to the real originator IP;
+%[remoteip 1]  expands to the IP determined from the X-Forwarded-For
+               (or similar) header.
 
 
 Version 4.17, 2025-07-29

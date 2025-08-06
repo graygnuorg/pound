@@ -19,7 +19,7 @@
 /*
  * SYNOPSIS
  *      typedef struct {
- *          char name;
+ *          char *name;
  *          ...
  *      } X
  *      #define HT_TYPE X

@@ -34,6 +34,7 @@ pound_SOURCES=\
  metrics.c\
  pound.c\
  svc.c\
+ tbf.c\
  watcher.c
 
 if COND_PCRE

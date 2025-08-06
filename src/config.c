@@ -2096,6 +2096,52 @@ parse_cond_client_cert (void *call_data, void *section_data)
   return assign_cert (&cond->x509, NULL);
 }
 
+#ifndef UINT64_MAX
+# define UINT64_MAX ((uint64_t)-1)
+#endif
+
+static int
+parse_rate (uint64_t *ret_rate)
+{
+  int rc;
+  unsigned rate;
+
+  if ((rc = cfg_assign_unsigned (&rate, NULL)) != CFGPARSER_OK)
+    return rc;
+  if (UINT64_MAX / NANOSECOND < rate)
+    {
+      conf_error ("%s", "rate out of range");
+      return CFGPARSER_FAIL;
+    }
+  *ret_rate = rate * NANOSECOND;
+  return CFGPARSER_OK;
+}
+
+static int
+parse_cond_tbf (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_TBF);
+  struct token *tok;
+  uint64_t rate;
+  unsigned maxtok;
+  STRING *key;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  key = string_init (tok->str);
+
+  if ((rc = parse_rate (&rate)) != CFGPARSER_OK)
+    return rc;
+  if ((rc = cfg_assign_unsigned (&maxtok, section_data)) != CFGPARSER_OK)
+    return rc;
+
+  cond->tbf.key = key;
+  cond->tbf.tbf = tbf_alloc (rate, maxtok);
+  return CFGPARSER_OK;
+}
+
+
 static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
@@ -2494,6 +2540,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "BasicAuth",
     .parser = parse_cond_basic_auth
+  },
+  {
+    .name = "TBF",
+    .parser = parse_cond_tbf
   },
   {
     .name = "StringMatch",

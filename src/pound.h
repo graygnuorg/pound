@@ -267,6 +267,7 @@ enum
     HTTP_STATUS_METHOD_NOT_ALLOWED,// 405
     HTTP_STATUS_PAYLOAD_TOO_LARGE, // 413
     HTTP_STATUS_URI_TOO_LONG,      // 414
+    HTTP_STATUS_TOO_MANY_REQUESTS, // 429
     HTTP_STATUS_INTERNAL_SERVER_ERROR,          // 500
     HTTP_STATUS_NOT_IMPLEMENTED,   // 501
     HTTP_STATUS_SERVICE_UNAVAILABLE, // 503
@@ -293,6 +294,8 @@ timespec_cmp (struct timespec const *a, struct timespec const *b)
   return 0;
 }
 
+enum { NANOSECOND = 1000000000L };
+
 static inline struct timespec
 timespec_sub (struct timespec const *a, struct timespec const *b)
 {
@@ -303,12 +306,11 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
   if (d.tv_nsec < 0)
     {
       --d.tv_sec;
-      d.tv_nsec += 1e9;
+      d.tv_nsec += NANOSECOND;
     }
 
   return d;
 }
-
 
 /* Memory allocation primitives. */
 #include "mem.h"
@@ -706,7 +708,8 @@ enum service_cond_type
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
     COND_CLIENT_CERT,
-    COND_DYN
+    COND_DYN,
+    COND_TBF
   };
 
 struct dyn_service_cond
@@ -738,6 +741,14 @@ struct pass_file
   USER_PASS_HEAD head;
 };
 
+typedef struct tbf TBF;
+
+struct tbf_cond
+{
+  STRING *key;
+  TBF *tbf;
+};
+
 typedef struct _service_cond
 {
   enum service_cond_type type;
@@ -753,6 +764,7 @@ typedef struct _service_cond
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
     X509 *x509;              /* COND_CLIENT_CERT */
+    struct tbf_cond tbf;     /* COND_TBF */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -1055,6 +1067,7 @@ typedef struct _pound_http
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
+void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
 void save_forwarded_header (POUND_HTTP *phttp);
 void http_log (POUND_HTTP *phttp);
 
@@ -1333,3 +1346,6 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
+
+TBF *tbf_alloc (uint64_t rate, unsigned burst);
+int tbf_eval (TBF *env, char const *keyid);

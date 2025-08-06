@@ -1168,6 +1168,8 @@ cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 		  break;
 
 		case CFGPARSER_OK_NONL:
+		  if (single_statement)
+		    return CFGPARSER_OK_NONL;
 		  continue;
 
 		case CFGPARSER_FAIL:
@@ -1403,7 +1405,7 @@ cfg_assign_unsigned (void *call_data, void *section_data)
 
 int
 cfg_assign_int (void *call_data, void *section_data)
-  {
+{
   long n;
   char *p;
   struct token *tok = gettkn_expect (T_NUMBER);
@@ -1422,7 +1424,8 @@ cfg_assign_int (void *call_data, void *section_data)
   return 0;
 }
 
-int cfg_assign_int_range (int *dst, int min, int max)
+int
+cfg_assign_int_range (int *dst, int min, int max)
 {
   int n;
   int rc;

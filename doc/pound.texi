@@ -111,6 +111,7 @@ Simple Proxy
 * Conditional branches::
 * Modifying responses::
 * Authentication::
+* Rate-limiting::
 * Redirects::
 * Error responses::
 
@@ -555,6 +556,7 @@ match all requests.
 * Conditional branches::
 * Modifying responses::
 * Authentication::
+* Rate-limiting::
 * Redirects::
 * Error responses::
 @end menu
@@ -1287,6 +1289,110 @@ will be replied to with a properly formatted 401 response, which will
 prompt the remote user to authenticate themselves.  On the other hand,
 authorized requests will not match this service and will eventually be
 handled by one of the services declared after it.
+
+@node Rate-limiting
+@section Rate-limiting
+@cindex rate-limiting
+@cindex token bucket filter
+@kwindex TBF
+  Rate-limiting is a technique that controls the number of requests
+processed by a service in a second.  @command{Pound} contains
+mechanism to implement rate-limiting using @dfn{token bucket filter}
+algorithm.
+
+  The token bucket filter decides whether a request can be accepted
+based on the presence of abstract entities called @dfn{tokens} in a container
+called @dfn{bucket}.  Each token represents an ability to process one
+incoming request.  The algorithm works as follows:
+
+@itemize @bullet
+@item
+Tokens are added to the bucket at a constant rate of @var{r} tokens
+per second.
+@item
+A bucket can host at most @var{M} tokens.  Any tokens arriving when
+the bucket is full are discarded.
+@item
+If a request arrives when the bucket holds some tokens, one token is
+removed and the request is accepted.
+@item
+If the bucket is empty, the request is not accepted.
+@end itemize
+
+   This algorithm makes sure requests are accepted at a constant rate
+or @var{r} requests per seconds with bursts of up to @var{M} requests.
+Such bursts occur when no requests arrive for @var{M}/@var{r} or more
+seconds.
+
+  The special conditional statement @code{TBF} provides an interface
+to this algorithm.  The statement takes three arguments: @var{key},
+a string identifying the bucket, and the values of @var{r} and
+@var{M}.  It evaluates to @dfn{true} if the algorithm accepts the
+request and to @dfn{false} otherwise.  Placing that conditional in
+a @code{Service} section ensures that requests will be processed at
+the configured rate.  For each such service section, there is normally
+another one to be used for requests that arrive faster than allowed.
+The selection criteria for the two sections differ only by the absence
+of @code{TBF} conditional in the second section.  Consider the
+following example:
+
+@example
+Service "git"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   TBF "$1" 5 10
+   Backend
+       Address 192.0.2.10
+       Port 80
+   End
+End
+Service "block"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   Error 429
+End
+@end example
+
+  This configuration limits request rate to any path beginning with
+@file{/git/} (presumably, a @command{git} repository) to 5 requests
+per second with bursts of up to 10 requests.  The bucket to use is
+identified by the first directory component after the @file{/git/}
+prefix, so that rates are computed for each repository individually.
+Requests that conform to that policy are routed to the backend at
+@samp{192.0.2.10:80}.  This is configured by the service section
+@samp{git}.
+
+  The requests that arrive quicker than permitted by that service will
+be served by service @samp{block}, which will respond to them with
+HTTP status 429 (@samp{Too Many Requests}).  @xref{Special Backends,
+Error}, for a discussion of @code{Error} backend.
+
+  To compute rates for each connection individually, use the
+@code{remoteip} accessor (@pxref{Request Accessors}).  In that case
+the corresponding fragment from the example above becomes:
+
+@example
+   Path -re "^/git/([^/]+).*"
+   TBF "%[remoteip 0]-$1" 5 10
+@end example
+
+  If the rate limit should apply to several services, the recommended
+course of action is to declare such @dfn{error} service first, using
+a common subset of conditions for all services it is intended to cover
+and a negation of @code{TBF}.  E.g.:
+
+@example
+@group
+Service "rate-limit"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   Not TBF "$1" 5 10
+   Error 429
+End
+@end group
+@end example
+
+This service section shall be followed by the services it protects.
 
 @node Redirects
 @section Redirects
@@ -2681,6 +2787,12 @@ If the value of the @code{Host} header includes port number,
 character.  Otherwise, it expands to empty string.
 @end deffn
 
+@deffn {Accessor} remoteip @var{fwd}
+Expands to the request originator IP address.  If @var{fwd} is 0,
+expands to its real IP, otherwise expands to the IP determined from
+the @code{X-Forwarded-For} (or similar) header.  @xref{%a}, for details.
+@end deffn
+
 @node Global directives
 @section Global directives
  Global directives configure the program operation as a whole.  They
@@ -3562,6 +3674,16 @@ server.
 @end quotation
 @end defvr
 
+@defvr {HTTP status} 429
+@samp{Too Many Requests}
+@*
+@quotation
+The remote party sent too many requests in a given amount of
+time. @command{Pound} never issues this error by itself.  This code is
+intended for implementing rate-limiting.  @xref{Rate-limiting}.
+@end quotation
+@end defvr
+
 @defvr {HTTP status} 500
 @samp{Internal Server Error}
 @*
@@ -3933,6 +4055,24 @@ their effect on matching.
 @deffn {Request Conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions} and matches the
 resulting value against @var{pattern}.
+@end deffn
+
+@deffn {Request Conditional} TBF @var{key} @var{rate} @var{burst}
+Defines a @dfn{token bucket filter} condition.  @xref{Rate-limiting},
+for a detailed discussion.  Arguments are:
+
+@table @var
+@item key
+A string identifying the bucket.  It is subject to backreference
+expansion and request accessor interpretation, as described in
+@ref{String Expansions}.
+
+@item rate
+Rate limit, in requests per second.
+
+@item burst
+Burst value, i.e. maximum number of tokens the bucket can contain.
+@end table
 @end deffn
 
 @deffn {Request Conditional} URL [@var{options}] "@var{pattern}"

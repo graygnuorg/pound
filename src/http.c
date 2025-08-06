@@ -134,6 +134,11 @@ static HTTP_STATUS http_status[] = {
     "The length of the requested URL exceeds the capacity limit for"
     " this server."
   },
+  [HTTP_STATUS_TOO_MANY_REQUESTS] = {
+    429,
+    "Too Many Requests",
+    "Originator sent too many requests in a given amount of time."
+  },
   [HTTP_STATUS_INTERNAL_SERVER_ERROR] = {
     500,
     "Internal Server Error",
@@ -368,8 +373,8 @@ static int http_request_get_query_param (struct http_request *,
 					 char const *, size_t,
 					 struct query_param **);
 
-typedef int (*accessor_func) (struct http_request *, char const *, int,
-			      char const **, size_t *);
+typedef int (*accessor_func) (POUND_HTTP *, char const *, int,
+			      struct stringbuf *);
 
 struct accessor
 {
@@ -379,117 +384,136 @@ struct accessor
 };
 
 static int
-accessor_url (struct http_request *req, char const *arg, int arglen,
-	      char const **ret_val, size_t *ret_len)
+accessor_url (POUND_HTTP *phttp, char const *arg, int arglen,
+	      struct stringbuf *sb)
 {
   char const *val;
-  int rc = http_request_get_url (req, &val);
+  int rc = http_request_get_url (&phttp->request, &val);
   if (rc == RETRIEVE_OK && val)
-    {
-      *ret_len = strlen (val);
-      *ret_val = val;
-    }
+    stringbuf_add_string (sb, val);
+  else
+    rc = RETRIEVE_NOT_FOUND;
   return rc;
 }
 
 static int
-accessor_path (struct http_request *req, char const *arg, int arglen,
-	       char const **ret_val, size_t *ret_len)
+accessor_path (POUND_HTTP *phttp, char const *arg, int arglen,
+	       struct stringbuf *sb)
 {
   char const *val;
-  int rc = http_request_get_path (req, &val);
+  int rc = http_request_get_path (&phttp->request, &val);
   if (rc == RETRIEVE_OK && val)
-    {
-      *ret_len = strlen (val);
-      *ret_val = val;
-    }
+    stringbuf_add_string (sb, val);
+  else
+    rc = RETRIEVE_NOT_FOUND;
   return rc;
 }
 
 static int
-accessor_query (struct http_request *req, char const *arg, int arglen,
-		char const **ret_val, size_t *ret_len)
+accessor_query (POUND_HTTP *phttp, char const *arg, int arglen,
+		struct stringbuf *sb)
 {
   char const *val;
-  int rc = http_request_get_query (req, &val);
+  int rc = http_request_get_query (&phttp->request, &val);
   if (rc == RETRIEVE_OK && val)
-    {
-      *ret_len = strlen (val);
-      *ret_val = val;
-    }
+    stringbuf_add_string (sb, val);
+  else
+    rc = RETRIEVE_NOT_FOUND;
   return rc;
 }
 
 static int
-accessor_param (struct http_request *req, char const *arg, int arglen,
-		char const **ret_val, size_t *ret_len)
+accessor_param (POUND_HTTP *phttp, char const *arg, int arglen,
+		struct stringbuf *sb)
 {
   struct query_param *qp;
   int rc;
-  if ((rc = http_request_get_query_param (req, arg, arglen, &qp)) == RETRIEVE_OK)
-    {
-      *ret_val = qp->value;
-      if (qp->value)
-	*ret_len = strlen (qp->value);
-    }
+  if ((rc = http_request_get_query_param (&phttp->request, arg,
+					  arglen, &qp)) == RETRIEVE_OK &&
+      qp->value)
+    stringbuf_add_string (sb, qp->value);
+  else
+    rc = RETRIEVE_NOT_FOUND;
   return rc;
 }
 
 static int
-accessor_header (struct http_request *req, char const *arg, int arglen,
-		 char const **ret_val, size_t *ret_len)
+accessor_get_header (POUND_HTTP *phttp, char const *arg, int arglen,
+		     char const **ret_val, size_t *ret_len)
 {
   struct http_header *hdr;
+  char const *val;
 
-  if ((hdr = http_header_list_locate_name (&req->headers, arg, arglen)) == NULL)
+  if ((hdr = http_header_list_locate_name (&phttp->request.headers,
+					   arg, arglen)) == NULL)
     return RETRIEVE_NOT_FOUND;
 
-  if ((*ret_val = http_header_get_value (hdr)) != NULL)
-    *ret_len = strlen (*ret_val);
+  if ((val = http_header_get_value (hdr)) != NULL)
+    {
+      *ret_val = val;
+      *ret_len = strlen (val);
+    }
+  else
+    return RETRIEVE_NOT_FOUND;
+
   return RETRIEVE_OK;
 }
 
 static int
-accessor_host (struct http_request *req, char const *arg, int arglen,
-	       char const **ret_val, size_t *ret_len)
+accessor_header (POUND_HTTP *phttp, char const *arg, int arglen,
+		 struct stringbuf *sb)
+{
+  char const *val;
+  size_t len;
+  int rc;
+
+  rc = accessor_get_header (phttp, arg, arglen, &val, &len);
+  if (rc == RETRIEVE_OK)
+    stringbuf_add (sb, val, len);
+  return rc;
+}
+
+static int
+accessor_host (POUND_HTTP *phttp, char const *arg, int arglen,
+	       struct stringbuf *sb)
 {
   char const *host;
   size_t len;
-  int rc = accessor_header (req, "host", 4, &host, &len);
-  if (rc == RETRIEVE_OK && host)
+  int rc = accessor_get_header (phttp, "host", 4, &host, &len);
+  if (rc == RETRIEVE_OK)
     {
       char *p;
-      *ret_val = host;
       if ((p = memchr (host, ':', len)) != NULL)
-	*ret_len = p - host;
-      else
-	*ret_len = len;
+	len = p - host;
+      stringbuf_add (sb, host, len);
     }
   return rc;
 }
 
 static int
-accessor_port (struct http_request *req, char const *arg, int arglen,
-	       char const **ret_val, size_t *ret_len)
+accessor_port (POUND_HTTP *phttp, char const *arg, int arglen,
+	       struct stringbuf *sb)
 {
   char const *host;
   size_t len;
-  int rc = accessor_header (req, "host", 4, &host, &len);
-  if (rc == RETRIEVE_OK && host)
+  if (accessor_get_header (phttp, "host", 4, &host, &len) == RETRIEVE_OK)
     {
       char *p;
       if ((p = memchr (host, ':', len)) != NULL)
 	{
-	  *ret_val = p;
-	  *ret_len = len - (p - host);
-	}
-      else
-	{
-	  *ret_val = host + len;
-	  *ret_len = 0;
+	  stringbuf_add (sb, p, len - (p - host));
+	  return RETRIEVE_OK;
 	}
     }
-  return rc;
+  return RETRIEVE_NOT_FOUND;
+}
+
+int
+accessor_remote_ip (POUND_HTTP *phttp, char const *arg, int arglen,
+		    struct stringbuf *sb)
+{
+  stringbuf_store_ip (sb, phttp, !(arg[0] == '0' && arg[1] == 0));
+  return RETRIEVE_OK;
 }
 
 static struct accessor accessors[] = {
@@ -500,6 +524,7 @@ static struct accessor accessors[] = {
   { "header",   accessor_header, 1 },
   { "host",     accessor_host },
   { "port",     accessor_port },
+  { "remoteip", accessor_remote_ip, 1 },
   { NULL }
 };
 
@@ -601,7 +626,6 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  accessor_func acc;
 	  char *arg;
 	  size_t arglen;
-	  char const *val;
 
 	  q = strchr (str + 2, ']');
 	  if (q == NULL)
@@ -620,9 +644,8 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	    {
 	      stringbuf_add (sb, str, len + 1);
 	    }
-	  else if (acc (&phttp->request, arg, arglen, &val, &len) == 0 && val)
+	  else if (acc (phttp, arg, arglen, sb) == RETRIEVE_OK)
 	    {
-	      stringbuf_add (sb, val, len);
 	      if (result >= 0)
 		result++;
 	    }
@@ -3435,6 +3458,22 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       res = (phttp->x509 != NULL &&
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
+      break;
+
+    case COND_TBF:
+      {
+	char *key;
+
+	key = expand_string (string_ptr (cond->tbf.key), phttp, req, "tbf");
+	if (key)
+	  {
+	    res = tbf_eval (cond->tbf.tbf, key);
+	    free (key);
+	  }
+	else
+	  res = -1;
+      }
+      break;
     }
   watcher_unlock (cond->watcher);
 

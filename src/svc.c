@@ -261,7 +261,7 @@ thr_timer (void *arg)
 	}
       else
 	abend (NULL, "unexpected error from pthread_cond_timedwait: %s",
-	       strerror (errno));
+	       strerror (rc));
     }
   pthread_cleanup_pop (1);
 }
@@ -571,7 +571,16 @@ str_be (char *buf, size_t size, BACKEND *be)
 static int
 match_service (SERVICE *svc, POUND_HTTP *phttp)
 {
-  return match_cond (&svc->cond, phttp, &phttp->request) == 1;
+  int rc;
+  /*
+   * Temporarily assume this service.  This is needed to properly
+   * expand %[remoteip 1] constructs, since TrustedIP lists can be declared
+   * inside a service.
+   */
+  phttp->svc = svc;
+  rc = match_cond (&svc->cond, phttp, &phttp->request);
+  phttp->svc = NULL;
+  return rc == 1;
 }
 
 /*

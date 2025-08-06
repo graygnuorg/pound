@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 2, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "August 5, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1621,6 +1621,28 @@ Match the value of the query parameter \fIname\fR.
 Expand \fIstring\fR as described in \fBString expansion\fR (see below)
 and match the resulting value against \fIpattern\fR.
 .TP
+\fBTBF\fR "\fIkey\fR" \fIrate\fR \fIburst\fR
+Defines a
+.I token bucket filter
+for that service.  See below, the section entitled
+.BR "REQUEST RATE",
+for a discussion.  Arguments are:
+.RS
+.TP
+.I key
+A string identifying the bucket to use.  It is subject to string expansion
+(see the subsection \fBString expansion\fR, above).
+.TP
+.I rate
+Allowed request rate, requests per second.
+.TP
+.I burst
+Burst size, i.e. maximum number of tokens the bucket can contain.
+.RE
+.IP
+The \fBTBF\fR conditional evaluates to \fItrue\fR if the request
+conforms to the defined rate policy, and \fIfalse\fR otherwise.
+.TP
 \fBURL\fR [\fIoptions\fR] "\fIpattern\fR"
 Match the URL of the incoming request.  By default, \fIpattern\fR is
 treated as case-sensitive extended regular expression.  This can be
@@ -2931,6 +2953,31 @@ as shown in the following example:
 Placing this service definition before others ensures that services
 defined below it will be tried only if the incoming request passes
 basic authentication.
+.SH REQUEST RATE
+Request rate can be controlled using the
+.B TBF
+service selection statement.  The statement implements a
+.IR "token bucket filter" ,
+and takes three arguments: a string identifying the bucket, request flow
+rate in requests per second, and token burst size, i.e. maximum number
+of requests per bucket.  The first argument is expanded as discussed
+in
+.BR "String expansion" .
+The statement evaluates to
+.IR true ,
+if the request conforms to the rate policy, and to
+.I false
+otherwise.  It is customary to use its negation together with the
+.B Error
+special backend in order to control request flow, e.g.:
+.PP
+.EX
+Service "rate-limit"
+  Path -re "^/([^/]+).*"
+  Not TBF "$1" 3 10
+  Error 429
+End
+.EE
 .SH REQUEST LOGGING
 Logging of HTTP requests and responses is controlled by
 .B LogLevel

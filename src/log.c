@@ -134,14 +134,13 @@ anon_addr2str (char *buf, size_t size, struct addrinfo const *from_host)
 
 static void
 i_remote_ip (struct stringbuf *sb, struct http_log_instr *instr,
-		    POUND_HTTP *phttp)
+	     POUND_HTTP *phttp)
 {
-  char caddr[MAX_ADDR_BUFSIZE];
-  print_str (sb, anon_addr2str (caddr, sizeof (caddr), &phttp->from_host));
+  stringbuf_store_ip (sb, phttp, 0);
 }
 
 static int
-acl_match_ip (ACL *acl, char const *ipstr)
+acl_match_ip (ACL *acl, char const *ipstr, struct addrinfo **ret_addr)
 {
   struct addrinfo hints, *res, *ap;
 
@@ -157,21 +156,25 @@ acl_match_ip (ACL *acl, char const *ipstr)
 	  if ((rc = acl_match (acl, ap->ai_addr) == 0))
 	    break;
 	}
-      freeaddrinfo (res);
+      if (rc == 0 && ret_addr)
+	*ret_addr = ap;
+      else
+	freeaddrinfo (res);
       return rc;
     }
   return -1;
 }
 
-static char *
-scan_forwarded_header (char const *hdr, ACL *acl)
+static int
+scan_forwarded_header (char const *hdr, ACL *acl, char const **ret_ptr,
+		       size_t *ret_len, struct addrinfo **ret_addr)
 {
   char const *end;
   char *buf = NULL;
   size_t bufsize = 0;
 
   if (!hdr || !acl)
-    return NULL;
+    return -1;
 
   end = hdr + strlen (hdr);
   while (end > hdr)
@@ -193,7 +196,7 @@ scan_forwarded_header (char const *hdr, ACL *acl)
 	  else
 	    {
 	      free (buf);
-	      return NULL;
+	      return -1;
 	    }
 	}
 
@@ -211,10 +214,16 @@ scan_forwarded_header (char const *hdr, ACL *acl)
 	}
       buf[i] = 0;
 
-      switch (acl_match_ip (acl, buf))
+      switch (acl_match_ip (acl, buf, ret_addr))
 	{
 	case 0:
-	  return buf;
+	  free (buf);
+	  if (ret_ptr)
+	    {
+	      *ret_ptr = p + j - i;
+	      *ret_len = i;
+	    }
+	  return 0;
 
 	case 1:
 	  break;
@@ -227,7 +236,7 @@ scan_forwarded_header (char const *hdr, ACL *acl)
     }
  end:
   free (buf);
-  return NULL;
+  return 1;
 }
 
 static char const *
@@ -254,15 +263,14 @@ get_trusted_ips (POUND_HTTP *phttp)
   return NULL;
 }
 
-void
-save_forwarded_header (POUND_HTTP *phttp)
+static char *
+get_forwarded_header (POUND_HTTP *phttp)
 {
   struct http_header *hdr;
   char const *hname;
   char const *val;
+  char *retval = NULL;
 
-  free (phttp->orig_forwarded_header);
-  phttp->orig_forwarded_header = NULL;
   hname = get_forwarded_header_name (phttp);
   if ((hdr = http_header_list_locate_name (&phttp->request.headers,
 					   hname, strlen (hname))) != NULL)
@@ -270,7 +278,10 @@ save_forwarded_header (POUND_HTTP *phttp)
       if (is_combinable_header (hdr))
 	{
 	  if ((val = http_header_get_value (hdr)) != NULL)
-	    phttp->orig_forwarded_header = xstrdup (val);
+	    {
+	      if ((retval = strdup (val)) == NULL)
+		lognomem ();
+	    }
 	}
       else
 	{
@@ -290,28 +301,51 @@ save_forwarded_header (POUND_HTTP *phttp)
 	      else
 		break;
 	    }
-	  phttp->orig_forwarded_header = stringbuf_finish (&sb);
-	  if (!phttp->orig_forwarded_header)
+	  if ((retval = stringbuf_finish (&sb)) == NULL)
 	    stringbuf_free (&sb);
 	}
     }
+  return retval;
+}
+
+void
+save_forwarded_header (POUND_HTTP *phttp)
+{
+  free (phttp->orig_forwarded_header);
+  phttp->orig_forwarded_header = get_forwarded_header (phttp);
+}
+
+void
+stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int forwarded)
+{
+  char const *val = NULL;
+  size_t len;
+  char caddr[MAX_ADDR_BUFSIZE];
+
+  if (forwarded)
+    {
+      char *fwh = phttp->orig_forwarded_header;
+      if (!fwh)
+	fwh = get_forwarded_header (phttp);
+      scan_forwarded_header (fwh, get_trusted_ips (phttp), &val, &len, NULL);
+      if (!phttp->orig_forwarded_header)
+	free (fwh);
+      if (val)
+	{
+	  stringbuf_add (sb, val, len);
+	  return;
+	}
+    }
+
+  stringbuf_add_string (sb, anon_addr2str (caddr, sizeof (caddr),
+					   &phttp->from_host));
 }
 
 static void
 i_forwarded_ip (struct stringbuf *sb, struct http_log_instr *instr,
 		POUND_HTTP *phttp)
 {
-  char *ip;
-  char caddr[MAX_ADDR_BUFSIZE];
-
-  if ((ip = scan_forwarded_header (phttp->orig_forwarded_header,
-				    get_trusted_ips (phttp))) != NULL)
-    {
-      print_str (sb, ip);
-      free (ip);
-    }
-  else
-    print_str (sb, anon_addr2str (caddr, sizeof (caddr), &phttp->from_host));
+  stringbuf_store_ip (sb, phttp, 1);
 }
 
 static void
