@@ -754,20 +754,32 @@ parse_acl (ACL *acl)
 
 #define OPT_FILE  0x1
 #define OPT_WATCH 0x2
+#define OPT_FWD   0x4
 
 static int
-get_file_option (int *opt, char const **filename)
+get_file_option (int *opt, char const **filename, int fwd)
 {
   static struct config_option optab[] = {
+    { "forwarded", OPT_FWD },
     { "file", OPT_FILE, 1 },
     { "filewatch", OPT_FILE | OPT_WATCH, 1 },
     { NULL }
   };
+  struct config_option *opptr = fwd ? optab : optab + 1;
 
   *opt = 0;
   *filename = NULL;
-  if (gettok_option (optab, opt, filename) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
+
+  for (;;)
+    {
+      int n;
+
+      if (gettok_option (opptr, &n, filename) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      if (n == -1)
+	break;
+      *opt |= n;
+    }
   return CFGPARSER_OK;
 }
 
@@ -795,7 +807,7 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)
@@ -824,15 +836,17 @@ parse_named_acl (void *call_data, void *section_data)
  *   Creates and references an unnamed ACL.
  */
 static int
-parse_acl_ref (ACL **ret_acl)
+parse_acl_ref (ACL **ret_acl, int *pforwarded)
 {
   struct token *tok;
   ACL *acl;
   int opt;
   char const *filename;
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, pforwarded != NULL) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
+  if (pforwarded)
+    *pforwarded = !!(opt & OPT_FWD);
 
   if (filename)
     {
@@ -880,7 +894,7 @@ parse_acl_ref (ACL **ret_acl)
 static int
 assign_acl (void *call_data, void *section_data)
 {
-  return parse_acl_ref (call_data);
+  return parse_acl_ref (call_data, NULL);
 }
 
 static int
@@ -1902,7 +1916,7 @@ static int
 parse_cond_acl (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_ACL);
-  return parse_acl_ref (&cond->acl);
+  return parse_acl_ref (&cond->acl.acl, &cond->acl.forwarded);
 }
 
 static int
@@ -2045,7 +2059,7 @@ parse_cond_basic_auth (void *call_data, void *section_data)
   char const *filename;
   void *wt;
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)

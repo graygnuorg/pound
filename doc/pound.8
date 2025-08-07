@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 5, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "August 7, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1493,7 +1493,7 @@ directives are joined by a boolean \fBAND\fR.
 .PP
 A service with no matching directives always matches.
 .TP
-\fBACL\fR "\fIname\fR"
+\fBACL\fR [\fB\-forwarded\fR] "\fIname\fR"
 Match the source IP address against the named ACL.  The ACL must have
 been defined earlier (see the
 .B ACL
@@ -1501,11 +1501,21 @@ statement in
 .B "GLOBAL DIRECTIVES"
 section above).  If the originating IP doesn't match any CIDR from the
 list, then this service will be skipped and next one tried.
+.IP
+The \fB\-forwarded\fR keyword, if present, instructs the program to
+deduce originator IP from the
+.BR X\-Forwarded\-For
+header, instead of using the actual source IP address.  See the
+description of
+.B %a
+specifier in
+.BR "REQUEST LOGGING" ,
+for a detailed discussion of how the IP is determined.
 .TP
-\fBACL\fR
+\fBACL\fR [\fB\-forwarded\fR]
 This statement defines an unnamed ACL to match the source IP against.
-This line must be followed by one or more lines defining CIDRs, as
-described in the
+See above for the meaning of the optional argument.  This line must be
+followed by one or more lines defining CIDRs, as described in the
 .B "GLOBAL DIRECTIVES"
 section above.
 The ACL definition is finished with a
@@ -1515,15 +1525,18 @@ keyword on a line by itself.
 Semantically it is equivalent to the named ACL reference described
 above.
 .TP
-\fBACL\fR \fB\-file\fR "\fIfilename\fR"
+\fBACL\fR [\fB\-forwarded\fR] \fB\-file\fR "\fIfilename\fR"
 Same as above, but reads ACL definition from file \fIfilename\fR.
 The name is taken relative to the \fBIncludeDir\fR directory, unless
 it starts with a slash.
 .IP
 The ACL file should contain one CIDR per line.  CIDRs need not be
 quoted.  Empty lines and comments are allowed.
+.IP
+The \fB\-forwarded\fR optional keyword has the same meaning as
+described above.
 .TP
-\fBACL\fR \fB\-filewatch\fR "\fIfilename\fR"
+\fBACL\fR [\fB\-forwarded\fR] \fB\-filewatch\fR "\fIfilename\fR"
 Same as above, but \fIfilename\fR will be watched for changes during
 the runtime.  Once a change is detected, the file will be reloaded and
 the ACL updated.

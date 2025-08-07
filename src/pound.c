@@ -386,8 +386,6 @@ void
 pound_http_destroy (POUND_HTTP *arg)
 {
   free (arg->from_host.ai_addr);
-
-  free (arg->orig_forwarded_header);
   http_request_free (&arg->request);
   http_request_free (&arg->response);
 

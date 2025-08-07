@@ -3300,10 +3300,18 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
   switch (cond->type)
     {
     case COND_ACL:
-      if ((r = acl_match (cond->acl, phttp->from_host.ai_addr)) == -1)
-	res = -1;
-      else
-	res = r == 0;
+      {
+	struct addrinfo *tmp;
+	if ((r = acl_match (cond->acl.acl,
+			    get_remote_ip (phttp,
+					   cond->acl.forwarded,
+					   &tmp)->ai_addr)) == -1)
+	  res = -1;
+	else
+	  res = r == 0;
+	if (tmp)
+	  freeaddrinfo (tmp);
+      }
       break;
 
     case COND_URL:
@@ -5214,8 +5222,6 @@ do_http (POUND_HTTP *phttp)
 
       phttp->res_bytes = 0;
       http_request_free (&phttp->response);
-
-      save_forwarded_header (phttp);
 
       clock_gettime (CLOCK_REALTIME, &be_start);
       switch (phttp->backend->be_type)

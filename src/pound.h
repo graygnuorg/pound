@@ -749,6 +749,12 @@ struct tbf_cond
   TBF *tbf;
 };
 
+struct acl_cond
+{
+  ACL *acl;
+  int forwarded;
+};
+
 typedef struct _service_cond
 {
   enum service_cond_type type;
@@ -756,7 +762,7 @@ typedef struct _service_cond
   WATCHER *watcher;
   union
   {
-    ACL *acl;
+    struct acl_cond acl;
     GENPAT re;
     struct bool_service_cond boolean;
     struct dyn_service_cond dyn;
@@ -1057,7 +1063,6 @@ typedef struct _pound_http
   struct timespec start_req; /* Time when original request was received */
   struct timespec end_req;   /* Time after the response was sent */
 
-  char *orig_forwarded_header; /* Original value of forwarded header */
   int response_code;
 
   CONTENT_LENGTH res_bytes;
@@ -1068,8 +1073,10 @@ typedef struct _pound_http
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
 void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
-void save_forwarded_header (POUND_HTTP *phttp);
 void http_log (POUND_HTTP *phttp);
+struct addrinfo *get_remote_ip (POUND_HTTP *phttp, int forwarded,
+				struct addrinfo **pres);
+
 
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);

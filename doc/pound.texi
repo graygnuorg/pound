@@ -865,7 +865,11 @@ monitoring support: @code{BasicAuth}, @code{Header}, @code{Host},
 statements that evaluate to true for requests originating from one of the
 predefined IP addresses.  Access control lists are defined using the
 @code{ACL} section statement, which has three forms: anonymous,
-file reference, and ACL reference.
+file reference, and ACL reference.  In all three forms, the @code{ACL}
+statement accepts optional argument @code{-forwarded}, which indicates
+that the remote IP should be determined from the
+@code{X-Forwarded-From} IP address (@pxref{%a}), instead of using the
+actual originator IP.
 
 In @dfn{anonymous} form, the @code{ACL} is a section statement: the
 keyword is followed by a newline and a list of CIDRs, terminated with
@@ -3916,19 +3920,29 @@ Conditions}, for a detailed discussion of this feature.
 
 The following conditionals are available:
 
-@deffn {Request Conditional} ACL "@var{name}"
+@deffn {Request Conditional} ACL [-forwarded] "@var{name}"
 Returns @samp{true} if the source IP matches one of the CIDRs from the
 named access control list @var{name}.  The ACL itself must have been
 defined earlier (@pxref{ACL definition}).
 
+@kwindex -forwarded
+By default, @code{ACL} operates on the actual originator IP address.
+This is changed if @code{-forwarded} is specified, in which case it
+uses an IP determined from the @code{X-Forwarded-For} (or similar)
+header (@pxref{%a}).
+
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL
+@deffn {Request Conditional} ACL [-forwarded]
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
 described in @ref{ACL definition}.  The ACL definition is finished with an
 @code{End} keyword on a line by itself.
+
+The @code{-forwarded} option instructs @command{pound} to use source
+IP address determined from the @code{X-Forwarded-For} header
+(@pxref{%a}), instead of the actual originator IP.
 
 Semantically, this statement is equivalent to the named ACL reference
 described above.
@@ -3936,8 +3950,8 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL -file "@var{filename}"
-@deffnx {Request Conditional} ACL -filewatch "@var{filename}"
+@deffn {Request Conditional} ACL [-forwarded] -file "@var{filename}"
+@deffnx {Request Conditional} ACL [-forwarded] -filewatch "@var{filename}"
 Defines an unnamed ACL to match the source IP against.  The ACL definition
 is read from the file @var{filename}, one CIDR per line.  Empty lines
 and comments are allowed.  If @var{filename} is relative, it is looked
@@ -3945,6 +3959,8 @@ up in the @ref{include directory}.  The form with @code{-file} reads
 the file contents once, at the program startup.  The one with
 @code{-filewatch} reads it and then monitors that file for changes.
 @xref{File-based Conditions}, for a detailed discussion.
+
+The meaning of @code{-forwarded} is as described above.
 @end deffn
 
 @deffn {Request Conditional} BasicAuth [@var{option}] "@var{filename}"

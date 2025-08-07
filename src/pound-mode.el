@@ -218,6 +218,7 @@
 (defvar pound-match-flags
   '("-file"
     "-filewatch"
+    "-forwarded"
     "-re"
     "-exact"
     "-beg"
@@ -410,7 +411,12 @@
 	  "\\("
 	  (regexp-opt (append pound-true-sections (list "End")) 'words)
 	  "\\|\\(?:"
-	  (regexp-opt pound-maybe-sections)
+	  "\\(?:"
+	    (regexp-opt pound-maybe-sections)
+	    ;; Technically, the following is not quite correct, as it is
+	    ;; only ACL that takes the "forwarded" option, but it will do
+	    ;; no harm to assume that for TrustedIP as well.
+	    "\\(?:[ \t]*-forwarded\\)?\\)"
 	  "\\|"
 	  "\\(?:\\(?:not[ \t]+\\)*Match\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)"
 	  "\\)"

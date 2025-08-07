@@ -136,7 +136,8 @@ static void
 i_remote_ip (struct stringbuf *sb, struct http_log_instr *instr,
 	     POUND_HTTP *phttp)
 {
-  stringbuf_store_ip (sb, phttp, 0);
+  char caddr[MAX_ADDR_BUFSIZE];
+  print_str (sb, addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
 }
 
 static int
@@ -157,7 +158,7 @@ acl_match_ip (ACL *acl, char const *ipstr, struct addrinfo **ret_addr)
 	    break;
 	}
       if (rc == 0 && ret_addr)
-	*ret_addr = ap;
+	*ret_addr = res;
       else
 	freeaddrinfo (res);
       return rc;
@@ -166,12 +167,12 @@ acl_match_ip (ACL *acl, char const *ipstr, struct addrinfo **ret_addr)
 }
 
 static int
-scan_forwarded_header (char const *hdr, ACL *acl, char const **ret_ptr,
-		       size_t *ret_len, struct addrinfo **ret_addr)
+scan_forwarded_header (char const *hdr, ACL *acl, struct addrinfo **ret_addr)
 {
   char const *end;
   char *buf = NULL;
   size_t bufsize = 0;
+  int rc = -1;
 
   if (!hdr || !acl)
     return -1;
@@ -195,8 +196,8 @@ scan_forwarded_header (char const *hdr, ACL *acl, char const **ret_ptr,
 	    }
 	  else
 	    {
-	      free (buf);
-	      return -1;
+	      rc = -1;
+	      break;
 	    }
 	}
 
@@ -214,29 +215,12 @@ scan_forwarded_header (char const *hdr, ACL *acl, char const **ret_ptr,
 	}
       buf[i] = 0;
 
-      switch (acl_match_ip (acl, buf, ret_addr))
-	{
-	case 0:
-	  free (buf);
-	  if (ret_ptr)
-	    {
-	      *ret_ptr = p + j - i;
-	      *ret_len = i;
-	    }
-	  return 0;
-
-	case 1:
-	  break;
-
-	default:
-	  goto end;
-	}
-
+      if ((rc = acl_match_ip (acl, buf, ret_addr)) != 1)
+	break;
       end = p;
     }
- end:
   free (buf);
-  return 1;
+  return rc;
 }
 
 static char const *
@@ -308,37 +292,34 @@ get_forwarded_header (POUND_HTTP *phttp)
   return retval;
 }
 
-void
-save_forwarded_header (POUND_HTTP *phttp)
+struct addrinfo *
+get_remote_ip (POUND_HTTP *phttp, int forwarded, struct addrinfo **pres)
 {
-  free (phttp->orig_forwarded_header);
-  phttp->orig_forwarded_header = get_forwarded_header (phttp);
+  if (forwarded)
+    {
+      int rc;
+      struct addrinfo *res;
+      char *fwh = get_forwarded_header (phttp);
+      rc = scan_forwarded_header (fwh, get_trusted_ips (phttp), &res);
+      free (fwh);
+      if (rc == 0)
+	{
+	  *pres = res;
+	  return res;
+	}
+    }
+  *pres = NULL;
+  return &phttp->from_host;
 }
 
 void
 stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int forwarded)
 {
-  char const *val = NULL;
-  size_t len;
+  struct addrinfo *res, *tmp;
   char caddr[MAX_ADDR_BUFSIZE];
-
-  if (forwarded)
-    {
-      char *fwh = phttp->orig_forwarded_header;
-      if (!fwh)
-	fwh = get_forwarded_header (phttp);
-      scan_forwarded_header (fwh, get_trusted_ips (phttp), &val, &len, NULL);
-      if (!phttp->orig_forwarded_header)
-	free (fwh);
-      if (val)
-	{
-	  stringbuf_add (sb, val, len);
-	  return;
-	}
-    }
-
-  stringbuf_add_string (sb, anon_addr2str (caddr, sizeof (caddr),
-					   &phttp->from_host));
+  res = get_remote_ip (phttp, forwarded, &tmp);
+  stringbuf_add_string (sb, anon_addr2str (caddr, sizeof (caddr), res));
+  freeaddrinfo (tmp);
 }
 
 static void
