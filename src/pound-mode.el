@@ -443,10 +443,15 @@
       (if ctx
 	  ctx
 	(goto-char start)
-	(if (re-search-backward "^[ \t]*\\(\\(?:\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)\\|\\(?:TrustedIP[ \t]*\\(?:#.*\\)?$\\)\\)" nil t)
-	    (let ((pos (marker-position (nth 2 (match-data)))))
-	      (forward-line)
-	      (pound-scan start (list pos))))))))
+	(cond
+	 ((re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|TrustedIP\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
+	  (let ((pos (marker-position (nth 2 (match-data)))))
+	    (forward-line)
+	    (pound-scan start (list pos))))
+	 ((re-search-backward "^[ \t]*\\(TrustedIP[ \t]*\\(?:#.*\\)?$\\)")
+	  (let ((pos (marker-position (nth 2 (match-data)))))
+	    (forward-line)
+	    (pound-scan start (list pos)))))))))
 
 (defun pound-indent-level ()
   (save-excursion

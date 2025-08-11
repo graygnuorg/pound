@@ -848,7 +848,7 @@ immediately on file system changes.  On systems that don't support
 either API, @command{pound} falls back to periodic checking of file
 modification time (@dfn{mtime}).  In that case, the reload is
 initiated if @code{mtime} changes.  The interval between two
-succeeding checks is defined by the @code{WatcherTTL} statement
+successive checks is defined by the @code{WatcherTTL} statement
 (@pxref{Timeouts, WatcherTTL}) and defaults to 60 seconds.
 
   Following is a list of conditional statements that implement file
