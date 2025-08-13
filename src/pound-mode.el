@@ -448,7 +448,7 @@
 	  (let ((pos (marker-position (nth 2 (match-data)))))
 	    (forward-line)
 	    (pound-scan start (list pos))))
-	 ((re-search-backward "^[ \t]*\\(TrustedIP[ \t]*\\(?:#.*\\)?$\\)")
+	 ((re-search-backward "^[ \t]*\\(TrustedIP[ \t]*\\(?:#.*\\)?$\\)" nil t)
 	  (let ((pos (marker-position (nth 2 (match-data)))))
 	    (forward-line)
 	    (pound-scan start (list pos)))))))))

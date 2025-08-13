@@ -340,6 +340,8 @@ workdir_get (char const *name)
 static int
 workdir_free (WORKDIR *wd)
 {
+  if (!wd)
+    return 0;
   if (wd->refcount == 0)
     {
       DLIST_REMOVE (&workdir_head, wd, link);
