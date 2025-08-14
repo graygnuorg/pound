@@ -660,40 +660,11 @@ i_backend (struct stringbuf *sb, struct http_log_instr *instr,
   print_str (sb, str_be (caddr, sizeof (caddr), phttp->backend));
 }
 
-static char *
-be_service_name (BACKEND *be)
-{
-  switch (be->be_type)
-    {
-    case BE_REGULAR:
-      if (be->service->name)
-       return be->service->name;
-      break;
-    case BE_REDIRECT:
-      return "(redirect)";
-    case BE_ACME:
-      return "(acme)";
-    case BE_CONTROL:
-      return "(control)";
-    case BE_ERROR:
-      return "(error)";
-    case BE_METRICS:
-      return "(metrics)";
-    case BE_FILE:
-      return "(file)";
-    case BE_MATRIX:
-    case BE_BACKEND_REF:
-      /* shouldn't happen */
-      break;
-    }
-  return "-";
-}
-
 static void
 i_service (struct stringbuf *sb, struct http_log_instr *instr,
 	   POUND_HTTP *phttp)
 {
-  print_str (sb, be_service_name (phttp->backend));
+  print_str (sb, phttp->svc->name);
 }
 
 static void
