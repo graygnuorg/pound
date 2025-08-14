@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-08-07
+Pound -- history of user-visible changes. 2025-08-14
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -37,6 +37,29 @@ determined from the X-Forwarded-For header.  To do so, use the
 
    ACL -forwarded -file "acl.lst"
 
+* Changes in log format specifications
+
+** Expansion of %v changed
+
+The %v specifier now expands to the host name used in the request, as
+obtained from the "Host" header, with port specification removed.
+
+If you want the old expansion (name of the listener that served the
+request), use "%{listener}N".
+
+** Support for new specifiers
+
+ . %l            Reserved for future use.  Expands to dash.
+ . %p            Port number of the listener that served the request.
+
+** Built-in formats changed accordingly:
+
+3, "vhost_combined"
+   "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
+4, "combined"
+   "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
+5, "detailed"
+   "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec"
 
 Version 4.17, 2025-07-29
 

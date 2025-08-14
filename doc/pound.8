@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 7, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "August 14, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -3121,6 +3121,9 @@ made by header modification directives affect this.
 Same as \fB%i\fR, except that if no such header is present in the
 request, a dash is substituted.
 .TP
+.B %l
+Single dash.  This specifier is reserved for future use.
+.TP
 .BI %{ OBJNAME }L
 Location of the
 .B Pound
@@ -3165,6 +3168,9 @@ are:
 .BR service ,
 and
 .BR backend .
+.TP
+.B %p
+Port number of the listener serving the request.
 .TP
 .B %P
 Thread ID of the serving thread.
@@ -3232,7 +3238,8 @@ The URL path requested.  This is affected by request modification
 directives.
 .TP
 .B %v
-The listener name.
+Hostname used in the request (from the \fBHost\fI header, without
+port number).
 .SS Built-in formats
 There are five built-in formats.  These can be identified either by
 their numeric index in the format table, or by symbolic name.  The
@@ -3255,19 +3262,19 @@ No request logging at all.
 .BR 3 ", " vhost_combined
 (Split in two lines for readability)
 .EX
-"%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
+"%v:%p %a %l %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
 \(rs\(dq%{User\-Agent}i\(rs\(dq"
 .EE
 .TP
 .BR 4 ", " combined
 .EX
-"%a \- %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs\(dq%{User\-Agent}i\(rs\(dq"
+"%a %l %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs\(dq%{User\-Agent}i\(rs\(dq"
 .EE
 .TP
 .BR 5 ", " detailed
 (Split in two lines for readability)
 .EX
-"%{Host}I %a - %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
+"%v:%p %a %l %u %t \(rs\(dq%r\(rs\(dq %s %b \(rs\(dq%{Referer}i\(rs\(dq \(rs
 \(rs\(dq%{User\-Agent}\(rs\(dq (%{service}N \-> %{backend}N) %{f}T sec"
 .EE
 .SH SECURITY

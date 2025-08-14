@@ -3470,11 +3470,11 @@ static struct canned_log_format canned_log_format[] = {
   /* 2 - extended logging (show chosen backend server as well) */
   { "extended", "%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec" },
   /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
-  { "vhost_combined", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  { "vhost_combined", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 4 - same as 3 but without the virtual host information */
-  { "combined", "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  { "combined", "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 5 - same as 3 but with information about the Service and Backend used */
-  { "detailed", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
+  { "detailed", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
 };
 static int max_canned_log_format =
   sizeof (canned_log_format) / sizeof (canned_log_format[0]);

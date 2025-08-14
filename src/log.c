@@ -102,6 +102,13 @@ print_str (struct stringbuf *sb, const char *arg)
 }
 
 static void
+i_nosys (struct stringbuf *sb, struct http_log_instr *instr,
+	 POUND_HTTP *phttp)
+{
+  print_str (sb, "-");
+}
+
+static void
 i_print (struct stringbuf *sb, struct http_log_instr *instr,
 	 POUND_HTTP *phttp)
 {
@@ -642,13 +649,6 @@ i_url (struct stringbuf *sb, struct http_log_instr *instr,
 }
 
 static void
-i_listener_name (struct stringbuf *sb, struct http_log_instr *instr,
-		 POUND_HTTP *phttp)
-{
-  print_str (sb, phttp->lstn->name);
-}
-
-static void
 i_tid (struct stringbuf *sb, struct http_log_instr *instr,
        POUND_HTTP *phttp)
 {
@@ -747,36 +747,71 @@ p_objloc (struct http_log_parser *parser, char const *arg, int len)
   return 0;
 }
 
+#define F_NONE      0
+#define F_CLF       0x1
+#define F_PORTSTRIP 0x2
+
 static void
-i_header (struct stringbuf *sb, struct http_log_instr *instr,
-	  POUND_HTTP *phttp)
+print_header (struct stringbuf *sb, char const *name, POUND_HTTP *phttp,
+	      int flags)
 {
   struct http_header *hdr;
   char const *val = NULL;
 
-  if (instr->arg &&
-      (hdr = http_header_list_locate_name (&phttp->request.headers, instr->arg,
-					   strlen (instr->arg))) != NULL)
+  if (name &&
+      (hdr = http_header_list_locate_name (&phttp->request.headers, name,
+					   strlen (name))) != NULL)
     val = http_header_get_value (hdr);
-  if (val)
-    stringbuf_add_string (sb, val);
+  if (!val)
+    {
+      if (!(flags & F_CLF))
+	return;
+    }
+  else if (flags & F_PORTSTRIP)
+    {
+      char *p;
+      if ((p = strrchr (val, ':')) != NULL)
+	{
+	  stringbuf_add (sb, val, p - val);
+	  return;
+	}
+    }
+  print_str (sb, val);
+}
+
+static void
+i_header (struct stringbuf *sb, struct http_log_instr *instr,
+	  POUND_HTTP *phttp)
+{
+  print_header (sb, instr->arg, phttp, F_NONE);
 }
 
 static void
 i_header_clf (struct stringbuf *sb, struct http_log_instr *instr,
 	      POUND_HTTP *phttp)
 {
-  struct http_header *hdr;
-  char const *val = NULL;
-
-  if (instr->arg &&
-      (hdr = http_header_list_locate_name (&phttp->request.headers,
-					   instr->arg,
-					   strlen (instr->arg))) != NULL)
-    val = http_header_get_value (hdr);
-  print_str (sb, val);
+  print_header (sb, instr->arg, phttp, F_CLF);
 }
 
+
+static void
+i_server_name (struct stringbuf *sb, struct http_log_instr *instr,
+	       POUND_HTTP *phttp)
+{
+  print_header (sb, "Host", phttp, F_CLF | F_PORTSTRIP);
+}
+
+static void
+i_listener_port (struct stringbuf *sb, struct http_log_instr *instr,
+		 POUND_HTTP *phttp)
+{
+  char portstr[6];
+  if (getnameinfo (phttp->lstn->addr.ai_addr, phttp->lstn->addr.ai_addrlen,
+		   NULL, 0,
+		   portstr, sizeof (portstr), NI_NUMERICSERV))
+    portstr[0] = '-';
+  print_str (sb, portstr);
+}
 
 enum
   {
@@ -816,6 +851,7 @@ static struct http_log_spec http_log_spec[] = {
     { 'i', i_header, SPEC_REQ_ARG },
     /* Same as %i, but in CLF format. */
     { 'I', i_header_clf, SPEC_REQ_ARG },
+    { 'l', i_nosys },
     /* Object locus & name:
        %{backend}N
        %{service}N
@@ -825,7 +861,7 @@ static struct http_log_spec http_log_spec[] = {
     /* The request method. */
     { 'm', i_method },
     /* The canonical port of the server serving the request. */
-    // { 'p', i_canon_port },
+    { 'p', i_listener_port },
     /* Thread ID */
     { 'P', i_tid },
     /* The query string (prepended with a ? if a query string exists,
@@ -851,7 +887,7 @@ static struct http_log_spec http_log_spec[] = {
     /* The URL path requested, not including any query string. */
     { 'U', i_url },
     /* Listener name */
-    { 'v', i_listener_name },
+    { 'v', i_server_name },
     { 0 }
 };
 

@@ -2373,6 +2373,10 @@ Same as @samp{%i}, except that if no such header is present in the
 request, a dash is substituted.
 @end deffn
 
+@deffn {Format specifier} %l
+Single dash.  This specifier is reserved for future use.
+@end deffn
+
 @deffn {Format specifier} %@{@var{obj}@}L
 Location of the @command{pound} object that is involved in handling
 the request.  Valid values for @var{obj} are: @samp{listener},
@@ -2400,6 +2404,10 @@ The request method.
 Name of @command{pound} object that is involved in handling the
 request.  Valid values for @var{obj} are: @samp{listener},
 @samp{service}, and @samp{backend}.
+@end deffn
+
+@deffn {Format specifier} %p
+Port number of the listener serving the request.
 @end deffn
 
 @deffn {Format specifier} %P
@@ -2474,7 +2482,8 @@ directives.
 @end deffn
 
 @deffn {Format specifier} %v
-The listener name.
+Hostname used in the request (from the @samp{Host} header, without
+port number).
 @end deffn
 
  The table below describes the built-in formats in terms of format
@@ -2506,14 +2515,14 @@ definitions:
 @itemx vhost_combined
 @kwindex vhost_combined, built-in format
 @example
-"%@{Host@}I %a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
+"%v:%p %a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
 @end example
 
 @item 4
 @itemx combined
 @kwindex combined, built-in format
 @example
-"%a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
+"%a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
 @end example
 
 @item 5
@@ -2521,7 +2530,7 @@ definitions:
 @kwindex detailed, built-in format
 (Split in two lines for readability)
 @example
-"%@{Host@}I %a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\"
+"%v:%p %a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\"
 (%@{service@}N -> %@{backend@}N) %@{f@}T sec"
 @end example
 @end table
