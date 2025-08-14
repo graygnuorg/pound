@@ -171,18 +171,26 @@ watcher_reread (struct watcher *watcher)
   pthread_rwlock_unlock (&watcher->rwl);
 }
 
-char const *
-filename_split_str (char const *filename, char **dir)
+static char *
+filename_catn (char const *dir, char const *file, size_t flen)
 {
-  char *p = strrchr (filename, '/');
+  char *buf;
+  size_t len;
   if (dir)
     {
-      if (p)
-	*dir = xstrndup (filename, p - filename);
-      else
-	*dir = NULL;
+      len = strlen (dir);
+      while (len > 0 && dir[len-1] == '/')
+	--len;
     }
-  return p ? p + 1 : filename;
+  else
+    len = 0;
+  buf = xmalloc (len + flen + 2);
+  if (dir)
+    memcpy (buf, dir, len);
+  buf[len++] = '/';
+  memcpy (buf + len, file, flen);
+  buf[len + flen] = 0;
+  return buf;
 }
 
 char const *
@@ -190,28 +198,36 @@ filename_split_wd (char const *filename, WORKDIR **wdp)
 {
   char const *name;
   WORKDIR *wd;
+  char *dir = NULL;
 
-  if (filename[0] == '/')
+  if ((name = strrchr (filename, '/')) == NULL)
     {
-      char *dir;
-      name = filename_split_str (filename, &dir);
-      if ((wd = workdir_get (dir)) == NULL)
-	{
-	  logmsg (LOG_ERR, "can't open directory %s: %s",
-		  dir, strerror (errno));
-	  free (dir);
-	  return NULL;
-	}
-      free (dir);
+      name = filename;
+      if ((wd = get_include_wd ()) == NULL)
+	return NULL;
+    }
+  else if (filename[0] == '/')
+    {
+      dir = xstrndup (filename, name - filename);
+      name++;
     }
   else
     {
       if ((wd = get_include_wd ()) == NULL)
 	return NULL;
-      workdir_ref (wd);
-      name = filename;
+      dir = filename_catn (wd->name, filename, name - filename);
+      name++;
     }
-  *wdp = wd;
+  if ((wd = workdir_get (dir)) == NULL)
+    {
+      logmsg (LOG_ERR, "can't open directory %s: %s", dir, strerror (errno));
+      name = NULL;
+    }
+  else
+    *wdp = wd;
+
+  free (dir);
+
   return name;
 }
 
@@ -238,6 +254,7 @@ watcher_register (void *obj, char const *filename,
   struct watchpoint *wp;
   int rc;
   enum watcher_mode mode;
+  char const *basename;
 
   XZALLOC (wp);
   wp->wd = -1;
@@ -247,28 +264,14 @@ watcher_register (void *obj, char const *filename,
   wp->watcher->read = read;
   wp->watcher->clear = clear;
 
-  if (root_jail)
+  basename = filename_split_wd (filename, &wp->watcher->wd);
+  if (!basename)
     {
-      char const *basename = filename_split_wd (filename, &wp->watcher->wd);
-      if (!basename)
-	{
-	  conf_error_at_locus_range (loc, "can't register watcher");
-	  free (wp);
-	  return NULL;
-	}
-      wp->watcher->filename = xstrdup (basename);
+      conf_error_at_locus_range (loc, "can't register watcher");
+      free (wp);
+      return NULL;
     }
-  else
-    {
-      WORKDIR *wd = get_include_wd_at_locus_range (loc);
-      if (!wd)
-	{
-	  free (wp);
-	  return NULL;
-	}
-      wp->watcher->wd = workdir_ref (wd);
-      wp->watcher->filename = xstrdup (filename);
-    }
+  wp->watcher->filename = xstrdup (basename);
 
   locus_range_init (&wp->watcher->locus);
   locus_range_copy (&wp->watcher->locus, loc);
