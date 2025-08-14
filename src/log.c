@@ -386,7 +386,17 @@ i_status (struct stringbuf *sb, struct http_log_instr *instr,
 	  POUND_HTTP *phttp)
 {
   if (instr->arg)
-    stringbuf_add_string (sb, http_request_orig_line (&phttp->response));
+    {
+      char const *s = http_request_orig_line (&phttp->response);
+      if (s[0] == 0)
+	{
+	  /* Special backends don't fill in the response */
+	  stringbuf_printf (sb, "%3d ", phttp->response_code);
+	  print_str (sb, http_status_reason (phttp->response_code));
+	}
+      else
+	stringbuf_add_string (sb, s);
+    }
   else
     stringbuf_printf (sb, "%3d", phttp->response_code);
 }

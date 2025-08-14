@@ -1295,6 +1295,7 @@ void json_error (struct json_value *val, char const *fmt, ...)
 
 int http_status_to_pound (int status);
 int pound_to_http_status (int err);
+char const *http_status_reason (int code);
 
 struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);

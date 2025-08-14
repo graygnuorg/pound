@@ -193,6 +193,15 @@ pound_to_http_status (int err)
   return http_status[err].code;
 }
 
+char const *
+http_status_reason (int code)
+{
+  int n = http_status_to_pound (code);
+  if (n == -1)
+    return NULL;
+  return http_status[n].reason;
+}
+
 /*
  * Write to BIO an error HTTP 1.PROTO response.  ERR is one of
  * HTTP_STATUS_* constants.  TXT supplies the error page content.
