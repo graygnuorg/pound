@@ -138,7 +138,6 @@
     "Ciphers"
     "Client"
     "ClientCert"
-    "CombineHeaders"
     "ConfigFile"
     "ConfigText"
     "ConnTO"
@@ -424,6 +423,7 @@
 
 (defun pound-scan (limit stk)
   (catch 'ret
+    (if (looking-at pound-section-delim) (forward-line))
     (while (and (< (point) limit)
 		(re-search-forward pound-section-delim limit t))
       (cond
