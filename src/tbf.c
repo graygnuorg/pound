@@ -36,18 +36,16 @@ timediff (struct timespec const *a, struct timespec const *b)
   return (a->tv_sec - b->tv_sec) * NANOSECOND + (a->tv_nsec - b->tv_nsec);
 }
 
-static inline struct timespec
-timespec_add_nsec (struct timespec const *a, uint64_t nsec)
+static inline void
+timespec_add_nsec (struct timespec *a, uint64_t nsec)
 {
-  struct timespec s;
-  s.tv_sec = a->tv_sec + nsec / NANOSECOND;
-  s.tv_nsec = a->tv_nsec + nsec % NANOSECOND;
-  if (s.tv_nsec >= NANOSECOND)
+  a->tv_sec += nsec / NANOSECOND;
+  a->tv_nsec += nsec % NANOSECOND;
+  if (a->tv_nsec >= NANOSECOND)
     {
-      s.tv_sec++;
-      s.tv_nsec %= NANOSECOND;
+      a->tv_sec++;
+      a->tv_nsec %= NANOSECOND;
     }
-  return s;
 }
 
 static TOKBKT *
@@ -156,8 +154,10 @@ tbf_check (TBF *tbf, char const *keyid)
 	ent->tokens += tokens;
     }
 
-  ent->expiry = timespec_add_nsec (&now,
-				  (1 + tbf->maxtok - ent->tokens) * tbf->rate);
+  ent->expiry = now;
+  timespec_add_nsec (&ent->expiry,
+		     (1 + tbf->maxtok - ent->tokens) * tbf->rate);
+
   rearm = DLIST_EMPTY (&tbf->head);
   DLIST_REMOVE (&tbf->head, ent, link);
   DLIST_INSERT_TAIL (&tbf->head, ent, link);

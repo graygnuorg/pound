@@ -2122,12 +2122,7 @@ parse_rate (uint64_t *ret_rate)
 
   if ((rc = cfg_assign_unsigned (&rate, NULL)) != CFGPARSER_OK)
     return rc;
-  if (UINT64_MAX / NANOSECOND < rate)
-    {
-      conf_error ("%s", "rate out of range");
-      return CFGPARSER_FAIL;
-    }
-  *ret_rate = rate * NANOSECOND;
+  *ret_rate = NANOSECOND / rate;
   return CFGPARSER_OK;
 }
 
