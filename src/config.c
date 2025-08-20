@@ -2122,6 +2122,11 @@ parse_rate (uint64_t *ret_rate)
 
   if ((rc = cfg_assign_unsigned (&rate, NULL)) != CFGPARSER_OK)
     return rc;
+  if (rate == 0)
+    {
+      conf_error ("%s", "invalid rate");
+      return CFGPARSER_OK;
+    }
   *ret_rate = NANOSECOND / rate;
   return CFGPARSER_OK;
 }
