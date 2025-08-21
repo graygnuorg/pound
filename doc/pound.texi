@@ -4093,7 +4093,15 @@ expansion and request accessor interpretation, as described in
 @ref{String Expansions}.
 
 @item rate
-Rate limit, in requests per second.
+Rate limit.  A single decimal number means requests per second.
+To specify another time unit, follow the number with a slash, another
+number and optional unit specifier (@samp{s} for seconds, @samp{ms}
+for milliseconds, and @samp{us} for microseconds).  Examples:
+
+@example
+1/2s @result{} "one request per two seconds"
+200/500ms @result{} "200 requests per 500 milliseconds"
+@end example
 
 @item burst
 Burst value, i.e. maximum number of tokens the bucket can contain.

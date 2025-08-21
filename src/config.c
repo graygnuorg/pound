@@ -2114,20 +2114,94 @@ parse_cond_client_cert (void *call_data, void *section_data)
 # define UINT64_MAX ((uint64_t)-1)
 #endif
 
+/*
+ * Compute (v * d) / n with range checking.  On success, store the result
+ * in retval and return 0.
+ */
+static int
+mulf (unsigned long v, unsigned n, unsigned long d, uint64_t *retval)
+{
+  if (UINT64_MAX / n < v)
+    {
+      uint64_t e = (v - UINT64_MAX / n) * n;
+      if (UINT64_MAX / n < (v - e))
+	return -1;
+      *retval = ((v - e) * n) / d + e / d;
+    }
+  else
+    *retval = (v * n) / d;
+  return 0;
+}
+
 static int
 parse_rate (uint64_t *ret_rate)
 {
-  int rc;
-  unsigned rate;
+  struct token *tok;
+  unsigned long rate;
+  unsigned long n = 1;
+  char *p;
+  enum { I_SEC, I_MSEC, I_USEC };
+  int i = I_SEC;
+  static struct kwtab intervals[] = {
+    { "s",  I_SEC },
+    { "ms", I_MSEC },
+    { "us", I_USEC },
+    { NULL }
+  };
+  static unsigned mul[] = {
+    NANOSECOND,
+    1000000,
+    1000,
+  };
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  errno = 0;
+  rate = strtoul (tok->str, &p, 10);
+  if (errno || rate == 0)
+    {
+      conf_error ("%s", "bad unsigned number");
+      return CFGPARSER_FAIL;
+    }
+  else if (*p == '/')
+    {
+      ++p;
 
-  if ((rc = cfg_assign_unsigned (&rate, NULL)) != CFGPARSER_OK)
-    return rc;
-  if (rate == 0)
+      if (c_isdigit (p[0]))
+	{
+	  n = strtoul (p, &p, 10);
+	  if (n == 0 || errno)
+	    {
+	      conf_error ("%s", "bad interval specifier");
+	      return CFGPARSER_FAIL;
+	    }
+	}
+
+      if (kw_to_tok (intervals, p, 1, &i))
+	{
+	  struct locus_range r = *last_token_locus_range ();
+	  r.beg.col += p - tok->str;
+	  conf_error_at_locus_range (&r, "%s", "bad interval specifier");
+	  return CFGPARSER_FAIL;
+	}
+    }
+  else if (*p != 0)
     {
       conf_error ("%s", "invalid rate");
-      return CFGPARSER_OK;
+      return CFGPARSER_FAIL;
     }
-  *ret_rate = NANOSECOND / rate;
+
+  if (mulf (n, mul[i], rate, ret_rate))
+    {
+      conf_error ("%s", "effective rate is out of range");
+      return CFGPARSER_FAIL;
+    }
+
+  if (*ret_rate == 0)
+    {
+      conf_error ("%s", "effective rate is 0");
+      return CFGPARSER_FAIL;
+    }
+
   return CFGPARSER_OK;
 }
 

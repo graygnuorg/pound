@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 14, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "August 21, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1647,7 +1647,11 @@ A string identifying the bucket to use.  It is subject to string expansion
 (see the subsection \fBString expansion\fR, above).
 .TP
 .I rate
-Allowed request rate, requests per second.
+Allowed request rate, requests per second.  Fractional rates are
+allowed as well:
+.BR 1/2 " (one request each two seconds)",
+.BR 3/500ms " (three requests each 500 milliseconds)",
+etc.
 .TP
 .I burst
 Burst size, i.e. maximum number of tokens the bucket can contain.
