@@ -1060,7 +1060,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
 	      return result;
 	    }
 	}
-      else if (c_strcasecmp (p->name, name) == 0)
+      else if (p->type == KWT_WILDCARD || c_strcasecmp (p->name, name) == 0)
 	{
 	  *ref = p;
 	  if (p->type == KWT_ALIAS)
@@ -1076,7 +1076,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
   return NULL;
 }
 
-static CFGPARSER_TABLE global_parsetab[] = {
+CFGPARSER_TABLE cfg_global_parsetab[] = {
   {
     .name = "Include",
     .parser = cfg_parse_include
@@ -1122,7 +1122,7 @@ cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 							 &buf, &ref);
 
 	  if (!single_statement && ent == NULL)
-	    ent = parser_find (global_parsetab, tok->str, &buf, &ref);
+	    ent = parser_find (cfg_global_parsetab, tok->str, &buf, &ref);
 
 	  if (ref && ref->deprecated)
 	    {

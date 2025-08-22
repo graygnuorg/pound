@@ -166,7 +166,7 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "TemplateName",
     .parser = cfg_assign_string,
     .data = &tmpl_name
-  },    
+  },
   {
     .name = "Server",
     .parser = parse_server
@@ -191,7 +191,7 @@ read_config (void)
     }
 
   server_hash = SERVER_HASH_NEW ();
-  
+
   if ((poundctl_conf = getenv ("POUNDCTL_CONF")) != NULL)
     {
       if (poundctl_conf[0])
@@ -213,6 +213,249 @@ read_config (void)
 	}
       free (buf);
     }
+}
+
+static int skip_section (void *call_data, void *section_data);
+static int skip_acl_def (void *call_data, void *section_data);
+static int skip_acl_ref (void *call_data, void *section_data);
+static int skip_directive (void *call_data, void *section_data);
+
+
+static CFGPARSER_TABLE section_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "Service",
+    .parser = skip_section
+  },
+  {
+    .name = "Backend",
+    .parser = skip_section
+  },
+  {
+    .name = "Emergency",
+    .parser = skip_section
+  },
+  {
+    .name = "Session",
+    .parser = skip_section
+  },
+  {
+    .name = "Match",
+    .parser = skip_section
+  },
+  {
+    .name = "Rewrite",
+    .parser = skip_section
+  },
+  {
+    .name = "ACL",
+    .parser = skip_acl_ref,
+  },
+  {
+    .name = "TrustedIP",
+    .parser = skip_acl_ref
+  },
+  {
+    .name = "",
+    .type = KWT_WILDCARD,
+    .parser = skip_directive
+  },
+  { NULL }
+};
+
+static int
+skip_section (void *call_data, void *section_data)
+{
+  if (skip_directive (call_data, section_data) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+  return cfgparser_loop (section_parsetab, call_data, section_data,
+			 DEPREC_OK, NULL);
+}
+
+static int
+skip_to_end (void)
+{
+  struct token *tok;
+  while ((tok = gettkn_any ()) != NULL)
+    {
+      if (tok->type == T_IDENT && c_strcasecmp (tok->str, "end") == 0)
+	return CFGPARSER_OK;
+      while ((tok = gettkn_any ()) != NULL && tok->type != '\n')
+	;
+    }
+  conf_error ("%s", "unexpected end of file");
+  return CFGPARSER_FAIL;
+}
+
+static int
+skip_acl_def (void *call_data, void *section_data)
+{
+  if (skip_directive (call_data, section_data) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+  return skip_to_end ();
+}
+
+static int
+skip_acl_ref (void *call_data, void *section_data)
+{
+  struct token *tok;
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  if (tok->type == '\n')
+    return skip_to_end ();
+  return skip_directive (call_data, section_data);
+}
+
+static int
+skip_stringlist (void *call_data, void *section_data)
+{
+  return skip_to_end ();
+}
+
+static int
+skip_directive (void *call_data, void *section_data)
+{
+  struct token *tok;
+  while ((tok = gettkn_any ()) != NULL)
+    {
+      if (tok->type == '\n')
+	return CFGPARSER_OK_NONL;
+    }
+  return CFGPARSER_FAIL;
+}
+
+static CFGPARSER_TABLE resolver_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "ConfigText",
+    .parser = skip_stringlist
+  },
+  {
+    .name = "",
+    .type = KWT_WILDCARD,
+    .parser = skip_directive
+  },
+  { NULL }
+};
+
+static int
+skip_resolver (void *call_data, void *section_data)
+{
+  return cfgparser_loop (resolver_parsetab, call_data, section_data,
+			 DEPREC_OK, NULL);
+}
+
+static CFGPARSER_TABLE control_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "Socket",
+    .parser = cfg_assign_string
+  },
+  {
+    .name = "",
+    .type = KWT_WILDCARD,
+    .parser = skip_directive
+  },
+  { NULL }
+};
+
+static int
+parse_control (void *call_data, void *section_data)
+{
+  struct token *tok;
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  switch (tok->type)
+    {
+    case '\n':
+      return cfgparser_loop (control_parsetab, call_data, section_data,
+			     DEPREC_OK, NULL);
+    case T_STRING:
+      *(char **) call_data = xstrdup (tok->str);
+      break;
+    default:
+      conf_error ("expected string or newline, but found %s",
+		  token_type_str (tok->type));
+      return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
+}
+
+static CFGPARSER_TABLE pound_top_level_parsetab[] = {
+  {
+    .type = KWT_TOPLEVEL
+  },
+  {
+    .name = "IncludeDir",
+    .parser = cfg_parse_includedir
+  },
+  {
+    .name = "Control",
+    .parser = parse_control,
+  },
+  {
+    .name = "ListenHTTP",
+    .parser = skip_section
+  },
+  {
+    .name = "ListenHTTPS",
+    .parser = skip_section
+  },
+  {
+    .name = "Service",
+    .parser = skip_section
+  },
+  {
+    .name = "ACL",
+    .parser = skip_acl_def,
+  },
+  {
+    .name = "TrustedIP",
+    .parser = skip_acl_def,
+  },
+  {
+    .name = "CombineHeaders",
+    .parser = skip_stringlist
+  },
+  {
+    .name = "Resolver",
+    .parser = skip_resolver
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = cfg_global_parsetab
+  },
+  {
+    .name = "",
+    .type = KWT_WILDCARD,
+    .parser = skip_directive
+  },
+  { NULL }
+};
+
+char *
+scan_pound_cfg (void)
+{
+  char *control_socket = NULL;
+  if (access (conf_name, F_OK) == 0)
+    {
+      if (verbose_option)
+	errormsg (0, 0, "scanning file %s", conf_name);
+      if (cfgparser_parse (conf_name, NULL, pound_top_level_parsetab,
+			   &control_socket, DEPREC_OK, 0))
+	return NULL;
+    }
+  return control_socket;
 }
 
 static void
@@ -237,152 +480,6 @@ openssl_errormsg (int code, char const *fmt, ...)
   fputc ('\n', stderr);
   if (code)
     exit (code);
-}
-
-struct keyword
-{
-  char const *name;
-  size_t len;
-  int flag;
-};
-
-#define S(a) a, sizeof (a) - 1
-static struct keyword inline_keyword[] = {
-  { S("control"), 1 },
-  { NULL }
-};
-static struct keyword block_keyword[] = {
-  { S("socket"), 1 },
-  { S("end"), 0 },
-  { NULL }
-};
-
-static struct keyword *keywords[] = {
-  inline_keyword,
-  block_keyword
-};
-
-static int
-find_keyword (int kwtab, char const *arg, size_t len)
-{
-  struct keyword *kw;
-  for (kw = keywords[kwtab]; kw->name; kw++)
-    if (c_strncasecmp (kw->name, arg, len) == 0)
-      return kw->flag;
-  return -1;
-}
-
-/*
- * A temporary solution to obtain socket name from the pound.cfg file.
- * FIXME: Use the parser from config.c for that.
- */
-char *
-get_socket_name (void)
-{
-  FILE *fp;
-  char  buf[MAXBUF], *name = NULL;
-  int line = 0;
-  int kwtab = 0;
-
-  if (verbose_option)
-    errormsg (0, 0, "scanning file %s", conf_name);
-  fp = fopen (conf_name, "r");
-  if (!fp)
-    {
-      if (errno != ENOENT || verbose_option)
-	errormsg (0, errno, "can't open %s", conf_name);
-      return NULL;
-    }
-  while (fgets (buf, sizeof (buf), fp))
-    {
-      size_t len;
-      char *p;
-
-      ++line;
-      len = strlen (buf);
-      if (len == 0)
-	continue;
-      if (buf[len-1] == '\n')
-	--len;
-      else
-	{
-	  errormsg (0, 0, "%s:%d: line too long", conf_name, line);
-	  break;
-	}
-      len = c_trimrws (buf, len);
-      buf[len] = 0;
-
-      for (p = buf; *p && c_isspace (*p); p++)
-	;
-
-      if (*p == 0 || *p == '#')
-	continue;
-
-      len = strcspn (p, " \t");
-      switch (find_keyword (kwtab, p, len))
-	{
-	case 0:
-	  kwtab = 0;
-	  break;
-
-	case 1:
-	  for (p += len; *p && c_isspace (*p); p++)
-	    ;
-	  if (*p == '"')
-	    {
-	      char *q;
-
-	      q = name = ++p;
-	      while (*p != '"')
-		{
-		  if (*p == 0)
-		    {
-		      errormsg (0, 0, "%s:%d:%ld missing closing double-quote",
-				conf_name, line, p - buf + 1);
-		      name = NULL;
-		      goto end;
-		    }
-
-		  if (*p == '\\')
-		    {
-		      if (p[1] == '\\' || p[1] == '\"')
-			{
-			  p++;
-			}
-		      else
-			{
-			  errormsg (0, 0, "%s:%d:%ld unrecognized escape character",
-				    conf_name, line, p - buf + 1);
-			}
-		    }
-		  *q++ = *p++;
-		}
-	      *q = 0;
-	    }
-	  else if (*p == 0 && kwtab == 0)
-	    {
-	      kwtab = 1;
-	      continue;
-	    }
-	  else
-	    {
-	      errormsg (0, 0, "%s:%d:%ld: expected quoted string",
-			conf_name, line, p - buf + 1);
-	    }
-	  goto end;
-
-	default:
-	  continue;
-	}
-    }
- end:
-  if (ferror (fp))
-    {
-      errormsg (0, 0, "%s: %s", conf_name, strerror (errno));
-    }
-  fclose (fp);
-
-  return name ? xstrdup (name) : NULL;
 }
 
 static void
@@ -522,7 +619,7 @@ open_socket (URL *url)
       SSL *ssl;
       X509 *x509;
       int verify_result;
-      
+
       if ((ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
 	errormsg (1, 0, "SSL_CTX_new");
       SSL_CTX_set_verify (ctx, SSL_VERIFY_NONE, NULL);
@@ -534,7 +631,7 @@ open_socket (URL *url)
 					      server->ca_path))
 	    openssl_errormsg (1, "SSL_CTX_load_verify_locations");
 	}
-      
+
       if (server->cert)
 	{
 	  if (SSL_CTX_use_certificate_chain_file (ctx, server->cert) != 1)
@@ -544,7 +641,7 @@ open_socket (URL *url)
 	  if (SSL_CTX_check_private_key (ctx) != 1)
 	    openssl_errormsg (1, "SSL_CTX_check_private_key failed");
 	}
-      
+
       if ((ssl = SSL_new (ctx)) == NULL)
 	errormsg (1, 0, "SSL_new");
       SSL_set_tlsext_host_name (ssl, url->host);
@@ -566,7 +663,7 @@ open_socket (URL *url)
 	  errormsg (1, 0, "certificate verification failed: %s",
 		    X509_verify_cert_error_string (verify_result));
 	}
-      
+
       bio = bb;
     }
 
@@ -1345,7 +1442,7 @@ main (int argc, char **argv)
   BIO *bio;
   COMMAND command;
   struct stat sb;
-  
+
   set_progname (argv[0]);
   json_memabrt = xnomem;
 
@@ -1362,7 +1459,7 @@ main (int argc, char **argv)
 	  else
 	    server->ca_file = optarg;
 	  break;
-	  
+
 	case 'f':
 	  conf_name = optarg;
 	  break;
@@ -1373,11 +1470,11 @@ main (int argc, char **argv)
 	      SERVER key = { .name = optarg };
 	      server = SERVER_RETRIEVE (server_hash, &key);
 	      if (!server)
-		errormsg (1, 0, "%s: no such server defined in configuration", 
-                          optarg);
+		errormsg (1, 0, "%s: no such server defined in configuration",
+			  optarg);
 	    }
 	  break;
-	  
+
 	case 's':
 	  server->url = optarg;
 	  break;
@@ -1400,7 +1497,7 @@ main (int argc, char **argv)
 	case 'k':
 	  server->verify = 0;
 	  break;
-	  
+
 	case 'T':
 	  tmpl_name = optarg;
 	  break;
@@ -1425,7 +1522,7 @@ main (int argc, char **argv)
   if ((tmpl_path = getenv ("POUND_TMPL_PATH")) == NULL)
     tmpl_path = POUND_TMPL_PATH;
 
-  if (!server->url && (server->url = get_socket_name ()) == NULL)
+  if (!server->url && (server->url = scan_pound_cfg ()) == NULL)
     {
       errormsg (1, 0, "can't determine control socket name; use the -s option");
     }
