@@ -423,7 +423,7 @@
 
 (defun pound-scan (limit stk)
   (catch 'ret
-    (if (looking-at pound-section-delim) (forward-line))
+    (forward-line)
     (while (and (< (point) limit)
 		(re-search-forward pound-section-delim limit t))
       (cond
@@ -446,11 +446,9 @@
 	(cond
 	 ((re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|TrustedIP\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
 	  (let ((pos (marker-position (nth 2 (match-data)))))
-	    (forward-line)
 	    (pound-scan start (list pos))))
 	 ((re-search-backward "^[ \t]*\\(TrustedIP[ \t]*\\(?:#.*\\)?$\\)" nil t)
 	  (let ((pos (marker-position (nth 2 (match-data)))))
-	    (forward-line)
 	    (pound-scan start (list pos)))))))))
 
 (defun pound-indent-level ()
