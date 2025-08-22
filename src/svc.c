@@ -964,7 +964,7 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
 
       n = strcspn (hval, ";");
 
-      if (n > slen && hval[slen] == '=' && strncasecmp (hval, sid, slen) == 0)
+      if (n > slen && hval[slen] == '=' && c_strncasecmp (hval, sid, slen) == 0)
 	{
 	  hval += slen + 1;
 	  n -= slen + 1;
@@ -1308,7 +1308,7 @@ get_host (char const *name, struct addrinfo *res, int ai_family)
 static inline int
 is_proto (char const *pat, char const *proto, size_t len)
 {
-  return len == strlen (pat) && strncasecmp (proto, pat, len) == 0;
+  return len == strlen (pat) && c_strncasecmp (proto, pat, len) == 0;
 }
 
 union sockaddr_union
@@ -1489,7 +1489,7 @@ need_rewrite (const char *location, const char *v_host,
     }
   else
     result = (be->v.reg.servername &&
-	      strcasecmp (host, be->v.reg.servername) == 0 &&
+	      c_strcasecmp (host, be->v.reg.servername) == 0 &&
 	      is_proto (be->v.reg.ctx ? "https" : "http",
 			proto,
 			matches[1].rm_eo - matches[1].rm_so));
@@ -1497,7 +1497,7 @@ need_rewrite (const char *location, const char *v_host,
   if (result == 0 && lstn->rewr_loc == 1)
     {
       result = ((is_listener_address (addr, lstn) ||
-		 strcasecmp (host, vhost) == 0) ||
+		 c_strcasecmp (host, vhost) == 0) ||
 		((port != listener_port (lstn) ||
 		  !is_proto (SLIST_EMPTY (&lstn->ctx_head) ? "http" : "https",
 			     proto,

@@ -250,7 +250,7 @@ exact_exec (void *gp_data, const char *subj, size_t n, POUND_REGMATCH *prm)
 
   if (slen != pat->len)
     return 1;
-  return (pat->ci ? strcasecmp : strcmp) (subj, pat->pattern);
+  return (pat->ci ? c_strcasecmp : strcmp) (subj, pat->pattern);
 }
 
 /* Prefix match (-beg). */
@@ -262,7 +262,7 @@ prefix_exec (void *gp_data, const char *subj, size_t n, POUND_REGMATCH *prm)
 
   if (slen < pat->len)
     return 1;
-  return (pat->ci ? strncasecmp : strncmp) (subj, pat->pattern, pat->len);
+  return (pat->ci ? c_strncasecmp : strncmp) (subj, pat->pattern, pat->len);
 }
 
 /* Suffix match (-end). */
@@ -274,7 +274,8 @@ suffix_exec (void *gp_data, const char *subj, size_t n, POUND_REGMATCH *prm)
 
   if (slen < pat->len)
     return 1;
-  return (pat->ci ? strncasecmp : strncmp) (subj + slen - pat->len, pat->pattern, pat->len);
+  return (pat->ci ? c_strncasecmp : strncmp) (subj + slen - pat->len,
+					      pat->pattern, pat->len);
 }
 
 /* "Regex" definitions for the above. */
