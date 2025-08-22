@@ -120,6 +120,7 @@
 
 (defvar pound-matcher-keywords-2
   '("Header"
+    "StringMatch"
     "QueryParam"))
 
 (defvar pound-statement-keywords
