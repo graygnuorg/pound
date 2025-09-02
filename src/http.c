@@ -4105,7 +4105,9 @@ backend_response (POUND_HTTP *phttp)
 	    case HEADER_TRANSFER_ENCODING:
 	      if ((val = http_header_get_value (hdr)) == NULL)
 		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	      if (cs_locate_token (val, "chunked", NULL))
+	      if (cs_locate_token (val, "chunked", NULL)
+			  phttp->request.method != METH_HEAD &&
+			  phttp->response_code != 304)
 		{
 		  chunked = 1;
 		  phttp->no_cont = 0;
