@@ -3223,11 +3223,12 @@ static int
 parse_http_request (struct http_request *req, int group)
 {
   char *str;
-  size_t len;
+  size_t len, ulen;
   struct method_def *md;
   char const *url;
   int http_ver;
   int status = HTTP_STATUS_OK;
+  int rebuild = 0;
 
   str = req->request;
   len = strcspn (str, " ");
@@ -3241,16 +3242,24 @@ parse_http_request (struct http_request *req, int group)
     status = HTTP_STATUS_METHOD_NOT_ALLOWED;
 
   str += len;
-  str += strspn (str, " ");
+  len = strspn (str, " ");
+  if (len > 1)
+    rebuild = 1;
+  str += len;
 
   if (*str == 0)
     return HTTP_STATUS_BAD_REQUEST;
 
   url = str;
   len = strcspn (url, " ");
+  ulen = len;
 
   str += len;
-  str += strspn (str, " ");
+  len = strspn (str, " ");
+  if (len > 1)
+    rebuild = 1;
+  str += len;
+
   if (!(strncmp (str, "HTTP/1.", 7) == 0 &&
 	((http_ver = str[7]) == '0' || http_ver == '1') &&
 	str[8] == 0))
@@ -3259,16 +3268,17 @@ parse_http_request (struct http_request *req, int group)
   if (status == HTTP_STATUS_OK)
     {
       req->method = md->meth;
-      if ((req->url = malloc (len + 1)) == NULL)
+      if ((req->url = xstrndup (url, ulen)) == NULL)
 	{
 	  lognomem ();
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
-      memcpy (req->url, url, len);
-      req->url[len] = 0;
 
       req->version = http_ver - '0';
       req->split = 1;
+
+      if (rebuild)
+	http_request_rebuild_line (req);
     }
 
   return status;
