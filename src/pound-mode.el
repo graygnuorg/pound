@@ -162,6 +162,7 @@
     "IgnoreSRVWeight"
     "Include"
     "IncludeDir"
+    "LineBufferSize"
     "LogFacility"
     "LogFormat"
     "LogLevel"

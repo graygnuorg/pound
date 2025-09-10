@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-08-14
+Pound -- history of user-visible changes. 2025-09-10
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -12,6 +12,17 @@ Version 4.17.90 (git)
 * Emacs mode for editing pound configuration files
 
 * Include statement accepts globbing patterns
+
+* New configuration statement: LineBufferSize
+
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  By default, it is set to the internal
+buffer size (4096), which is also its minimum allowed value.
+
+This statement can be used in global scope and within ListenHTTP
+(ListenHTTPS) sections.
 
 * TBF statement
 

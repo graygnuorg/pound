@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 21, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "September 10, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -377,6 +377,15 @@ will run as (must be defined in the system user database).
 Specify the group
 .B pound
 will run as (must be defined in the system group database).
+.TP
+\fBLineBufferSize\fR \fIN\fR
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  By default, it is set to the internal
+buffer size (4096 bytes, configurable at compile time using the
+\fB\-\-with\-maxbuf\fR option).  It cannot be set to a value less than
+that default.
 .TP
 \fBRootJail\fR "\fIdirectory\fR"
 Specify the directory that
@@ -1010,6 +1019,11 @@ for a detailed discussion of this feature.
 The same statement can also appear in
 .B Service
 block, in which case it overrides the settings of the listener.
+.TP
+\fBLineBufferSize\fR \fIN\fR
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  The default is inherited from the global setting.
 .TP
 \fBMaxRequest\fR \fIn\fR
 Maximum allowed size of incoming request. All requests will be limited

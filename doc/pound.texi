@@ -2874,6 +2874,26 @@ further monitor it, restarting it if it fails.
 The default is @code{true}.
 @end deffn
 
+@deffn {Global directive} LineBufferSize @var{n}
+@anchor{line buffer}
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  By default, it is set to the internal
+buffer size (4096 bytes, configurable at compile time using the
+@code{--with-maxbuf} option)@footnote{To check the value your
+@command{pound} is compiled with, run @command{pound -V}}, and it
+cannot be less than that default.
+
+Incoming requests with request line longer than that limit will get
+a 414 (@samp{URI Too Long}) response.  Requests with one of header
+fields longer than that will be responded with 413 (@samp{Payload Too
+Large}) code.
+
+This global setting can be overridden for each particular listener
+(@pxref{Listener-specific limits}).
+@end deffn
+
 @deffn {Global directive} RootJail "@var{directory}"
 If this directive is present, @command{pound} will use the system
 @code{chroot} call to set the root directory of the process to that
@@ -3531,6 +3551,14 @@ This statement overrides the global timeout value (@pxref{Timeouts})
 for this particular listener.
 @end deffn
 
+@deffn {ListenHTTP directive} LineBufferSize @var{n}
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  The default is inherited from the
+global directive (@pxref{line buffer}).
+@end deffn
+
 @deffn {ListenHTTP directive} MaxRequest @var{n}
 Limits the maximum allowed size of incoming requests.
 A request bigger than that will be responded with status
@@ -3542,9 +3570,9 @@ By default, there is no limit on the request size.
 @deffn {ListenHTTP directive} MaxURI @var{n}
 Limits the maximum allowed length of incoming request URI.
 A request with an URI longer than that will be responded with status
-414.
+414 (@samp{URI Too Long}).
 
-By default, there is no limit on the URI length.
+By default, the limit is set to @code{LineBufferSize} (@pxref{line buffer}).
 @end deffn
 
 @deffn {ListenHTTP directive} CheckURL "@var{pattern}"

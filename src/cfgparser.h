@@ -352,6 +352,7 @@ int cfg_assign_unsigned (void *call_data, void *section_data);
 int cfg_assign_int (void *call_data, void *section_data);
 int cfg_assign_mode (void *call_data, void *section_data);
 
+int cfg_assign_unsigned_min (unsigned *dst, unsigned minval, int quiet);
 int cfg_assign_int_range (int *dst, int min, int max);
 int cfg_assign_int_enum (int *dst, struct token *tok, struct kwtab *kwtab,
 			 char *what);

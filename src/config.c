@@ -249,7 +249,14 @@ typedef struct
   BALANCER_ALGO balancer_algo;
   NAMED_BACKEND_TABLE named_backend_table;
   struct resolver_config resolver;
+  unsigned linebufsize;
 } POUND_DEFAULTS;
+
+static int
+assign_bufsize (void *call_data, void *section_data)
+{
+  return cfg_assign_unsigned_min (call_data, MAXBUF, 0);
+}
 
 static int
 assign_address_string (void *call_data, void *section_data)
@@ -3874,6 +3881,11 @@ static CFGPARSER_TABLE http_common[] = {
     .parser = parse_service,
     .off = offsetof (LISTENER, services)
   },
+  {
+    .name = "LineBufferSize",
+    .parser = assign_bufsize,
+    .off = offsetof (LISTENER, linebufsize),
+  },
   { NULL }
 };
 
@@ -3986,6 +3998,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   lst->clnt_check = -1;
+  lst->linebufsize = dfl->linebufsize;
   locus_range_init (&lst->locus);
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
@@ -4128,6 +4141,8 @@ parse_listen_http (void *call_data, void *section_data)
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
     return CFGPARSER_FAIL;
+  if (lst->max_uri_length > lst->linebufsize)
+    lst->max_uri_length = lst->linebufsize;
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -4804,6 +4819,9 @@ parse_listen_https (void *call_data, void *section_data)
   if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
+  if (lst->max_uri_length > lst->linebufsize)
+    lst->max_uri_length = lst->linebufsize;
+
   if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error_at_locus_range (&lst->locus, "Cert statement is missing");
@@ -5379,6 +5397,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = cfg_assign_unsigned,
     .data = &watcher_ttl
   },
+  {
+    .name = "LineBufferSize",
+    .parser = assign_bufsize,
+    .off = offsetof (POUND_DEFAULTS, linebufsize),
+  },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
@@ -5742,7 +5765,8 @@ parse_config_file (char const *file, int nosyslog)
     .re_type = GENPAT_POSIX,
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
     .balancer_algo = BALANCER_ALGO_RANDOM,
-    .resolver = RESOLVER_CONFIG_INITIALIZER
+    .resolver = RESOLVER_CONFIG_INITIALIZER,
+    .linebufsize = MAXBUF
   };
 
   named_backend_table_init (&pound_defaults.named_backend_table);

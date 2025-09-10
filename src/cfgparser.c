@@ -1385,7 +1385,7 @@ cfg_assign_bool (void *call_data, void *section_data)
 }
 
 int
-cfg_assign_unsigned (void *call_data, void *section_data)
+cfg_assign_unsigned_min (unsigned *dst, unsigned minval, int quiet)
 {
   unsigned long n;
   char *p;
@@ -1401,8 +1401,24 @@ cfg_assign_unsigned (void *call_data, void *section_data)
       conf_error ("%s", "bad unsigned number");
       return CFGPARSER_FAIL;
     }
-  *(unsigned *)call_data = n;
+  if (n < minval)
+    {
+      if (quiet)
+	n = minval;
+      else
+	{
+	  conf_error ("value out of allowed range (>= %lu)", minval);
+	  return CFGPARSER_FAIL;
+	}
+    }
+  *dst = n;
   return 0;
+}
+
+int
+cfg_assign_unsigned (void *call_data, void *section_data)
+{
+  return cfg_assign_unsigned_min (call_data, 0, 0);
 }
 
 int

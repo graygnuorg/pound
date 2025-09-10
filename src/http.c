@@ -1040,15 +1040,16 @@ copy_status_string (int rc)
  * Read and write some binary data
  */
 static int
-copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, CONTENT_LENGTH *res_bytes,
-	  int no_write)
+copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, int no_write,
+	  CONTENT_LENGTH *res_bytes)
 {
   char buf[MAXBUF];
   int res;
 
   while (cont > 0)
     {
-      if ((res = BIO_read (cl, buf, cont > sizeof (buf) ? sizeof (buf) : cont)) < 0)
+      if ((res = BIO_read (cl, buf,
+			   cont > sizeof (buf) ? sizeof (buf) : cont)) < 0)
 	{
 	  if (BIO_should_retry (cl))
 	    continue;
@@ -1120,7 +1121,7 @@ acme_response (POUND_HTTP *phttp)
       phttp->response_code = 200;
       bio_http_reply_start (phttp->cl, phttp->request.version, 200, "OK", NULL,
 			    "text/html", (CONTENT_LENGTH) st.st_size);
-      ec = copy_bin (bin, phttp->cl, st.st_size, NULL, 0);
+      ec = copy_bin (bin, phttp->cl, st.st_size, 0, NULL);
       switch (ec)
 	{
 	case COPY_OK:
@@ -1275,7 +1276,7 @@ file_response (POUND_HTTP *phttp)
 				 http_status[HTTP_STATUS_OK].reason,
 				 &req.headers,
 				 (CONTENT_LENGTH) st.st_size);
-      rc = copy_bin (bin, phttp->cl, st.st_size, NULL, 0);
+      rc = copy_bin (bin, phttp->cl, st.st_size, 0, NULL);
       switch (rc)
 	{
 	case COPY_OK:
@@ -1517,16 +1518,16 @@ get_content_length (char const *arg, int mode)
  * Copy chunked
  */
 static int
-copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
-	     CONTENT_LENGTH max_size)
+copy_chunks (BIO *cl, BIO *be, char *buf, unsigned bufsize,
+	     int no_write,
+	     CONTENT_LENGTH max_size, CONTENT_LENGTH *res_bytes)
 {
-  char buf[MAXBUF];
   CONTENT_LENGTH cont, tot_size;
   int res;
 
   for (tot_size = 0;;)
     {
-      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
+      if ((res = get_line (cl, buf, bufsize)) != COPY_OK)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") chunked read error: %s",
 		  POUND_TID (),
@@ -1563,7 +1564,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
 
       if (cont > 0)
 	{
-	  int ec = copy_bin (cl, be, cont, res_bytes, no_write);
+	  int ec = copy_bin (cl, be, cont, no_write, res_bytes);
 	  switch (ec)
 	    {
 	    case COPY_OK:
@@ -1594,7 +1595,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
       /*
        * final CRLF
        */
-      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
+      if ((res = get_line (cl, buf, bufsize)) != COPY_OK)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error after chunk: %s",
 		  POUND_TID (),
@@ -1623,7 +1624,7 @@ copy_chunks (BIO *cl, BIO *be, CONTENT_LENGTH *res_bytes, int no_write,
    */
   for (;;)
     {
-      if ((res = get_line (cl, buf, sizeof (buf))) != COPY_OK)
+      if ((res = get_line (cl, buf, bufsize)) != COPY_OK)
 	{
 	  logmsg (LOG_NOTICE, "(%"PRItid") error post-chunk: %s",
 		  POUND_TID (),
@@ -2977,9 +2978,9 @@ compose_header_add (char const *str, size_t len, void *data)
 }
 
 static int
-http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
+http_request_read (BIO *in, const LISTENER *lstn, char *buf,
+		   struct http_request *req)
 {
-  char buf[MAXBUF];
   int res;
   COMPOSE_HEADER_HASH *chash = NULL;
 
@@ -2998,7 +2999,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
   /*
    * HTTP/1.1 allows leading CRLF
    */
-  while ((res = get_line (in, buf, sizeof (buf))) == COPY_OK)
+  while ((res = get_line (in, buf, lstn->linebufsize)) == COPY_OK)
     if (buf[0])
       break;
 
@@ -3040,7 +3041,7 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
     {
       struct http_header *hdr;
 
-      if ((res = get_line (in, buf, sizeof (buf))) != COPY_OK)
+      if ((res = get_line (in, buf, lstn->linebufsize)) != COPY_OK)
 	{
 	  http_request_free (req);
 	  compose_header_hash_free (chash);
@@ -4039,7 +4040,8 @@ backend_response (POUND_HTTP *phttp)
 
       /* Free previous response, if any */
       http_request_free (&phttp->response);
-      res = http_request_read (phttp->be, phttp->lstn, &phttp->response);
+      res = http_request_read (phttp->be, phttp->lstn, phttp->buffer,
+			       &phttp->response);
       if (res != HTTP_STATUS_OK)
 	{
 	  log_error (phttp, res, errno, "response read error");
@@ -4280,8 +4282,10 @@ backend_response (POUND_HTTP *phttp)
 	       * had Transfer-encoding: chunked so read/write all
 	       * the chunks (HTTP/1.1 only)
 	       */
-	      if (copy_chunks (phttp->be, phttp->cl, &phttp->res_bytes,
-			       resp_mode != RESP_OK, 0) != HTTP_STATUS_OK)
+	      if (copy_chunks (phttp->be, phttp->cl,
+			       phttp->buffer, phttp->lstn->linebufsize,
+			       resp_mode != RESP_OK, 0,
+			       &phttp->res_bytes) != HTTP_STATUS_OK)
 		{
 		  /*
 		   * copy_chunks() has its own error messages
@@ -4296,7 +4300,7 @@ backend_response (POUND_HTTP *phttp)
 	       * for the length
 	       */
 	      int ec = copy_bin (phttp->be, phttp->cl, content_length,
-				 &phttp->res_bytes, resp_mode != RESP_OK);
+				 resp_mode != RESP_OK, &phttp->res_bytes);
 	      switch (ec)
 		{
 		case COPY_OK:
@@ -4668,9 +4672,10 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        * had Transfer-encoding: chunked so read/write all the chunks
        * (HTTP/1.1 only)
        */
-      int rc = copy_chunks (phttp->cl, phttp->be, NULL,
+      int rc = copy_chunks (phttp->cl, phttp->be,
+			    phttp->buffer, phttp->lstn->linebufsize,
 			    phttp->backend->be_type != BE_REGULAR,
-			    phttp->lstn->max_req_size);
+			    phttp->lstn->max_req_size, NULL);
       if (rc != HTTP_STATUS_OK)
 	{
 	  log_error (phttp, rc, 0, "error sending chunks");
@@ -4682,8 +4687,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       /*
        * had Content-length, so do raw reads/writes for the length
        */
-      int rc = copy_bin (phttp->cl, phttp->be, content_length, NULL,
-			 phttp->backend->be_type != BE_REGULAR);
+      int rc = copy_bin (phttp->cl, phttp->be, content_length,
+			 phttp->backend->be_type != BE_REGULAR, NULL);
       switch (rc)
 	{
 	case COPY_OK:
@@ -5306,7 +5311,8 @@ do_http (POUND_HTTP *phttp)
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
       clock_gettime (CLOCK_REALTIME, &phttp->start_req);
-      res = http_request_read (phttp->cl, phttp->lstn, &phttp->request);
+      res = http_request_read (phttp->cl, phttp->lstn, phttp->buffer,
+			       &phttp->request);
       if (res != HTTP_STATUS_OK)
 	{
 	  if (errno)

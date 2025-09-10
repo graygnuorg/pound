@@ -954,6 +954,7 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */
   struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
+  unsigned linebufsize;         /* Line buffer size */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */
   int rewr_loc;			/* rewrite location response */
@@ -1039,6 +1040,7 @@ typedef struct _pound_http
   int sock;
   LISTENER *lstn;
   struct addrinfo from_host;
+  char *buffer; /* Line buffer, allocated after the structure. */
 
   /* Deduced information */
   SERVICE *svc;

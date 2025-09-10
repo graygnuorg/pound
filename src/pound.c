@@ -276,11 +276,12 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 {
   POUND_HTTP *res;
 
-  if ((res = calloc (1, sizeof (res[0]))) == NULL)
+  if ((res = calloc (1, sizeof (res[0]) + lstn->linebufsize)) == NULL)
     {
       lognomem ();
       return -1;
     }
+  res->buffer = (char*)(res + 1);
 
   if ((res->from_host.ai_addr = malloc (salen)) == NULL)
     {
