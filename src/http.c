@@ -210,7 +210,8 @@ http_status_reason (int code)
  */
 static int
 bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
-	       int (*cbf) (HTTP_HEADER_LIST *, void *), void *data)
+	       int (*cbf) (HTTP_HEADER_LIST *, void *), void *data,
+	       int *resp_code, CONTENT_LENGTH *resp_size, char **resp_line)
 {
   char const *content;
   struct http_errmsg tmp = HTTP_ERRMSG_INITIALIZER (tmp);
@@ -221,7 +222,8 @@ bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
 
   if (!(err >= 0 && err < HTTP_STATUS_MAX))
     {
-      logmsg (LOG_NOTICE, "INTERNAL ERROR: unsupported error code in call to bio_err_reply");
+      logmsg (LOG_NOTICE,
+	      "INTERNAL ERROR: unsupported error code in call to bio_err_reply");
       err = HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
@@ -266,7 +268,34 @@ bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
   http_header_list_free (&hlist);
   free (mem);
 
+  if (rc == HTTP_STATUS_OK)
+    {
+      if (resp_code)
+	*resp_code = http_status[err].code;
+      if (resp_size)
+	*resp_size = len;
+      if (resp_line)
+	{
+	  struct stringbuf sb;
+	  stringbuf_init_log (&sb);
+	  stringbuf_printf (&sb, "%d %s",
+			    http_status[err].code,
+			    http_status[err].reason);
+	  if ((*resp_line = stringbuf_finish (&sb)) == NULL)
+	    stringbuf_free (&sb);
+	}
+    }
+
   return rc;
+}
+
+static inline int
+http_err_reply_cb (POUND_HTTP *phttp, int err, struct http_errmsg *msg,
+		   int (*cbf) (HTTP_HEADER_LIST *, void *), void *data)
+{
+  return bio_err_reply (phttp->cl, phttp->request.version, err, msg, cbf, data,
+			&phttp->response_code, &phttp->res_bytes,
+			&phttp->response.request);
 }
 
 /*
@@ -276,12 +305,13 @@ bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
  * it will be used, otherwise the default error page for the ERR code
  * will be generated
  */
-static void
+static int
 http_err_reply (POUND_HTTP *phttp, int err)
 {
-  bio_err_reply (phttp->cl, phttp->request.version, err,
-		 phttp->lstn->http_err[err], NULL, NULL);
+  int rc = http_err_reply_cb (phttp, err, phttp->lstn->http_err[err],
+			      NULL, NULL);
   phttp->conn_closed = 1;
+  return rc;
 }
 
 static int
@@ -1180,7 +1210,6 @@ error_response (POUND_HTTP *phttp)
 {
   int err = phttp->backend->v.error.status;
   struct http_errmsg *ep;
-  int rc;
 
   if (phttp->backend->v.error.msg.text)
     ep = &phttp->backend->v.error.msg;
@@ -1189,13 +1218,7 @@ error_response (POUND_HTTP *phttp)
   else
     ep = NULL;
 
-  rc = bio_err_reply (phttp->cl, phttp->request.version, err,
-		      ep, cb_hdr_rewrite, phttp);
-  if (rc != HTTP_STATUS_OK)
-    return rc;
-
-  phttp->response_code = http_status[err].code;
-  return 0;
+  return http_err_reply_cb (phttp, err, ep, cb_hdr_rewrite, phttp);
 }
 
 static char file_headers[] = "Content-Type: text/plain\r\n";
@@ -2982,14 +3005,22 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
   switch (res)
     {
     case COPY_OK:
-    case COPY_EOF:
       break;
+
+    case COPY_EOF:
+      return HTTP_STATUS_OK;
 
     case COPY_READ_ERR:
       logmsg (LOG_NOTICE, "(%"PRItid") %s",
 	      POUND_TID (),
 	      copy_status_string (res));
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+    case COPY_TOO_LONG:
+      logmsg (LOG_NOTICE, "(%"PRItid") %s",
+	      POUND_TID (),
+	      copy_status_string (res));
+      return HTTP_STATUS_URI_TOO_LONG;
 
     default:
       logmsg (LOG_NOTICE, "(%"PRItid") %s",
@@ -3009,14 +3040,12 @@ http_request_read (BIO *in, const LISTENER *lstn, struct http_request *req)
     {
       struct http_header *hdr;
 
-      if (get_line (in, buf, sizeof (buf)) != COPY_OK)
+      if ((res = get_line (in, buf, sizeof (buf))) != COPY_OK)
 	{
 	  http_request_free (req);
 	  compose_header_hash_free (chash);
-	  /*
-	   * this is not necessarily an error, EOF/timeout are possible
-	   */
-	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	  return res == COPY_TOO_LONG ?
+	    HTTP_STATUS_PAYLOAD_TOO_LARGE : HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
       if (!buf[0])
@@ -4016,6 +4045,13 @@ backend_response (POUND_HTTP *phttp)
 	  log_error (phttp, res, errno, "response read error");
 	  return res;
 	}
+      else if (phttp->response.request == NULL)
+	{
+	  res = HTTP_STATUS_SERVICE_UNAVAILABLE;
+	  log_error (phttp, res, 0, "eof from backend");
+	  return res;
+	}
+
       if ((code = http_response_validate (&phttp->response)) == 0)
 	{
 	  res = HTTP_STATUS_SERVICE_UNAVAILABLE;
@@ -4064,10 +4100,9 @@ backend_response (POUND_HTTP *phttp)
 		  int err = http_status_to_pound (phttp->response_code);
 		  if (err != -1 && phttp->lstn->http_err[err])
 		    {
-		      if (bio_err_reply (phttp->cl, phttp->request.version,
-					 err,
-					 phttp->lstn->http_err[err],
-					 cb_hdr_rewrite, phttp)
+		      if (http_err_reply_cb (phttp, err,
+					     phttp->lstn->http_err[err],
+					     cb_hdr_rewrite, phttp)
 			  != HTTP_STATUS_OK)
 			return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 		      resp_mode = RESP_DRAIN;
@@ -4893,22 +4928,307 @@ enum transfer_encoding
     TRANSFER_ENCODING_UNKNOWN
   };
 
+enum { HTTP_ABORT = -2 };
+
+static inline int
+is_http10 (POUND_HTTP *phttp)
+{
+  return phttp->request.version == 0;
+}
+
+static int
+http_process_request (POUND_HTTP *phttp)
+{
+  int res;  /* General-purpose result variable */
+  char caddr[MAX_ADDR_BUFSIZE];
+  CONTENT_LENGTH content_length;
+  struct http_header *hdr, *hdrtemp;
+  char *val;
+  /* FIXME: this belongs to struct http_request, perhaps. */
+  int transfer_encoding;
+
+  /*
+   * check for correct request
+   */
+  if ((res = parse_http_request (&phttp->request,
+				 phttp->lstn->verb)) != HTTP_STATUS_OK)
+    {
+      log_error (phttp, res, 0, "error parsing request");
+      return res;
+    }
+
+  phttp->no_cont = phttp->request.method == METH_HEAD;
+  if (phttp->request.method == METH_GET)
+    phttp->ws_state |= WSS_REQ_GET;
+
+  if (phttp->lstn->url_pat &&
+      genpat_match (phttp->lstn->url_pat, phttp->request.url, 0, NULL))
+    {
+      log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
+		 "bad URL \"%s\"", phttp->request.url);
+      return HTTP_STATUS_NOT_IMPLEMENTED;
+    }
+
+  /*
+   * check headers
+   */
+  transfer_encoding = TRANSFER_ENCODING_NONE;
+  content_length = NO_CONTENT_LENGTH;
+  DLIST_FOREACH_SAFE (hdr, hdrtemp, &phttp->request.headers, link)
+    {
+      switch (hdr->code)
+	{
+	case HEADER_CONNECTION:
+	  if ((val = http_header_get_value (hdr)) == NULL)
+	    return HTTP_ABORT;
+	  if (cs_locate_token (val, "close", NULL))
+	    phttp->conn_closed = 1;
+	  /*
+	   * Connection: upgrade
+	   */
+	  else if (genpat_match (CONN_UPGRD, val, 0, NULL) == 0)
+	    phttp->ws_state |= WSS_REQ_HEADER_CONNECTION_UPGRADE;
+	  break;
+
+	case HEADER_UPGRADE:
+	  if ((val = http_header_get_value (hdr)) == NULL)
+	    return HTTP_ABORT;
+	  if (cs_locate_token (val, "websocket", NULL))
+	    phttp->ws_state |= WSS_REQ_HEADER_UPGRADE_WEBSOCKET;
+	  break;
+
+	case HEADER_TRANSFER_ENCODING:
+	  if ((val = http_header_get_value (hdr)) == NULL)
+	    return HTTP_ABORT;
+	  else if (transfer_encoding == TRANSFER_ENCODING_CHUNKED)
+	    {
+	      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+			 "multiple Transfer-Encoding headers");
+	      return HTTP_STATUS_BAD_REQUEST;
+	    }
+	  else
+	    {
+	      char *next;
+	      if (cs_locate_token (val, "chunked", &next))
+		{
+		  if (next)
+		    {
+		      /*
+		       * When the "chunked" transfer-coding is used,
+		       * it MUST be the last transfer-coding applied
+		       * to the message-body.
+		       */
+		      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+				 "multiple Transfer-Encoding headers");
+		      return HTTP_STATUS_BAD_REQUEST;
+		    }
+		  transfer_encoding = TRANSFER_ENCODING_CHUNKED;
+		}
+	      else
+		transfer_encoding = TRANSFER_ENCODING_UNKNOWN;
+	    }
+	  break;
+
+	case HEADER_CONTENT_LENGTH:
+	  if ((val = http_header_get_value (hdr)) == NULL)
+	    return HTTP_ABORT;
+	  if (content_length != NO_CONTENT_LENGTH || strchr (val, ','))
+	    {
+	      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+			 "multiple Content-Length headers");
+	      return HTTP_STATUS_BAD_REQUEST;
+	    }
+	  else if ((content_length = get_content_length (val, CL_HEADER)) == NO_CONTENT_LENGTH)
+	    {
+	      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+			 "bad Content-Length value");
+	      return HTTP_STATUS_BAD_REQUEST;
+	    }
+
+	  if (content_length == NO_CONTENT_LENGTH)
+	    {
+	      http_header_list_remove (&phttp->request.headers, hdr);
+	    }
+	  break;
+
+	case HEADER_EXPECT:
+	  /*
+	   * We do NOT support the "Expect: 100-continue" headers;
+	   * Supporting them may involve severe performance penalties
+	   * (non-responding back-end, etc).
+	   * As a stop-gap measure we just skip these headers.
+	   */
+	  if ((val = http_header_get_value (hdr)) == NULL)
+	    return HTTP_ABORT;
+	  if (!c_strcasecmp ("100-continue", val))
+	    {
+	      http_header_list_remove (&phttp->request.headers, hdr);
+	    }
+	  break;
+
+	case HEADER_ILLEGAL:
+	  /*
+	   * FIXME: This should not happen.  See the handling of
+	   * HEADER_ILLEGAL in http_header_list_append.
+	   */
+	  logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
+		  POUND_TID (),
+		  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
+		  hdr->header);
+
+	  http_header_list_remove (&phttp->request.headers, hdr);
+	  break;
+	}
+    }
+
+  /*
+   * check for possible request smuggling attempt
+   */
+  if (transfer_encoding != TRANSFER_ENCODING_NONE)
+    {
+      if (transfer_encoding == TRANSFER_ENCODING_UNKNOWN)
+	{
+	  log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
+		     "unknown Transfer-Encoding");
+	  return HTTP_STATUS_NOT_IMPLEMENTED;
+	}
+      else if (content_length != NO_CONTENT_LENGTH)
+	{
+	  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
+		     "both Transfer-Encoding and Content-Length given");
+	  return HTTP_STATUS_BAD_REQUEST;
+	}
+    }
+
+  if (phttp->lstn->max_uri_length > 0)
+    {
+      int rc;
+      char const *url;
+      rc = http_request_get_url (&phttp->request, &url);
+      if (rc == RETRIEVE_OK)
+	{
+	  size_t urlen;
+	  if ((urlen = strlen (url)) > phttp->lstn->max_uri_length)
+	    {
+	      log_error (phttp, HTTP_STATUS_URI_TOO_LONG, 0,
+			 "URI too long: %zu bytes",
+			 urlen);
+	      return HTTP_STATUS_URI_TOO_LONG;
+	    }
+	}
+      else
+	{
+	  log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
+		     "can't get URL from the request (shouldn't happen)");
+	  return HTTP_ABORT;
+	}
+    }
+
+  /*
+   * possibly limited request size
+   */
+  if (phttp->lstn->max_req_size > 0 && content_length > 0
+      && content_length > phttp->lstn->max_req_size)
+    {
+      log_error (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE, 0,
+		 "request too large: %"PRICLEN" bytes",
+		 content_length);
+      return HTTP_STATUS_PAYLOAD_TOO_LARGE;
+    }
+
+  if (phttp->be != NULL)
+    {
+      if (is_readable (phttp->be, 0))
+	{
+	  /*
+	   * The only way it's readable is if it's at EOF, so close
+	   * it!
+	   */
+	  close_backend (phttp);
+	}
+    }
+
+  /*
+   * check that the requested URL still fits the old back-end (if
+   * any)
+   */
+  if ((phttp->svc = get_service (phttp)) == NULL)
+    {
+      log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
+		 "no suitable service found");
+      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+    }
+
+  if ((res = select_backend (phttp)) != 0)
+    return res;
+
+  /*
+   * if we have anything but a regular backend we close the channel
+   */
+  if (phttp->be != NULL && phttp->backend->be_type != BE_REGULAR)
+    close_backend (phttp);
+
+  if (force_http_10 (phttp))
+    phttp->conn_closed = 1;
+
+  phttp->res_bytes = 0;
+  http_request_free (&phttp->response);
+
+  clock_gettime (CLOCK_REALTIME, &phttp->be_start);
+  switch (phttp->backend->be_type)
+    {
+    case BE_REDIRECT:
+      res = redirect_response (phttp);
+      break;
+
+    case BE_ACME:
+      res = acme_response (phttp);
+      break;
+
+    case BE_CONTROL:
+      res = control_response (phttp);
+      break;
+
+    case BE_ERROR:
+      res = error_response (phttp);
+      break;
+
+    case BE_METRICS:
+      res = metrics_response (phttp);
+      break;
+
+    case BE_REGULAR:
+      /* Send the request. */
+      res = send_to_backend (phttp,
+			     !is_http10 (phttp) &&
+			     (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
+			     content_length);
+      if (res == 0)
+	/* Process the response. */
+	res = backend_response (phttp);
+      break;
+
+    case BE_FILE:
+      res = file_response (phttp);
+      break;
+
+    case BE_MATRIX:
+    case BE_BACKEND_REF:
+      /* shouldn't happen */
+      abort ();
+    }
+  return res;
+}
+
 /*
  * handle an HTTP request
  */
 void
 do_http (POUND_HTTP *phttp)
 {
-  int cl_11;  /* Whether client connection is using HTTP/1.1 */
   int res;  /* General-purpose result variable */
-  /* FIXME: this belongs to struct http_request, perhaps. */
-  int transfer_encoding = TRANSFER_ENCODING_NONE;
   BIO *bb;
   char caddr[MAX_ADDR_BUFSIZE];
-  CONTENT_LENGTH content_length;
-  struct http_header *hdr, *hdrtemp;
-  char *val;
-  struct timespec be_start;
 
   if (phttp->lstn->allow_client_reneg)
     phttp->reneg_state = RENEG_ALLOW;
@@ -4978,7 +5298,6 @@ do_http (POUND_HTTP *phttp)
   BIO_set_buffer_size (phttp->cl, MAXBUF);
   phttp->cl = BIO_push (bb, phttp->cl);
 
-  cl_11 = 0;
   for (;;)
     {
       http_request_free (&phttp->request);
@@ -4986,321 +5305,44 @@ do_http (POUND_HTTP *phttp)
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
-      if (http_request_read (phttp->cl, phttp->lstn, &phttp->request) != HTTP_STATUS_OK)
-	{
-	  if (!cl_11)
-	    {
-	      if (errno)
-		{
-		  logmsg (LOG_NOTICE, "(%"PRItid") error reading request from %s: %s",
-			  POUND_TID (),
-			  addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
-			  strerror (errno));
-		}
-	    }
-	  return;
-	}
-
       clock_gettime (CLOCK_REALTIME, &phttp->start_req);
-
-      /*
-       * check for correct request
-       */
-      if ((res = parse_http_request (&phttp->request, phttp->lstn->verb)) != HTTP_STATUS_OK)
+      res = http_request_read (phttp->cl, phttp->lstn, &phttp->request);
+      if (res != HTTP_STATUS_OK)
 	{
-	  log_error (phttp, res, 0, "error parsing request");
-	  http_err_reply (phttp, res);
-	  return;
-	}
-      cl_11 = phttp->request.version;
-
-      phttp->no_cont = phttp->request.method == METH_HEAD;
-      if (phttp->request.method == METH_GET)
-	phttp->ws_state |= WSS_REQ_GET;
-
-      if (phttp->lstn->url_pat &&
-	  genpat_match (phttp->lstn->url_pat, phttp->request.url, 0, NULL))
-	{
-	  log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
-		     "bad URL \"%s\"", phttp->request.url);
-	  http_err_reply (phttp, HTTP_STATUS_NOT_IMPLEMENTED);
-	  return;
-	}
-
-      /*
-       * check headers
-       */
-      transfer_encoding = TRANSFER_ENCODING_NONE;
-      content_length = NO_CONTENT_LENGTH;
-      DLIST_FOREACH_SAFE (hdr, hdrtemp, &phttp->request.headers, link)
-	{
-	  switch (hdr->code)
+	  if (errno)
 	    {
-	    case HEADER_CONNECTION:
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      if (cs_locate_token (val, "close", NULL))
-		phttp->conn_closed = 1;
-	      /*
-	       * Connection: upgrade
-	       */
-	      else if (genpat_match (CONN_UPGRD, val, 0, NULL) == 0)
-		phttp->ws_state |= WSS_REQ_HEADER_CONNECTION_UPGRADE;
-	      break;
-
-	    case HEADER_UPGRADE:
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      if (cs_locate_token (val, "websocket", NULL))
-		phttp->ws_state |= WSS_REQ_HEADER_UPGRADE_WEBSOCKET;
-	      break;
-
-	    case HEADER_TRANSFER_ENCODING:
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      else if (transfer_encoding == TRANSFER_ENCODING_CHUNKED)
-		{
-		  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-			     "multiple Transfer-Encoding headers");
-		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-		  return;
-		}
-	      else
-		{
-		  char *next;
-		  if (cs_locate_token (val, "chunked", &next))
-		    {
-		      if (next)
-			{
-			  /*
-			   * When the "chunked" transfer-coding is used,
-			   * it MUST be the last transfer-coding applied
-			   * to the message-body.
-			   */
-			  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-				     "multiple Transfer-Encoding headers");
-			  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-			  return;
-			}
-		      transfer_encoding = TRANSFER_ENCODING_CHUNKED;
-		    }
-		  else
-		    transfer_encoding = TRANSFER_ENCODING_UNKNOWN;
-		}
-	      break;
-
-	    case HEADER_CONTENT_LENGTH:
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      if (content_length != NO_CONTENT_LENGTH || strchr (val, ','))
-		{
-		  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-			     "multiple Content-Length headers");
-		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-		  return;
-		}
-	      else if ((content_length = get_content_length (val, CL_HEADER)) == NO_CONTENT_LENGTH)
-		{
-		  log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-			     "bad Content-Length value");
-		  http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-		  return;
-		}
-
-	      if (content_length == NO_CONTENT_LENGTH)
-		{
-		  http_header_list_remove (&phttp->request.headers, hdr);
-		}
-	      break;
-
-	    case HEADER_EXPECT:
-	      /*
-	       * We do NOT support the "Expect: 100-continue" headers;
-	       * Supporting them may involve severe performance penalties
-	       * (non-responding back-end, etc).
-	       * As a stop-gap measure we just skip these headers.
-	       */
-	      if ((val = http_header_get_value (hdr)) == NULL)
-		goto err;
-	      if (!c_strcasecmp ("100-continue", val))
-		{
-		  http_header_list_remove (&phttp->request.headers, hdr);
-		}
-	      break;
-
-	    case HEADER_ILLEGAL:
-	      /*
-	       * FIXME: This should not happen.  See the handling of
-	       * HEADER_ILLEGAL in http_header_list_append.
-	       */
-	      logmsg (LOG_NOTICE, "(%"PRItid") bad header from %s (%s)",
+	      logmsg (LOG_NOTICE, "(%"PRItid") "
+		      "error reading request from %s: %s",
 		      POUND_TID (),
-		      addr2str (caddr, sizeof (caddr), &phttp->from_host, 1),
-		      hdr->header);
-
-	      http_header_list_remove (&phttp->request.headers, hdr);
-	      break;
+		      addr2str (caddr, sizeof (caddr),
+				&phttp->from_host, 1),
+		      strerror (errno));
 	    }
+	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
 	}
-
-      /*
-       * check for possible request smuggling attempt
-       */
-      if (transfer_encoding != TRANSFER_ENCODING_NONE)
-	{
-	  if (transfer_encoding == TRANSFER_ENCODING_UNKNOWN)
-	    {
-	      log_error (phttp, HTTP_STATUS_NOT_IMPLEMENTED, 0,
-			 "unknown Transfer-Encoding");
-	      http_err_reply (phttp, HTTP_STATUS_NOT_IMPLEMENTED);
-	      return;
-	    }
-	  else if (content_length != NO_CONTENT_LENGTH)
-	    {
-	      log_error (phttp, HTTP_STATUS_BAD_REQUEST, 0,
-			 "both Transfer-Encoding and Content-Length given");
-	      http_err_reply (phttp, HTTP_STATUS_BAD_REQUEST);
-	      return;
-	    }
-	}
-
-      if (phttp->lstn->max_uri_length > 0)
-	{
-	  int rc;
-	  char const *url;
-	  rc = http_request_get_url (&phttp->request, &url);
-	  if (rc == RETRIEVE_OK)
-	    {
-	      size_t urlen;
-	      if ((urlen = strlen (url)) > phttp->lstn->max_uri_length)
-		{
-		  log_error (phttp, HTTP_STATUS_URI_TOO_LONG, 0,
-			     "URI too long: %zu bytes",
-			     urlen);
-		  http_err_reply (phttp, HTTP_STATUS_URI_TOO_LONG);
-		  return;
-		}
-	    }
-	  else
-	    {
-	      log_error (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
-			 "can't get URL from the request (shouldn't happen)");
-	      goto err;
-	    }
-	}
-
-      /*
-       * possibly limited request size
-       */
-      if (phttp->lstn->max_req_size > 0 && content_length > 0
-	  && content_length > phttp->lstn->max_req_size)
-	{
-	  log_error (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE, 0,
-		     "request too large: %"PRICLEN" bytes",
-		     content_length);
-	  http_err_reply (phttp, HTTP_STATUS_PAYLOAD_TOO_LARGE);
-	  return;
-	}
-
-      if (phttp->be != NULL)
-	{
-	  if (is_readable (phttp->be, 0))
-	    {
-	      /*
-	       * The only way it's readable is if it's at EOF, so close
-	       * it!
-	       */
-	      close_backend (phttp);
-	    }
-	}
-
-      /*
-       * check that the requested URL still fits the old back-end (if
-       * any)
-       */
-      if ((phttp->svc = get_service (phttp)) == NULL)
-	{
-	  log_error (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
-		     "no suitable service found");
-	  http_err_reply (phttp, HTTP_STATUS_SERVICE_UNAVAILABLE);
-	  return;
-	}
-
-      if ((res = select_backend (phttp)) != 0)
-	{
-	  http_err_reply (phttp, res);
-	  return;
-	}
-
-      /*
-       * if we have anything but a regular backend we close the channel
-       */
-      if (phttp->be != NULL && phttp->backend->be_type != BE_REGULAR)
-	close_backend (phttp);
-
-      if (force_http_10 (phttp))
-	phttp->conn_closed = 1;
-
-      phttp->res_bytes = 0;
-      http_request_free (&phttp->response);
-
-      clock_gettime (CLOCK_REALTIME, &be_start);
-      switch (phttp->backend->be_type)
-	{
-	case BE_REDIRECT:
-	  res = redirect_response (phttp);
-	  break;
-
-	case BE_ACME:
-	  res = acme_response (phttp);
-	  break;
-
-	case BE_CONTROL:
-	  res = control_response (phttp);
-	  break;
-
-	case BE_ERROR:
-	  res = error_response (phttp);
-	  break;
-
-	case BE_METRICS:
-	  res = metrics_response (phttp);
-	  break;
-
-	case BE_REGULAR:
-	  /* Send the request. */
-	  res = send_to_backend (phttp,
-				 cl_11 && (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
-				 content_length);
-	  if (res == 0)
-	    /* Process the response. */
-	    res = backend_response (phttp);
-	  break;
-
-	case BE_FILE:
-	  res = file_response (phttp);
-	  break;
-
-	case BE_MATRIX:
-	case BE_BACKEND_REF:
-	  /* shouldn't happen */
-	  abort ();
-	}
-
-      clock_gettime (CLOCK_REALTIME, &phttp->end_req);
-      if (enable_backend_stats)
-	backend_update_stats (phttp->backend, &be_start, &phttp->end_req);
-
-      if (res == -1)
+      else if (phttp->request.request == NULL)
 	break;
       else
 	{
-	  if (res != HTTP_STATUS_OK)
-	    http_err_reply (phttp, res);
-	  if (phttp->response_code == 0)
-	    phttp->response_code = http_status[res].code;
-	  http_log (phttp);
+	  clock_gettime (CLOCK_REALTIME, &phttp->start_req);
+	  res = http_process_request (phttp);
+	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
+	  if (enable_backend_stats)
+	    backend_update_stats (phttp->backend, &phttp->be_start,
+				  &phttp->end_req);
 	}
+
+      if (res < 0)
+	http_err_reply (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR);
+      else if (res != HTTP_STATUS_OK)
+	http_err_reply (phttp, res);
+
+      if (phttp->response_code == 0)
+	phttp->response_code = http_status[res].code;
+      http_log (phttp);
+
+      if (res < 0)
+	break;
 
       /*
        * Stop processing if:
@@ -5308,15 +5350,9 @@ do_http (POUND_HTTP *phttp)
        *      or
        *  - we had a "Connection: closed" header
        */
-      if (!cl_11 || phttp->conn_closed)
+      if (is_http10 (phttp) || phttp->conn_closed)
 	break;
     }
-
-  return;
-
- err:
-  http_err_reply (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR);
-  return;
 }
 
 void *

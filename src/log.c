@@ -233,7 +233,7 @@ scan_forwarded_header (char const *hdr, ACL *acl, struct addrinfo **ret_addr)
 static char const *
 get_forwarded_header_name (POUND_HTTP *phttp)
 {
-  if (phttp->svc->forwarded_header)
+  if (phttp->svc && phttp->svc->forwarded_header)
     return phttp->svc->forwarded_header;
   if (phttp->lstn->forwarded_header)
     return phttp->lstn->forwarded_header;
@@ -245,7 +245,7 @@ get_forwarded_header_name (POUND_HTTP *phttp)
 static ACL *
 get_trusted_ips (POUND_HTTP *phttp)
 {
-  if (phttp->svc->trusted_ips)
+  if (phttp->svc && phttp->svc->trusted_ips)
     return phttp->svc->trusted_ips;
   if (phttp->lstn->trusted_ips)
     return phttp->lstn->trusted_ips;
@@ -666,15 +666,20 @@ static void
 i_backend (struct stringbuf *sb, struct http_log_instr *instr,
 	   POUND_HTTP *phttp)
 {
-  char caddr[MAX_ADDR_BUFSIZE];
-  print_str (sb, str_be (caddr, sizeof (caddr), phttp->backend));
+  if (phttp->backend)
+    {
+      char caddr[MAX_ADDR_BUFSIZE];
+      print_str (sb, str_be (caddr, sizeof (caddr), phttp->backend));
+    }
+  else
+    print_str (sb, NULL);
 }
 
 static void
 i_service (struct stringbuf *sb, struct http_log_instr *instr,
 	   POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->svc->name);
+  print_str (sb, phttp->svc ? phttp->svc->name : NULL);
 }
 
 static void
@@ -709,14 +714,20 @@ static void
 i_backend_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  stringbuf_format_locus_range (sb, &phttp->backend->locus);
+  if (phttp->backend)
+    stringbuf_format_locus_range (sb, &phttp->backend->locus);
+  else
+    print_str (sb, NULL);
 }
 
 static void
 i_service_locus (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
-  stringbuf_format_locus_range (sb, &phttp->svc->locus);
+  if (phttp->svc)
+    stringbuf_format_locus_range (sb, &phttp->svc->locus);
+  else
+    print_str (sb, NULL);
 }
 
 static void
@@ -750,6 +761,7 @@ p_objloc (struct http_log_parser *parser, char const *arg, int len)
 #define F_NONE      0
 #define F_CLF       0x1
 #define F_PORTSTRIP 0x2
+#define F_LOCALIP   0x4
 
 static void
 print_header (struct stringbuf *sb, char const *name, POUND_HTTP *phttp,
@@ -764,7 +776,14 @@ print_header (struct stringbuf *sb, char const *name, POUND_HTTP *phttp,
     val = http_header_get_value (hdr);
   if (!val)
     {
-      if (!(flags & F_CLF))
+      if (flags & F_LOCALIP)
+	{
+	  char caddr[MAX_ADDR_BUFSIZE];
+	  print_str (sb, addr2str (caddr, sizeof (caddr),
+				   &phttp->lstn->addr, 1));
+	  return;
+	}
+      else if (!(flags & F_CLF))
 	return;
     }
   else if (flags & F_PORTSTRIP)
@@ -798,7 +817,7 @@ static void
 i_server_name (struct stringbuf *sb, struct http_log_instr *instr,
 	       POUND_HTTP *phttp)
 {
-  print_header (sb, "Host", phttp, F_CLF | F_PORTSTRIP);
+  print_header (sb, "Host", phttp, F_LOCALIP | F_PORTSTRIP);
 }
 
 static void
@@ -1067,7 +1086,8 @@ http_log (POUND_HTTP *phttp)
 
   if (http_log_format_check (phttp->lstn->log_level))
     return;
-  if (STATUS_MASK (phttp->response_code) & phttp->svc->log_suppress_mask)
+  if (phttp->svc &&
+      (STATUS_MASK (phttp->response_code) & phttp->svc->log_suppress_mask))
     return;
   prog = http_log_tab + phttp->lstn->log_level;
   if (SLIST_EMPTY (&prog->head))
