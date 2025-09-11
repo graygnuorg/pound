@@ -1926,9 +1926,9 @@ End
 @cindex balancer group
   Backends within each service are grouped in @dfn{balancer groups}.
 Each such group is assigned a unique integer @dfn{priority}, which
-defines the order in which the groups are tried.  When selecting a
-backend, a group with the numerically lesser priority is selected and
-a suitable backend is looked up among backends defined in the group,
+defines the order in which groups are tried.  When selecting a
+backend, a group with the numerically smallest priority is tried first
+and a suitable backend is looked up among backends defined in that group,
 using one of the balancing strategies discussed above.  If no backend
 can be selected (e.g. all backends are unavailable), next group is
 tried.  The process continues until either a backend is chosen or
@@ -1939,8 +1939,8 @@ the list of balancer groups is exhausted.
 assigned to the balancer group 0.  These are backends used during
 normal operation.  Backends declared using the @code{Emergency} keyword
 (@pxref{Emergency}) are assigned to the balancer group 65535.  These
-backends form a pull of @dfn{high availability} backends, which will
-be used if all of the normal backends fail.
+backends form a pool of @dfn{high availability} backends, which will
+be used if all normal backends fail.
 
   More backend groups can be added using dynamic backends, discussed
 in the next section.
