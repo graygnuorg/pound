@@ -2188,10 +2188,13 @@ terminated.
 
 @node Logging
 @chapter Logging
+@cindex Logging
  @command{Pound} can send its diagnostic messages to standard error,
 syslog, or to both.
 
 @kwindex LogFacility
+@cindex syslog facility
+@cindex facility, syslog
  Upon startup, while the configuration file is being parsed, the
 diagnostics goes to the standard error.  Once it switches to the
 operation mode and starts serving requests, diagnostic output is
@@ -2204,16 +2207,76 @@ instructs @command{pound} to use standard error for logging, thus
 overriding the settings from the configuration file.
 
 @kwindex LogLevel
+@cindex @code{err}, syslog facility
+@cindex @code{LOG_ERR}
+@cindex @code{notice}, syslog facility
+@cindex @code{LOG_NOTICE}
  Normally, @command{pound} is not very loquacious in logging: only
-errors are reported.  Logging of each incoming request can be
-configured using the @code{LogLevel} directive.  It can be used either
-in listener scope, in which case it affects only this particular
-listener, or in global scope, where it affects all listeners that
-don't configure it on their own.  The value of this directive can be
-either an integer number in range 0 through 5 (inclusive), or a quoted
-string.  Numeric value requests one of the @dfn{built-in
-log formats}.  String value refers either to a built-in format name,
-or to a user-defined format name.
+errors and exceptional conditions are reported.  Messages concerning
+@command{pound} itself are reported to syslog facility @code{err}.
+Messages that describe exceptional conditions detected when serving
+requests are reported to facility @code{notice}.  These latter have
+the following format:
+
+@example
+pound: (@var{tid}): @var{client-ip}: "@var{request}": @var{message}
+or
+pound: (@var{tid}): e@var{NNN}: @var{client-ip}: "@var{request}": @var{message}
+@end example
+
+@noindent
+where:
+
+@table @var
+@item tid
+Thread identifier.
+
+@item NNN
+Optional three-digit HTTP status code.
+
+@item client-ip
+IP address of the client.
+
+@item request
+HTTP request being served.
+
+@item message
+Message text.
+@end table
+
+If the condition being reported concerns the backend, then the IP
+address of the backend is included as well, e.g.@footnote{These
+example messages are split in two lines for readability}:
+
+@example
+pound: (7fcb33924640): 192.0.20.3 => 10.0.0.1:8081:
+        "POST /upload HTTP/1.1": error writing to backend
+@end example
+
+The @samp{=>} marker between IP addresses indicates flow direction:
+from @command{pound} to backend.  If an error occurs while
+transferring response from backend to client, it is indicated by
+@samp{<=}, as in:
+
+@example
+pound: (7fcb33924640): 192.0.20.3 <= 10.0.0.1:8081:
+        "POST /upload HTTP/1.1": response read error
+@end example
+
+Additionally, @command{pound} can be instructed to log each processed
+request.  These @dfn{access logs} are emitted for each processed
+request @emph{after a response was sent back to the client}, and go to
+the syslog facility @code{info}.
+
+Such additional logging is configured using two directives:
+@code{LogLevel} and @code{LogFormat}.  The @code{LogLevel} directive
+can appear either in listener scope, in which case it affects only
+this particular listener, or in global scope, where it affects all
+listeners that don't configure it on their own.  The value of this 
+directive can be either an integer number in range 0 through 5
+(inclusive), or a quoted string.  Numeric value requests one of the
+@dfn{built-in log formats}.  String value refers either to a built-in
+format name, or to a user-defined format name.
 
 The built-in formats are:
 
@@ -2260,7 +2323,7 @@ must refer to the name of a @dfn{custom format}, defined earlier using
 the @code{LogFormat} statement.  This statement takes two string arguments:
 the name to be assigned to the new format, and its definition.
 
-@dfn{Format definition} is a character string composed of ordinary
+The @dfn{format definition} is a character string composed of ordinary
 characters (not @samp{%}), which are copied unchanged to the resulting
 log message, and conversion specifications, each of which are replaced
 by a corresponding piece of information about the request or reply.
