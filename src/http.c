@@ -344,6 +344,9 @@ log_duration (char *buf, size_t size, struct timespec const *start)
 #define PHTTP_LOG_DFL        0
 #define PHTTP_LOG_BACKEND    0x01  /* Include backend information. */
 #define PHTTP_LOG_REVERSE    0x02  /* Indicate reverse direction. */
+#define PHTTP_LOG_HANDSHAKE  0x04  /* Reporting handshake error: zero return
+				      from ERR_get_error() indicates
+				      ECONNRESET. */
 
 static void ATTR_PRINTFLIKE(5,6)
 phttp_log (POUND_HTTP *phttp, int flags, int status, int en,
@@ -383,13 +386,16 @@ phttp_log (POUND_HTTP *phttp, int flags, int status, int en,
       break;
 
     case -1:
-      stringbuf_add (&sb, ": ", 2);
       {
 	unsigned long err = ERR_get_error ();
 	if (err == 0)
-	  stringbuf_add_string (&sb, "connection closed by peer");
+	  {
+	    if (flags & PHTTP_LOG_HANDSHAKE)
+	      stringbuf_add_string (&sb, ": connection reset by peer");
+	  }
 	else
 	  {
+	    stringbuf_add (&sb, ": ", 2);
 	    ERR_error_string_n (err, buf, sizeof (buf));
 	    stringbuf_add_string (&sb, buf);
 	  }
@@ -4342,7 +4348,7 @@ backend_response (POUND_HTTP *phttp)
 			     "%s while sending backend response",
 			     copy_status_string (ec));
 		  return -1;
-		  
+
 		default:
 		  phttp_log (phttp,
 			     PHTTP_LOG_BACKEND | PHTTP_LOG_REVERSE,
@@ -4810,7 +4816,7 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 
       if (BIO_do_handshake (phttp->be) <= 0)
 	{
-	  phttp_log (phttp, PHTTP_LOG_DFL,
+	  phttp_log (phttp, PHTTP_LOG_HANDSHAKE,
 		     HTTP_STATUS_SERVICE_UNAVAILABLE, -1,
 		     "handshake with backend failed");
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
@@ -5321,7 +5327,7 @@ do_http (POUND_HTTP *phttp)
       phttp->cl = bb;
       if (BIO_do_handshake (phttp->cl) <= 0)
 	{
-	  phttp_log (phttp, PHTTP_LOG_DFL,
+	  phttp_log (phttp, PHTTP_LOG_HANDSHAKE,
 		     -1, -1, "handshake failed");
 	  return;
 	}
