@@ -69,8 +69,7 @@ libpound_a_SOURCES = \
  json.h\
  mem.c\
  mem.h\
- progname.c\
- tmpl.c
+ progname.c
 
 pkgdata_DATA = poundctl.tmpl mvh.inc
 EXTRA_DIST = poundctl.tmpl mvh.inc
@@ -98,4 +97,5 @@ DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h
 endif
 
 bin_PROGRAMS=poundctl
-poundctl_SOURCES=poundctl.c
+poundctl_SOURCES=poundctl.c tmpl.c
+poundctl_LDFLAGS=-lm

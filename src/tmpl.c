@@ -26,6 +26,7 @@
 
 #include "pound.h"
 #include <assert.h>
+#include <math.h>
 #include "json.h"
 
 static void
@@ -505,7 +506,7 @@ json_cast_to_string (struct json_value *val)
       break;
 
     case json_array:
-      stringbuf_printf (&sb, "%lu", (unsigned long)val->v.n);
+      stringbuf_printf (&sb, "%zu", json_array_length (val));
       s = stringbuf_finish (&sb);
       break;
 
@@ -843,6 +844,39 @@ func_div (ACTUAL_ARG_HEAD const *head)
   assert_numeric_value (a, "div", 1);
   assert_numeric_value (b, "div", 2);
   return json_new_number (a->v.n / b->v.n);
+}
+
+static struct json_value *
+func_mod (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *a, *b;
+
+  two_args (head, "mod", &a, &b);
+  assert_numeric_value (a, "mod", 1);
+  assert_numeric_value (b, "mod", 2);
+  return json_new_number (fmod(a->v.n, b->v.n));
+}
+
+static struct json_value *
+func_int (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *val;
+
+  val = single_arg (head, "int")->val;
+  assert_numeric_value (val, "int", 1);
+  return json_new_number (floor (val->v.n));
+}
+
+static struct json_value *
+func_fraq (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *val;
+  double i;
+
+  val = single_arg (head, "fraq")->val;
+  assert_numeric_value (val, "fraq", 1);
+  modf (val->v.n, &i);
+  return json_new_number (modf (val->v.n, &i));
 }
 
 /*
@@ -1519,6 +1553,9 @@ static struct func_def funtab[] = {
   { "sub", func_sub },
   { "mul", func_mul },
   { "div", func_div },
+  { "mod", func_mod },
+  { "int", func_int },
+  { "fraq", func_fraq },
   { NULL }
 };
 
@@ -1575,7 +1612,7 @@ struct tmpl_tok
   union
   {
     char *str;
-    long num;
+    double num;
   } v;
 };
 
@@ -1795,19 +1832,14 @@ tmpl_gettok (struct tmpl_input *inp)
 
   if (c_isdigit (c))
     {
-      long n = 0;
-      //FIXME: move to tmpl_input_token
-      do
-	{
-	  c -= '0';
-	  if (LONG_MAX - n < c)
-	    return tmpl_input_error (inp, TMPL_ERR_RANGE);
-	  n = n * 10 + c;
-	}
-      while ((c = tmpl_getchar (inp)) != 0 && c_isdigit (c));
+      char *p;
+      errno = 0;
       tmpl_input_less (inp, 1);
+      inp->tok.v.num = strtod (inp->text + inp->off, &p);
+      if (errno)
+	return tmpl_input_error (inp, TMPL_ERR_RANGE);
+      inp->off = p - inp->text;
       inp->tok.type = TMPL_TOK_NUM;
-      inp->tok.v.num = n;
       return &inp->tok;
     }
 
@@ -1839,17 +1871,13 @@ tmpl_gettok (struct tmpl_input *inp)
     }
   else if (c == '-' && c_isdigit (tmpl_lookahead (inp)))
     {
-      long n = 0;
-      while ((c = tmpl_getchar (inp)) != 0 && c_isdigit (c))
-	{
-	  c -= '0';
-	  if (-(LONG_MIN+1) - n < c)
-	    return tmpl_input_error (inp, TMPL_ERR_RANGE);
-	  n = n * 10 + c;
-	}
-      tmpl_input_less (inp, 1);
+      char *p;
+      errno = 0;
+      inp->tok.v.num = - strtod (inp->text + inp->off, &p);
+      if (errno)
+	return tmpl_input_error (inp, TMPL_ERR_RANGE);
+      inp->off = p - inp->text;
       inp->tok.type = TMPL_TOK_NUM;
-      inp->tok.v.num = - n;
       return &inp->tok;
     }
   else if (c == '$' && c_isalpha (tmpl_lookahead (inp)))

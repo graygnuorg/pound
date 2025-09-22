@@ -61,6 +61,8 @@ pthread_mutexattr_t mutex_attr_recursive;
 pthread_attr_t thread_attr_detached;
 static pthread_attr_t thread_attr_worker;
 
+struct timespec start_time;
+
 #ifndef  SOL_TCP
 /* for systems without the definition */
 int SOL_TCP;
@@ -163,6 +165,13 @@ abend (struct locus_range const *range, char const *fmt, ...)
   _exit (1);
 }
 
+struct timespec
+pound_uptime (void)
+{
+  struct timespec now;
+  clock_gettime (CLOCK_REALTIME, &now);
+  return timespec_sub (&now, &start_time);
+}
 
 /*
  * OpenSSL thread support stuff
@@ -1222,6 +1231,8 @@ main (const int argc, char **argv)
 	abend (NULL, "no such group %s", group);
       group_id = gr->gr_gid;
     }
+
+  clock_gettime (CLOCK_REALTIME, &start_time);
 
   logmsg (LOG_NOTICE, "starting...");
 

@@ -1079,7 +1079,7 @@ void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
 void http_log (POUND_HTTP *phttp);
 struct addrinfo *get_remote_ip (POUND_HTTP *phttp, int forwarded,
 				struct addrinfo **pres);
-
+struct timespec pound_uptime (void);
 
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);

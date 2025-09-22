@@ -254,6 +254,8 @@ static int gen_backend_request_stddev (EXPOSITION *exp, struct metric *metric,
 				 METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_workers (EXPOSITION *exp, struct metric *metric,
 			METRIC_LABELS *pfx, struct json_value *obj);
+static int gen_uptime (EXPOSITION *exp, struct metric *metric,
+		       METRIC_LABELS *pfx, struct json_value *obj);
 
 static struct metric_family listener_metric_families[] = {
   { "pound_listener_enabled",
@@ -320,6 +322,15 @@ static struct metric_family workers_metric_families[] = {
     NULL,
     "Number of pound workers.",
     gen_workers },
+  { NULL }
+};
+
+static struct metric_family uptime_metric_families[] = {
+  { "pound_uptime",
+    "counter",
+    NULL,
+    "Pound uptime, milliseconds since startup.",
+    gen_uptime },
   { NULL }
 };
 
@@ -788,6 +799,18 @@ gen_workers (EXPOSITION *exp, struct metric *metric,
     }
   return 0;
 }
+
+static int
+gen_uptime (EXPOSITION *exp, struct metric *metric,
+	    METRIC_LABELS *pfx, struct json_value *val)
+{
+  struct metric_sample *samp;
+
+  if ((samp = metric_add_sample (metric, pfx)) == NULL)
+    return -1;
+  samp->number = val->v.n;
+  return 0;
+}
 
 /*
  * Initialize the exposition and fill it, using OBJ as input.
@@ -798,6 +821,12 @@ exposition_fill (EXPOSITION *exp, struct json_value *obj)
   struct json_value *val;
 
   EXPOSITION_INIT (exp);
+
+  if (json_object_get_type (obj, "uptime", json_number, &val))
+    return -1;
+
+  if (exposition_apply_family (exp, NULL, uptime_metric_families, val))
+    return -1;
 
   if (json_object_get_type (obj, "workers", json_object, &val))
     return -1;

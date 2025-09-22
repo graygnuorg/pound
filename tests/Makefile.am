@@ -152,7 +152,8 @@ TESTSUITE_AT = \
 noinst_PROGRAMS = tmplrun
 tmplrun_SOURCES = tmplrun.c
 AM_CPPFLAGS = -I$(top_srcdir)/src
-tmplrun_LDADD = ../src/libpound.a
+tmplrun_LDADD = ../src/libpound.a ../src/tmpl.o
+tmplrun_LDFLAGS = -lm
 
 if COND_DYNAMIC_BACKENDS
 if COND_BUILD_FAKEDNS

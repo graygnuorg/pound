@@ -1,5 +1,5 @@
 {{- /* Default template for poundctl */ -}}
-{{- /* Copyright (C) 2023 Sergey Poznyakoff
+{{- /* Copyright (C) 2023, 2025 Sergey Poznyakoff
      *
      * Pound is free software; you can redistribute it and/or modify
      * it under the terms of the GNU General Public License as published by
@@ -15,8 +15,28 @@
      * along with pound.  If not, see <http://www.gnu.org/licenses/>.
      */ -}}
 
+{{define "hours" -}}
+  {{div . 36e8 | printf "%02d:" -}}
+  {{with mod . 36e8 -}}
+    {{div . 6e7 | printf "%02d:" -}}
+    {{with mod . 6e7 -}}
+      {{div . 1e6 | printf "%02d" -}}
+      {{mod . 1e6 | printf ".%06d" -}}
+    {{end -}}
+  {{end -}}
+{{end -}}
+
+{{define "duration" -}}
+  {{if gt . 864e8}}{{div . 864e8}} days,
+    {{- with mod . 86400 }} {{template "hours" .}}{{end -}}
+  {{else -}}
+    {{template "hours" . -}}
+  {{end -}}
+{{end -}}
+
 {{define "default.core" -}}
 Server time: {{ .timestamp }}
+Uptime: {{ template "duration" .uptime }}
 Pound version: {{ .version }}
 PID: {{ .pid }}
 {{with .workers -}}

@@ -13,7 +13,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL.TMPL 5 "January 2, 2025" "pound" "File Formats Manual"
+.TH POUNDCTL.TMPL 5 "September 22, 2025" "pound" "File Formats Manual"
 .SH NAME
 poundctl.tmpl \- templates for poundctl.
 .SH DESCRIPTION
@@ -415,6 +415,11 @@ Number of incoming HTTP requests in the queue (integer).
 .B timestamp
 Current time on the server, formatted as ISO 8601 date-time with
 microsecond precision, e.g.: "2023-01-05T22:43:18.071559".
+.TP
+.B uptime
+Uptime of the
+.B pound
+daemon: number of microseconds elapsed since its startup.
 .SS Listener
 A \fIlistener\fR object represents a single HTTP or HTTPS listener in
 \fBpound\fR configuration.  It has the following attributes:

@@ -1905,10 +1905,17 @@ timespec_serialize (struct timespec const *ts)
   struct tm tm;
   size_t n;
 
-  strftime (buf, sizeof (buf), "%Y-%m-%dT%H:%M:%S", localtime_r (&ts->tv_sec, &tm));
-  n = strlen (buf);
+  n = strftime (buf, sizeof (buf), "%Y-%m-%dT%H:%M:%S",
+		localtime_r (&ts->tv_sec, &tm));
   snprintf (buf + n, sizeof (buf) - n, ".%06ld", ts->tv_nsec / 1000);
   return json_new_string (buf);
+}
+
+/* Duration is represented in milliseconds. */
+static struct json_value *
+duration_serialize (struct timespec const *ts)
+{
+  return json_new_number ((double)ts->tv_sec * 1000000 + ts->tv_nsec / 1000);
 }
 
 static struct json_value *
@@ -2335,12 +2342,13 @@ pound_core_serialize (void)
   if ((obj = json_new_object ()) != NULL)
     {
       int err = 0;
-      struct timespec ts;
+      struct timespec ts, uptime = pound_uptime ();
 
       clock_gettime (CLOCK_REALTIME, &ts);
       err = json_object_set (obj, "version", json_new_string (PACKAGE_VERSION))
 	|| json_object_set (obj, "pid", json_new_integer (getpid ()))
 	|| json_object_set (obj, "timestamp", timespec_serialize (&ts))
+	|| json_object_set (obj, "uptime", duration_serialize (&uptime))
 	|| json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()))
 	|| json_object_set (obj, "workers", workers_serialize ());
       if (err)
@@ -3021,7 +3029,7 @@ find_endpoint (int method, const char *uri, int *errcode)
 
   if (cp == NULL)
     *errcode = uri_match ? HTTP_STATUS_METHOD_NOT_ALLOWED
-                         : HTTP_STATUS_NOT_FOUND;
+			 : HTTP_STATUS_NOT_FOUND;
   return cp;
 }
 

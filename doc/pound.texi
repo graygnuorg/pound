@@ -6353,6 +6353,10 @@ Number of incoming HTTP requests in the queue (integer).
 @item timestamp
 Current time on the server, formatted as ISO 8601 date-time with
 microsecond precision, e.g.: @samp{2023-01-05T22:43:18.071559}.
+
+@item uptime
+Total running time of @command{pound} daemon: number of
+microseconds elapsed since its startup.
 @end table
 
 @node Listener object
