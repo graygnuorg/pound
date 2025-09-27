@@ -1050,7 +1050,7 @@ redirect_response (POUND_HTTP *phttp)
       if (c_isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
 	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?'
 	  || xurl[i] == '&' || xurl[i] == ';' || xurl[i] == '-'
-	  || xurl[i] == '=')
+	  || xurl[i] == '=' || xurl[i] == '+')
 	stringbuf_add_char (&sb_url, xurl[i]);
       else
 	stringbuf_printf (&sb_url, "%%%02x", xurl[i]);

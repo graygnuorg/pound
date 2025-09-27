@@ -836,14 +836,27 @@ func_mul (ACTUAL_ARG_HEAD const *head)
 }
 
 static struct json_value *
+func_fdiv (ACTUAL_ARG_HEAD const *head)
+{
+  struct json_value *a, *b;
+
+  two_args (head, "/", &a, &b);
+  assert_numeric_value (a, "/", 1);
+  assert_numeric_value (b, "/", 2);
+  return json_new_number (a->v.n / b->v.n);
+}
+
+static struct json_value *
 func_div (ACTUAL_ARG_HEAD const *head)
 {
   struct json_value *a, *b;
+  double i;
 
   two_args (head, "div", &a, &b);
   assert_numeric_value (a, "div", 1);
   assert_numeric_value (b, "div", 2);
-  return json_new_number (a->v.n / b->v.n);
+  modf(a->v.n / b->v.n, &i);
+  return json_new_number (i);
 }
 
 static struct json_value *
@@ -1553,6 +1566,7 @@ static struct func_def funtab[] = {
   { "sub", func_sub },
   { "mul", func_mul },
   { "div", func_div },
+  { "fdiv",   func_fdiv },
   { "mod", func_mod },
   { "int", func_int },
   { "fraq", func_fraq },

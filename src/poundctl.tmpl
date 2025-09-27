@@ -28,7 +28,7 @@
 
 {{define "duration" -}}
   {{if gt . 864e8}}{{div . 864e8}} days,
-    {{- with mod . 86400 }} {{template "hours" .}}{{end -}}
+    {{- with mod . 864e8 }} {{template "hours" .}}{{end -}}
   {{else -}}
     {{template "hours" . -}}
   {{end -}}
@@ -50,7 +50,7 @@ Idle timeout: {{ .timeout }}
 {{end}}{{ /* define */ }}
 
 {{define "milliseconds" -}}
-{{ div . 1000000 | printf "%.2f" }}
+{{ fdiv . 1000000 | printf "%.2f" }}
 {{- end}}
 
 {{define "default" -}}
