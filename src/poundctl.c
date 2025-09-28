@@ -490,7 +490,7 @@ url_parse_host (char *str, URL *url)
   int n = strcspn (str, "/");
   char *host = xstrndup (str, n);
   char *p;
-  int rc;
+  int rc, len;
 
   memset (&hints, 0, sizeof (hints));
   hints.ai_socktype = SOCK_STREAM;
@@ -522,7 +522,17 @@ url_parse_host (char *str, URL *url)
     errormsg (1, 0, "can't resolve %s: %s", host, gai_strerror (rc));
 
   url->host = host;
-  url->path = xstrdup (str + n);
+  str += n;
+  len = strlen (str);
+  if (!(len > 0 && str[len-1] == '/'))
+    {
+      url->path = xmalloc (len + 2);
+      strcpy (url->path, str);
+      url->path[len] = '/';
+      url->path[len+1] = 0;
+    }
+  else
+    url->path = xstrdup (str);
 }
 
 static void
@@ -571,7 +581,7 @@ url_parse_scheme (char *str, URL *url)
   else
     {
       url->tls = 0;
-      url->path = xstrdup ("");
+      url->path = xstrdup ("/");
       url->host = xstrdup ("localhost");
       url->user = NULL;
       url->pass = NULL;
@@ -938,7 +948,7 @@ send_request (BIO *bio, char const *method, char const *fmt, ...)
 {
   va_list ap;
 
-  BIO_printf (bio, "%s %s/", method, url->path);
+  BIO_printf (bio, "%s %s", method, url->path);
   va_start (ap, fmt);
   BIO_vprintf (bio, fmt, ap);
   va_end (ap);

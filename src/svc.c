@@ -2490,7 +2490,9 @@ control_list_all (BIO *c, char const *url)
   struct json_value *val;
   int rc;
 
-  if ((val = pound_serialize ()) == NULL)
+  if (url[1])
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((val = pound_serialize ()) == NULL)
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   else
     {
