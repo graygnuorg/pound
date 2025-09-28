@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-09-10
+Pound -- history of user-visible changes. 2025-09-28
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -70,7 +70,14 @@ request), use "%{listener}N".
 4, "combined"
    "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
 5, "detailed"
-   "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec"
+   "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"
+   (%{service}N -> %{backend}N) %{f}T sec"
+
+* poundctl core
+
+This command shows core pound statistics: server time, daemon version,
+pid, and uptime, as well as worker threads configuration and
+statistics.
 
 Version 4.17, 2025-07-29
 

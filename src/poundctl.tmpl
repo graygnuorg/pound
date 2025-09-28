@@ -58,14 +58,15 @@ Idle timeout: {{ .timeout }}
 {{- /* The code below deduces the type of object passed to it by
        presence of certain attributes:
 
-	 "listeners"  -  entire listing as requested by poundctl list
+	 "listeners"  -  entire listing as requested by poundctl list.
 	 "services"   -  single listener as requested by poundctl list /L
 			 Notice that this attribute is present in the full
 			 listing as well, so presence of "listeners" should
 			 be checked first.
-	 "backends"   -  single service as requested by poundctl list /L/S
+	 "backends"   -  single service as requested by poundctl list /L/S.
+	 "pid"        -  core status listing.
 
-       otherwise, a backend listing (poundctl list /L/S/B) is assumed. */ -}}
+       Otherwise, a backend listing (poundctl list /L/S/B) is assumed. */ -}}
 
 {{if exists . "listeners" -}}
 {{- /* Iterate over all listeners */ -}}
@@ -120,21 +121,20 @@ Global services:
 {{block "default.print_listener" .}}
 {{else if exists . "backends" -}}
 {{block "default.print_service" .}}
+{{else if exists . "pid" -}}
+{{block "default.core" .}}
 {{else -}}
 {{block "default.print_backend" .}}
 {{end -}}
 {{end -}}{{ /* define */ }}
 
-
-{{define "xml" -}}
-<pound>
-{{- if exists . "listeners" }}
-  {{ /* This is a full listing. */ -}}
+{{define "xml.core" -}}
   <core>
     <timestamp>{{ .timestamp }}</timestamp>
     <server>
       <version>{{ .version }}</version>
       <pid>{{ .pid }}</pid>
+      <uptime>{{ template "duration" .uptime }}</uptime>
     </server>
     <workers>
       {{with .workers -}}
@@ -147,6 +147,13 @@ Global services:
     </workers>
     <queue size="{{ .queue_len }}" />
   </core>
+{{- end}}
+
+{{define "xml" -}}
+<pound>
+{{- if exists . "listeners" }}
+  {{ /* This is a full listing. */ -}}
+  {{- block "xml.core" .}}
   {{- /* Iterate over all listeners */ -}}
   {{- range $lno,$lstn = .listeners }}
     {{block "xml.print_listener" $lstn -}}
@@ -179,6 +186,9 @@ Global services:
 {{else if exists . "backends" -}}
   {{- /* Single service. */ -}}
   {{block "xml.print_service" .}}
+{{else if exists . "pid" -}}
+  {{- /* Core stat. */ }}
+  {{block "xml.core" .}}
 {{else -}}
   {{- /* Backend listing. */ -}}
   {{block "xml.print_backend" .}}

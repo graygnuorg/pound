@@ -988,7 +988,7 @@ send_request (BIO *bio, char const *method, char const *fmt, ...)
 }
 
 int
-command_list (BIO *bio, int argc, char **argv)
+command_gen (char const *path, BIO *bio, int argc, char **argv)
 {
   char *uri = "/";
   struct json_value *val;
@@ -999,7 +999,7 @@ command_list (BIO *bio, int argc, char **argv)
     {
       errormsg (1, 0, "too many arguments");
     }
-  send_request (bio, "GET", "listener%s", uri);
+  send_request (bio, "GET", "%s%s", path, uri);
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -1016,6 +1016,18 @@ command_list (BIO *bio, int argc, char **argv)
     }
   json_value_free (val);
   return 0;
+}
+
+int
+command_core (BIO *bio, int argc, char **argv)
+{
+  return command_gen ("core", bio, argc, argv);
+}
+
+int
+command_list (BIO *bio, int argc, char **argv)
+{
+  return command_gen ("listener", bio, argc, argv);
 }
 
 int
@@ -1168,6 +1180,7 @@ struct dispatch_table
 
 static struct dispatch_table dispatch[] = {
   { "list", command_list },
+  { "core", command_core },
   { "disable", command_disable },
   { "off", command_disable },
   { "enable", command_enable },
@@ -1196,6 +1209,7 @@ static char *usage_text[] = {
   "",
   "COMMANDs are:"
   "",
+  "   core              show core status",
   "   list [/L/S/B]     list pound status; without argument, shows all",
   "                     listeners and underlying objects.",
   "   enable /L/S/B     enable listener, service, or backend.",

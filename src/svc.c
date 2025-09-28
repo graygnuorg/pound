@@ -2468,13 +2468,21 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
   return HTTP_STATUS_OK;
 }
 
+static inline int
+url_is_root (char const *url)
+{
+  return *url == 0 || (*url == '/' && url[1] == 0);
+}
+
 static int
 control_list_core (BIO *c, char const *url)
 {
   struct json_value *val;
   int rc;
 
-  if ((val = pound_core_serialize ()) == NULL)
+  if (!url_is_root (url))
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((val = pound_core_serialize ()) == NULL)
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   else
     {
@@ -2490,7 +2498,7 @@ control_list_all (BIO *c, char const *url)
   struct json_value *val;
   int rc;
 
-  if (url[1])
+  if (!url_is_root (url))
     rc = HTTP_STATUS_NOT_FOUND;
   else if ((val = pound_serialize ()) == NULL)
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;

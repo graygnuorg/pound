@@ -5596,13 +5596,20 @@ poundctl disable /-/1
 @node poundctl commands
 @section @command{poundctl} commands
 
+@deffn {poundctl} core
+Display core statistics.  By default, it includes: server time,
+@command{pound} daemon version, uptime, and PID, and worker thread
+statistics.
+@end deffn
+
 @deffn {poundctl} list /@var{L}/@var{S}/@var{B}
 @deffnx {poundctl} list /@var{L}/@var{S}
 @deffnx {poundctl} list /@var{L}
 @deffnx {poundctl} list
 @anchor{poundctl list}
 Lists status of the given object and its subordinates.  Without
-argument, shows all listeners and underlying objects.
+argument, shows core statistics (see above), all listeners and
+underlying objects, as well as all standalone services.
 @end deffn
 
 @deffn {poundctl} enable /@var{L}/@var{S}/@var{B}
@@ -5933,10 +5940,12 @@ The default @file{poundctl.tmpl} file defines two templates:
 
 @node Template syntax
 @subsection Template syntax
+@cindex syntax, template
   The syntax of @command{poundctl} templates is modelled after and mostly
 conforming to the specifications of the @command{golang} template
 module@footnote{@url{https://pkg.go.dev/text/template}}.
 
+@cindex dot
 Templates are executed by applying them to a JSON object.  Annotations
 in a template refer to attributes of the object to control execution
 and derive values to be displayed.  Execution of the template walks
@@ -5979,6 +5988,7 @@ following whitespace, as in
 @{@{- -@}@}
 @end example
 
+@cindex comments, template
 @item @{@{/* a comment */@}@}
 Comments are discarded.  They may span multiple lines of text.
 Comments do not nest and must start immediately after the opening
@@ -5992,16 +6002,19 @@ well:
 @{@{- a comment trimming the surrounding whitespace -@}@}
 @end example
 
+@cindex pipeline
 @item @{@{ @var{pipeline} @}@}
 The @var{pipeline} is evaluated, and the default textual
 representation of its value is copied to the output.
 
+@kwindex if
 @item @{@{if @var{pipeline} @}@} @var{T1} @{@{end@}@}
 If the value of the @var{pipeline} is empty, no output is generated;
 otherwise, @var{T1} is executed.  The empty values are @code{null},
 @code{false}, numeric 0, empty string (@samp{""}),
 array (@samp{[]}), or object (@samp{@{@}}).  Dot is unaffected.
 
+@kwindex else
 @item @{@{if @var{pipeline} @}@} @var{T1} @{@{else@}@} @var{T0} @{@{end@}@}
 If the value of the pipeline is empty, @var{T0} is executed;
 otherwise, @var{T1} is executed. Dot is unaffected.
@@ -6024,6 +6037,7 @@ A shortcut to simplify writing the if-else chains.  Equivalent to
 @end group
 @end example
 
+@kwindex range
 @item @{@{range @var{pipeline} @}@} @var{T1} @{@{end@}@}
 The value of @var{pipeline} must be an object or array.  If it is of
 length zero, nothing is output.  Otherwise, dot is set to the
@@ -6039,20 +6053,24 @@ Within the @code{@{@{range@}@}} action, the following two keywords may
 appear:
 
 @table @code
+@kwindex break
 @item @{@{break@}@}
 The innermost @samp{@{@{range @var{pipeline}@}@}} loop is ended early,
 stopping the current iteration and bypassing all remaining iterations.
 
+@kwindex define
 @item @{@{continue@}@}
 The current iteration of the innermost @samp{@{@{range @var{pipeline}@}@}}
 loop is stopped, and the loop starts the next iteration.
 @end table
 
+@kwindex define
 @item @{@{define "@var{name}"@}@} @var{text} @{@{end@}@}
 The @var{text} is collected and stored for the further use as template
 with the given @var{name}.  It can be invoked using the
 @samp{@{@{template@}@}} action (see below).
 
+@kwindex template
 @item @{@{template "@var{name}"@}@}
 The template with the specified @var{name} (see the @samp{@{@{define@}@}}
 above) is executed with dot set to @code{null}.
@@ -6061,6 +6079,7 @@ above) is executed with dot set to @code{null}.
 The template with the specified @var{name} (see the @samp{@{@{define@}@}}
 above) is executed with dot set to @var{value}.
 
+@kwindex block
 @item @{@{block "@var{name}" @var{pipeline} @}@} @var{T1} @{@{end@}@}
 A block is shorthand for defining a template and then executing it in
 place:
@@ -6070,6 +6089,7 @@ place:
 @{@{template "@var{name}" @var{pipeline}@}@}
 @end example
 
+@kwindex with
 @item @{@{with @var{pipeline} @}@} @var{T1} @{@{end@}@}
 If the value of the @var{pipeline} is empty, no output is generated;
 otherwise, dot is set to the value of the @var{pipeline} and @var{T1} is
@@ -6292,6 +6312,9 @@ fragment:
 @{@{else if exists . "backends"@}@}
   @{@{/* Single service, as requested by @command{poundctl list /@var{L}/@var{S}}. */@}@}
   ...
+@{@{else if exists . "pid"@}@}
+  @{@{/* Core statistics (@command{poundctl core}) */@}@}
+  ...
 @{@{else@}@}
   @{@{/* Backend listing (@command{poundctl list /@var{L}/@var{I}/@var{B}}) */@}@}
   ...
@@ -6302,24 +6325,19 @@ fragment:
 Structures of each object are discussed in subsections that follow.
 
 @menu
+* Core listing::
 * Full listing::
 * Listener object::
 * Service object::
 * Backend object::
 @end menu
 
-@node Full listing
-@subsubsection Full listing
-A full listing contains the following attributes:
+@node Core listing
+@subsubsection Core listing
+A @dfn{core} object describes core @command{pound} configuration.  It
+contains the following objects:
 
 @table @code
-@item listeners
-An array of @dfn{listener} objects.  See below for a description.
-
-@item services
-An array of @dfn{service} objects, representing services defined in
-the global scope of the @command{pound} configuration file.
-
 @item pid
 PID of the running @command{pound} daemon.
 
@@ -6357,6 +6375,20 @@ microsecond precision, e.g.: @samp{2023-01-05T22:43:18.071559}.
 @item uptime
 Total running time of @command{pound} daemon: number of
 microseconds elapsed since its startup.
+@end table
+
+@node Full listing
+@subsubsection Full listing
+A full listing contains all the attributes of @code{core} object
+(@pxref{Core listing}), plus the following:
+
+@table @code
+@item listeners
+An array of @dfn{listener} objects.  See below for a description.
+
+@item services
+An array of @dfn{service} objects, representing services defined in
+the global scope of the @command{pound} configuration file.
 @end table
 
 @node Listener object
