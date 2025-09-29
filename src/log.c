@@ -825,11 +825,12 @@ i_listener_port (struct stringbuf *sb, struct http_log_instr *instr,
 		 POUND_HTTP *phttp)
 {
   char portstr[6];
+  char *port = NULL;
   if (getnameinfo (phttp->lstn->addr.ai_addr, phttp->lstn->addr.ai_addrlen,
 		   NULL, 0,
-		   portstr, sizeof (portstr), NI_NUMERICSERV))
-    portstr[0] = '-';
-  print_str (sb, portstr);
+		   portstr, sizeof (portstr), NI_NUMERICSERV) == 0)
+    port = portstr;
+  print_str (sb, port);
 }
 
 enum
