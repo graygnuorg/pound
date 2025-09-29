@@ -74,6 +74,9 @@ TESTSUITE_AT = \
  chunked.at\
  chunked2.at\
  config.at\
+ ctl-core.at\
+ ctl-listener.at\
+ ctl-service.at\
  disable.at\
  dyn_a.at\
  dyn_a_ttl.at\

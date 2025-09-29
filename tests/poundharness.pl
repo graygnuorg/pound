@@ -715,6 +715,18 @@ sub send {
     delete $self->{stats};
 }
 
+sub body_match {
+    my ($self, $body) = @_;
+    if ($self->{EXP}{BODY} =~ m{^:re\s*\n(.+)}s) {
+	my $rx = $1;
+	return $body =~ m{$rx}ms
+    } elsif ($self->{EXP}{BODY} =~ m{^:exact\s*\n(.+)}s) {
+	return $1 eq $body
+    } else {
+	return $self->{EXP}{BODY} eq $body
+    }
+}
+
 sub assert {
     my ($self, $response) = @_;
     if ($self->{EXP}) {
@@ -753,8 +765,7 @@ sub assert {
 	    }
 	}
 
-	if (exists($self->{EXP}{BODY}) &&
-	    $self->{EXP}{BODY} ne $response->{content}) {
+	if (exists($self->{EXP}{BODY}) && !$self->body_match($response->{content})) {
 	    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: response content mismatch\n";
 	    print STDERR "EXP '".$self->{EXP}{BODY}."'\n";
 	    print STDERR "GOT '".$response->{content}."'\n";
@@ -1334,15 +1345,7 @@ sub parse_expect_body {
 	    return;
 	}
 
-	# if (/^(?:#.*)?$/) {
-	#     next;
-	# }
-
-	if (/\\(.*)/) {
-	    push @{$self->{EXP}{BODY}}, $1;
-	} else {
-	    push @{$self->{EXP}{BODY}}, $_;
-	}
+        push @{$self->{EXP}{BODY}}, $_;
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file");
@@ -2126,8 +2129,11 @@ in the response. E.g. the header line
 means that the response may not contain B<X-Forwarded-Proto: https> header.
 The test will fail if such header is present.
 
-Headers may be followed by a newline and response body (content).  If
-present, it will be matched literally against the actual response.
+Headers may be followed by a newline and response body (content), optionally
+preceded by B<:re> or B<:exact> on a separate line.  The B<:re> line instructs
+the program to treat the following text as a multiline regular expression.
+B<:exact> means use literal match.  This is also the default.
+
 The response is terminated with the word B<end> or B<endnonl> on a line
 alone (the semantics of the latter is described above).
 

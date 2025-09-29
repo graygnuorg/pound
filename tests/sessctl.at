@@ -16,16 +16,30 @@
 AT_SETUP([Session control])
 AT_KEYWORDS([poundctl sessctl])
 AT_DATA([test.tmpl],
-[{{define "milliseconds" -}}
-{{ div . 1000000 | printf "%.2f" }}
+[{{define "default.core" -}}
+Server time: {{ .timestamp }}
+Uptime: {{ .uptime }}
+Pound version: {{ .version }}
+PID: {{ .pid }}
+{{with .workers -}}
+Workers:
+  Min:     {{ .min }}
+  Max:     {{ .max }}
+  Current: {{ .count }}
+  Active:  {{ .active }}
+Idle timeout: {{ .timeout }}
+{{end}}{{ /* with */ -}}
+{{end}}{{ /* define */ }}
+
+{{define "milliseconds" -}}
+{{ fdiv . 1000000 | printf "%.2f" }}
 {{- end}}
 
 {{define "print_status" -}}
 {{if .enabled}}enabled{{else}}disabled{{end -}}
 {{end -}}
 
-{{define "default" -}}
-{{if exists . "listeners" -}}
+{{define "default.pound" -}}
 {{- /* Iterate over all listeners */ -}}
 Listeners:
 
@@ -66,12 +80,25 @@ Listeners:
 Global services:
 {{block "default.print_services" .services}}
 {{end -}}{{ /* if len .services */ }}
-{{else if exists . "services" -}}
+{{end}}
+
+{{define "pound.core" -}}
+{{block "default.core" .core -}}
+{{end}}
+
+{{define "default" -}}
+{{if eq .kind "core" -}}
+{{block "default.core" . -}}
+{{else if eq .kind "pound" -}}
+{{block "default.pound" .}}
+{{else if eq .kind "listener" -}}
 {{block "default.print_listener" .}}
-{{else if exists . "backends" -}}
+{{else if eq .kind "service" -}}
 {{block "default.print_service" .}}
-{{else -}}
+{{else if eq .kind "backend" -}}
 {{block "default.print_backend" .}}
+{{else -}}
+Unknown object kind!
 {{end -}}
 {{end -}}{{ /* define */ }}
 ])

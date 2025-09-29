@@ -157,6 +157,11 @@ AT_BANNER([HTTPS])
 m4_include([https.at])
 m4_include([virthost.at])
 
+AT_BANNER([Control interface])
+m4_include([ctl-core.at])
+m4_include([ctl-listener.at])
+m4_include([ctl-service.at])
+
 AT_BANNER([Templates])
 m4_include([template.at])
 

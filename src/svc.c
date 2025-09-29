@@ -2133,6 +2133,18 @@ backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
   return err;
 }
 
+static inline struct json_value *
+new_typed_object (char const *type)
+{
+  struct json_value *obj = json_new_object ();
+  if (type && json_object_set (obj, "kind", json_new_string (type)))
+    {
+      json_value_free (obj);
+      obj = NULL;
+    }
+  return obj;
+}
+
 static struct json_value *
 backend_serialize (BACKEND *be)
 {
@@ -2143,7 +2155,7 @@ backend_serialize (BACKEND *be)
     obj = json_new_null ();
   else
     {
-      obj = json_new_object ();
+      obj = new_typed_object ("backend");
 
       if (obj)
 	{
@@ -2262,7 +2274,7 @@ backends_serialize (BALANCER_LIST *meta)
 static struct json_value *
 service_serialize (SERVICE *svc)
 {
-  struct json_value *obj = json_new_object ();
+  struct json_value *obj = new_typed_object ("service");
   char const *typename;
 
   if (obj)
@@ -2289,7 +2301,7 @@ service_serialize (SERVICE *svc)
 static struct json_value *
 listener_serialize (LISTENER *lstn)
 {
-  struct json_value *obj = json_new_object (), *p;
+  struct json_value *obj = new_typed_object ("listener"), *p;
   int is_https;
   SERVICE *svc;
 
@@ -2339,7 +2351,7 @@ pound_core_serialize (void)
 {
   struct json_value *obj;
 
-  if ((obj = json_new_object ()) != NULL)
+  if ((obj = new_typed_object ("core")) != NULL)
     {
       int err = 0;
       struct timespec ts, uptime = pound_uptime ();
@@ -2367,13 +2379,15 @@ pound_serialize (void)
   LISTENER *lstn;
   SERVICE *svc;
 
-  obj = pound_core_serialize ();
+  obj = new_typed_object ("pound");
 
   if (obj)
     {
       int err = 0;
 
-      if ((p = json_new_array ()) == NULL)
+      if (json_object_set (obj, "core", pound_core_serialize ()))
+	err = 1;
+      else if ((p = json_new_array ()) == NULL)
 	err = 1;
       else if (json_object_set (obj, "listeners", p))
 	{
@@ -2471,7 +2485,8 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
 static inline int
 url_is_root (char const *url)
 {
-  return *url == 0 || (*url == '/' && url[1] == 0);
+  size_t n = strcspn (url, "?");
+  return n == 0 || (n == 1 && *url == '/');
 }
 
 static int
@@ -2563,7 +2578,7 @@ ctl_getident (char const **url)
 	  retval.type = IDTYPE_STR;
 	  *url = end;
 	}
-      else if (errno == 0 && n <= INT_MAX)
+      else if (end > *url && errno == 0 && n <= INT_MAX)
 	{
 	  retval.type = IDTYPE_NUM;
 	  retval.n = n;
@@ -2701,7 +2716,9 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
   OBJECT obj = { .type = OBJ_LISTENER };
   size_t len = strcspn (url, "?");
 
-  if (url[0] == '/' && len == 1)
+  if (len == 0)
+    obj.lstn = NULL;
+  else if (url[0] == '/' && len == 1)
     {
       obj.lstn = NULL;
       url++;
@@ -2767,17 +2784,13 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 static int
 control_list_listener (BIO *c, char const *url)
 {
-  if (*url == '/')
-    return ctl_listener (list_handler, NULL, c, url);
-  return HTTP_STATUS_NOT_FOUND;
+  return ctl_listener (list_handler, NULL, c, url);
 }
 
 static int
 control_list_service (BIO *c, char const *url)
 {
-  if (*url == '/')
-    return ctl_service (list_handler, NULL, c, url, NULL);
-  return HTTP_STATUS_NOT_FOUND;
+  return ctl_service (list_handler, NULL, c, url, NULL);
 }
 
 static int

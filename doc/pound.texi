@@ -93,6 +93,7 @@ This edition of the @cite{Pound Manual}, last updated
 * poundctl::
 * Metric Families::
 * Time and Date Formats::
+* Old Control Format::
 * GNU Free Documentation License::
 * Index::
 @ifset WEBDOC
@@ -6290,37 +6291,23 @@ includes any nested statements that may appear in between.
 @node Input object
 @subsection Input object
 Depending on the request issued by @command{poundctl}, the invoked template
-can receive as its argument (@dfn{dot}) an object of the following
-types: @dfn{full listing}, @dfn{listener}, @dfn{service}, or @dfn{backend}.
+can receive as its argument (@dfn{dot}) an object of one of the following
+types: @dfn{core}, @dfn{full listing}, @dfn{listener}, @dfn{service},
+or @dfn{backend}.  Each object carries an explicit indication of its
+type in its @code{kind} attribute.  Its possible values are:
 
-Since there is no explicit indication of the object type being passed,
-templates normally use heuristics based on the presence or absence of
-certain attribute to deduce the object type in question.  The
-recommended approach is described in the following pseudo-code
-fragment:
-
-@example
-@group
-@{@{if exists . "listeners" @}@}
-  @{@{/* This is a full listing, as requested by @command{poundctl list}. */@}@}
-  ...
-@{@{else if exists . "services"@}@}
-  @{@{/* Single listener, as requested by @command{poundctl list /@var{L}}.
-       Notice that this attribute is present in the full listing as
-       well, so presence of "listeners" should be checked first. */@}@}
-  ...
-@{@{else if exists . "backends"@}@}
-  @{@{/* Single service, as requested by @command{poundctl list /@var{L}/@var{S}}. */@}@}
-  ...
-@{@{else if exists . "pid"@}@}
-  @{@{/* Core statistics (@command{poundctl core}) */@}@}
-  ...
-@{@{else@}@}
-  @{@{/* Backend listing (@command{poundctl list /@var{L}/@var{I}/@var{B}}) */@}@}
-  ...
-@{@{end@}@}
-@end group
-@end example
+@table @samp
+@item core
+Core statistics.
+@item pound
+Full listing.
+@item listener
+Listener statistics.
+@item service
+Service statistics.
+@item backend
+Backend statistics.
+@end table
 
 Structures of each object are discussed in subsections that follow.
 
@@ -6335,9 +6322,12 @@ Structures of each object are discussed in subsections that follow.
 @node Core listing
 @subsubsection Core listing
 A @dfn{core} object describes core @command{pound} configuration.  It
-contains the following objects:
+contains the following attributes:
 
 @table @code
+@item kind
+Identifies the core listing object.  Its value is @samp{core}.
+
 @item pid
 PID of the running @command{pound} daemon.
 
@@ -6379,10 +6369,16 @@ microseconds elapsed since its startup.
 
 @node Full listing
 @subsubsection Full listing
-A full listing contains all the attributes of @code{core} object
-(@pxref{Core listing}), plus the following:
+A full listing contains the following attributes.
 
 @table @code
+@item kind
+Identifies the full listing object.  The value if this attribute is
+@samp{pound}.
+
+@item core
+Core listing.  @xref{Core listing}.
+
 @item listeners
 An array of @dfn{listener} objects.  See below for a description.
 
@@ -6397,6 +6393,10 @@ A @dfn{listener} object represents a single HTTP or HTTPS listener in
 @command{pound} configuration.  It has the following attributes:
 
 @table @code
+@item kind
+Identifies the listener object.  The value of this attribute is
+@samp{listener}.
+
 @item address
 Address of this listener.  A string formatted as @samp{@var{ip}:@var{port}}.
 for IPv4 and IPv6 addresses or containing a socket file name, for UNIX
@@ -6422,6 +6422,10 @@ listener (@pxref{ListenHTTPS, NoHTTPS11}).  One of: 0, 1, 2.
   A @dfn{service} object describes a single service.
 
 @table @code
+@item kind
+Identifies the service object.  The value of this attribute is
+@samp{service}.
+
 @item name
 Symbolic name of this service.
 
@@ -6462,6 +6466,10 @@ defined.
 The following attributes are always present in each @dfn{backend} object:
 
 @table @code
+@item kind
+Identifies the backend object.  The value of this attribute is
+@samp{backend}.
+
 @item alive
 Whether or not this backend is alive.
 
@@ -6538,6 +6546,10 @@ Standard deviation of the above.
 @node Time and Date Formats
 @appendix Time and Date Formats
 @include strftime.texi
+
+@node Old Control Format
+@appendix Old Control Output Format
+@include ctlapi417.texi
 
 @node GNU Free Documentation License
 @appendix GNU Free Documentation License
