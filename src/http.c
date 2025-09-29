@@ -5385,7 +5385,7 @@ do_http (POUND_HTTP *phttp)
 	  clock_gettime (CLOCK_REALTIME, &phttp->start_req);
 	  res = http_process_request (phttp);
 	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
-	  if (enable_backend_stats)
+	  if (enable_backend_stats && phttp->backend)
 	    backend_update_stats (phttp->backend, &phttp->be_start,
 				  &phttp->end_req);
 	}
