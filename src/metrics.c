@@ -812,26 +812,28 @@ gen_uptime (EXPOSITION *exp, struct metric *metric,
   return 0;
 }
 
+static int
+exposition_fill_core (EXPOSITION *exp, struct json_value *obj)
+{
+  struct json_value *core, *val;
+
+  if (json_object_get_type (obj, "core", json_object, &core) ||
+      json_object_get_type (core, "uptime", json_number, &val) ||
+      exposition_apply_family (exp, NULL, uptime_metric_families, val) ||
+      json_object_get_type (core, "workers", json_object, &val) ||
+      exposition_apply_family (exp, NULL, workers_metric_families, val))
+    return -1;
+  return 0;
+}
 /*
  * Initialize the exposition and fill it, using OBJ as input.
  */
 static int
 exposition_fill (EXPOSITION *exp, struct json_value *obj)
 {
-  struct json_value *val;
-
   EXPOSITION_INIT (exp);
 
-  if (json_object_get_type (obj, "uptime", json_number, &val))
-    return -1;
-
-  if (exposition_apply_family (exp, NULL, uptime_metric_families, val))
-    return -1;
-
-  if (json_object_get_type (obj, "workers", json_object, &val))
-    return -1;
-
-  if (exposition_apply_family (exp, NULL, workers_metric_families, val))
+  if (exposition_fill_core (exp, obj))
     return -1;
 
   if (exposition_iterate (exp, NULL, METRIC_FAMILY_LISTENER, obj))
