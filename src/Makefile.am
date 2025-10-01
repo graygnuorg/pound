@@ -73,9 +73,7 @@ libpound_a_SOURCES = \
 
 pkgdata_DATA = poundctl.tmpl mvh.inc
 
-lisp_LISP  = pound-mode.el
-
-EXTRA_DIST = $(pkgdata_DATA) $(lisp_LISP)
+EXTRA_DIST = $(pkgdata_DATA) pound-mode.el
 
 noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h watcher.h
 

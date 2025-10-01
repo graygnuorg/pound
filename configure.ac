@@ -255,9 +255,6 @@ AC_ARG_WITH(inotify,[],
 	       AC_MSG_ERROR([--with-inotify doesn't take arguments])
 	     esac])
 
-## Check for Emacs site-lisp directory
-AM_PATH_LISPDIR
-
 AM_CONDITIONAL([COND_INOTIFY],[test $status_fsevmon = inotify])
 AM_CONDITIONAL([COND_KQUEUE],[test $status_fsevmon = kqueue])
 
