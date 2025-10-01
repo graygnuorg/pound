@@ -526,6 +526,7 @@ exposition_iterate (EXPOSITION *exp, METRIC_LABELS const *pfx, int fn,
   n = json_array_length (arr);
   for (i = 0; i < n; i++)
     {
+      int has_name = 0;
       jv = arr->v.a->ov[i];
       snprintf (nbuf, sizeof nbuf, "%zu", i);
       if ((res = metric_labels_add (&pfxcopy, defn->index_label, nbuf)) != 0)
@@ -538,6 +539,7 @@ exposition_iterate (EXPOSITION *exp, METRIC_LABELS const *pfx, int fn,
 	      if ((res = metric_labels_add (&pfxcopy, defn->tag_label,
 					    nv->v.s)) != 0)
 		break;
+	      has_name = 1;
 	    }
 	}
       if ((res = exposition_apply_family (exp, &pfxcopy, defn->family, jv)) != 0)
@@ -547,7 +549,7 @@ exposition_iterate (EXPOSITION *exp, METRIC_LABELS const *pfx, int fn,
 	  if ((res = exposition_iterate (exp, &pfxcopy, defn->descend_family, jv)) != 0)
 	    break;
 	}
-      if (defn->tag_label)
+      if (has_name)
 	metric_labels_pop (&pfxcopy);
       metric_labels_pop (&pfxcopy);
     }
