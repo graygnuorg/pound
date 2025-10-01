@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-09-29
+Pound -- history of user-visible changes. 2025-10-01
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -78,6 +78,11 @@ request), use "%{listener}N".
 This command shows core pound statistics: server time, daemon version,
 pid, and uptime, as well as worker threads configuration and
 statistics.
+
+* Openmetrics output
+
+Metrics describing listeners and services are labeled by the listener
+and service names, as well as by their ordinal numbers in the configuration.
 
 Version 4.17, 2025-07-29
 

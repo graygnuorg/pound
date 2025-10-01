@@ -40,13 +40,13 @@ pound_workers@{type="min"@} 5
 
 @deftypevr {Metric family} stateset pound_listener_enabled
 State of a listener: enabled/disabled.  Indexed by the listener
-ordinal number.
+ordinal number and, if available, its name.
 
 @example
 @group
 pound_listener_enabled@{listener="0"@} 1
-pound_listener_enabled@{listener="1"@} 0
-pound_listener_enabled@{listener="2"@} 1
+pound_listener_enabled@{listener="1",listener_name="plain"@} 0
+pound_listener_enabled@{listener="2",listener_name="tls"@} 1
 @end group
 @end example
 @end deftypevr
@@ -59,8 +59,8 @@ indices:
 @item listener
 Listener ordinal number.
 
-@item name
-Listener name, as set in the @code{ListenHTTP} or @code{ListenHTTPS}
+@item listener_name
+Listener name, if set in the @code{ListenHTTP} or @code{ListenHTTPS}
 statement (@pxref{ListenHTTP}).
 
 @item address
@@ -76,38 +76,9 @@ The value of this metrics is always @samp{1}.
 
 @example
 @group
-pound_listener_info@{listener="0",name="",address="/run/pound.sock",protocol="http"@} 1
-pound_listener_info@{listener="1",name="plain",address="0.0.0.0:80",protocol="http"@} 1
-pound_listener_info@{listener="2",name="tls",address="0.0.0.0:443",protocol="https"@} 1
-@end group
-@end example
-@end deftypevr
-
-@deftypevr {Metric family} info pound_service_info
-Description of a service.  Indices:
-
-@table @code
-@item listener
-Listener ordinal number.  This index is absent for globally defined
-services.
-
-@item service
-Index of the service in listener (or in global configuration, for
-globally defined services).
-
-@item name
-Service name as set in the @code{Service} definition
-(@pxref{Service}).
-@end table
-
-@example
-@group
-pound_service_info@{listener="0",service="0",name=""@} 1
-pound_service_info@{listener="1",service="0",name=""@} 1
-pound_service_info@{listener="1",service="1",name="redirect"@} 1
-pound_service_info@{listener="2",service="0",name="metrics"@} 1
-pound_service_info@{listener="2",service="1",name="web"@} 1
-pound_service_info@{service="0",name="fallback"@} 1
+pound_listener_info@{listener="0",address="/run/pound.sock",protocol="http"@} 1
+pound_listener_info@{listener="1",listener_name="plain",address="0.0.0.0:80",protocol="http"@} 1
+pound_listener_info@{listener="2",listener_name="tls",address="0.0.0.0:443",protocol="https"@} 1
 @end group
 @end example
 @end deftypevr
@@ -119,8 +90,11 @@ State of a particular service.
 @group
 pound_service_enabled@{listener="0",service="0"@} 1
 pound_service_enabled@{listener="1",service="0"@} 1
-pound_service_enabled@{listener="2",service="0"@} 1
-pound_service_enabled@{service="0"@} 1
+pound_service_enabled@{listener="1",listener_name="plain",service="0",service_name="redirect"@} 0
+pound_service_enabled@{listener="2",listener_name="tls",service="0",service_name="metrics"@} 1
+pound_service_enabled@{listener="2",listener_name="tls",service="1",service_name="web"@} 1
+pound_service_enabled@{service="0",service_name="fallback"@} 1
+
 @end group
 @end example
 @end deftypevr
@@ -134,22 +108,31 @@ Number of backends per service: total, alive, enabled, and active
 Listener ordinal number.  This index is absent for globally defined
 services.
 
+@item listener_name
+Name of the listener.  Present only if the name is set and not empty.
+
 @item service
 Index of the service in listener (or in global configuration, for
 globally defined services).
 
+@item service_name
+Name of the service.  Present only if the name is set and not empty.
+
 @item state
 Backend state: @samp{total}, @samp{alive}, @samp{enabled}, or
 @samp{active}.
+
+@item service_name
+Name of the service.  Present only if the name is set and not empty.
 @end table
 
 Example:
 
 @example
 @group
-pound_backends@{listener="0",service="0",state="total"@} 5
-pound_backends@{listener="0",service="0",state="enabled"@} 3
-pound_backends@{listener="0",service="0",state="alive"@} 3
+pound_backends@{listener="0",listener_name="plain",service="0",service_name="web",state="total"@} 5
+pound_backends@{listener="0",listener_name="plain",,service="0",service_name="web",state="enabled"@} 3
+pound_backends@{listener="0",listener_name="plain",,service="0",service_name="web",state="alive"@} 3
 pound_backends@{service="0",state="total"@} 1
 pound_backends@{service="0",state="enabled"@} 1
 pound_backends@{service="0",state="alive"@} 1
@@ -165,9 +148,15 @@ State of each backend.  Indices:
 Listener ordinal number.  This index is absent for globally defined
 services.
 
+@item listener_name
+Name of the listener.  Present only if the name is set and not empty.
+
 @item service
 Index of the service in listener (or in global configuration, for
 globally defined services).
+
+@item service_name
+Name of the service.  Present only if the name is set and not empty.
 
 @item backend
 Index of the backend in service.
