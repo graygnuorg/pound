@@ -1188,7 +1188,7 @@ static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
  * the service where that backend is hosted, because service priorities
  * depend on it.  Updating priorities after state change would create a
  * race condition.  Therefore, state change is done as part of priority
- * recalculation, while service mutex is being locked.  It is thus guaranteed
+ * recalculation, while service mutex is locked.  It is thus guaranteed
  * that the disabled field of any backend is safe to be accessed for
  * reading while the hosting service of that backend is locked.
  *
