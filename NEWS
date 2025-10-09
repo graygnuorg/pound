@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-10-01
+Pound -- history of user-visible changes. 2025-10-09
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -10,6 +10,10 @@ Please send pound bug reports to <gray@gnu.org>
 Version 4.17.91 (git)
 
 * Emacs mode for editing pound configuration files
+
+The major mode for GNU Emacs is implemented in file src/pound-mode.el.
+Its installation and use is covered by Chapter 11 of the Pound Manual,
+entitled "Emacs Major Mode".
 
 * Include statement accepts globbing patterns
 

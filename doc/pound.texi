@@ -91,6 +91,7 @@ This edition of the @cite{Pound Manual}, last updated
 * Logging::
 * Configuration::
 * poundctl::
+* Emacs::
 * Metric Families::
 * Time and Date Formats::
 * Old Control Format::
@@ -119,6 +120,7 @@ Simple Proxy
 Service Selection
 
 * Regular Expressions::
+* File-based Conditions::
 * ACL::
 
 HTTPS
@@ -174,6 +176,7 @@ ListenHTTP
 * Listener logging::
 * Request Modification::
 * Response Modification::
+* Error response rewriting::
 * Service definitions::
 
 Request Modification
@@ -225,6 +228,7 @@ Template syntax
 
 Input object
 
+* Core listing::
 * Full listing::
 * Listener object::
 * Service object::
@@ -370,6 +374,7 @@ listener sections, detaches itself from the controlling terminal and
 starts serving incoming requests.  From that moment on, all diagnostic
 messages are reported via @command{syslog} (@pxref{Logging}).
 
+@anchor{lint}
  To check whether the configuration file is correct, run
 @command{pound} with the @option{-c} (for @dfn{check}) configuration
 option:
@@ -6538,6 +6543,96 @@ Average time per request, in nanoseconds.
 @item request_time_stddev
 Standard deviation of the above.
 @end table
+
+@node Emacs
+@chapter Emacs Major Mode
+@cindex Emacs
+@findex pound-mode.el
+@anchor{pound-mode}
+@command{Pound} is distributed with @file{pound-mode.el}, an elisp
+source which provides a major mode for editing @command{pound}
+configuration files in GNU Emacs.  The file is located in @file{src}
+directory of the distribution.  To install it, follow the instructions
+below.
+
+First, select the directory where to place the file.  The directory
+must form a part of the @command{emacs} @code{load-path}
+(@pxref{Library Search,,, elisp, GNU Emacs Lisp Reference Manual})
+variable.  Then, copy @file{pound-mode.el} to that directory.  Then,
+add the following statements to your @file{.emacs} or site-wide
+@file{site-start.el} file (@pxref{Init File, The Emacs Initialization
+File,,emacs,GNU Emacs Manual}):
+
+@lisp
+@group
+(autoload 'pound-mode "pound-mode")
+(add-to-list 'auto-mode-alist
+             (cons (purecopy "pound\\.cfg\\'") 'pound-mode))
+@end group
+@end lisp
+
+The first statement loads @code{pound} Emacs major mode.  The
+second one associates file @file{pound.cfg} with that mode, so that
+each time you load a file with that name to your editor, it will
+automatically select @code{pound-mode} as its default major mode.
+Depending on your customs, you may further modify
+@code{auto-mode-alist} to associate @code{pound-mode} with more
+files.  For example, if your main configuration file includes 
+files from @file{/etc/pound} directory (@pxref{File inclusion}), it
+might be a good idea to add the following:
+
+@lisp
+@group
+(add-to-list 'auto-mode-alist
+   (cons (purecopy "pound/.*\\.cfg\\'") 'pound-mode))
+@end group
+@end lisp
+
+Once these changes done, you can start @command{emacs} to see if it
+correctly selects the major mode for your @command{pound.cfg}.
+
+The @code{pound-mode} major mode highlights @command{pound}
+configuration keywords and data types, and provides automatic
+indentation for the configuration file.  It defines the following key
+bindings:
+
+@table @key
+@item C-M-a
+Place cursor at the start of the enclosing section.
+
+@item C-M-e
+Place cursor at the end of the enclosing section.
+
+@item C-M-\
+Indent region.
+
+@item C-c C-c
+Check the syntax of the current buffer by running @command{pound -c}
+(@pxref{lint}).
+@end table
+
+The following customization variables are available:
+
+@defvr {Customization Variable} pound-basic-offset
+Default indentation increment.  Each nesting level in the
+configuration file will be indented that amount of columns, relative
+to the enclosing section.
+
+The default value is 8.
+@end defvr
+
+@defvr {Customization Variable} pound-command
+Command line for starting the @command{pound} daemon.  Default is
+@samp{pound}.
+
+Use this variable to specify full pathname of the @command{pound}
+binary, if it cannot be found using the @env{PATH} shell variable, or
+to supply additional options to it.
+@end defvr
+
+@defvr {Customization Variable} pound-include-dir
+Defines @command{pound} include directory (@pxref{include directory}).
+@end defvr
 
 @node Metric Families
 @appendix Metric Families
