@@ -16,7 +16,6 @@
 use strict;
 use warnings;
 use Socket qw(:DEFAULT :crlf);
-use threads;
 use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
@@ -1636,19 +1635,16 @@ sub read_and_process {
     my $self = shift;
 
     foreach my $lst (@{$self->{listeners}}) {
-	$lst->listen;
-    }
-
-    foreach my $lst (@{$self->{listeners}}) {
-	threads->create(sub {
-	    my $lst = shift;
+	my $pid = fork();
+	if ($pid == 0) {
 	    $lst->listen;
 	    while (1) {
-		my $fh;
-		accept($fh, $lst->socket_handle) or threads->exit();
-		process_http_request($fh, $lst)
+	        my $fh;
+	        accept($fh, $lst->socket_handle) or last;
+	        process_http_request($fh, $lst)
 	    }
-	}, $lst)->detach;
+	    exit 0;
+	}
     }
 }
 
@@ -1711,7 +1707,7 @@ sub process_http_request {
 
     local $| = 1;
     my $http = HTTPServ->new($sock, $backend);
-    $http->parse();
+    return unless $http->parse();
     if ($http->uri =~ m{^/([^/]+)(/.*)?}) {
 	my ($dir, $rest) = ($1, $2);
 	if (my $ep = $endpoints{$dir}) {
@@ -1774,7 +1770,8 @@ sub getline {
 sub ParseRequest {
     my $http = shift;
 
-    my $input = $http->getline() or threads->exit();
+    my $input = $http->getline();
+    return 0 unless defined $input;
     #    print "GOT $input\n";
     my @res = split " ", $input;
     if (@res != 3) {
@@ -1782,6 +1779,7 @@ sub ParseRequest {
     }
 
     ($http->{METHOD}, $http->{URI}, $http->{VERSION}) = @res;
+    return 1;
 }
 
 sub ParseHeader {
@@ -1819,9 +1817,10 @@ sub GetBody {
 
 sub parse {
     my $http = shift;
-    $http->ParseRequest;
+    return 0 unless $http->ParseRequest;
     $http->ParseHeader;
     $http->GetBody;
+    return 1;
 }
 
 sub reply {
