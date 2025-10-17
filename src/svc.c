@@ -261,7 +261,7 @@ thr_timer (void *arg)
 	}
       else
 	abend (NULL, "unexpected error from pthread_cond_timedwait: %s",
-	       strerror (errno));
+	       strerror (rc));
     }
   pthread_cleanup_pop (1);
 }
@@ -571,7 +571,16 @@ str_be (char *buf, size_t size, BACKEND *be)
 static int
 match_service (SERVICE *svc, POUND_HTTP *phttp)
 {
-  return match_cond (&svc->cond, phttp, &phttp->request) == 1;
+  int rc;
+  /*
+   * Temporarily assume this service.  This is needed to properly
+   * expand %[remoteip 1] constructs, since TrustedIP lists can be declared
+   * inside a service.
+   */
+  phttp->svc = svc;
+  rc = match_cond (&svc->cond, phttp, &phttp->request);
+  phttp->svc = NULL;
+  return rc == 1;
 }
 
 /*
@@ -955,7 +964,7 @@ key_cookie (char const *hval, char const *sid, char *ret_key)
 
       n = strcspn (hval, ";");
 
-      if (n > slen && hval[slen] == '=' && strncasecmp (hval, sid, slen) == 0)
+      if (n > slen && hval[slen] == '=' && c_strncasecmp (hval, sid, slen) == 0)
 	{
 	  hval += slen + 1;
 	  n -= slen + 1;
@@ -1179,7 +1188,7 @@ static void touch_be (enum job_ctl ctl, void *data, const struct timespec *ts);
  * the service where that backend is hosted, because service priorities
  * depend on it.  Updating priorities after state change would create a
  * race condition.  Therefore, state change is done as part of priority
- * recalculation, while service mutex is being locked.  It is thus guaranteed
+ * recalculation, while service mutex is locked.  It is thus guaranteed
  * that the disabled field of any backend is safe to be accessed for
  * reading while the hosting service of that backend is locked.
  *
@@ -1299,7 +1308,7 @@ get_host (char const *name, struct addrinfo *res, int ai_family)
 static inline int
 is_proto (char const *pat, char const *proto, size_t len)
 {
-  return len == strlen (pat) && strncasecmp (proto, pat, len) == 0;
+  return len == strlen (pat) && c_strncasecmp (proto, pat, len) == 0;
 }
 
 union sockaddr_union
@@ -1480,7 +1489,7 @@ need_rewrite (const char *location, const char *v_host,
     }
   else
     result = (be->v.reg.servername &&
-	      strcasecmp (host, be->v.reg.servername) == 0 &&
+	      c_strcasecmp (host, be->v.reg.servername) == 0 &&
 	      is_proto (be->v.reg.ctx ? "https" : "http",
 			proto,
 			matches[1].rm_eo - matches[1].rm_so));
@@ -1488,7 +1497,7 @@ need_rewrite (const char *location, const char *v_host,
   if (result == 0 && lstn->rewr_loc == 1)
     {
       result = ((is_listener_address (addr, lstn) ||
-		 strcasecmp (host, vhost) == 0) ||
+		 c_strcasecmp (host, vhost) == 0) ||
 		((port != listener_port (lstn) ||
 		  !is_proto (SLIST_EMPTY (&lstn->ctx_head) ? "http" : "https",
 			     proto,
@@ -1896,10 +1905,17 @@ timespec_serialize (struct timespec const *ts)
   struct tm tm;
   size_t n;
 
-  strftime (buf, sizeof (buf), "%Y-%m-%dT%H:%M:%S", localtime_r (&ts->tv_sec, &tm));
-  n = strlen (buf);
+  n = strftime (buf, sizeof (buf), "%Y-%m-%dT%H:%M:%S",
+		localtime_r (&ts->tv_sec, &tm));
   snprintf (buf + n, sizeof (buf) - n, ".%06ld", ts->tv_nsec / 1000);
   return json_new_string (buf);
+}
+
+/* Duration is represented in milliseconds. */
+static struct json_value *
+duration_serialize (struct timespec const *ts)
+{
+  return json_new_number ((double)ts->tv_sec * 1000000 + ts->tv_nsec / 1000);
 }
 
 static struct json_value *
@@ -2117,6 +2133,18 @@ backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
   return err;
 }
 
+static inline struct json_value *
+new_typed_object (char const *type)
+{
+  struct json_value *obj = json_new_object ();
+  if (type && json_object_set (obj, "kind", json_new_string (type)))
+    {
+      json_value_free (obj);
+      obj = NULL;
+    }
+  return obj;
+}
+
 static struct json_value *
 backend_serialize (BACKEND *be)
 {
@@ -2127,7 +2155,7 @@ backend_serialize (BACKEND *be)
     obj = json_new_null ();
   else
     {
-      obj = json_new_object ();
+      obj = new_typed_object ("backend");
 
       if (obj)
 	{
@@ -2246,7 +2274,7 @@ backends_serialize (BALANCER_LIST *meta)
 static struct json_value *
 service_serialize (SERVICE *svc)
 {
-  struct json_value *obj = json_new_object ();
+  struct json_value *obj = new_typed_object ("service");
   char const *typename;
 
   if (obj)
@@ -2273,7 +2301,7 @@ service_serialize (SERVICE *svc)
 static struct json_value *
 listener_serialize (LISTENER *lstn)
 {
-  struct json_value *obj = json_new_object (), *p;
+  struct json_value *obj = new_typed_object ("listener"), *p;
   int is_https;
   SERVICE *svc;
 
@@ -2323,15 +2351,16 @@ pound_core_serialize (void)
 {
   struct json_value *obj;
 
-  if ((obj = json_new_object ()) != NULL)
+  if ((obj = new_typed_object ("core")) != NULL)
     {
       int err = 0;
-      struct timespec ts;
+      struct timespec ts, uptime = pound_uptime ();
 
       clock_gettime (CLOCK_REALTIME, &ts);
       err = json_object_set (obj, "version", json_new_string (PACKAGE_VERSION))
 	|| json_object_set (obj, "pid", json_new_integer (getpid ()))
 	|| json_object_set (obj, "timestamp", timespec_serialize (&ts))
+	|| json_object_set (obj, "uptime", duration_serialize (&uptime))
 	|| json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()))
 	|| json_object_set (obj, "workers", workers_serialize ());
       if (err)
@@ -2350,13 +2379,15 @@ pound_serialize (void)
   LISTENER *lstn;
   SERVICE *svc;
 
-  obj = pound_core_serialize ();
+  obj = new_typed_object ("pound");
 
   if (obj)
     {
       int err = 0;
 
-      if ((p = json_new_array ()) == NULL)
+      if (json_object_set (obj, "core", pound_core_serialize ()))
+	err = 1;
+      else if ((p = json_new_array ()) == NULL)
 	err = 1;
       else if (json_object_set (obj, "listeners", p))
 	{
@@ -2451,13 +2482,22 @@ send_json_reply (BIO *c, struct json_value *val, char const *url)
   return HTTP_STATUS_OK;
 }
 
+static inline int
+url_is_root (char const *url)
+{
+  size_t n = strcspn (url, "?");
+  return n == 0 || (n == 1 && *url == '/');
+}
+
 static int
 control_list_core (BIO *c, char const *url)
 {
   struct json_value *val;
   int rc;
 
-  if ((val = pound_core_serialize ()) == NULL)
+  if (!url_is_root (url))
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((val = pound_core_serialize ()) == NULL)
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   else
     {
@@ -2473,7 +2513,9 @@ control_list_all (BIO *c, char const *url)
   struct json_value *val;
   int rc;
 
-  if ((val = pound_serialize ()) == NULL)
+  if (!url_is_root (url))
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((val = pound_serialize ()) == NULL)
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   else
     {
@@ -2536,7 +2578,7 @@ ctl_getident (char const **url)
 	  retval.type = IDTYPE_STR;
 	  *url = end;
 	}
-      else if (errno == 0 && n <= INT_MAX)
+      else if (end > *url && errno == 0 && n <= INT_MAX)
 	{
 	  retval.type = IDTYPE_NUM;
 	  retval.n = n;
@@ -2674,7 +2716,9 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
   OBJECT obj = { .type = OBJ_LISTENER };
   size_t len = strcspn (url, "?");
 
-  if (url[0] == '/' && len == 1)
+  if (len == 0)
+    obj.lstn = NULL;
+  else if (url[0] == '/' && len == 1)
     {
       obj.lstn = NULL;
       url++;
@@ -2740,17 +2784,13 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 static int
 control_list_listener (BIO *c, char const *url)
 {
-  if (*url == '/')
-    return ctl_listener (list_handler, NULL, c, url);
-  return HTTP_STATUS_NOT_FOUND;
+  return ctl_listener (list_handler, NULL, c, url);
 }
 
 static int
 control_list_service (BIO *c, char const *url)
 {
-  if (*url == '/')
-    return ctl_service (list_handler, NULL, c, url, NULL);
-  return HTTP_STATUS_NOT_FOUND;
+  return ctl_service (list_handler, NULL, c, url, NULL);
 }
 
 static int
@@ -3012,7 +3052,7 @@ find_endpoint (int method, const char *uri, int *errcode)
 
   if (cp == NULL)
     *errcode = uri_match ? HTTP_STATUS_METHOD_NOT_ALLOWED
-                         : HTTP_STATUS_NOT_FOUND;
+			 : HTTP_STATUS_NOT_FOUND;
   return cp;
 }
 

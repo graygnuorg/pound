@@ -267,6 +267,7 @@ enum
     HTTP_STATUS_METHOD_NOT_ALLOWED,// 405
     HTTP_STATUS_PAYLOAD_TOO_LARGE, // 413
     HTTP_STATUS_URI_TOO_LONG,      // 414
+    HTTP_STATUS_TOO_MANY_REQUESTS, // 429
     HTTP_STATUS_INTERNAL_SERVER_ERROR,          // 500
     HTTP_STATUS_NOT_IMPLEMENTED,   // 501
     HTTP_STATUS_SERVICE_UNAVAILABLE, // 503
@@ -293,6 +294,8 @@ timespec_cmp (struct timespec const *a, struct timespec const *b)
   return 0;
 }
 
+enum { NANOSECOND = 1000000000L };
+
 static inline struct timespec
 timespec_sub (struct timespec const *a, struct timespec const *b)
 {
@@ -303,12 +306,11 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
   if (d.tv_nsec < 0)
     {
       --d.tv_sec;
-      d.tv_nsec += 1e9;
+      d.tv_nsec += NANOSECOND;
     }
 
   return d;
 }
-
 
 /* Memory allocation primitives. */
 #include "mem.h"
@@ -434,7 +436,6 @@ WATCHER *watcher_register (void *obj, char
 			   void (*clear) (void *));
 int watcher_setup (void);
 
-char const *filename_split_str (char const *filename, char **dir);
 char const *filename_split_wd (char const *filename, WORKDIR **wdp);
 
 struct cidr;
@@ -707,7 +708,8 @@ enum service_cond_type
     COND_STRING_MATCH,/* String match. */
     COND_CLIENT_CERT,
     COND_DYN,
-    COND_LUA,
+    COND_TBF,
+    COND_LUA
   };
 
 struct dyn_service_cond
@@ -746,6 +748,20 @@ struct cond_lua
   char **argv;
 };
 
+typedef struct tbf TBF;
+
+struct tbf_cond
+{
+  STRING *key;
+  TBF *tbf;
+};
+
+struct acl_cond
+{
+  ACL *acl;
+  int forwarded;
+};
+
 typedef struct _service_cond
 {
   enum service_cond_type type;
@@ -753,7 +769,7 @@ typedef struct _service_cond
   WATCHER *watcher;
   union
   {
-    ACL *acl;
+    struct acl_cond acl;
     GENPAT re;
     struct bool_service_cond boolean;
     struct dyn_service_cond dyn;
@@ -762,6 +778,7 @@ typedef struct _service_cond
     struct pass_file pwfile; /* COND_BASIC_AUTH */
     X509 *x509;              /* COND_CLIENT_CERT */
     struct cond_lua clua;    /* COND_LUA */
+    struct tbf_cond tbf;     /* COND_TBF */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -946,6 +963,7 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */
   struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
+  unsigned linebufsize;         /* Line buffer size */
   CONTENT_LENGTH max_req_size;	/* max. request size */
   unsigned max_uri_length;      /* max. URI length */
   int rewr_loc;			/* rewrite location response */
@@ -1031,6 +1049,7 @@ typedef struct _pound_http
   int sock;
   LISTENER *lstn;
   struct addrinfo from_host;
+  char *buffer; /* Line buffer, allocated after the structure. */
 
   /* Deduced information */
   SERVICE *svc;
@@ -1053,8 +1072,9 @@ typedef struct _pound_http
 
   struct timespec start_req; /* Time when original request was received */
   struct timespec end_req;   /* Time after the response was sent */
+  struct timespec be_start;  /* Time when the request was handed to the
+				backend */
 
-  char *orig_forwarded_header; /* Original value of forwarded header */
   int response_code;
 
   CONTENT_LENGTH res_bytes;
@@ -1064,8 +1084,11 @@ typedef struct _pound_http
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
-void save_forwarded_header (POUND_HTTP *phttp);
+void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
 void http_log (POUND_HTTP *phttp);
+struct addrinfo *get_remote_ip (POUND_HTTP *phttp, int forwarded,
+				struct addrinfo **pres);
+struct timespec pound_uptime (void);
 
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
@@ -1285,6 +1308,7 @@ void json_error (struct json_value *val, char const *fmt, ...)
 
 int http_status_to_pound (int status);
 int pound_to_http_status (int err);
+char const *http_status_reason (int code);
 
 struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);
@@ -1342,6 +1366,9 @@ int basic_auth (struct pass_file *pwf, struct http_request *req);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
+
+TBF *tbf_alloc (uint64_t rate, unsigned burst);
+int tbf_eval (TBF *env, char const *keyid);
 
 #if ENABLE_LUA
 void pndlua_init (void);

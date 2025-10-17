@@ -91,8 +91,10 @@ This edition of the @cite{Pound Manual}, last updated
 * Logging::
 * Configuration::
 * poundctl::
+* Emacs::
 * Metric Families::
 * Time and Date Formats::
+* Old Control Format::
 * GNU Free Documentation License::
 * Index::
 @ifset WEBDOC
@@ -111,12 +113,14 @@ Simple Proxy
 * Conditional branches::
 * Modifying responses::
 * Authentication::
+* Rate-limiting::
 * Redirects::
 * Error responses::
 
 Service Selection
 
 * Regular Expressions::
+* File-based Conditions::
 * ACL::
 
 HTTPS
@@ -172,6 +176,7 @@ ListenHTTP
 * Listener logging::
 * Request Modification::
 * Response Modification::
+* Error response rewriting::
 * Service definitions::
 
 Request Modification
@@ -223,6 +228,7 @@ Template syntax
 
 Input object
 
+* Core listing::
 * Full listing::
 * Listener object::
 * Service object::
@@ -368,6 +374,7 @@ listener sections, detaches itself from the controlling terminal and
 starts serving incoming requests.  From that moment on, all diagnostic
 messages are reported via @command{syslog} (@pxref{Logging}).
 
+@anchor{lint}
  To check whether the configuration file is correct, run
 @command{pound} with the @option{-c} (for @dfn{check}) configuration
 option:
@@ -555,6 +562,7 @@ match all requests.
 * Conditional branches::
 * Modifying responses::
 * Authentication::
+* Rate-limiting::
 * Redirects::
 * Error responses::
 @end menu
@@ -846,7 +854,7 @@ immediately on file system changes.  On systems that don't support
 either API, @command{pound} falls back to periodic checking of file
 modification time (@dfn{mtime}).  In that case, the reload is
 initiated if @code{mtime} changes.  The interval between two
-succeeding checks is defined by the @code{WatcherTTL} statement
+successive checks is defined by the @code{WatcherTTL} statement
 (@pxref{Timeouts, WatcherTTL}) and defaults to 60 seconds.
 
   Following is a list of conditional statements that implement file
@@ -863,7 +871,11 @@ monitoring support: @code{BasicAuth}, @code{Header}, @code{Host},
 statements that evaluate to true for requests originating from one of the
 predefined IP addresses.  Access control lists are defined using the
 @code{ACL} section statement, which has three forms: anonymous,
-file reference, and ACL reference.
+file reference, and ACL reference.  In all three forms, the @code{ACL}
+statement accepts optional argument @code{-forwarded}, which indicates
+that the remote IP should be determined from the
+@code{X-Forwarded-From} IP address (@pxref{%a}), instead of using the
+actual originator IP.
 
 In @dfn{anonymous} form, the @code{ACL} is a section statement: the
 keyword is followed by a newline and a list of CIDRs, terminated with
@@ -1287,6 +1299,110 @@ will be replied to with a properly formatted 401 response, which will
 prompt the remote user to authenticate themselves.  On the other hand,
 authorized requests will not match this service and will eventually be
 handled by one of the services declared after it.
+
+@node Rate-limiting
+@section Rate-limiting
+@cindex rate-limiting
+@cindex token bucket filter
+@kwindex TBF
+  Rate-limiting is a technique that controls the number of requests
+processed by a service in a second.  @command{Pound} contains
+mechanism to implement rate-limiting using @dfn{token bucket filter}
+algorithm.
+
+  The token bucket filter decides whether a request can be accepted
+based on the presence of abstract entities called @dfn{tokens} in a container
+called @dfn{bucket}.  Each token represents an ability to process one
+incoming request.  The algorithm works as follows:
+
+@itemize @bullet
+@item
+Tokens are added to the bucket at a constant rate of @var{r} tokens
+per second.
+@item
+A bucket can host at most @var{M} tokens.  Any tokens arriving when
+the bucket is full are discarded.
+@item
+If a request arrives when the bucket holds some tokens, one token is
+removed and the request is accepted.
+@item
+If the bucket is empty, the request is not accepted.
+@end itemize
+
+   This algorithm makes sure requests are accepted at a constant rate
+or @var{r} requests per seconds with bursts of up to @var{M} requests.
+Such bursts occur when no requests arrive for @var{M}/@var{r} or more
+seconds.
+
+  The special conditional statement @code{TBF} provides an interface
+to this algorithm.  The statement takes three arguments: @var{key},
+a string identifying the bucket, and the values of @var{r} and
+@var{M}.  It evaluates to @dfn{true} if the algorithm accepts the
+request and to @dfn{false} otherwise.  Placing that conditional in
+a @code{Service} section ensures that requests will be processed at
+the configured rate.  For each such service section, there is normally
+another one to be used for requests that arrive faster than allowed.
+The selection criteria for the two sections differ only by the absence
+of @code{TBF} conditional in the second section.  Consider the
+following example:
+
+@example
+Service "git"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   TBF "$1" 5 10
+   Backend
+       Address 192.0.2.10
+       Port 80
+   End
+End
+Service "block"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   Error 429
+End
+@end example
+
+  This configuration limits request rate to any path beginning with
+@file{/git/} (presumably, a @command{git} repository) to 5 requests
+per second with bursts of up to 10 requests.  The bucket to use is
+identified by the first directory component after the @file{/git/}
+prefix, so that rates are computed for each repository individually.
+Requests that conform to that policy are routed to the backend at
+@samp{192.0.2.10:80}.  This is configured by the service section
+@samp{git}.
+
+  The requests that arrive quicker than permitted by that service will
+be served by service @samp{block}, which will respond to them with
+HTTP status 429 (@samp{Too Many Requests}).  @xref{Special Backends,
+Error}, for a discussion of @code{Error} backend.
+
+  To compute rates for each connection individually, use the
+@code{remoteip} accessor (@pxref{Request Accessors}).  In that case
+the corresponding fragment from the example above becomes:
+
+@example
+   Path -re "^/git/([^/]+).*"
+   TBF "%[remoteip 0]-$1" 5 10
+@end example
+
+  If the rate limit should apply to several services, the recommended
+course of action is to declare such @dfn{error} service first, using
+a common subset of conditions for all services it is intended to cover
+and a negation of @code{TBF}.  E.g.:
+
+@example
+@group
+Service "rate-limit"
+   Host "example.org"
+   Path -re "^/git/([^/]+).*"
+   Not TBF "$1" 5 10
+   Error 429
+End
+@end group
+@end example
+
+This service section shall be followed by the services it protects.
 
 @node Redirects
 @section Redirects
@@ -1816,9 +1932,9 @@ End
 @cindex balancer group
   Backends within each service are grouped in @dfn{balancer groups}.
 Each such group is assigned a unique integer @dfn{priority}, which
-defines the order in which the groups are tried.  When selecting a
-backend, a group with the numerically lesser priority is selected and
-a suitable backend is looked up among backends defined in the group,
+defines the order in which groups are tried.  When selecting a
+backend, a group with the numerically smallest priority is tried first
+and a suitable backend is looked up among backends defined in that group,
 using one of the balancing strategies discussed above.  If no backend
 can be selected (e.g. all backends are unavailable), next group is
 tried.  The process continues until either a backend is chosen or
@@ -1829,8 +1945,8 @@ the list of balancer groups is exhausted.
 assigned to the balancer group 0.  These are backends used during
 normal operation.  Backends declared using the @code{Emergency} keyword
 (@pxref{Emergency}) are assigned to the balancer group 65535.  These
-backends form a pull of @dfn{high availability} backends, which will
-be used if all of the normal backends fail.
+backends form a pool of @dfn{high availability} backends, which will
+be used if all normal backends fail.
 
   More backend groups can be added using dynamic backends, discussed
 in the next section.
@@ -2078,10 +2194,13 @@ terminated.
 
 @node Logging
 @chapter Logging
+@cindex Logging
  @command{Pound} can send its diagnostic messages to standard error,
 syslog, or to both.
 
 @kwindex LogFacility
+@cindex syslog facility
+@cindex facility, syslog
  Upon startup, while the configuration file is being parsed, the
 diagnostics goes to the standard error.  Once it switches to the
 operation mode and starts serving requests, diagnostic output is
@@ -2094,16 +2213,76 @@ instructs @command{pound} to use standard error for logging, thus
 overriding the settings from the configuration file.
 
 @kwindex LogLevel
+@cindex @code{err}, syslog facility
+@cindex @code{LOG_ERR}
+@cindex @code{notice}, syslog facility
+@cindex @code{LOG_NOTICE}
  Normally, @command{pound} is not very loquacious in logging: only
-errors are reported.  Logging of each incoming request can be
-configured using the @code{LogLevel} directive.  It can be used either
-in listener scope, in which case it affects only this particular
-listener, or in global scope, where it affects all listeners that
-don't configure it on their own.  The value of this directive can be
-either an integer number in range 0 through 5 (inclusive), or a quoted
-string.  Numeric value requests one of the @dfn{built-in
-log formats}.  String value refers either to a built-in format name,
-or to a user-defined format name.
+errors and exceptional conditions are reported.  Messages concerning
+@command{pound} itself are reported to syslog facility @code{err}.
+Messages that describe exceptional conditions detected when serving
+requests are reported to facility @code{notice}.  These latter have
+the following format:
+
+@example
+pound: (@var{tid}): @var{client-ip}: "@var{request}": @var{message}
+or
+pound: (@var{tid}): e@var{NNN}: @var{client-ip}: "@var{request}": @var{message}
+@end example
+
+@noindent
+where:
+
+@table @var
+@item tid
+Thread identifier.
+
+@item NNN
+Optional three-digit HTTP status code.
+
+@item client-ip
+IP address of the client.
+
+@item request
+HTTP request being served.
+
+@item message
+Message text.
+@end table
+
+If the condition being reported concerns the backend, then the IP
+address of the backend is included as well, e.g.@footnote{These
+example messages are split in two lines for readability}:
+
+@example
+pound: (7fcb33924640): 192.0.20.3 => 10.0.0.1:8081:
+        "POST /upload HTTP/1.1": error writing to backend
+@end example
+
+The @samp{=>} marker between IP addresses indicates flow direction:
+from @command{pound} to backend.  If an error occurs while
+transferring response from backend to client, it is indicated by
+@samp{<=}, as in:
+
+@example
+pound: (7fcb33924640): 192.0.20.3 <= 10.0.0.1:8081:
+        "POST /upload HTTP/1.1": response read error
+@end example
+
+Additionally, @command{pound} can be instructed to log each processed
+request.  These @dfn{access logs} are emitted for each processed
+request @emph{after a response was sent back to the client}, and go to
+the syslog facility @code{info}.
+
+Such additional logging is configured using two directives:
+@code{LogLevel} and @code{LogFormat}.  The @code{LogLevel} directive
+can appear either in listener scope, in which case it affects only
+this particular listener, or in global scope, where it affects all
+listeners that don't configure it on their own.  The value of this 
+directive can be either an integer number in range 0 through 5
+(inclusive), or a quoted string.  Numeric value requests one of the
+@dfn{built-in log formats}.  String value refers either to a built-in
+format name, or to a user-defined format name.
 
 The built-in formats are:
 
@@ -2150,7 +2329,7 @@ must refer to the name of a @dfn{custom format}, defined earlier using
 the @code{LogFormat} statement.  This statement takes two string arguments:
 the name to be assigned to the new format, and its definition.
 
-@dfn{Format definition} is a character string composed of ordinary
+The @dfn{format definition} is a character string composed of ordinary
 characters (not @samp{%}), which are copied unchanged to the resulting
 log message, and conversion specifications, each of which are replaced
 by a corresponding piece of information about the request or reply.
@@ -2263,6 +2442,10 @@ Same as @samp{%i}, except that if no such header is present in the
 request, a dash is substituted.
 @end deffn
 
+@deffn {Format specifier} %l
+Single dash.  This specifier is reserved for future use.
+@end deffn
+
 @deffn {Format specifier} %@{@var{obj}@}L
 Location of the @command{pound} object that is involved in handling
 the request.  Valid values for @var{obj} are: @samp{listener},
@@ -2290,6 +2473,10 @@ The request method.
 Name of @command{pound} object that is involved in handling the
 request.  Valid values for @var{obj} are: @samp{listener},
 @samp{service}, and @samp{backend}.
+@end deffn
+
+@deffn {Format specifier} %p
+Port number of the listener serving the request.
 @end deffn
 
 @deffn {Format specifier} %P
@@ -2364,7 +2551,8 @@ directives.
 @end deffn
 
 @deffn {Format specifier} %v
-The listener name.
+Hostname used in the request (from the @samp{Host} header, without
+port number).
 @end deffn
 
  The table below describes the built-in formats in terms of format
@@ -2396,14 +2584,14 @@ definitions:
 @itemx vhost_combined
 @kwindex vhost_combined, built-in format
 @example
-"%@{Host@}I %a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
+"%v:%p %a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
 @end example
 
 @item 4
 @itemx combined
 @kwindex combined, built-in format
 @example
-"%a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
+"%a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\""
 @end example
 
 @item 5
@@ -2411,7 +2599,7 @@ definitions:
 @kwindex detailed, built-in format
 (Split in two lines for readability)
 @example
-"%@{Host@}I %a - %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\"
+"%v:%p %a %l %u %t \"%r\" %s %b \"%@{Referer@}i\" \"%@{User-Agent@}i\"
 (%@{service@}N -> %@{backend@}N) %@{f@}T sec"
 @end example
 @end table
@@ -2681,6 +2869,12 @@ If the value of the @code{Host} header includes port number,
 character.  Otherwise, it expands to empty string.
 @end deffn
 
+@deffn {Accessor} remoteip @var{fwd}
+Expands to the request originator IP address.  If @var{fwd} is 0,
+expands to its real IP, otherwise expands to the IP determined from
+the @code{X-Forwarded-For} (or similar) header.  @xref{%a}, for details.
+@end deffn
+
 @node Global directives
 @section Global directives
  Global directives configure the program operation as a whole.  They
@@ -2747,6 +2941,26 @@ process, in turn, will start main @command{pound} process and will
 further monitor it, restarting it if it fails.
 
 The default is @code{true}.
+@end deffn
+
+@deffn {Global directive} LineBufferSize @var{n}
+@anchor{line buffer}
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  By default, it is set to the internal
+buffer size (4096 bytes, configurable at compile time using the
+@code{--with-maxbuf} option)@footnote{To check the value your
+@command{pound} is compiled with, run @command{pound -V}}, and it
+cannot be less than that default.
+
+Incoming requests with request line longer than that limit will get
+a 414 (@samp{URI Too Long}) response.  Requests with one of header
+fields longer than that will be responded with 413 (@samp{Payload Too
+Large}) code.
+
+This global setting can be overridden for each particular listener
+(@pxref{Listener-specific limits}).
 @end deffn
 
 @deffn {Global directive} RootJail "@var{directory}"
@@ -3406,6 +3620,14 @@ This statement overrides the global timeout value (@pxref{Timeouts})
 for this particular listener.
 @end deffn
 
+@deffn {ListenHTTP directive} LineBufferSize @var{n}
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  The default is inherited from the
+global directive (@pxref{line buffer}).
+@end deffn
+
 @deffn {ListenHTTP directive} MaxRequest @var{n}
 Limits the maximum allowed size of incoming requests.
 A request bigger than that will be responded with status
@@ -3417,9 +3639,9 @@ By default, there is no limit on the request size.
 @deffn {ListenHTTP directive} MaxURI @var{n}
 Limits the maximum allowed length of incoming request URI.
 A request with an URI longer than that will be responded with status
-414.
+414 (@samp{URI Too Long}).
 
-By default, there is no limit on the URI length.
+By default, the limit is set to @code{LineBufferSize} (@pxref{line buffer}).
 @end deffn
 
 @deffn {ListenHTTP directive} CheckURL "@var{pattern}"
@@ -3559,6 +3781,16 @@ process.
 @quotation
 The length of the requested URL exceeds the capacity limit for this
 server.
+@end quotation
+@end defvr
+
+@defvr {HTTP status} 429
+@samp{Too Many Requests}
+@*
+@quotation
+The remote party sent too many requests in a given amount of
+time. @command{Pound} never issues this error by itself.  This code is
+intended for implementing rate-limiting.  @xref{Rate-limiting}.
 @end quotation
 @end defvr
 
@@ -3794,19 +4026,29 @@ Conditions}, for a detailed discussion of this feature.
 
 The following conditionals are available:
 
-@deffn {Request Conditional} ACL "@var{name}"
+@deffn {Request Conditional} ACL [-forwarded] "@var{name}"
 Returns @samp{true} if the source IP matches one of the CIDRs from the
 named access control list @var{name}.  The ACL itself must have been
 defined earlier (@pxref{ACL definition}).
 
+@kwindex -forwarded
+By default, @code{ACL} operates on the actual originator IP address.
+This is changed if @code{-forwarded} is specified, in which case it
+uses an IP determined from the @code{X-Forwarded-For} (or similar)
+header (@pxref{%a}).
+
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL
+@deffn {Request Conditional} ACL [-forwarded]
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
 described in @ref{ACL definition}.  The ACL definition is finished with an
 @code{End} keyword on a line by itself.
+
+The @code{-forwarded} option instructs @command{pound} to use source
+IP address determined from the @code{X-Forwarded-For} header
+(@pxref{%a}), instead of the actual originator IP.
 
 Semantically, this statement is equivalent to the named ACL reference
 described above.
@@ -3814,8 +4056,8 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL -file "@var{filename}"
-@deffnx {Request Conditional} ACL -filewatch "@var{filename}"
+@deffn {Request Conditional} ACL [-forwarded] -file "@var{filename}"
+@deffnx {Request Conditional} ACL [-forwarded] -filewatch "@var{filename}"
 Defines an unnamed ACL to match the source IP against.  The ACL definition
 is read from the file @var{filename}, one CIDR per line.  Empty lines
 and comments are allowed.  If @var{filename} is relative, it is looked
@@ -3823,6 +4065,8 @@ up in the @ref{include directory}.  The form with @code{-file} reads
 the file contents once, at the program startup.  The one with
 @code{-filewatch} reads it and then monitors that file for changes.
 @xref{File-based Conditions}, for a detailed discussion.
+
+The meaning of @code{-forwarded} is as described above.
 @end deffn
 
 @deffn {Request Conditional} BasicAuth [@var{option}] "@var{filename}"
@@ -3933,6 +4177,32 @@ their effect on matching.
 @deffn {Request Conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions} and matches the
 resulting value against @var{pattern}.
+@end deffn
+
+@deffn {Request Conditional} TBF @var{key} @var{rate} @var{burst}
+Defines a @dfn{token bucket filter} condition.  @xref{Rate-limiting},
+for a detailed discussion.  Arguments are:
+
+@table @var
+@item key
+A string identifying the bucket.  It is subject to backreference
+expansion and request accessor interpretation, as described in
+@ref{String Expansions}.
+
+@item rate
+Rate limit.  A single decimal number means requests per second.
+To specify another time unit, follow the number with a slash, another
+number and optional unit specifier (@samp{s} for seconds, @samp{ms}
+for milliseconds, and @samp{us} for microseconds).  Examples:
+
+@example
+1/2s @result{} "one request per two seconds"
+200/500ms @result{} "200 requests per 500 milliseconds"
+@end example
+
+@item burst
+Burst value, i.e. maximum number of tokens the bucket can contain.
+@end table
 @end deffn
 
 @deffn {Request Conditional} URL [@var{options}] "@var{pattern}"
@@ -5332,13 +5602,20 @@ poundctl disable /-/1
 @node poundctl commands
 @section @command{poundctl} commands
 
+@deffn {poundctl} core
+Display core statistics.  By default, it includes: server time,
+@command{pound} daemon version, uptime, and PID, and worker thread
+statistics.
+@end deffn
+
 @deffn {poundctl} list /@var{L}/@var{S}/@var{B}
 @deffnx {poundctl} list /@var{L}/@var{S}
 @deffnx {poundctl} list /@var{L}
 @deffnx {poundctl} list
 @anchor{poundctl list}
 Lists status of the given object and its subordinates.  Without
-argument, shows all listeners and underlying objects.
+argument, shows core statistics (see above), all listeners and
+underlying objects, as well as all standalone services.
 @end deffn
 
 @deffn {poundctl} enable /@var{L}/@var{S}/@var{B}
@@ -5669,10 +5946,12 @@ The default @file{poundctl.tmpl} file defines two templates:
 
 @node Template syntax
 @subsection Template syntax
+@cindex syntax, template
   The syntax of @command{poundctl} templates is modelled after and mostly
 conforming to the specifications of the @command{golang} template
 module@footnote{@url{https://pkg.go.dev/text/template}}.
 
+@cindex dot
 Templates are executed by applying them to a JSON object.  Annotations
 in a template refer to attributes of the object to control execution
 and derive values to be displayed.  Execution of the template walks
@@ -5715,6 +5994,7 @@ following whitespace, as in
 @{@{- -@}@}
 @end example
 
+@cindex comments, template
 @item @{@{/* a comment */@}@}
 Comments are discarded.  They may span multiple lines of text.
 Comments do not nest and must start immediately after the opening
@@ -5728,16 +6008,19 @@ well:
 @{@{- a comment trimming the surrounding whitespace -@}@}
 @end example
 
+@cindex pipeline
 @item @{@{ @var{pipeline} @}@}
 The @var{pipeline} is evaluated, and the default textual
 representation of its value is copied to the output.
 
+@kwindex if
 @item @{@{if @var{pipeline} @}@} @var{T1} @{@{end@}@}
 If the value of the @var{pipeline} is empty, no output is generated;
 otherwise, @var{T1} is executed.  The empty values are @code{null},
 @code{false}, numeric 0, empty string (@samp{""}),
 array (@samp{[]}), or object (@samp{@{@}}).  Dot is unaffected.
 
+@kwindex else
 @item @{@{if @var{pipeline} @}@} @var{T1} @{@{else@}@} @var{T0} @{@{end@}@}
 If the value of the pipeline is empty, @var{T0} is executed;
 otherwise, @var{T1} is executed. Dot is unaffected.
@@ -5760,6 +6043,7 @@ A shortcut to simplify writing the if-else chains.  Equivalent to
 @end group
 @end example
 
+@kwindex range
 @item @{@{range @var{pipeline} @}@} @var{T1} @{@{end@}@}
 The value of @var{pipeline} must be an object or array.  If it is of
 length zero, nothing is output.  Otherwise, dot is set to the
@@ -5775,20 +6059,24 @@ Within the @code{@{@{range@}@}} action, the following two keywords may
 appear:
 
 @table @code
+@kwindex break
 @item @{@{break@}@}
 The innermost @samp{@{@{range @var{pipeline}@}@}} loop is ended early,
 stopping the current iteration and bypassing all remaining iterations.
 
+@kwindex define
 @item @{@{continue@}@}
 The current iteration of the innermost @samp{@{@{range @var{pipeline}@}@}}
 loop is stopped, and the loop starts the next iteration.
 @end table
 
+@kwindex define
 @item @{@{define "@var{name}"@}@} @var{text} @{@{end@}@}
 The @var{text} is collected and stored for the further use as template
 with the given @var{name}.  It can be invoked using the
 @samp{@{@{template@}@}} action (see below).
 
+@kwindex template
 @item @{@{template "@var{name}"@}@}
 The template with the specified @var{name} (see the @samp{@{@{define@}@}}
 above) is executed with dot set to @code{null}.
@@ -5797,6 +6085,7 @@ above) is executed with dot set to @code{null}.
 The template with the specified @var{name} (see the @samp{@{@{define@}@}}
 above) is executed with dot set to @var{value}.
 
+@kwindex block
 @item @{@{block "@var{name}" @var{pipeline} @}@} @var{T1} @{@{end@}@}
 A block is shorthand for defining a template and then executing it in
 place:
@@ -5806,6 +6095,7 @@ place:
 @{@{template "@var{name}" @var{pipeline}@}@}
 @end example
 
+@kwindex with
 @item @{@{with @var{pipeline} @}@} @var{T1} @{@{end@}@}
 If the value of the @var{pipeline} is empty, no output is generated;
 otherwise, dot is set to the value of the @var{pipeline} and @var{T1} is
@@ -6006,55 +6296,42 @@ includes any nested statements that may appear in between.
 @node Input object
 @subsection Input object
 Depending on the request issued by @command{poundctl}, the invoked template
-can receive as its argument (@dfn{dot}) an object of the following
-types: @dfn{full listing}, @dfn{listener}, @dfn{service}, or @dfn{backend}.
+can receive as its argument (@dfn{dot}) an object of one of the following
+types: @dfn{core}, @dfn{full listing}, @dfn{listener}, @dfn{service},
+or @dfn{backend}.  Each object carries an explicit indication of its
+type in its @code{kind} attribute.  Its possible values are:
 
-Since there is no explicit indication of the object type being passed,
-templates normally use heuristics based on the presence or absence of
-certain attribute to deduce the object type in question.  The
-recommended approach is described in the following pseudo-code
-fragment:
-
-@example
-@group
-@{@{if exists . "listeners" @}@}
-  @{@{/* This is a full listing, as requested by @command{poundctl list}. */@}@}
-  ...
-@{@{else if exists . "services"@}@}
-  @{@{/* Single listener, as requested by @command{poundctl list /@var{L}}.
-       Notice that this attribute is present in the full listing as
-       well, so presence of "listeners" should be checked first. */@}@}
-  ...
-@{@{else if exists . "backends"@}@}
-  @{@{/* Single service, as requested by @command{poundctl list /@var{L}/@var{S}}. */@}@}
-  ...
-@{@{else@}@}
-  @{@{/* Backend listing (@command{poundctl list /@var{L}/@var{I}/@var{B}}) */@}@}
-  ...
-@{@{end@}@}
-@end group
-@end example
+@table @samp
+@item core
+Core statistics.
+@item pound
+Full listing.
+@item listener
+Listener statistics.
+@item service
+Service statistics.
+@item backend
+Backend statistics.
+@end table
 
 Structures of each object are discussed in subsections that follow.
 
 @menu
+* Core listing::
 * Full listing::
 * Listener object::
 * Service object::
 * Backend object::
 @end menu
 
-@node Full listing
-@subsubsection Full listing
-A full listing contains the following attributes:
+@node Core listing
+@subsubsection Core listing
+A @dfn{core} object describes core @command{pound} configuration.  It
+contains the following attributes:
 
 @table @code
-@item listeners
-An array of @dfn{listener} objects.  See below for a description.
-
-@item services
-An array of @dfn{service} objects, representing services defined in
-the global scope of the @command{pound} configuration file.
+@item kind
+Identifies the core listing object.  Its value is @samp{core}.
 
 @item pid
 PID of the running @command{pound} daemon.
@@ -6089,6 +6366,30 @@ Number of incoming HTTP requests in the queue (integer).
 @item timestamp
 Current time on the server, formatted as ISO 8601 date-time with
 microsecond precision, e.g.: @samp{2023-01-05T22:43:18.071559}.
+
+@item uptime
+Total running time of @command{pound} daemon: number of
+microseconds elapsed since its startup.
+@end table
+
+@node Full listing
+@subsubsection Full listing
+A full listing contains the following attributes.
+
+@table @code
+@item kind
+Identifies the full listing object.  The value if this attribute is
+@samp{pound}.
+
+@item core
+Core listing.  @xref{Core listing}.
+
+@item listeners
+An array of @dfn{listener} objects.  See below for a description.
+
+@item services
+An array of @dfn{service} objects, representing services defined in
+the global scope of the @command{pound} configuration file.
 @end table
 
 @node Listener object
@@ -6097,6 +6398,10 @@ A @dfn{listener} object represents a single HTTP or HTTPS listener in
 @command{pound} configuration.  It has the following attributes:
 
 @table @code
+@item kind
+Identifies the listener object.  The value of this attribute is
+@samp{listener}.
+
 @item address
 Address of this listener.  A string formatted as @samp{@var{ip}:@var{port}}.
 for IPv4 and IPv6 addresses or containing a socket file name, for UNIX
@@ -6122,6 +6427,10 @@ listener (@pxref{ListenHTTPS, NoHTTPS11}).  One of: 0, 1, 2.
   A @dfn{service} object describes a single service.
 
 @table @code
+@item kind
+Identifies the service object.  The value of this attribute is
+@samp{service}.
+
 @item name
 Symbolic name of this service.
 
@@ -6162,6 +6471,10 @@ defined.
 The following attributes are always present in each @dfn{backend} object:
 
 @table @code
+@item kind
+Identifies the backend object.  The value of this attribute is
+@samp{backend}.
+
 @item alive
 Whether or not this backend is alive.
 
@@ -6231,6 +6544,96 @@ Average time per request, in nanoseconds.
 Standard deviation of the above.
 @end table
 
+@node Emacs
+@chapter Emacs Major Mode
+@cindex Emacs
+@findex pound-mode.el
+@anchor{pound-mode}
+@command{Pound} is distributed with @file{pound-mode.el}, an elisp
+source which provides a major mode for editing @command{pound}
+configuration files in GNU Emacs.  The file is located in @file{src}
+directory of the distribution.  To install it, follow the instructions
+below.
+
+First, select the directory where to place the file.  The directory
+must form a part of the @command{emacs} @code{load-path}
+(@pxref{Library Search,,, elisp, GNU Emacs Lisp Reference Manual})
+variable.  Then, copy @file{pound-mode.el} to that directory.  Then,
+add the following statements to your @file{.emacs} or site-wide
+@file{site-start.el} file (@pxref{Init File, The Emacs Initialization
+File,,emacs,GNU Emacs Manual}):
+
+@lisp
+@group
+(autoload 'pound-mode "pound-mode")
+(add-to-list 'auto-mode-alist
+             (cons (purecopy "pound\\.cfg\\'") 'pound-mode))
+@end group
+@end lisp
+
+The first statement loads @code{pound} Emacs major mode.  The
+second one associates file @file{pound.cfg} with that mode, so that
+each time you load a file with that name to your editor, it will
+automatically select @code{pound-mode} as its default major mode.
+Depending on your customs, you may further modify
+@code{auto-mode-alist} to associate @code{pound-mode} with more
+files.  For example, if your main configuration file includes 
+files from @file{/etc/pound} directory (@pxref{File inclusion}), it
+might be a good idea to add the following:
+
+@lisp
+@group
+(add-to-list 'auto-mode-alist
+   (cons (purecopy "pound/.*\\.cfg\\'") 'pound-mode))
+@end group
+@end lisp
+
+Once these changes done, you can start @command{emacs} to see if it
+correctly selects the major mode for your @command{pound.cfg}.
+
+The @code{pound-mode} major mode highlights @command{pound}
+configuration keywords and data types, and provides automatic
+indentation for the configuration file.  It defines the following key
+bindings:
+
+@table @key
+@item C-M-a
+Place cursor at the start of the enclosing section.
+
+@item C-M-e
+Place cursor at the end of the enclosing section.
+
+@item C-M-\
+Indent region.
+
+@item C-c C-c
+Check the syntax of the current buffer by running @command{pound -c}
+(@pxref{lint}).
+@end table
+
+The following customization variables are available:
+
+@defvr {Customization Variable} pound-basic-offset
+Default indentation increment.  Each nesting level in the
+configuration file will be indented that amount of columns, relative
+to the enclosing section.
+
+The default value is 8.
+@end defvr
+
+@defvr {Customization Variable} pound-command
+Command line for starting the @command{pound} daemon.  Default is
+@samp{pound}.
+
+Use this variable to specify full pathname of the @command{pound}
+binary, if it cannot be found using the @env{PATH} shell variable, or
+to supply additional options to it.
+@end defvr
+
+@defvr {Customization Variable} pound-include-dir
+Defines @command{pound} include directory (@pxref{include directory}).
+@end defvr
+
 @node Metric Families
 @appendix Metric Families
 @include metrics.texi
@@ -6238,6 +6641,10 @@ Standard deviation of the above.
 @node Time and Date Formats
 @appendix Time and Date Formats
 @include strftime.texi
+
+@node Old Control Format
+@appendix Old Control Output Format
+@include ctlapi417.texi
 
 @node GNU Free Documentation License
 @appendix GNU Free Documentation License

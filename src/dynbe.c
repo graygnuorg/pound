@@ -245,7 +245,7 @@ BACKEND_cmp (const BACKEND *a, const BACKEND *b)
     }
   else /* if (a->be_type == BE_MATRIX) */
     {
-      if (strcasecmp (a->v.mtx.hostname, b->v.mtx.hostname) == 0)
+      if (c_strcasecmp (a->v.mtx.hostname, b->v.mtx.hostname) == 0)
 	return a->v.mtx.port - b->v.mtx.port;
       return 1;
     }

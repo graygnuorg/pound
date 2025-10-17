@@ -291,7 +291,7 @@ CNAME_REF_hash (const CNAME_REF *cp)
 static int
 CNAME_REF_cmp (const CNAME_REF *a, const CNAME_REF *b)
 {
-  return strcasecmp (a->name, b->name);
+  return c_strcasecmp (a->name, b->name);
 }
 
 #define HT_TYPE CNAME_REF
@@ -635,7 +635,7 @@ srv_cmp (void const *a, void const *b)
     {
       rc = bsrv->weight - asrv->weight;
       if (rc == 0)
-	rc = strcasecmp (asrv->host, bsrv->host);
+	rc = c_strcasecmp (asrv->host, bsrv->host);
     }
   return rc;
 }

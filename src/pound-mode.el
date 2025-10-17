@@ -107,7 +107,6 @@
     "Err501"
     "Err503"))
 
-
 (defvar pound-matcher-keywords-1
   '("ACL"
     "BasicAuth"
@@ -115,10 +114,12 @@
     "Host"
     "Path"
     "Query"
+    "TBF"
     "URL"))
 
 (defvar pound-matcher-keywords-2
   '("Header"
+    "StringMatch"
     "QueryParam"))
 
 (defvar pound-statement-keywords
@@ -137,7 +138,6 @@
     "Ciphers"
     "Client"
     "ClientCert"
-    "CombineHeaders"
     "ConfigFile"
     "ConfigText"
     "ConnTO"
@@ -161,6 +161,7 @@
     "IgnoreSRVWeight"
     "Include"
     "IncludeDir"
+    "LineBufferSize"
     "LogFacility"
     "LogFormat"
     "LogLevel"
@@ -217,6 +218,7 @@
 (defvar pound-match-flags
   '("-file"
     "-filewatch"
+    "-forwarded"
     "-re"
     "-exact"
     "-beg"
@@ -409,37 +411,79 @@
 	  "\\("
 	  (regexp-opt (append pound-true-sections (list "End")) 'words)
 	  "\\|\\(?:"
-	  (regexp-opt pound-maybe-sections)
+	  "\\(?:"
+	    (regexp-opt pound-maybe-sections)
+	    ;; Technically, the following is not quite correct, as it is
+	    ;; only ACL that takes the "forwarded" option, but it will do
+	    ;; no harm to assume that for TrustedIP as well.
+	    "\\(?:[ \t]*-forwarded\\)?\\)"
 	  "\\|"
 	  "\\(?:\\(?:not[ \t]+\\)*Match\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)"
 	  "\\)"
 	  "[ \t]*\\(?:#.*\\)?$\\)"))
 
+(defun pound-streq (a b)
+  "Case-insensitive string equality"
+  (eq t (compare-strings a 0 nil b 0 nil t)))
+
 (defun pound-scan (limit stk)
   (catch 'ret
+    (forward-line)
     (while (and (< (point) limit)
 		(re-search-forward pound-section-delim limit t))
       (cond
-       ((eq t (compare-strings (match-string 1) 0 nil "end" 0 nil t))
+       ((pound-streq (match-string 1) "end")
 	(setq stk (cdr stk))
 	(if (not stk) (throw 'ret stk)))
+       ((and (looking-at "^[ \t]*Control[ \t]*\\(?:#.*\\)?$")
+	     (pound-at-control-backend)))
        (t
 	(setq stk (cons (marker-position (nth 2 (match-data))) stk))))
       (forward-line))
     stk))
 
+(defun pound-at-control-backend ()
+  "Return true if the statement at point is a Control backend keyword within
+a Service, as opposed to the top-level Control (whether block or directive)"
+  (save-excursion
+    (catch 'ret
+      (beginning-of-line)
+      (while (not (bobp))
+	(forward-line -1)
+	(cond
+	 ((looking-at "^[ \t]*Service")
+	  (throw 'ret t))
+	 ((looking-at "^[ \t]*End\\>")
+	  (throw 'ret nil)))))))
+
+(defun pound-top-level-form ()
+  "Move point to the beginning of the nearest top-level block statement.
+Return t if such was found, nil otherwise."
+  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\)[ \t]*\\(?:#.*\\)?$" nil t)
+      (cond
+       ((and (pound-streq (match-string 1) "Control")
+	     (pound-at-control-backend))
+	(pound-top-level-form))
+       (t
+	t))))
+
 (defun pound-get-context ()
   (save-excursion
     (let* ((start (point))
-	   (ctx (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\)[ \t]*\\(?:#.*\\)?$" nil t)
-		    (pound-scan start (list (marker-position (nth 2 (match-data))))))))
+	   (ctx (if (pound-top-level-form)
+		    (pound-scan start
+				(list (marker-position
+				       (nth 2 (match-data))))))))
       (if ctx
 	  ctx
 	(goto-char start)
-	(if (re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
-	    (let ((pos (marker-position (nth 2 (match-data)))))
-	      (forward-line)
-	      (pound-scan start (list pos))))))))
+	(cond
+	 ((re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|TrustedIP\\|Backend\\)[ \t]\".*\"\\)\\|Service\\>\\)" nil t)
+	  (let ((pos (marker-position (nth 2 (match-data)))))
+	    (pound-scan start (list pos))))
+	 ((re-search-backward "^[ \t]*\\(TrustedIP[ \t]*\\(?:#.*\\)?$\\)" nil t)
+	  (let ((pos (marker-position (nth 2 (match-data)))))
+	    (pound-scan start (list pos)))))))))
 
 (defun pound-indent-level ()
   (save-excursion
@@ -476,7 +520,7 @@
   (let ((n 1))
     (while (and (> n 0) (re-search-forward pound-section-delim nil t))
       (cond
-       ((eq t (compare-strings (match-string 1) 0 nil "end" 0 nil t))
+       ((pound-streq (match-string 1) "end")
 	(setq n (1- n)))
        (t
 	(setq n (1+ n)))))

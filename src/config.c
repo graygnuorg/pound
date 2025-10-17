@@ -249,7 +249,14 @@ typedef struct
   BALANCER_ALGO balancer_algo;
   NAMED_BACKEND_TABLE named_backend_table;
   struct resolver_config resolver;
+  unsigned linebufsize;
 } POUND_DEFAULTS;
+
+static int
+assign_bufsize (void *call_data, void *section_data)
+{
+  return cfg_assign_unsigned_min (call_data, MAXBUF, 0);
+}
 
 static int
 assign_address_string (void *call_data, void *section_data)
@@ -754,20 +761,32 @@ parse_acl (ACL *acl)
 
 #define OPT_FILE  0x1
 #define OPT_WATCH 0x2
+#define OPT_FWD   0x4
 
 static int
-get_file_option (int *opt, char const **filename)
+get_file_option (int *opt, char const **filename, int fwd)
 {
   static struct config_option optab[] = {
+    { "forwarded", OPT_FWD },
     { "file", OPT_FILE, 1 },
     { "filewatch", OPT_FILE | OPT_WATCH, 1 },
     { NULL }
   };
+  struct config_option *opptr = fwd ? optab : optab + 1;
 
   *opt = 0;
   *filename = NULL;
-  if (gettok_option (optab, opt, filename) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
+
+  for (;;)
+    {
+      int n;
+
+      if (gettok_option (opptr, &n, filename) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      if (n == -1)
+	break;
+      *opt |= n;
+    }
   return CFGPARSER_OK;
 }
 
@@ -795,7 +814,7 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)
@@ -824,15 +843,17 @@ parse_named_acl (void *call_data, void *section_data)
  *   Creates and references an unnamed ACL.
  */
 static int
-parse_acl_ref (ACL **ret_acl)
+parse_acl_ref (ACL **ret_acl, int *pforwarded)
 {
   struct token *tok;
   ACL *acl;
   int opt;
   char const *filename;
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, pforwarded != NULL) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
+  if (pforwarded)
+    *pforwarded = !!(opt & OPT_FWD);
 
   if (filename)
     {
@@ -880,7 +901,7 @@ parse_acl_ref (ACL **ret_acl)
 static int
 assign_acl (void *call_data, void *section_data)
 {
-  return parse_acl_ref (call_data);
+  return parse_acl_ref (call_data, NULL);
 }
 
 static int
@@ -1902,7 +1923,7 @@ static int
 parse_cond_acl (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_ACL);
-  return parse_acl_ref (&cond->acl);
+  return parse_acl_ref (&cond->acl.acl, &cond->acl.forwarded);
 }
 
 static int
@@ -2045,7 +2066,7 @@ parse_cond_basic_auth (void *call_data, void *section_data)
   char const *filename;
   void *wt;
 
-  if (get_file_option (&opt, &filename) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)
@@ -2095,6 +2116,126 @@ parse_cond_client_cert (void *call_data, void *section_data)
   SERVICE_COND *cond = service_cond_append (call_data, COND_CLIENT_CERT);
   return assign_cert (&cond->x509, NULL);
 }
+
+#ifndef UINT64_MAX
+# define UINT64_MAX ((uint64_t)-1)
+#endif
+
+/*
+ * Compute (v * d) / n with range checking.  On success, store the result
+ * in retval and return 0.
+ */
+static int
+mulf (unsigned long v, unsigned n, unsigned long d, uint64_t *retval)
+{
+  if (UINT64_MAX / n < v)
+    {
+      uint64_t e = (v - UINT64_MAX / n) * n;
+      if (UINT64_MAX / n < (v - e))
+	return -1;
+      *retval = ((v - e) * n) / d + e / d;
+    }
+  else
+    *retval = (v * n) / d;
+  return 0;
+}
+
+static int
+parse_rate (uint64_t *ret_rate)
+{
+  struct token *tok;
+  unsigned long rate;
+  unsigned long n = 1;
+  char *p;
+  enum { I_SEC, I_MSEC, I_USEC };
+  int i = I_SEC;
+  static struct kwtab intervals[] = {
+    { "s",  I_SEC },
+    { "ms", I_MSEC },
+    { "us", I_USEC },
+    { NULL }
+  };
+  static unsigned mul[] = {
+    NANOSECOND,
+    1000000,
+    1000,
+  };
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  errno = 0;
+  rate = strtoul (tok->str, &p, 10);
+  if (errno || rate == 0)
+    {
+      conf_error ("%s", "bad unsigned number");
+      return CFGPARSER_FAIL;
+    }
+  else if (*p == '/')
+    {
+      ++p;
+
+      if (c_isdigit (p[0]))
+	{
+	  n = strtoul (p, &p, 10);
+	  if (n == 0 || errno)
+	    {
+	      conf_error ("%s", "bad interval specifier");
+	      return CFGPARSER_FAIL;
+	    }
+	}
+
+      if (kw_to_tok (intervals, p, 1, &i))
+	{
+	  struct locus_range r = *last_token_locus_range ();
+	  r.beg.col += p - tok->str;
+	  conf_error_at_locus_range (&r, "%s", "bad interval specifier");
+	  return CFGPARSER_FAIL;
+	}
+    }
+  else if (*p != 0)
+    {
+      conf_error ("%s", "invalid rate");
+      return CFGPARSER_FAIL;
+    }
+
+  if (mulf (n, mul[i], rate, ret_rate))
+    {
+      conf_error ("%s", "effective rate is out of range");
+      return CFGPARSER_FAIL;
+    }
+
+  if (*ret_rate == 0)
+    {
+      conf_error ("%s", "effective rate is 0");
+      return CFGPARSER_FAIL;
+    }
+
+  return CFGPARSER_OK;
+}
+
+static int
+parse_cond_tbf (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_TBF);
+  struct token *tok;
+  uint64_t rate;
+  unsigned maxtok;
+  STRING *key;
+  int rc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  key = string_init (tok->str);
+
+  if ((rc = parse_rate (&rate)) != CFGPARSER_OK)
+    return rc;
+  if ((rc = cfg_assign_unsigned (&maxtok, section_data)) != CFGPARSER_OK)
+    return rc;
+
+  cond->tbf.key = key;
+  cond->tbf.tbf = tbf_alloc (rate, maxtok);
+  return CFGPARSER_OK;
+}
+
 
 static int
 parse_lua_match (void *call_data, void *section_data)
@@ -2501,6 +2642,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "BasicAuth",
     .parser = parse_cond_basic_auth
+  },
+  {
+    .name = "TBF",
+    .parser = parse_cond_tbf
   },
   {
     .name = "StringMatch",
@@ -3417,11 +3562,11 @@ static struct canned_log_format canned_log_format[] = {
   /* 2 - extended logging (show chosen backend server as well) */
   { "extended", "%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec" },
   /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
-  { "vhost_combined", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  { "vhost_combined", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 4 - same as 3 but without the virtual host information */
-  { "combined", "%a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
+  { "combined", "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
   /* 5 - same as 3 but with information about the Service and Backend used */
-  { "detailed", "%{Host}I %a - %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
+  { "detailed", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
 };
 static int max_canned_log_format =
   sizeof (canned_log_format) / sizeof (canned_log_format[0]);
@@ -3747,6 +3892,11 @@ static CFGPARSER_TABLE http_common[] = {
     .parser = parse_service,
     .off = offsetof (LISTENER, services)
   },
+  {
+    .name = "LineBufferSize",
+    .parser = assign_bufsize,
+    .off = offsetof (LISTENER, linebufsize),
+  },
   { NULL }
 };
 
@@ -3859,6 +4009,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->verb = 0;
   lst->header_options = dfl->header_options;
   lst->clnt_check = -1;
+  lst->linebufsize = dfl->linebufsize;
   locus_range_init (&lst->locus);
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
@@ -4001,6 +4152,8 @@ parse_listen_http (void *call_data, void *section_data)
 			"use of SSL features in ListenHTTP sections"
 			" is forbidden"))
     return CFGPARSER_FAIL;
+  if (lst->max_uri_length > lst->linebufsize)
+    lst->max_uri_length = lst->linebufsize;
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -4677,6 +4830,9 @@ parse_listen_https (void *call_data, void *section_data)
   if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
+  if (lst->max_uri_length > lst->linebufsize)
+    lst->max_uri_length = lst->linebufsize;
+
   if (SLIST_EMPTY (&lst->ctx_head))
     {
       conf_error_at_locus_range (&lst->locus, "Cert statement is missing");
@@ -5256,6 +5412,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = cfg_assign_unsigned,
     .data = &watcher_ttl
   },
+  {
+    .name = "LineBufferSize",
+    .parser = assign_bufsize,
+    .off = offsetof (POUND_DEFAULTS, linebufsize),
+  },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
@@ -5619,7 +5780,8 @@ parse_config_file (char const *file, int nosyslog)
     .re_type = GENPAT_POSIX,
     .header_options = HDROPT_FORWARDED_HEADERS | HDROPT_SSL_HEADERS,
     .balancer_algo = BALANCER_ALGO_RANDOM,
-    .resolver = RESOLVER_CONFIG_INITIALIZER
+    .resolver = RESOLVER_CONFIG_INITIALIZER,
+    .linebufsize = MAXBUF
   };
 
   named_backend_table_init (&pound_defaults.named_backend_table);

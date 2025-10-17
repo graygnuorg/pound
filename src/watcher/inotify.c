@@ -41,7 +41,7 @@ fsevmon_watchpoint_install (FSEVMON *evmon, struct watchpoint *wp)
     case WATCH_FILE:
       locus_point_init (&pt, wp->watcher->filename, wp->watcher->wd->name);
       wp->wd = inotify_add_watch (evmon->ifd, string_ptr (pt.filename),
-				  IN_CLOSE_WRITE);
+				  IN_CLOSE_WRITE | IN_MOVE_SELF);
       locus_point_unref (&pt);
       break;
 
@@ -85,6 +85,13 @@ process_event (FSEVMON *evmon, struct inotify_event *ep)
       return;
     }
 
+#if 0
+  if (ep->len > 0)
+    logmsg (LOG_DEBUG, "event %#x, for %s", ep->mask, ep->name);
+  else
+    logmsg (LOG_DEBUG, "event %#x, %s, %s", ep->mask, wp->watcher->filename, wp->watcher->wd->name);
+#endif
+
   if (ep->mask & IN_IGNORED)
     {
       wp->wd = -1;
@@ -103,7 +110,9 @@ process_event (FSEVMON *evmon, struct inotify_event *ep)
       return;
     }
 
-  if (ep->mask & (IN_CREATE | IN_MOVED_TO))
+  if (ep->mask & IN_MOVE_SELF)
+    sentinel_setup (evmon, wp);
+  else if (ep->mask & (IN_CREATE | IN_MOVED_TO))
     sentinel_wakeup (evmon, wp, ep->name);
   else if (ep->mask & IN_CLOSE_WRITE)
     watcher_reread (wp->watcher);
@@ -160,7 +169,7 @@ watcher_setup (void)
   struct watchpoint *wp;
   pthread_t tid;
   int ifd;
-  
+
   if (DLIST_EMPTY (&watch_head))
     return 0;
 
@@ -195,4 +204,3 @@ watcher_setup (void)
   pthread_create (&tid, &thread_attr_detached, thr_watcher, evmon);
   return 0;
 }
-

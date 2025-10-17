@@ -127,9 +127,8 @@ configuration options:
   The dynamic backends are enabled using the `--enable-dynamic-backends`
   option (see below).  The corresponding tests involve the use of an
   experimental pre-loaded library and are by default disabled.  Use this
-  option to enable them.  These tests also require a specific version of
-  `Net::DNS::Nameserver` module.  [See below](#user-content-testing), for
-  details.
+  option to enable them.  These tests also require the `Net::DNS` perl module.
+  [See below](#user-content-testing), for details.
 
 * `--enable-dynamic-backends` or `--disable-dynamic-backends`
 
@@ -239,15 +238,12 @@ To install them on a debian-based system, run:
 ```
 
 Additionally, to test DNS-based dynamic backends functionality, the
-`Net::DNS::Nameserver` module is needed.  On debian-based systems it is
+`Net::DNS` module is needed.  On debian-based systems it is
 installed with the following command:
 
 ```sh
  apt-get install libnet-dns-perl
 ```
-
-You will need at least version 1.44 of `libnet-dns-perl`, which corresponds to
-version 1963 of `Net::DNS::Nameserver`.
 
 To run tests, type
 

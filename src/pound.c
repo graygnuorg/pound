@@ -25,6 +25,9 @@
 /* common variables */
 char *user;			/* user to run as */
 char *group;			/* group to run as */
+static uid_t user_id = -1;
+static gid_t group_id = -1;
+
 char *root_jail;		/* directory to chroot to */
 char *pid_name = POUND_PID;     /* file to record pid in */
 
@@ -57,6 +60,8 @@ char *syslog_tag;               /* Tag to mark syslog messages with.
 pthread_mutexattr_t mutex_attr_recursive;
 pthread_attr_t thread_attr_detached;
 static pthread_attr_t thread_attr_worker;
+
+struct timespec start_time;
 
 #ifndef  SOL_TCP
 /* for systems without the definition */
@@ -160,6 +165,13 @@ abend (struct locus_range const *range, char const *fmt, ...)
   _exit (1);
 }
 
+struct timespec
+pound_uptime (void)
+{
+  struct timespec now;
+  clock_gettime (CLOCK_REALTIME, &now);
+  return timespec_sub (&now, &start_time);
+}
 
 /*
  * OpenSSL thread support stuff
@@ -273,11 +285,12 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 {
   POUND_HTTP *res;
 
-  if ((res = calloc (1, sizeof (res[0]))) == NULL)
+  if ((res = calloc (1, sizeof (res[0]) + lstn->linebufsize)) == NULL)
     {
       lognomem ();
       return -1;
     }
+  res->buffer = (char*)(res + 1);
 
   if ((res->from_host.ai_addr = malloc (salen)) == NULL)
     {
@@ -386,8 +399,6 @@ void
 pound_http_destroy (POUND_HTTP *arg)
 {
   free (arg->from_host.ai_addr);
-
-  free (arg->orig_forwarded_header);
   http_request_free (&arg->request);
   http_request_free (&arg->response);
 
@@ -676,6 +687,44 @@ cleanup (void)
     }
 }
 
+#if EARLY_PTHREAD_CANCEL_PROBE
+/*
+ * In GNU libc, a call to pthread_cancel involves loading the libgcc_s.so.1
+ * shared library.  If pound is running in a chroot, this fails with the
+ * diagnostics
+ *
+ *    libgcc_s.so.1 must be installed for pthread_cancel to work
+ *
+ * after which the program aborts.  That means that normal pound shutdown
+ * sequence is not performed properly.  To avoid this, the following kludge
+ * is implemented: a dummy thread is created and immediately cancelled before
+ * doing chroot.  This should load libgcc_s.so.1 early, so that it remains
+ * loaded after chroot.
+ *
+ * In case other libc flavours exhibit similar behaviour, this hack can
+ * be enabled at compile time by giving the --enable-pthread-cancel-probe
+ * option to configure.
+ */
+static void *
+thr_cancel (void *dummy)
+{
+  pause ();
+  return NULL;
+}
+
+static void
+probe_pthread_cancel (void)
+{
+  pthread_t t;
+  void *p;
+  pthread_create (&t, NULL, thr_cancel, NULL);
+  pthread_cancel (t);
+  pthread_join (t, &p);
+}
+#else
+# define probe_pthread_cancel()
+#endif
+
 struct signal_handler
 {
   int signo;
@@ -705,6 +754,35 @@ server (void)
   struct sigaction act;
   sigset_t sigs;
   void *res;
+
+  watcher_setup ();
+
+  /* chroot if necessary */
+  if (root_jail)
+    {
+      unsigned char random;
+
+      /* Make sure openssl opens /dev/urandom before the chroot. */
+      RAND_bytes (&random, 1);
+
+      /*
+       * Give libc a chance to load any libraries necessary for pthread_cancel
+       * to work.  See the comment above.
+       */
+      probe_pthread_cancel ();
+
+      if (chroot (root_jail))
+	abend (NULL, "chroot: %s", strerror (errno));
+
+      if (chdir ("/"))
+	abend (NULL, "chdir /: %s", strerror (errno));
+    }
+
+  if (group_id != -1 && (setgid (group_id) || setegid (group_id)))
+      abend (NULL, "setgid: %s", strerror (errno));
+
+  if (user_id != -1 && (setuid (user_id) || seteuid (user_id)))
+      abend (NULL, "setuid: %s", strerror (errno));
 
   sigemptyset (&sigs);
 
@@ -933,44 +1011,6 @@ detach (void)
     abend (NULL, "dup failed: %s", strerror (errno));
 }
 
-#if EARLY_PTHREAD_CANCEL_PROBE
-/*
- * In GNU libc, a call to pthread_cancel involves loading the libgcc_s.so.1
- * shared library.  If pound is running in a chroot, this fails with the
- * diagnostics
- *
- *    libgcc_s.so.1 must be installed for pthread_cancel to work
- *
- * after which the program aborts.  That means that normal pound shutdown
- * sequence is not performed properly.  To avoid this, the following kludge
- * is implemented: a dummy thread is created and immediately cancelled before
- * doing chroot.  This should load libgcc_s.so.1 early, so that it remains
- * loaded after chroot.
- *
- * In case other libc flavours exhibit similar behaviour, this hack can
- * be enabled at compile time by giving the --enable-pthread-cancel-probe
- * option to configure.
- */
-static void *
-thr_cancel (void *dummy)
-{
-  pause ();
-  return NULL;
-}
-
-static void
-probe_pthread_cancel (void)
-{
-  pthread_t t;
-  void *p;
-  pthread_create (&t, NULL, thr_cancel, NULL);
-  pthread_cancel (t);
-  pthread_join (t, &p);
-}
-#else
-# define probe_pthread_cancel()
-#endif
-
 static int
 read_fd (int fd)
 {
@@ -1111,8 +1151,6 @@ int
 main (const int argc, char **argv)
 {
   LISTENER *lstn;
-  uid_t user_id = -1;
-  gid_t group_id = -1;
 #ifndef SOL_TCP
   struct protoent *pe;
 #endif
@@ -1196,6 +1234,8 @@ main (const int argc, char **argv)
       group_id = gr->gr_gid;
     }
 
+  clock_gettime (CLOCK_REALTIME, &start_time);
+
   logmsg (LOG_NOTICE, "starting...");
 
   /* open listeners */
@@ -1213,11 +1253,9 @@ main (const int argc, char **argv)
   if (daemonize)
     detach ();
 
-  watcher_setup ();
-
   pidfile_create ();
 
-  /* chroot if necessary */
+  /* chroot preparations */
   if (root_jail)
     {
       unsigned char random;
@@ -1230,21 +1268,7 @@ main (const int argc, char **argv)
        * to work.  See the comment above.
        */
       probe_pthread_cancel ();
-
-      if (chroot (root_jail))
-	abend (NULL, "chroot: %s", strerror (errno));
-
-      if (chdir ("/"))
-	abend (NULL, "chdir /: %s", strerror (errno));
     }
-
-  if (group)
-    if (setgid (group_id) || setegid (group_id))
-      abend (NULL, "setgid: %s", strerror (errno));
-
-  if (user)
-    if (setuid (user_id) || seteuid (user_id))
-      abend (NULL, "setuid: %s", strerror (errno));
 
   if (enable_supervisor && daemonize)
     supervisor ();

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "January 2, 2025" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "September 28, 2025" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -105,6 +105,9 @@ disables the service 1 defined in the global scope of
 .PP
 The following commands are available:
 .TP
+.B core
+Show core status: daemon PID, uptime, worker statistics, etc.
+.TP
 \fBlist\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
 List status of the given object and its subordinates.  Without
 argument, shows all listeners and underlying objects.
@@ -140,7 +143,7 @@ environment variable.  Setting that variable to an empty value
 disables the configuration.
 .PP
 The file consists of simple statements and sections, delimited by any
-amount of newlines.  Comments are introduced by \fB#\dR sign and
+amount of newlines.  Comments are introduced by \fB#\fR sign and
 extend to the end of physical line where it appears.
 .PP
 Simple statements consist of a keyword and value separated by any

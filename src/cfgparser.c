@@ -340,6 +340,8 @@ workdir_get (char const *name)
 static int
 workdir_free (WORKDIR *wd)
 {
+  if (!wd)
+    return 0;
   if (wd->refcount == 0)
     {
       DLIST_REMOVE (&workdir_head, wd, link);
@@ -1058,7 +1060,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
 	      return result;
 	    }
 	}
-      else if (c_strcasecmp (p->name, name) == 0)
+      else if (p->type == KWT_WILDCARD || c_strcasecmp (p->name, name) == 0)
 	{
 	  *ref = p;
 	  if (p->type == KWT_ALIAS)
@@ -1074,7 +1076,7 @@ parser_find (CFGPARSER_TABLE *tab, char const *name, CFGPARSER_TABLE *buf,
   return NULL;
 }
 
-static CFGPARSER_TABLE global_parsetab[] = {
+CFGPARSER_TABLE cfg_global_parsetab[] = {
   {
     .name = "Include",
     .parser = cfg_parse_include
@@ -1120,7 +1122,7 @@ cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 							 &buf, &ref);
 
 	  if (!single_statement && ent == NULL)
-	    ent = parser_find (global_parsetab, tok->str, &buf, &ref);
+	    ent = parser_find (cfg_global_parsetab, tok->str, &buf, &ref);
 
 	  if (ref && ref->deprecated)
 	    {
@@ -1168,6 +1170,8 @@ cfgparser0 (CFGPARSER_TABLE *ptab, void *call_data, void *section_data,
 		  break;
 
 		case CFGPARSER_OK_NONL:
+		  if (single_statement)
+		    return CFGPARSER_OK_NONL;
 		  continue;
 
 		case CFGPARSER_FAIL:
@@ -1381,7 +1385,7 @@ cfg_assign_bool (void *call_data, void *section_data)
 }
 
 int
-cfg_assign_unsigned (void *call_data, void *section_data)
+cfg_assign_unsigned_min (unsigned *dst, unsigned minval, int quiet)
 {
   unsigned long n;
   char *p;
@@ -1397,13 +1401,29 @@ cfg_assign_unsigned (void *call_data, void *section_data)
       conf_error ("%s", "bad unsigned number");
       return CFGPARSER_FAIL;
     }
-  *(unsigned *)call_data = n;
+  if (n < minval)
+    {
+      if (quiet)
+	n = minval;
+      else
+	{
+	  conf_error ("value out of allowed range (>= %lu)", minval);
+	  return CFGPARSER_FAIL;
+	}
+    }
+  *dst = n;
   return 0;
 }
 
 int
+cfg_assign_unsigned (void *call_data, void *section_data)
+{
+  return cfg_assign_unsigned_min (call_data, 0, 0);
+}
+
+int
 cfg_assign_int (void *call_data, void *section_data)
-  {
+{
   long n;
   char *p;
   struct token *tok = gettkn_expect (T_NUMBER);
@@ -1422,7 +1442,8 @@ cfg_assign_int (void *call_data, void *section_data)
   return 0;
 }
 
-int cfg_assign_int_range (int *dst, int min, int max)
+int
+cfg_assign_int_range (int *dst, int min, int max)
 {
   int n;
   int rc;

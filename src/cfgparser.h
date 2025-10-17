@@ -292,10 +292,12 @@ enum keyword_type
     KWT_ALIAS,        /* Alias to another keyword */
     KWT_TABREF,       /* Reference to another table */
     KWT_SOFTREF,      /* Same as above, but overrides data/off pair of it. */
-    KWT_TOPLEVEL      /* Can appear only in the first entry of the table.
+    KWT_TOPLEVEL,     /* Can appear only in the first entry of the table.
 			 Remaining fields are ignored.
 			 Indicates that it is a top-level table, i.e. the
 			 input ends with an EOF. */
+    KWT_WILDCARD      /* Match any keyword.  Used in poundctl to skip
+			 statements of no interest. */
   };
 
 typedef struct cfg_parser_table
@@ -350,6 +352,7 @@ int cfg_assign_unsigned (void *call_data, void *section_data);
 int cfg_assign_int (void *call_data, void *section_data);
 int cfg_assign_mode (void *call_data, void *section_data);
 
+int cfg_assign_unsigned_min (unsigned *dst, unsigned minval, int quiet);
 int cfg_assign_int_range (int *dst, int min, int max);
 int cfg_assign_int_enum (int *dst, struct token *tok, struct kwtab *kwtab,
 			 char *what);
@@ -371,3 +374,4 @@ extern struct cfginput *cur_input;
 extern void (*cfg_error_msg) (char const *msg);
 extern char const *include_dir;
 extern WORKDIR *include_wd;
+extern CFGPARSER_TABLE cfg_global_parsetab[];

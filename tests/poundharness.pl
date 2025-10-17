@@ -16,13 +16,14 @@
 use strict;
 use warnings;
 use Socket qw(:DEFAULT :crlf);
-use threads;
 use Getopt::Long;
 use HTTP::Tiny;
 use POSIX qw(:sys_wait_h);
 use Cwd qw(abs_path);
 use File::Spec;
 use Socket;
+use lib qw(perllib);
+use PoundSub;
 
 my $config = 'pound.cfi:pound.cfg';
 my @preproc_files;
@@ -112,23 +113,30 @@ sub handle_pound_status {
 }
 
 sub sigchild {
-    my $pid = waitpid(-1, 0);
-    if ($pid == -1) {
-	return
+    while (1) {
+	my $pid = waitpid(-1, WNOHANG);
+	if ($pid == -1) {
+	    return
+	}
+	if (!defined($pound_pid) || $pid != $pound_pid) {
+	    $status_codes{$pid} = $?;
+	    $SIG{CHLD} = \&sigchild;
+	    return;
+	}
+	$pound_pid = 0;
+	if (handle_pound_status()) {
+	    $SIG{CHLD} = \&sigchild;
+	    return;
+	}
+	exit(EX_ERROR);
     }
-    if (!defined($pound_pid) || $pid != $pound_pid) {
-	$status_codes{$pid} = $?;
-	$SIG{CHLD} = \&sigchild;
-	return;
-    }
-    $pound_pid = 0;
-    if (handle_pound_status()) {
-	$SIG{CHLD} = \&sigchild;
-	return;
-    }
-    exit(EX_ERROR);
 };
 $SIG{CHLD} = \&sigchild;
+
+END {
+#    print STDERR "XXX END $$\n";
+    PoundSub->stop;
+}
 
 sub fakedns_self_check {
     my $params = 'ns1.example.org. rname@example.org. 42 7200 3600 1209600 3600';
@@ -139,6 +147,7 @@ sub fakedns_self_check {
     );
 
     local $ENV{LD_PRELOAD} = $fakedns;
+    local %SIG;
     if (open(my $fh, '-|', 'getsoa', 'example.org', '192.0.2.24')) {
 	chomp(my $s = <$fh>);
 	if ($s ne $params) {
@@ -193,7 +202,11 @@ GetOptions('config|f=s' => \$config,
 	       my (undef, $ip) = @_;
 	       assert_source_ip($ip);
 	       push @source_addr, $ip;
-	   })
+	   },
+	   'test-threads' => sub {
+	       exit(PoundSub->using_threads == 0);
+	   }
+    )
     or exit(EX_USAGE);
 
 my $script_file = shift @ARGV or usage_error "required parameter missing";
@@ -715,6 +728,18 @@ sub send {
     delete $self->{stats};
 }
 
+sub body_match {
+    my ($self, $body) = @_;
+    if ($self->{EXP}{BODY} =~ m{^:re\s*\n(.+)}s) {
+	my $rx = $1;
+	return $body =~ m{$rx}ms
+    } elsif ($self->{EXP}{BODY} =~ m{^:exact\s*\n(.+)}s) {
+	return $1 eq $body
+    } else {
+	return $self->{EXP}{BODY} eq $body
+    }
+}
+
 sub assert {
     my ($self, $response) = @_;
     if ($self->{EXP}) {
@@ -753,8 +778,7 @@ sub assert {
 	    }
 	}
 
-	if (exists($self->{EXP}{BODY}) &&
-	    $self->{EXP}{BODY} ne $response->{content}) {
+	if (exists($self->{EXP}{BODY}) && !$self->body_match($response->{content})) {
 	    print STDERR "$self->{filename}:$self->{EXP}{BEG}-$self->{EXP}{END}: response content mismatch\n";
 	    print STDERR "EXP '".$self->{EXP}{BODY}."'\n";
 	    print STDERR "GOT '".$response->{content}."'\n";
@@ -1334,15 +1358,7 @@ sub parse_expect_body {
 	    return;
 	}
 
-	# if (/^(?:#.*)?$/) {
-	#     next;
-	# }
-
-	if (/\\(.*)/) {
-	    push @{$self->{EXP}{BODY}}, $1;
-	} else {
-	    push @{$self->{EXP}{BODY}}, $_;
-	}
+        push @{$self->{EXP}{BODY}}, $_;
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file");
@@ -1637,15 +1653,15 @@ sub read_and_process {
     }
 
     foreach my $lst (@{$self->{listeners}}) {
-	threads->create(sub {
+	PoundSub->start(sub {
 	    my $lst = shift;
 	    $lst->listen;
 	    while (1) {
 		my $fh;
-		accept($fh, $lst->socket_handle) or threads->exit();
+		accept($fh, $lst->socket_handle) or PoundSub->exit();
 		process_http_request($fh, $lst)
 	    }
-	}, $lst)->detach;
+	}, $lst);
     }
 }
 
@@ -1771,7 +1787,7 @@ sub getline {
 sub ParseRequest {
     my $http = shift;
 
-    my $input = $http->getline() or threads->exit();
+    my $input = $http->getline() or PoundSub->exit();
     #    print "GOT $input\n";
     my @res = split " ", $input;
     if (@res != 3) {
@@ -1949,6 +1965,7 @@ B<poundharness>
 [B<--source-address=>I<IP>]
 [B<--startup-timeout=>I<N>]
 [B<--statistics>]
+[B<--test-threads>]
 [B<--transcript=>I<FILE>]
 [B<--verbose>]
 I<SCRIPT>
@@ -2011,6 +2028,20 @@ If these requirements are not met, it exits with code 77.
 Status 3 is returned if B<poundharness> is used with wrong command line
 switches or arguments,
 
+=head2 Multi-process model
+
+Whenever available, B<poundharness> uses I<perl threads> (I<ithreads>) to run its
+subordinate tasks (HTTP and DNS servers, in particular).  If perl is built
+without I<ithreads>, the traditional UNIX forking model is used, with each task
+served by a separate child process.  To see if threads are available, use
+
+  perl poundharness.pl --test-threads && echo OK
+
+(see the description of B<--test-threads> below).
+
+To force using forking module instead of the default threads, set the
+B<POUNDSUB_FORK> environment variable to a non-zero value.
+
 =head1 OPTIONS
 
 =over 4
@@ -2034,7 +2065,7 @@ This option also instructs B<poundharness> to emit a B<Resolv> section to
 the created B<pound.cfg> file and to extend the script file syntax with
 the statements described in the B<DNS Statements> section (see below).
 
-If B<Net::DNS::Nameserver> perl module is not available and B<poundharness>
+If B<Net::DNS> perl module is not available and B<poundharness>
 is given this option, it will exit with status code 77.
 
 To avoid spurious failures, before actually using this functionality
@@ -2071,6 +2102,14 @@ B<source> statement in the script file.
 =item B<-s>, B<--statistics>
 
 Print short statistics at the end of the run.
+
+=item B<--test-threads>
+
+Test if Perl threads are available.  Exit with success if so.  Use
+
+  perl poundharness.pl --test-threads && echo OK
+
+if you wish to get a textual response.
 
 =item B<-t>, B<--startup-timeout=> I<N>
 
@@ -2126,8 +2165,11 @@ in the response. E.g. the header line
 means that the response may not contain B<X-Forwarded-Proto: https> header.
 The test will fail if such header is present.
 
-Headers may be followed by a newline and response body (content).  If
-present, it will be matched literally against the actual response.
+Headers may be followed by a newline and response body (content), optionally
+preceded by B<:re> or B<:exact> on a separate line.  The B<:re> line instructs
+the program to treat the following text as a multiline regular expression.
+B<:exact> means use literal match.  This is also the default.
+
 The response is terminated with the word B<end> or B<endnonl> on a line
 alone (the semantics of the latter is described above).
 
@@ -2321,7 +2363,7 @@ They become available if the following two conditions are met:
 
 =item *
 
-The module B<Net::DNS::Nameserver> is available.
+The module B<Net::DNS> is available.
 
 =item *
 

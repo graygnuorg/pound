@@ -15,7 +15,7 @@
 ## You should have received a copy of the GNU General Public License
 ## along with pound.  If not, see <http://www.gnu.org/licenses/>.
 EXTRA_DIST = $(TESTSUITE_AT) testsuite package.m4 poundharness.pl\
- perllib/PoundNS.pm
+ perllib/PoundNS.pm perllib/PoundSub.pm
 DISTCLEANFILES       = atconfig $(check_SCRIPTS)
 MAINTAINERCLEANFILES = Makefile.in $(TESTSUITE) package.m4
 
@@ -74,6 +74,9 @@ TESTSUITE_AT = \
  chunked.at\
  chunked2.at\
  config.at\
+ ctl-core.at\
+ ctl-listener.at\
+ ctl-service.at\
  disable.at\
  dyn_a.at\
  dyn_a_ttl.at\
@@ -143,6 +146,7 @@ TESTSUITE_AT = \
  sessurl.at\
  set.at\
  stringmatch.at\
+ tbf.at\
  template.at\
  url.at\
  virthost.at\
@@ -152,7 +156,8 @@ TESTSUITE_AT = \
 noinst_PROGRAMS = tmplrun
 tmplrun_SOURCES = tmplrun.c
 AM_CPPFLAGS = -I$(top_srcdir)/src
-tmplrun_LDADD = ../src/libpound.a
+tmplrun_LDADD = ../src/libpound.a ../src/tmpl.o
+tmplrun_LDFLAGS = -lm
 
 if COND_DYNAMIC_BACKENDS
 if COND_BUILD_FAKEDNS
