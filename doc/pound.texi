@@ -4167,8 +4167,8 @@ contains whitespace or other non-printable characters.
 @end deffn
 
 @deffn {Request Conditional} QueryParam "@var{name}" [@var{options}] "@var{pattern}"
-Returns @samp{true}, if the value of the query parameter @var{name}
-matches @var{pattern}.
+Returns @samp{true}, if query parameter @var{name} is defined and
+its value matches @var{pattern}.
 
 @xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
