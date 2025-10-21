@@ -491,7 +491,7 @@ Resolve host names found in configuration file and returned in the
 
 You can use @option{-W no-dns} to disable it, in order to
 suppress potentially lengthy network host address lookups.  Make sure
-if your configuration file refers to backends only by their IP
+that your configuration file refers to backends only by their IP
 addresses in this case.
 
 This setting affects also redirection location rewriting:
@@ -4167,8 +4167,8 @@ contains whitespace or other non-printable characters.
 @end deffn
 
 @deffn {Request Conditional} QueryParam "@var{name}" [@var{options}] "@var{pattern}"
-Returns @samp{true}, if the value of the query parameter @var{name}
-matches @var{pattern}.
+Returns @samp{true}, if query parameter @var{name} is defined and
+its value matches @var{pattern}.
 
 @xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.
