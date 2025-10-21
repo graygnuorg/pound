@@ -119,6 +119,7 @@
 
 (defvar pound-matcher-keywords-2
   '("Header"
+    "Lua"
     "StringMatch"
     "QueryParam"))
 
@@ -167,6 +168,7 @@
     "LogLevel"
     "LogSuppress"
     "LogTag"
+    "LuaLoad"
     "MaxRequest"
     "MaxURI"
     "Metrics"
