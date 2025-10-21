@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-10-18
+Pound -- history of user-visible changes. 2025-10-21
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -85,7 +85,14 @@ statistics.
 * Openmetrics output
 
 Metrics describing listeners and services are labeled by the listener
-and service names, as well as by their ordinal numbers in the configuration.
+and service names, as well as by their ordinal numbers in the
+configuration.
+
+* Testsuite: optionally use multi-process model
+
+If Perl is built without ithreads, testsuite harness switches to
+multi-process model.
+
 
 Version 4.17, 2025-07-29
 

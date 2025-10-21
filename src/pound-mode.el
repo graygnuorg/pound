@@ -477,11 +477,11 @@ Return t if such was found, nil otherwise."
       (if ctx
 	  ctx
 	(goto-char start)
-	(cond
-	 ((re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]+\".*\"\\)\\|\\(?:TrustedIP[ \t]*\\(\\(?:[ \t]\".*\"\\)\\|\\(?:\\(?:#.*\\)?$\\)\\)\\)\\|Service\\>\\)" nil t)
-	  (if (not (looking-at "^[ \t]*\\(?:\\(?:\\(?:ACL[ \t]+\".*\"\\)\\|TrustedIP\\)[ \t]+-file\\(?:watch\\)?\\)"))
-	      (let ((pos (marker-position (nth 2 (match-data)))))
-		(pound-scan start (list pos))))))))))
+	(if (and
+	     (re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]+\".*\"\\)\\|\\(?:TrustedIP[ \t]*\\(\\(?:[ \t]\".*\"\\)\\|\\(?:\\(?:#.*\\)?$\\)\\)\\)\\|Service\\>\\)" nil t)
+	     (not (looking-at "^[ \t]*\\(?:\\(?:\\(?:ACL[ \t]+\".*\"\\)\\|TrustedIP\\)[ \t]+-file\\(?:watch\\)?\\)")))
+	    (let ((pos (marker-position (nth 2 (match-data)))))
+	      (pound-scan start (list pos))))))))
 
 (defun pound-indent-level ()
   (save-excursion
