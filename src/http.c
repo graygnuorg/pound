@@ -3456,7 +3456,7 @@ match_lua (SERVICE_COND *cond, POUND_HTTP *phttp, struct http_request *req)
 	goto err;
     }
 
-  res = pndlua_match (phttp, cond->clua.func, cond->clua.argc, argv);
+  res = pndlua_match (phttp, &cond->clua, argv);
 
  err:
   for (i = 0; i < cond->clua.argc && argv[i]; i++)

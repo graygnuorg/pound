@@ -5404,8 +5404,20 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = parse_resolver
   },
   {
+    .name = "LuaPath",
+    .parser = pndlua_parse_lua_path
+  },
+  {
+    .name = "LuaCPath",
+    .parser = pndlua_parse_lua_cpath
+  },
+  {
     .name = "LuaLoad",
     .parser = pndlua_parse_lua_load
+  },
+  {
+    .name = "LuaLoadGlobal",
+    .parser = pndlua_parse_lua_load_global
   },
   {
     .name = "WatcherTTL",
@@ -5807,6 +5819,10 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
+
+      if (pndlua_init ())
+	return -1;
+
       if (worker_min_count > worker_max_count)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)

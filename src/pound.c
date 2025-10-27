@@ -308,6 +308,7 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 
   http_request_init (&res->request);
   http_request_init (&res->response);
+
   /*
    * Note: submatch_queue_init is not called, because res is already
    * filled with zeros.  Revise this if submatch_queue stuff changes.
@@ -390,6 +391,7 @@ pound_http_dequeue (void)
     pthread_cond_signal (&arg_cond);
 
   active_threads++;
+  pndlua_http_init (res);
  end:
   pthread_mutex_unlock (&arg_mut);
   return res;
@@ -429,7 +431,7 @@ pound_http_destroy (POUND_HTTP *arg)
     }
 
   submatch_queue_free (&arg->smq);
-
+  pndlua_http_deinit (arg);
   free (arg);
 }
 
@@ -1199,8 +1201,6 @@ main (const int argc, char **argv)
   /* set new stack size  */
   if (pthread_attr_setstacksize (&thread_attr_worker, 1 << 18))
     abend (NULL, "can't set stack size");
-
-  pndlua_init ();
 
   json_memabrt = lognomem;
 

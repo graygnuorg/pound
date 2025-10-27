@@ -741,11 +741,19 @@ struct pass_file
   USER_PASS_HEAD head;
 };
 
+enum
+  {
+    PNDLUA_CTX_GLOBAL,
+    PNDLUA_CTX_THREAD
+  };
+
 struct cond_lua
 {
+  int ctx;
   char *func;
   int argc;
   char **argv;
+  struct locus_range locus;
 };
 
 typedef struct tbf TBF;
@@ -1079,6 +1087,10 @@ typedef struct _pound_http
 
   CONTENT_LENGTH res_bytes;
 
+#ifdef ENABLE_LUA
+  struct pndlua *pndlua;
+#endif
+
   SLIST_ENTRY(_pound_http) next;
 } POUND_HTTP;
 
@@ -1371,26 +1383,52 @@ TBF *tbf_alloc (uint64_t rate, unsigned burst);
 int tbf_eval (TBF *env, char const *keyid);
 
 #if ENABLE_LUA
-void pndlua_init (void);
-int pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv);
+int pndlua_init (void);
+void pndlua_http_init (POUND_HTTP *phttp);
+void pndlua_http_deinit (POUND_HTTP *phttp);
+int pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv);
+int pndlua_parse_lua_path (void *call_data, void *section_data);
+int pndlua_parse_lua_cpath (void *call_data, void *section_data);
 int pndlua_parse_lua_load (void *call_data, void *section_data);
+int pndlua_parse_lua_load_global (void *call_data, void *section_data);
 int pndlua_parse_cond (struct cond_lua *cond);
 #else
-static inline void pndlua_init (void) { }
+static inline int pndlua_init (void) { return 0; }
+#define pndlua_http_init(phttp)
+#define pndlua_http_deinit(phttp)
 static inline int
-pndlua_parse_lua_load (void *call_data, void *section_data)
+cfg_no_lua (void)
 {
   conf_error ("%s", "this pound is compiled without support for Lua");
   return CFGPARSER_FAIL;
+}
+static inline int
+pndlua_parse_lua_load (void *call_data, void *section_data)
+{
+  return cfg_no_lua ();
+}
+static inline int
+pndlua_parse_lua_load_global (void *call_data, void *section_data)
+{
+  return cfg_no_lua ();
+}
+static inline int
+pndlua_parse_lua_path (void *call_data, void *section_data)
+{
+  return cfg_no_lua ();
+}
+static inline int
+pndlua_parse_lua_cpath (void *call_data, void *section_data)
+{
+  return cfg_no_lua ();
 }
 static inline int
 pndlua_parse_cond (struct cond_lua *cond)
 {
-  conf_error ("%s", "this pound is compiled without support for Lua");
-  return CFGPARSER_FAIL;
+  return cfg_no_lua ();
 }
 static inline int
-pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv)
+pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 {
   return -1;
 }

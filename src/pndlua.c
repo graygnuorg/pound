@@ -21,53 +21,188 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
-static lua_State *pndlua_state;
+struct pndlua
+{
+  lua_State *state;
+  DLIST_ENTRY (pndlua) link;
+};
+
+static DLIST_HEAD (, pndlua) pndlua_head =
+  DLIST_HEAD_INITIALIZER (pndlua_head);
+static pthread_mutex_t pndlua_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+void
+pndlua_http_init (POUND_HTTP *phttp)
+{
+  if (!DLIST_EMPTY (&pndlua_head))
+    {
+      pthread_mutex_lock (&pndlua_mutex);
+      phttp->pndlua = malloc (sizeof (phttp->pndlua[0]));
+      if (phttp->pndlua)
+	{
+	  phttp->pndlua = DLIST_FIRST (&pndlua_head);
+	  DLIST_SHIFT (&pndlua_head, link);
+	}
+      else
+	lognomem ();
+      pthread_mutex_unlock (&pndlua_mutex);
+    }
+}
+
+void
+pndlua_http_deinit (POUND_HTTP *phttp)
+{
+  if (phttp->pndlua)
+    {
+      pthread_mutex_lock (&pndlua_mutex);
+      DLIST_INSERT_HEAD (&pndlua_head, phttp->pndlua, link);
+      pthread_mutex_unlock (&pndlua_mutex);
+      phttp->pndlua = NULL;
+    }
+}
+
+static struct pndlua *pndlua_state;
+static int pndlua_state_count;
 static pthread_mutex_t pndlua_state_mutex = PTHREAD_MUTEX_INITIALIZER;
 
+struct pndlua_source
+{
+  char *name;
+  struct locus_range locus;
+  SLIST_ENTRY (pndlua_source) next;
+};
+
+static SLIST_HEAD (pndlua_source_head,pndlua_source)
+  global_sources = SLIST_HEAD_INITIALIZER (global_sources),
+  thread_sources = SLIST_HEAD_INITIALIZER (thread_sources);
+
+enum
+  {
+    PNDLUA_PATH,
+    PNDLUA_CPATH
+  };
+
+static char *path_name[] = { "path", "cpath" };
+char *pndlua_path[2];
+
+struct cond_entry
+{
+  struct cond_lua *cond;
+  SLIST_ENTRY (cond_entry) next;
+};
+
+static SLIST_HEAD (,cond_entry) cond_head = SLIST_HEAD_INITIALIZER (cond_head);
+
+static void
+cond_head_add (struct cond_lua *cond)
+{
+    struct cond_entry *ent;
+    XZALLOC (ent);
+    ent->cond = cond;
+    SLIST_INSERT_TAIL (&cond_head, ent, next);
+}
+
+static void
+cond_head_free (void)
+{
+  while (!SLIST_EMPTY (&cond_head))
+    {
+      struct cond_entry *ent = SLIST_FIRST (&cond_head);
+      SLIST_REMOVE_HEAD (&cond_head, next);
+      free (ent);
+    }
+}
+
+static inline int
+function_is_defined (lua_State *state, char const *name)
+{
+  int f;
+
+  lua_getglobal (state, name);
+  f = lua_isfunction (state, -1);
+  lua_pop (state, 1);
+  return f;
+}
+
 static int
-pndlua_load (char const *fname)
+cond_lua_resolve (struct cond_lua *cond)
+{
+  if (pndlua_state_count > 1 &&
+      function_is_defined (pndlua_state[1].state, cond->func))
+    cond->ctx = PNDLUA_CTX_THREAD;
+  else if (function_is_defined (pndlua_state[0].state, cond->func))
+    cond->ctx = PNDLUA_CTX_GLOBAL;
+  else
+    {
+      conf_error_at_locus_range (&cond->locus, "Lua function %s not defined",
+				 cond->func);
+      return -1;
+    }
+  return 0;
+}
+
+static int
+cond_head_resolve (void)
+{
+  struct cond_entry *ent;
+  int err = 0;
+  SLIST_FOREACH (ent, &cond_head, next)
+    if (cond_lua_resolve (ent->cond))
+      ++err;
+  return err;
+}
+
+static int
+source_load (lua_State *state, struct pndlua_source *source)
 {
   int res;
 
-  if (luaL_loadfile (pndlua_state, fname) != LUA_OK)
+  if (luaL_loadfile (state, source->name) != LUA_OK)
     {
-      logmsg (LOG_ERR, "error loading Lua file %s: %s", fname,
-	      lua_tostring (pndlua_state, -1));
-      lua_pop (pndlua_state, 1);
+      conf_error_at_locus_range (&source->locus,
+				 "error loading Lua file %s: %s",
+				 source->name,
+				 lua_tostring (state, -1));
+      lua_pop (state, 1);
       return -1;
     }
 
-  res = lua_pcall (pndlua_state, 0, LUA_MULTRET, 0);
+  res = lua_pcall (state, 0, LUA_MULTRET, 0);
   switch (res)
     {
     case LUA_OK:
       break;
 
     case LUA_ERRRUN:
-      logmsg (LOG_ERR, "Lua runtime error in %s: %s",
-	      fname, lua_tostring (pndlua_state, -1));
-      lua_pop (pndlua_state, 1);
+      conf_error_at_locus_range (&source->locus,
+				 "Lua runtime error in %s: %s",
+				 source->name, lua_tostring (state, -1));
+      lua_pop (state, 1);
       return -1;
 
     case LUA_ERRMEM:
-      logmsg (LOG_ERR, "out of memory running Lua code in %s", fname);
+      conf_error_at_locus_range (&source->locus,
+				 "out of memory running Lua code in %s",
+				 source->name);
       return -1;
 
     case LUA_ERRERR:
-      logmsg (LOG_ERR, "Lua message handler error in %s: %s",
-	      fname, lua_tostring (pndlua_state, -1));
-      lua_pop (pndlua_state, 1);
+      conf_error_at_locus_range (&source->locus,
+				 "Lua message handler error in %s: %s",
+				 source->name, lua_tostring (state, -1));
+      lua_pop (state, 1);
       return -1;
 
     case LUA_ERRGCMM:
-      logmsg (LOG_ERR, "Lua garbage collector error in %s: %s",
-	      fname, lua_tostring (pndlua_state, -1));
-      lua_pop (pndlua_state, 1);
+      conf_error_at_locus_range (&source->locus,
+				 "Lua garbage collector error in %s: %s",
+				 source->name, lua_tostring (state, -1));
+      lua_pop (state, 1);
       return -1;
 
     default:
-      logmsg (LOG_ERR, "unhandled Lua error %d in file %s",
-	      res, fname);
+      conf_error_at_locus_range (&source->locus, "unhandled Lua error %d",
+				 res);
       return -1;
     }
 
@@ -75,32 +210,50 @@ pndlua_load (char const *fname)
 }
 
 int
-pndlua_match (POUND_HTTP *phttp, char const *fname, int argc, char **argv)
+pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 {
   int i;
   int res;
+  lua_State *state;
 
-  pthread_mutex_lock (&pndlua_state_mutex);
+  if (cond->ctx == PNDLUA_CTX_GLOBAL)
+    {
+      pthread_mutex_lock (&pndlua_state_mutex);
+      state = pndlua_state[0].state;
+    }
+  else
+    {
+      state = phttp->pndlua->state;
+      if (!state)
+	{
+	  logmsg (LOG_ERR, "(%"PRItid") no Lua state (allocation error)",
+		  POUND_TID ());
+	  return -1;
+	}
+    }
 
-  lua_getglobal (pndlua_state, fname);
-  for (i = 0; i < argc; i++)
-    lua_pushstring (pndlua_state, argv[i]);
+  lua_getglobal (state, cond->func);
+  for (i = 0; i < cond->argc; i++)
+    lua_pushstring (state, argv[i]);
 
-  res = lua_pcall (pndlua_state, argc, 1, 0);
+  res = lua_pcall (state, cond->argc, 1, 0);
   if (res)
     {
-      logmsg (LOG_ERR, "(%"PRItid") error calling Lua function %s: %s",
-	      POUND_TID (), fname, lua_tostring (pndlua_state, -1));
+      conf_error_at_locus_range (&cond->locus,
+				 "(%"PRItid") error calling Lua function %s: %s",
+				 POUND_TID (), cond->func,
+				 lua_tostring (state, -1));
       res = -1;
     }
   else
     {
-      res = lua_toboolean (pndlua_state, -1);
+      res = lua_toboolean (state, -1);
     }
 
-  lua_pop (pndlua_state, 1);
+  lua_pop (state, 1);
 
-  pthread_mutex_unlock (&pndlua_state_mutex);
+  if (cond->ctx == PNDLUA_CTX_GLOBAL)
+    pthread_mutex_unlock (&pndlua_state_mutex);
   return res;
 }
 
@@ -156,30 +309,157 @@ static struct kwtab severity_table[] = {
   { NULL }
 };
 
-void
+static void
+pndlua_add_path (lua_State *L, int type)
+{
+  if (!pndlua_path[type])
+    return;
+
+  lua_getglobal (L, "package");
+  lua_pushstring (L, pndlua_path[type]);
+  lua_pushstring (L, ";");
+
+  /* Concatenate. */
+  lua_getfield (L, -3, path_name[type]);
+  lua_concat (L, 3);
+
+  /* Store new path and clean up stack. */
+  lua_setfield (L, -2, path_name[type]);
+  lua_pop (L, 1);
+}
+
+static lua_State *
+pndlua_new_state (void)
+{
+  int i;
+  lua_State *state;
+
+  state = luaL_newstate ();
+  luaL_openlibs (state);
+
+  lua_newtable (state);
+
+  for (i = 0; severity_table[i].name; i++)
+    pndlua_dcl_integer (state, severity_table[i].name, severity_table[i].tok);
+
+  pndlua_dcl_function (state, "log", pndlua_pound_log);
+  lua_setglobal (state, "pound");
+
+  for (i = 0; i < sizeof (pndlua_path) / sizeof (pndlua_path[0]); i++)
+    if (pndlua_path[i])
+      pndlua_add_path (state, i);
+
+  return state;
+}
+
+static int
+load_source_list (int i, struct pndlua_source_head *head)
+{
+  lua_State *L = pndlua_state[i].state;
+  struct pndlua_source *source;
+  int rc = 0;
+  lua_pushnumber (L, i);
+  lua_setglobal (L, "load_state");
+  SLIST_FOREACH (source, head, next)
+    {
+      if ((rc = source_load (L, source)) != 0)
+	break;
+    }
+  lua_pop (L, 1);
+  return rc;
+}
+
+static void
+free_source_list (struct pndlua_source_head *head)
+{
+  while (!SLIST_EMPTY (head))
+    {
+      struct pndlua_source *source = SLIST_FIRST (head);
+      SLIST_REMOVE_HEAD (head, next);
+      locus_range_unref (&source->locus);
+      free (source->name);
+      free (source);
+    }
+}
+
+int
 pndlua_init (void)
 {
   int i;
 
-  pndlua_state = luaL_newstate ();
-  luaL_openlibs (pndlua_state);
+  pndlua_state_count = 1;
+  if (!SLIST_EMPTY (&thread_sources))
+    pndlua_state_count += worker_max_count;
 
-  lua_newtable (pndlua_state);
+  pndlua_state = xcalloc (pndlua_state_count, sizeof (*pndlua_state));
+  pndlua_state[0].state = pndlua_new_state ();
+  for (i = 1; i < pndlua_state_count; i++)
+    {
+      pndlua_state[i].state = pndlua_new_state ();
+      DLIST_INSERT_TAIL (&pndlua_head, &pndlua_state[i], link);
+    }
 
-  for (i = 0; severity_table[i].name; i++)
-    pndlua_dcl_integer (pndlua_state,
-			severity_table[i].name, severity_table[i].tok);
+  /* Load global sources. */
+  if (load_source_list (0, &global_sources))
+    return -1;
 
-  pndlua_dcl_function (pndlua_state, "log", pndlua_pound_log);
-  lua_setglobal (pndlua_state, "pound");
+  /* Load per-thread sources. */
+  for (i = 1; i < pndlua_state_count; i++)
+    if (load_source_list (i, &thread_sources))
+      return -1;
+
+  /* Resolve invocation contexts. */
+  if (cond_head_resolve ())
+    return -1;
+
+  /* Free unneeded memory. */
+  free_source_list (&global_sources);
+  free_source_list (&thread_sources);
+  free (pndlua_path[PNDLUA_PATH]);
+  free (pndlua_path[PNDLUA_CPATH]);
+  cond_head_free ();
+
+  return 0;
 }
 
+static int
+parse_lua_path (int n)
+{
+  char *path, *s, *p;
+  int rc = cfg_assign_string (&path, NULL);
+  if (rc != CFGPARSER_OK)
+    return rc;
+  for (s = strtok_r (path, ";", &p); s; s = strtok_r (NULL, ";", &p))
+    {
+      if (!strchr (s, '?'))
+	{
+	  conf_error ("%s: this doesn't look like a Lua path component", s);
+	  rc = CFGPARSER_FAIL;
+	}
+    }
+  if (rc == CFGPARSER_OK)
+    pndlua_path[n] = path;
+  return rc;
+}
+
 int
-pndlua_parse_lua_load (void *call_data, void *section_data)
+pndlua_parse_lua_path (void *call_data, void *section_data)
+{
+  return parse_lua_path (PNDLUA_PATH);
+}
+
+int
+pndlua_parse_lua_cpath (void *call_data, void *section_data)
+{
+  return parse_lua_path (PNDLUA_CPATH);
+}
+
+static int
+parse_lua_load (struct pndlua_source_head *head)
 {
   struct token *tok;
   char *filename;
-  int res;
+  struct pndlua_source *src;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -187,14 +467,25 @@ pndlua_parse_lua_load (void *call_data, void *section_data)
   if ((filename = filename_resolve (tok->str)) == NULL)
     return CFGPARSER_FAIL;
 
-  if (pndlua_load (filename) == 0)
-    res = CFGPARSER_OK;
-  else
-    res = CFGPARSER_FAIL;
+  XZALLOC (src);
+  src->name = filename;
+  locus_range_init (&src->locus);
+  locus_range_copy (&src->locus, &tok->locus);
+  SLIST_INSERT_TAIL (head, src, next);
 
-  free (filename);
+  return 0;
+}
 
-  return res;
+int
+pndlua_parse_lua_load (void *call_data, void *section_data)
+{
+  return parse_lua_load (&thread_sources);
+}
+
+int
+pndlua_parse_lua_load_global (void *call_data, void *section_data)
+{
+  return parse_lua_load (&global_sources);
 }
 
 int
@@ -205,6 +496,10 @@ pndlua_parse_cond (struct cond_lua *cond)
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
+
+  locus_range_init (&cond->locus);
+  locus_range_copy (&cond->locus, &tok->locus);
+
   cond->func = xstrdup (tok->str);
   while (1)
     {
@@ -228,5 +523,6 @@ pndlua_parse_cond (struct cond_lua *cond)
 	  return CFGPARSER_FAIL;
 	}
     }
+  cond_head_add (cond);
   return CFGPARSER_OK_NONL;
 }
