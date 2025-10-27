@@ -358,14 +358,24 @@ load_source_list (int i, struct pndlua_source_head *head)
   lua_State *L = pndlua_state[i].state;
   struct pndlua_source *source;
   int rc = 0;
-  lua_pushnumber (L, i);
-  lua_setglobal (L, "load_state");
+
+  lua_getglobal (L, "pound");
+  lua_pushstring (L, "loadctx");
+  lua_pushinteger (L, i);
+  lua_rawset (L, -3);
+
   SLIST_FOREACH (source, head, next)
     {
       if ((rc = source_load (L, source)) != 0)
 	break;
     }
+
+  lua_pushstring (L, "loadctx");
+  lua_pushnil (L);
+  lua_rawset (L, -3);
+
   lua_pop (L, 1);
+
   return rc;
 }
 
