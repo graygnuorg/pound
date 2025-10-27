@@ -21,27 +21,40 @@
 #include "lauxlib.h"
 #include "lualib.h"
 
+/* Lua context, associated with a worker thread (POUND_HTTP structure). */
 struct pndlua
 {
-  lua_State *state;
-  DLIST_ENTRY (pndlua) link;
+  lua_State *state;           /* Lua state.  Null if global context. */
+  DLIST_ENTRY (pndlua) link;  /* Links to free context list. */
 };
 
-static DLIST_HEAD (, pndlua) pndlua_head =
-  DLIST_HEAD_INITIALIZER (pndlua_head);
+/*
+ * Array of allocated contexts.  It holds from 1 to worker_max_count + 1
+ * entries.  pndlua_ctx[0] is global context.  Rest of entries are contexts
+ * to use with worker threads.
+ */
+static struct pndlua *pndlua_ctx;
+/* Number of entries allocated in pndlua_ctx. */
+static int pndlua_ctx_count;
+/* Global mutex serializes access to pndlua_ctx[0]. */
+static pthread_mutex_t pndlua_global_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+/* Free context list. */
+static DLIST_HEAD (, pndlua) pndlua_avail =
+  DLIST_HEAD_INITIALIZER (pndlua_avail);
 static pthread_mutex_t pndlua_mutex = PTHREAD_MUTEX_INITIALIZER;
 
 void
 pndlua_http_init (POUND_HTTP *phttp)
 {
-  if (!DLIST_EMPTY (&pndlua_head))
+  if (!DLIST_EMPTY (&pndlua_avail))
     {
       pthread_mutex_lock (&pndlua_mutex);
       phttp->pndlua = malloc (sizeof (phttp->pndlua[0]));
       if (phttp->pndlua)
 	{
-	  phttp->pndlua = DLIST_FIRST (&pndlua_head);
-	  DLIST_SHIFT (&pndlua_head, link);
+	  phttp->pndlua = DLIST_FIRST (&pndlua_avail);
+	  DLIST_SHIFT (&pndlua_avail, link);
 	}
       else
 	lognomem ();
@@ -55,16 +68,12 @@ pndlua_http_deinit (POUND_HTTP *phttp)
   if (phttp->pndlua)
     {
       pthread_mutex_lock (&pndlua_mutex);
-      DLIST_INSERT_HEAD (&pndlua_head, phttp->pndlua, link);
+      DLIST_INSERT_HEAD (&pndlua_avail, phttp->pndlua, link);
       pthread_mutex_unlock (&pndlua_mutex);
       phttp->pndlua = NULL;
     }
 }
 
-static struct pndlua *pndlua_state;
-static int pndlua_state_count;
-static pthread_mutex_t pndlua_state_mutex = PTHREAD_MUTEX_INITIALIZER;
-
 struct pndlua_source
 {
   char *name;
@@ -156,10 +165,10 @@ function_is_defined (lua_State *state, char const *name)
 static int
 cond_lua_resolve (struct cond_lua *cond)
 {
-  if (pndlua_state_count > 1 &&
-      function_is_defined (pndlua_state[1].state, cond->func))
+  if (pndlua_ctx_count > 1 &&
+      function_is_defined (pndlua_ctx[1].state, cond->func))
     cond->ctx = PNDLUA_CTX_THREAD;
-  else if (function_is_defined (pndlua_state[0].state, cond->func))
+  else if (function_is_defined (pndlua_ctx[0].state, cond->func))
     cond->ctx = PNDLUA_CTX_GLOBAL;
   else
     {
@@ -247,8 +256,8 @@ pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 
   if (cond->ctx == PNDLUA_CTX_GLOBAL)
     {
-      pthread_mutex_lock (&pndlua_state_mutex);
-      state = pndlua_state[0].state;
+      pthread_mutex_lock (&pndlua_global_mutex);
+      state = pndlua_ctx[0].state;
     }
   else
     {
@@ -282,7 +291,7 @@ pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
   lua_pop (state, 1);
 
   if (cond->ctx == PNDLUA_CTX_GLOBAL)
-    pthread_mutex_unlock (&pndlua_state_mutex);
+    pthread_mutex_unlock (&pndlua_global_mutex);
   return res;
 }
 
@@ -306,7 +315,6 @@ pndlua_pound_log (lua_State *s)
   logmsg (prio, "%s", msg);
   return 0;
 }
-
 
 typedef int (*PND_LUAFUNC) (lua_State *);
 
@@ -391,7 +399,7 @@ pndlua_new_state (void)
 static int
 source_list_load (int i, struct pndlua_source_head *head)
 {
-  lua_State *L = pndlua_state[i].state;
+  lua_State *L = pndlua_ctx[i].state;
   struct pndlua_source *source;
   int rc = 0;
 
@@ -433,16 +441,16 @@ pndlua_init (void)
 {
   int i;
 
-  pndlua_state_count = 1;
+  pndlua_ctx_count = 1;
   if (!SLIST_EMPTY (&thread_sources))
-    pndlua_state_count += worker_max_count;
+    pndlua_ctx_count += worker_max_count;
 
-  pndlua_state = xcalloc (pndlua_state_count, sizeof (*pndlua_state));
-  pndlua_state[0].state = pndlua_new_state ();
-  for (i = 1; i < pndlua_state_count; i++)
+  pndlua_ctx = xcalloc (pndlua_ctx_count, sizeof (*pndlua_ctx));
+  pndlua_ctx[0].state = pndlua_new_state ();
+  for (i = 1; i < pndlua_ctx_count; i++)
     {
-      pndlua_state[i].state = pndlua_new_state ();
-      DLIST_INSERT_TAIL (&pndlua_head, &pndlua_state[i], link);
+      pndlua_ctx[i].state = pndlua_new_state ();
+      DLIST_INSERT_TAIL (&pndlua_avail, &pndlua_ctx[i], link);
     }
 
   /* Load global sources. */
@@ -450,7 +458,7 @@ pndlua_init (void)
     return -1;
 
   /* Load per-thread sources. */
-  for (i = 1; i < pndlua_state_count; i++)
+  for (i = 1; i < pndlua_ctx_count; i++)
     if (source_list_load (i, &thread_sources))
       return -1;
 
