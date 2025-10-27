@@ -60,7 +60,7 @@ pndlua_http_deinit (POUND_HTTP *phttp)
       phttp->pndlua = NULL;
     }
 }
-
+
 static struct pndlua *pndlua_state;
 static int pndlua_state_count;
 static pthread_mutex_t pndlua_state_mutex = PTHREAD_MUTEX_INITIALIZER;
@@ -76,6 +76,13 @@ static SLIST_HEAD (pndlua_source_head,pndlua_source)
   global_sources = SLIST_HEAD_INITIALIZER (global_sources),
   thread_sources = SLIST_HEAD_INITIALIZER (thread_sources);
 
+struct path_dir
+{
+  SLIST_ENTRY (path_dir) next;
+  char name[1];
+};
+typedef SLIST_HEAD(,path_dir) PATH_HEAD;
+
 enum
   {
     PNDLUA_PATH,
@@ -83,7 +90,29 @@ enum
   };
 
 static char *path_name[] = { "path", "cpath" };
-char *pndlua_path[2];
+static PATH_HEAD path_head[2] = {
+  SLIST_HEAD_INITIALIZER (path_head[0]),
+  SLIST_HEAD_INITIALIZER (path_head[1])
+};
+
+static void
+path_list_add (PATH_HEAD *head, char const *name)
+{
+  struct path_dir *dir = xmalloc (sizeof (*dir) + strlen (name));
+  strcpy (dir->name, name);
+  SLIST_INSERT_TAIL (head, dir, next);
+}
+
+static void
+path_list_free (PATH_HEAD *head)
+{
+  while (!SLIST_EMPTY (head))
+    {
+      struct path_dir *dir = SLIST_FIRST (head);
+      SLIST_REMOVE_HEAD (head, next);
+      free (dir);
+    }
+}
 
 struct cond_entry
 {
@@ -312,16 +341,24 @@ static struct kwtab severity_table[] = {
 static void
 pndlua_add_path (lua_State *L, int type)
 {
-  if (!pndlua_path[type])
+  struct path_dir *dir;
+  int n;
+
+  if (SLIST_EMPTY (&path_head[type]))
     return;
 
   lua_getglobal (L, "package");
-  lua_pushstring (L, pndlua_path[type]);
-  lua_pushstring (L, ";");
+  n = 1;
+  SLIST_FOREACH (dir, &path_head[type], next)
+    {
+      lua_pushstring (L, dir->name);
+      lua_pushstring (L, ";");
+      n += 2;
+    }
 
   /* Concatenate. */
-  lua_getfield (L, -3, path_name[type]);
-  lua_concat (L, 3);
+  lua_getfield (L, -n, path_name[type]);
+  lua_concat (L, n);
 
   /* Store new path and clean up stack. */
   lua_setfield (L, -2, path_name[type]);
@@ -345,15 +382,14 @@ pndlua_new_state (void)
   pndlua_dcl_function (state, "log", pndlua_pound_log);
   lua_setglobal (state, "pound");
 
-  for (i = 0; i < sizeof (pndlua_path) / sizeof (pndlua_path[0]); i++)
-    if (pndlua_path[i])
-      pndlua_add_path (state, i);
+  for (i = 0; i < sizeof (path_head) / sizeof (path_head[0]); i++)
+    pndlua_add_path (state, i);
 
   return state;
 }
 
 static int
-load_source_list (int i, struct pndlua_source_head *head)
+source_list_load (int i, struct pndlua_source_head *head)
 {
   lua_State *L = pndlua_state[i].state;
   struct pndlua_source *source;
@@ -380,7 +416,7 @@ load_source_list (int i, struct pndlua_source_head *head)
 }
 
 static void
-free_source_list (struct pndlua_source_head *head)
+source_list_free (struct pndlua_source_head *head)
 {
   while (!SLIST_EMPTY (head))
     {
@@ -410,12 +446,12 @@ pndlua_init (void)
     }
 
   /* Load global sources. */
-  if (load_source_list (0, &global_sources))
+  if (source_list_load (0, &global_sources))
     return -1;
 
   /* Load per-thread sources. */
   for (i = 1; i < pndlua_state_count; i++)
-    if (load_source_list (i, &thread_sources))
+    if (source_list_load (i, &thread_sources))
       return -1;
 
   /* Resolve invocation contexts. */
@@ -423,10 +459,10 @@ pndlua_init (void)
     return -1;
 
   /* Free unneeded memory. */
-  free_source_list (&global_sources);
-  free_source_list (&thread_sources);
-  free (pndlua_path[PNDLUA_PATH]);
-  free (pndlua_path[PNDLUA_CPATH]);
+  source_list_free (&global_sources);
+  source_list_free (&thread_sources);
+  path_list_free (&path_head[PNDLUA_PATH]);
+  path_list_free (&path_head[PNDLUA_CPATH]);
   cond_head_free ();
 
   return 0;
@@ -446,9 +482,9 @@ parse_lua_path (int n)
 	  conf_error ("%s: this doesn't look like a Lua path component", s);
 	  rc = CFGPARSER_FAIL;
 	}
+      else
+	path_list_add (&path_head[n], s);
     }
-  if (rc == CFGPARSER_OK)
-    pndlua_path[n] = path;
   return rc;
 }
 
