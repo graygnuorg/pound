@@ -110,7 +110,9 @@ TESTSUITE_AT = \
  loglevrun.at\
  logsup.at\
  lstset.at\
- lua.at\
+ lua-load.at\
+ lua-cond.at\
+ lua-path.at\
  maxrequest.at\
  maxuri.at\
  multival.at\

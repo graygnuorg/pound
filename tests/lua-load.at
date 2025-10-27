@@ -13,42 +13,67 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Lua support])
-AT_KEYWORDS([cond lua])
+AT_SETUP([Lua load])
+AT_KEYWORDS([cond lua lua-load])
 
 AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
 
-AT_DATA([xtest.lua],
-[function xtest(a)
-    pound.log(pound.DEBUG, "xtest called with argument " .. a)
-    return tonumber(a) > 10
+AT_DATA([gtest.lua],
+[function gtest()
+    return pound.loadctx == nil
 end
+pound.log(pound.DEBUG, "Global Context " .. tostring(pound.loadctx))
 ])
 
-PT_CHECK([Lua
+AT_DATA([xtest.lua],
+[function xtest()
+    return pound.loadctx == nil 
+end
+pound.log(pound.DEBUG, "Context " .. tostring(pound.loadctx))
+])
+
+PT_CHECK([
+WorkerMinCount 2
+WorkerMaxCount 2
+Lua
 	Load "xtest.lua"
+	LoadGlobal "gtest.lua"
 End
 ListenHTTP
 	Service
-		Header ["X-Test" -re "([0-9]+)$"]
-		Lua "xtest" "$1"
+		Path "/echo/foo"
+		Lua "xtest"
+		Backend
+		End
+	End
+	Service
+		Path "/echo/bar"
+		Lua "gtest"
 		Backend
 		End
 	End
 End
 ],
 [GET /echo/foo
-X-Test: 2
-end
-
-503
-end
-
-GET /echo/foo
-X-Test: 22
 end
 
 200
+x-backend-number: 0
+end
+
+GET /echo/bar
+end
+
+200
+x-backend-number: 1
 end
 ])
+
+AT_CHECK([grep Context pound.log],
+[0],
+[pound: Global Context 0
+pound: Context 1
+pound: Context 2
+])
+
 AT_CLEANUP

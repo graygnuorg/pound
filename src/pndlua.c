@@ -213,8 +213,8 @@ source_load (lua_State *state, struct pndlua_source *source)
 
     case LUA_ERRRUN:
       conf_error_at_locus_range (&source->locus,
-				 "Lua runtime error in %s: %s",
-				 source->name, lua_tostring (state, -1));
+				 "Lua runtime error: %s",
+				 lua_tostring (state, -1));
       lua_pop (state, 1);
       return -1;
 
