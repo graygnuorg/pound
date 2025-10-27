@@ -1387,10 +1387,7 @@ int pndlua_init (void);
 void pndlua_http_init (POUND_HTTP *phttp);
 void pndlua_http_deinit (POUND_HTTP *phttp);
 int pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv);
-int pndlua_parse_lua_path (void *call_data, void *section_data);
-int pndlua_parse_lua_cpath (void *call_data, void *section_data);
-int pndlua_parse_lua_load (void *call_data, void *section_data);
-int pndlua_parse_lua_load_global (void *call_data, void *section_data);
+int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_cond (struct cond_lua *cond);
 #else
 static inline int pndlua_init (void) { return 0; }
@@ -1403,22 +1400,7 @@ cfg_no_lua (void)
   return CFGPARSER_FAIL;
 }
 static inline int
-pndlua_parse_lua_load (void *call_data, void *section_data)
-{
-  return cfg_no_lua ();
-}
-static inline int
-pndlua_parse_lua_load_global (void *call_data, void *section_data)
-{
-  return cfg_no_lua ();
-}
-static inline int
-pndlua_parse_lua_path (void *call_data, void *section_data)
-{
-  return cfg_no_lua ();
-}
-static inline int
-pndlua_parse_lua_cpath (void *call_data, void *section_data)
+pndlua_parse_config (void *call_data, void *section_data)
 {
   return cfg_no_lua ();
 }

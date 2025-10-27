@@ -1252,17 +1252,6 @@ static CFGPARSER_TABLE use_backend_parsetab[] = {
   { NULL }
 };
 
-static inline int
-parser_loop (CFGPARSER_TABLE *ptab,
-	     void *call_data, void *section_data,
-	     struct locus_range *retrange)
-{
-  return cfgparser_loop (ptab, call_data, section_data,
-			 feature_is_set (FEATURE_WARN_DEPRECATED)
-			   ? DEPREC_WARN : DEPREC_OK,
-			 retrange);
-}
-
 static BACKEND *
 parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl)
 {
@@ -5404,20 +5393,8 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = parse_resolver
   },
   {
-    .name = "LuaPath",
-    .parser = pndlua_parse_lua_path
-  },
-  {
-    .name = "LuaCPath",
-    .parser = pndlua_parse_lua_cpath
-  },
-  {
-    .name = "LuaLoad",
-    .parser = pndlua_parse_lua_load
-  },
-  {
-    .name = "LuaLoadGlobal",
-    .parser = pndlua_parse_lua_load_global
+    .name = "Lua",
+    .parser = pndlua_parse_config
   },
   {
     .name = "WatcherTTL",

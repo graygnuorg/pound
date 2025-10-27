@@ -452,13 +452,13 @@ parse_lua_path (int n)
   return rc;
 }
 
-int
+static int
 pndlua_parse_lua_path (void *call_data, void *section_data)
 {
   return parse_lua_path (PNDLUA_PATH);
 }
 
-int
+static int
 pndlua_parse_lua_cpath (void *call_data, void *section_data)
 {
   return parse_lua_path (PNDLUA_CPATH);
@@ -486,13 +486,13 @@ parse_lua_load (struct pndlua_source_head *head)
   return 0;
 }
 
-int
+static int
 pndlua_parse_lua_load (void *call_data, void *section_data)
 {
   return parse_lua_load (&thread_sources);
 }
 
-int
+static int
 pndlua_parse_lua_load_global (void *call_data, void *section_data)
 {
   return parse_lua_load (&global_sources);
@@ -535,4 +535,34 @@ pndlua_parse_cond (struct cond_lua *cond)
     }
   cond_head_add (cond);
   return CFGPARSER_OK_NONL;
+}
+
+static CFGPARSER_TABLE lua_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "Path",
+    .parser = pndlua_parse_lua_path
+  },
+  {
+    .name = "CPath",
+    .parser = pndlua_parse_lua_cpath
+  },
+  {
+    .name = "Load",
+    .parser = pndlua_parse_lua_load
+  },
+  {
+    .name = "LoadGlobal",
+    .parser = pndlua_parse_lua_load_global
+  },
+  { NULL }
+};
+
+int
+pndlua_parse_config (void *call_data, void *section_data)
+{
+  return parser_loop (lua_parsetab, NULL, NULL, NULL);
 }

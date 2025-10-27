@@ -25,7 +25,9 @@ AT_DATA([xtest.lua],
 end
 ])
 
-PT_CHECK([LuaLoad "xtest.lua"
+PT_CHECK([Lua
+	Load "xtest.lua"
+End
 ListenHTTP
 	Service
 		Header ["X-Test" -re "([0-9]+)$"]
@@ -50,8 +52,3 @@ end
 end
 ])
 AT_CLEANUP
-
-		
-
-
-   
