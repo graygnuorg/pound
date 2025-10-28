@@ -2750,7 +2750,7 @@ int
 http_request_get_path (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
-      return -1;
+    return -1;
   *retval = req->path;
   return 0;
 }
@@ -2864,6 +2864,19 @@ http_request_parse_query (struct http_request *req)
 	}
     }
   return 0;
+}
+
+int
+http_request_count_query_param (struct http_request *req)
+{
+  struct query_param *qp;
+  int n = 0;
+
+  if (http_request_split (req))
+    return -1;
+  DLIST_FOREACH (qp, &req->query_head, link)
+    n++;
+  return n;
 }
 
 static int

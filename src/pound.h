@@ -1347,6 +1347,7 @@ enum
 int http_request_get_url (struct http_request *, char const **);
 int http_request_get_query (struct http_request *, char const **);
 int http_request_get_path (struct http_request *req, char const **retval);
+int http_request_count_query_param (struct http_request *req);
 int http_request_get_query_param_value (struct http_request *req,
 					char const *name,
 					char const **retval);

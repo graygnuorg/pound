@@ -1,6 +1,6 @@
 /*
  * Lua support for pound.
- * Copyright (C) 2024 Sergey Poznyakoff
+ * Copyright (C) 2024-2025 Sergey Poznyakoff
  *
  * Pound is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License as published by
@@ -247,6 +247,9 @@ source_load (lua_State *state, struct pndlua_source *source)
   return 0;
 }
 
+static void pndlua_set_http (lua_State *s, POUND_HTTP *http);
+static void pndlua_unset_http (lua_State *s);
+
 int
 pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 {
@@ -270,6 +273,8 @@ pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 	}
     }
 
+  pndlua_set_http (state, phttp);
+
   lua_getglobal (state, cond->func);
   for (i = 0; i < cond->argc; i++)
     lua_pushstring (state, argv[i]);
@@ -290,6 +295,8 @@ pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
 
   lua_pop (state, 1);
 
+  pndlua_unset_http (state);
+
   if (cond->ctx == PNDLUA_CTX_GLOBAL)
     pthread_mutex_unlock (&pndlua_global_mutex);
   return res;
@@ -300,7 +307,7 @@ check_args (lua_State *s, char *fname, int nargs)
 {
   if (lua_gettop (s) == nargs)
     return;
-  luaL_error(s, "'%s' requires %d arguments", fname, nargs);
+  luaL_error (s, "'%s' requires %d arguments", fname, nargs);
 }
 
 static int
@@ -315,11 +322,10 @@ pndlua_pound_log (lua_State *s)
   logmsg (prio, "%s", msg);
   return 0;
 }
-
-typedef int (*PND_LUAFUNC) (lua_State *);
 
+
 static void
-pndlua_dcl_function (lua_State *s, char const *name, PND_LUAFUNC func)
+pndlua_dcl_function (lua_State *s, char const *name, lua_CFunction func)
 {
   lua_pushstring (s, name);
   lua_pushcfunction (s, func);
@@ -334,6 +340,448 @@ pndlua_dcl_integer (lua_State *s, char const *name, int value)
   lua_rawset (s, -3);
 }
 
+/*FIXME
+static void
+pndlua_dcl_string (lua_State *s, char const *name, char const *value)
+{
+  lua_pushstring (s, name);
+  lua_pushstring (s, value);
+  lua_rawset (s, -3);
+}
+*/
+
+static void
+pndlua_new_metatable (lua_State *s, char const *name)
+{
+  lua_newtable (s);
+  /* Leave the value on stack upon exit. */
+  lua_pushvalue (s, -1);
+
+  /* Create __name field. */
+  lua_pushstring (s, name);
+  lua_setfield (s, -2, "__name");  /* metatable.__name = tname */
+
+  /* Register the table. */
+  lua_setfield (s, LUA_REGISTRYINDEX, name);
+}
+
+struct cfidx
+{
+  char *name;
+  lua_CFunction fun;
+};
+
+static lua_CFunction
+pndlua_cfidx_find (char const *letidx, luaL_Reg *cfidx, char const *field)
+{
+  int i;
+  char *p;
+  size_t cfidx_size = strlen (letidx);
+
+  if ((p = strchr (letidx, field[0])) != NULL)
+    for (i = p - letidx; i < cfidx_size && cfidx[i].name[0] == field[0]; i++)
+      if (strcmp (field, cfidx[i].name) == 0)
+	return cfidx[i].func;
+  return NULL;
+}
+
+static void *
+pndlua_get_userdata (lua_State *L, int idx)
+{
+  void *p;
+
+  if (!lua_istable (L, idx))
+    luaL_argerror (L, idx, NULL);
+  lua_rawgeti (L, idx, 0);
+  p = lua_touserdata (L, -1);
+  if (!p)
+    luaL_argerror (L, idx, NULL);
+  lua_pop (L, 1);
+  return p;
+}
+
+/* HTTP accessors. */
+/*
+  http.req   - returns HTTP request
+  http.resp  - returns HTTP response
+
+  req.line    - full request line
+  req.method  - request method (string)
+  req.headers - headers (table)
+  req.version - HTTP version (table)
+  req.url
+  req.path
+  req.query   - query (table)
+
+  tostring(VERSION) string
+  VERSION.major - major number
+  VERSION.minor - minor number
+
+  QUERY         - string
+  QUERY[k]      - value of parameter k
+ */
+
+struct req_ud
+{
+  struct http_request *req;
+};
+
+static int
+req_line (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  lua_pushstring (s, ud->req->request);
+  return 1;
+}
+
+static int
+req_method (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  lua_pushstring (s, method_name (ud->req->method));
+  return 1;
+}
+
+static int
+req_headers_str (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct http_header *hdr;
+  luaL_Buffer b;
+
+  luaL_buffinit (s, &b);
+  DLIST_FOREACH (hdr, &ud->req->headers, link)
+    {
+      luaL_addstring (&b, hdr->header);
+      luaL_addstring (&b, "\n");
+    }
+  luaL_pushresult (&b);
+
+  return 1;
+}
+
+static int
+req_headers_index (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  char const *field = lua_tostring (s, 2);
+  char const *val;
+  struct http_header *hdr;
+
+  hdr = http_header_list_locate_name (&ud->req->headers, field, strlen (field));
+  if (hdr == NULL)
+    lua_pushnil (s);
+  else
+    {
+      if ((val = http_header_get_value (hdr)) == NULL)
+	luaL_error (s, "out of memory");
+      lua_pushstring (s, val);
+      if ((hdr = http_header_list_next (hdr)) != NULL)
+	{
+	  int n = 1;
+
+	  /* Return multiple values as a table. */
+	  lua_newtable (s);
+	  lua_rotate (s, -2, 1);
+	  lua_rawseti (s, -2, 0);
+
+	  do
+	    {
+	      if ((val = http_header_get_value (hdr)) == NULL)
+		luaL_error (s, "out of memory");
+	      lua_pushstring (s, val);
+	      lua_rawseti (s, -2, n);
+	      n++;
+	    }
+	  while ((hdr = http_header_list_next (hdr)) != NULL);
+	}
+    }
+  return 1;
+}
+
+static int
+req_headers_len (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct http_header *hdr;
+  int n = 0;
+  DLIST_FOREACH (hdr, &ud->req->headers, link)
+    n++;
+  lua_pushinteger (s, n);
+  return 1;
+}
+
+static int
+req_headers (lua_State *s)
+{
+  /* Create the object */
+  lua_newtable (s);
+  /* t[0] = ud */
+  lua_rawgeti (s, 1, 0);
+  lua_rawseti (s, -2, 0);
+
+  /* Prepare metatable */
+  lua_newtable (s);
+
+  lua_pushcfunction (s, req_headers_str);
+  lua_setfield (s, -2, "__tostring");
+
+  lua_pushcfunction (s, req_headers_index);
+  lua_setfield (s, -2, "__index");
+
+  lua_pushcfunction (s, req_headers_len);
+  lua_setfield (s, -2, "__len");
+
+  /* Set metatable. */
+  lua_setmetatable (s, -2);
+
+  return 1;
+}
+
+static int
+req_version_str (lua_State *s)
+{
+  lua_pushvalue (s, lua_upvalueindex (1));
+  return 1;
+}
+
+static int
+req_version (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  char *p;
+
+  /* Create the object */
+  lua_newtable (s);
+
+  /* Prepare metatable */
+  lua_newtable (s);
+  /* Create __name field. */
+  p = strrchr (ud->req->request, '/');
+  if (!p)
+    luaL_error (s, "malformed request");
+  p++;
+  lua_pushstring (s, p);
+  lua_pushvalue (s, -1);
+  lua_setfield (s, -3, "__name");  /* metatable.__name = tname */
+
+  lua_pushcclosure (s, req_version_str, 1);
+  lua_setfield (s, -2, "__tostring");
+
+  /* Set metatable. */
+  lua_setmetatable (s, -2);
+
+  lua_pushinteger (s, 1);
+  lua_setfield (s, -2, "major");
+  lua_pushinteger (s, ud->req->version);
+  lua_setfield (s, -2, "minor");
+
+  return 1;
+}
+
+static int
+req_url (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  char const *v;
+  http_request_get_url (ud->req, &v);
+  lua_pushstring (s, v);
+  return 1;
+}
+
+static int
+req_path (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  char const *v;
+  if (http_request_get_path (ud->req, &v))
+    luaL_error (s, "out of memory");
+  lua_pushstring (s, v);
+  return 1;
+}
+
+static int
+req_query_str (lua_State *s)
+{
+  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  char const *v;
+  if (http_request_get_query (ud->req, &v))
+    luaL_error (s, "out of memory");
+  lua_pushstring (s, v ? v : "");
+  return 1;
+}
+
+static int
+req_query_len (lua_State *s)
+{
+  struct req_ud *ud = pndlua_get_userdata (s, 1);
+  lua_pushinteger (s, http_request_count_query_param (ud->req));
+  return 1;
+}
+
+static int
+req_query_index (lua_State *s)
+{
+  struct req_ud *ud = pndlua_get_userdata (s, 1);
+  char const *field = lua_tostring (s, 2);
+  char const *val;
+  switch (http_request_get_query_param_value (ud->req, field, &val))
+    {
+    case RETRIEVE_ERROR:
+      luaL_error (s, "out of memory");
+      break;
+    case RETRIEVE_NOT_FOUND:
+      lua_pushnil (s);
+      break;
+    case RETRIEVE_OK:
+      lua_pushstring (s, val);
+    }
+  return 1;
+}
+
+static int
+req_query (lua_State *s)
+{
+  /* Create the object */
+  lua_newtable (s);
+  /* t[0] = ud */
+  lua_rawgeti (s, 1, 0);
+  lua_rawseti (s, -2, 0);
+
+  /* Prepare metatable */
+  lua_newtable (s);
+
+  lua_pushcfunction (s, req_query_str);
+  lua_setfield (s, -2, "__tostring");
+
+  lua_pushcfunction (s, req_query_index);
+  lua_setfield (s, -2, "__index");
+
+  lua_pushcfunction (s, req_query_len);
+  lua_setfield (s, -2, "__len");
+
+  /* Set metatable. */
+  lua_setmetatable (s, -2);
+
+  return 1;
+}
+
+static int
+pndlua_req_index (lua_State *s)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "hlmpquv";
+  static struct luaL_Reg cfidx[] = {
+    { "headers", req_headers },
+    { "line", req_line },
+    { "method", req_method },
+    { "path", req_path },
+    { "query", req_query },
+    { "url", req_url },
+    { "version", req_version },
+  };
+
+  field = lua_tostring (s, 2);
+  if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
+    luaL_error (s, "no such field");
+  return fun (s);
+}
+
+static char const pndlua_req_class[] = "req";
+
+static void
+pndlua_dcl_req (lua_State *s)
+{
+  pndlua_new_metatable (s, pndlua_req_class);
+  /* Prepare the __index entry. */
+  pndlua_dcl_function (s, "__index", pndlua_req_index);
+  lua_pop (s, 1);
+}
+
+struct http_ud
+{
+  POUND_HTTP *phttp;
+};
+
+static int
+http_req (lua_State *s)
+{
+  struct http_ud *http = pndlua_get_userdata (s, 1);
+  struct req_ud *rud;
+
+  lua_newtable (s);
+  rud = lua_newuserdata (s, sizeof (*rud));
+  lua_rawseti (s, -2, 0);
+
+  rud->req = &http->phttp->request;
+
+  lua_getfield (s, LUA_REGISTRYINDEX, pndlua_req_class);
+  lua_setmetatable (s, -2);
+
+  return 1;
+}
+
+static int
+http_resp (lua_State *s)
+{
+  luaL_error (s, "not implemented");
+  return 1;
+}
+
+static int
+pndlua_http_index (lua_State *s)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "rr";
+  static struct luaL_Reg cfidx[] = {
+    { "req", http_req },
+    { "resp", http_resp }
+  };
+
+  field = lua_tostring (s, 2);
+  if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
+    luaL_error (s, "no such field");
+  return fun (s);
+}
+
+static char const pndlua_http_class[] = "http";
+
+static void
+pndlua_dcl_http (lua_State *s)
+{
+  pndlua_new_metatable (s, pndlua_http_class);
+  pndlua_dcl_function (s, "__index", pndlua_http_index);
+  lua_pop (s, 1);
+}
+
+static void
+pndlua_set_http (lua_State *s, POUND_HTTP *phttp)
+{
+  struct http_ud *ud;
+
+  lua_newtable (s);
+  ud = lua_newuserdata (s, sizeof (*ud));
+  lua_rawseti (s, -2, 0);
+
+  ud->phttp = phttp;
+
+  lua_getfield (s, LUA_REGISTRYINDEX, pndlua_http_class);
+  lua_setmetatable (s, -2);
+
+  lua_setglobal (s, "http");
+}
+
+static void
+pndlua_unset_http (lua_State *s)
+{
+  lua_pushnil (s);
+  lua_setglobal (s, "http");
+}
+
 static struct kwtab severity_table[] = {
   { "EMERG",   LOG_EMERG },
   { "ALERT",   LOG_ALERT },
@@ -392,6 +840,9 @@ pndlua_new_state (void)
 
   for (i = 0; i < sizeof (path_head) / sizeof (path_head[0]); i++)
     pndlua_add_path (state, i);
+
+  pndlua_dcl_req (state);
+  pndlua_dcl_http (state);
 
   return state;
 }
