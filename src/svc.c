@@ -1079,7 +1079,7 @@ upd_session (SERVICE *svc, HTTP_HEADER_LIST *headers, BACKEND *be)
       break;
 
     case SESS_COOKIE:
-      hname = "Cookie";
+      hname = "Set-Cookie";
       keyfun = key_cookie;
       break;
 
