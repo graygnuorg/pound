@@ -215,8 +215,9 @@ code.
 
 To test __pound__ you will need [Perl](https://www.perl.org) version
 5.26.3 or later, with [JSON](https://metacpan.org/pod/JSON) module (it is
-normally part of Perl), and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass) module.  To install the latter on a reasonably recent debian-based system,
-run
+normally part of Perl, or, on debian-based systems, it is in package
+`libjson-perl`), and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass)
+module.  To install the latter on a reasonably recent debian-based system, run
 
 ```sh
  apt-get install libio-fdpass-perl

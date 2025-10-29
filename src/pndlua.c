@@ -235,12 +235,14 @@ source_load (lua_State *state, struct pndlua_source *source)
       lua_pop (state, 1);
       return -1;
 
+#ifdef LUA_ERRGCMM
     case LUA_ERRGCMM:
       conf_error_at_locus_range (&source->locus,
 				 "Lua garbage collector error in %s: %s",
 				 source->name, lua_tostring (state, -1));
       lua_pop (state, 1);
       return -1;
+#endif
 
     default:
       conf_error_at_locus_range (&source->locus, "unhandled Lua error %d",

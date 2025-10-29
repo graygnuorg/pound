@@ -217,29 +217,12 @@ AC_ARG_WITH([lua],
  [status_lua=probe])
 
 if test $status_lua != no; then
-  # Check for lua header files
-  AC_CHECK_HEADERS([lua.h])
-  AC_CHECK_LIB([lua],[main])
-  if test "$ac_cv_lib_lua_main$ac_cv_header_lua_h" = yesyes; then
-    AC_COMPILE_IFELSE(
-      [AC_LANG_PROGRAM([
-	   #include <lua.h>
-	   #ifdef LUA_VERSION_NUM
-	   # if LUA_VERSION_NUM < 503
-	   #   error "Unsupported Lua version"
-	   # endif
-	   #else
-	   # error "LUA_VERSION_NUM not defined"
-	   #endif
-	 ],
-	 [[void main(){}]])],
+  PKG_PROG_PKG_CONFIG
+  PKG_CHECK_MODULES([LUA], [lua >= 5.3],
       [status_lua=yes
        AC_DEFINE([ENABLE_LUA], [1],
 		 [Define if Lua extension language is supported])],
       [status_lua=no])
-  else
-    status_lua=no
-  fi
   AC_MSG_CHECKING([For liblua 5.3 or newer])
   AC_MSG_RESULT([$status_lua])
 fi

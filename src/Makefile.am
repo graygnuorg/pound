@@ -17,12 +17,12 @@
 
 AM_CFLAGS = @PTHREAD_CFLAGS@
 
-AM_CPPFLAGS = @SSL_CPPFLAGS@ @PCRE_CFLAGS@ \
+AM_CPPFLAGS = @SSL_CPPFLAGS@ @LUA_CFLAGS@ @PCRE_CFLAGS@ \
  -DSYSCONFDIR=\"$(sysconfdir)\"\
  -DLOCALSTATEDIR=\"$(localstatedir)\"\
  -DPKGDATADIR=\"$(pkgdatadir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD = libpound.a @PCRE_LIBS@ @PTHREAD_LIBS@
+LDADD = libpound.a @LUA_LIBS@ @PCRE_LIBS@ @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
@@ -48,7 +48,6 @@ if COND_DYNAMIC_BACKENDS
 endif
 if COND_LUA
   pound_SOURCES += pndlua.c
-  LDADD += -llua -lm
 endif
 
 if COND_INOTIFY
