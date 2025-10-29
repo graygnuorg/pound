@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-10-21
+Pound -- history of user-visible changes. 2025-10-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,15 +7,19 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.17.91 (git)
+Version 4.18, 2025-10-29
 
 * Emacs mode for editing pound configuration files
 
-The major mode for GNU Emacs is implemented in file src/pound-mode.el.
-Its installation and usage is covered by Chapter 11 of the Pound Manual,
-entitled "Emacs Major Mode".
+Major mode for editing pound configuration files in GNU Emacs is
+implemented in file src/pound-mode.el.  Its installation and usage is
+covered by Chapter 11 of the Pound Manual, entitled "Emacs Major Mode".
 
 * Include statement accepts globbing patterns
+
+If the argument to "Include" configuration statement is a shell
+globbing pattern, all regular files matching that pattern will be
+included, in lexicographical order.
 
 * New configuration statement: LineBufferSize
 
@@ -30,12 +34,15 @@ This statement can be used in global scope and within ListenHTTP
 
 * TBF statement
 
-This is a conditional statement that implements token bucket filter.
-Its arguments are: the id of the buffer (a string, subject to to
+This conditional statement implements token bucket filter.  Its
+arguments are: the ID of the bucket (a string, subject to
 backreference expansion and request accessor interpretation), maximum
 allowed rate (requests per second) and a burst size (number of
 requests).  The statement evaluates to true if the token bucket accepts
 the request and to false otherwise.
+
+See Pound Manual, Section 4.6 "Rate-limiting", for a detailed
+discussion.
 
 * New request accessor: remoteip
 
@@ -47,7 +54,7 @@ the request and to false otherwise.
 
 By default, ACLs are applied to the IP address from which the request
 was received.  It is now possible to use the IP obtained from X-Forwarded-For 
-instead.  To do so, use the -forwarded optional keyword, e.g.:
+header, instead.  To do so, use the -forwarded option keyword, e.g.:
 
    ACL -forwarded -file "acl.lst"
 
@@ -63,7 +70,7 @@ request), use "%{listener}N".
 
 ** Support for new specifiers
 
- . %l            Reserved for future use.  Expands to dash.
+ . %l            Reserved for future use.  Expands to single dash.
  . %p            Port number of the listener that served the request.
 
 ** Built-in formats changed accordingly:
