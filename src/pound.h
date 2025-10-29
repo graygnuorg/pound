@@ -1087,10 +1087,6 @@ typedef struct _pound_http
 
   CONTENT_LENGTH res_bytes;
 
-#ifdef ENABLE_LUA
-  struct pndlua *pndlua;
-#endif
-
   SLIST_ENTRY(_pound_http) next;
 } POUND_HTTP;
 
@@ -1385,15 +1381,11 @@ int tbf_eval (TBF *env, char const *keyid);
 
 #if ENABLE_LUA
 int pndlua_init (void);
-void pndlua_http_init (POUND_HTTP *phttp);
-void pndlua_http_deinit (POUND_HTTP *phttp);
 int pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv);
 int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_cond (struct cond_lua *cond);
 #else
 static inline int pndlua_init (void) { return 0; }
-#define pndlua_http_init(phttp)
-#define pndlua_http_deinit(phttp)
 static inline int
 cfg_no_lua (void)
 {

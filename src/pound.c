@@ -391,7 +391,6 @@ pound_http_dequeue (void)
     pthread_cond_signal (&arg_cond);
 
   active_threads++;
-  pndlua_http_init (res);
  end:
   pthread_mutex_unlock (&arg_mut);
   return res;
@@ -431,7 +430,7 @@ pound_http_destroy (POUND_HTTP *arg)
     }
 
   submatch_queue_free (&arg->smq);
-  pndlua_http_deinit (arg);
+
   free (arg);
 }
 

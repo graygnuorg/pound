@@ -112,6 +112,7 @@ TESTSUITE_AT = \
  lstset.at\
  lua-load.at\
  lua-cond.at\
+ lua-http.at\
  lua-path.at\
  maxrequest.at\
  maxuri.at\

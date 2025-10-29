@@ -44,34 +44,38 @@ static DLIST_HEAD (, pndlua) pndlua_avail =
   DLIST_HEAD_INITIALIZER (pndlua_avail);
 static pthread_mutex_t pndlua_mutex = PTHREAD_MUTEX_INITIALIZER;
 
-void
-pndlua_http_init (POUND_HTTP *phttp)
+static pthread_key_t pndlua_key;
+static pthread_once_t pndlua_key_once = PTHREAD_ONCE_INIT;
+
+static void
+pndlua_reclaim (void *ptr)
 {
-  if (!DLIST_EMPTY (&pndlua_avail))
-    {
-      pthread_mutex_lock (&pndlua_mutex);
-      phttp->pndlua = malloc (sizeof (phttp->pndlua[0]));
-      if (phttp->pndlua)
-	{
-	  phttp->pndlua = DLIST_FIRST (&pndlua_avail);
-	  DLIST_SHIFT (&pndlua_avail, link);
-	}
-      else
-	lognomem ();
-      pthread_mutex_unlock (&pndlua_mutex);
-    }
+  struct pndlua *pndlua = ptr;
+  pthread_mutex_lock (&pndlua_mutex);
+  DLIST_INSERT_HEAD (&pndlua_avail, pndlua, link);
+  pthread_mutex_unlock (&pndlua_mutex);
 }
 
-void
-pndlua_http_deinit (POUND_HTTP *phttp)
+static void
+make_pndlua_key (void)
 {
-  if (phttp->pndlua)
+  pthread_key_create (&pndlua_key, pndlua_reclaim);
+}
+
+static struct pndlua *
+pndlua_get (void)
+{
+  struct pndlua *pndlua;
+  pthread_once (&pndlua_key_once, make_pndlua_key);
+  if ((pndlua = pthread_getspecific (pndlua_key)) == NULL)
     {
       pthread_mutex_lock (&pndlua_mutex);
-      DLIST_INSERT_HEAD (&pndlua_avail, phttp->pndlua, link);
+      pndlua = DLIST_FIRST (&pndlua_avail);
+      DLIST_SHIFT (&pndlua_avail, link);
       pthread_mutex_unlock (&pndlua_mutex);
-      phttp->pndlua = NULL;
+      pthread_setspecific (pndlua_key, pndlua);
     }
+  return pndlua;
 }
 
 struct pndlua_source
@@ -264,13 +268,8 @@ pndlua_match (POUND_HTTP *phttp, struct cond_lua *cond, char **argv)
     }
   else
     {
-      state = phttp->pndlua->state;
-      if (!state)
-	{
-	  logmsg (LOG_ERR, "(%"PRItid") no Lua state (allocation error)",
-		  POUND_TID ());
-	  return -1;
-	}
+      struct pndlua *pndlua = pndlua_get ();
+      state = pndlua->state;
     }
 
   pndlua_set_http (state, phttp);
