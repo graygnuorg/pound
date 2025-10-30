@@ -43,10 +43,18 @@ static pthread_mutex_t pndlua_global_mutex = PTHREAD_MUTEX_INITIALIZER;
 static DLIST_HEAD (, pndlua) pndlua_avail =
   DLIST_HEAD_INITIALIZER (pndlua_avail);
 static pthread_mutex_t pndlua_mutex = PTHREAD_MUTEX_INITIALIZER;
-
+
+/*
+ * Each started worker thread obtains a context from the available list and
+ * saves it in its thread-specific storage. The key pndlua_key identifies
+ * the storage and pndlua_key_once serves to initialize it.
+ */
 static pthread_key_t pndlua_key;
 static pthread_once_t pndlua_key_once = PTHREAD_ONCE_INIT;
 
+/*
+ * Reclaim the context by returning it to pndlua_avail list.
+ */
 static void
 pndlua_reclaim (void *ptr)
 {
@@ -78,84 +86,6 @@ pndlua_get (void)
   return pndlua;
 }
 
-struct pndlua_source
-{
-  char *name;
-  struct locus_range locus;
-  SLIST_ENTRY (pndlua_source) next;
-};
-
-static SLIST_HEAD (pndlua_source_head,pndlua_source)
-  global_sources = SLIST_HEAD_INITIALIZER (global_sources),
-  thread_sources = SLIST_HEAD_INITIALIZER (thread_sources);
-
-struct path_dir
-{
-  SLIST_ENTRY (path_dir) next;
-  char name[1];
-};
-typedef SLIST_HEAD(,path_dir) PATH_HEAD;
-
-enum
-  {
-    PNDLUA_PATH,
-    PNDLUA_CPATH
-  };
-
-static char *path_name[] = { "path", "cpath" };
-static PATH_HEAD path_head[2] = {
-  SLIST_HEAD_INITIALIZER (path_head[0]),
-  SLIST_HEAD_INITIALIZER (path_head[1])
-};
-
-static void
-path_list_add (PATH_HEAD *head, char const *name)
-{
-  struct path_dir *dir = xmalloc (sizeof (*dir) + strlen (name));
-  strcpy (dir->name, name);
-  SLIST_INSERT_TAIL (head, dir, next);
-}
-
-static void
-path_list_free (PATH_HEAD *head)
-{
-  while (!SLIST_EMPTY (head))
-    {
-      struct path_dir *dir = SLIST_FIRST (head);
-      SLIST_REMOVE_HEAD (head, next);
-      free (dir);
-    }
-}
-
-struct closure_entry
-{
-  struct pndlua_closure *cond;
-  SLIST_ENTRY (closure_entry) next;
-};
-
-static SLIST_HEAD (,closure_entry) closure_head =
-  SLIST_HEAD_INITIALIZER (closure_head);
-
-static void
-closure_head_add (struct pndlua_closure *cond)
-{
-    struct closure_entry *ent;
-    XZALLOC (ent);
-    ent->cond = cond;
-    SLIST_INSERT_TAIL (&closure_head, ent, next);
-}
-
-static void
-closure_head_free (void)
-{
-  while (!SLIST_EMPTY (&closure_head))
-    {
-      struct closure_entry *ent = SLIST_FIRST (&closure_head);
-      SLIST_REMOVE_HEAD (&closure_head, next);
-      free (ent);
-    }
-}
-
 static inline int
 function_is_defined (lua_State *state, char const *name)
 {
@@ -167,93 +97,7 @@ function_is_defined (lua_State *state, char const *name)
   return f;
 }
 
-static int
-closure_resolve (struct pndlua_closure *cond)
-{
-  if (pndlua_ctx_count > 1 &&
-      function_is_defined (pndlua_ctx[1].state, cond->func))
-    cond->ctx = PNDLUA_CTX_THREAD;
-  else if (function_is_defined (pndlua_ctx[0].state, cond->func))
-    cond->ctx = PNDLUA_CTX_GLOBAL;
-  else
-    {
-      conf_error_at_locus_range (&cond->locus, "Lua function %s not defined",
-				 cond->func);
-      return -1;
-    }
-  return 0;
-}
-
-static int
-closure_head_resolve (void)
-{
-  struct closure_entry *ent;
-  int err = 0;
-  SLIST_FOREACH (ent, &closure_head, next)
-    if (closure_resolve (ent->cond))
-      ++err;
-  return err;
-}
-
-static int
-source_load (lua_State *state, struct pndlua_source *source)
-{
-  int res;
-
-  if (luaL_loadfile (state, source->name) != LUA_OK)
-    {
-      conf_error_at_locus_range (&source->locus,
-				 "error loading Lua file %s: %s",
-				 source->name,
-				 lua_tostring (state, -1));
-      lua_pop (state, 1);
-      return -1;
-    }
-
-  res = lua_pcall (state, 0, LUA_MULTRET, 0);
-  switch (res)
-    {
-    case LUA_OK:
-      break;
-
-    case LUA_ERRRUN:
-      conf_error_at_locus_range (&source->locus,
-				 "Lua runtime error: %s",
-				 lua_tostring (state, -1));
-      lua_pop (state, 1);
-      return -1;
-
-    case LUA_ERRMEM:
-      conf_error_at_locus_range (&source->locus,
-				 "out of memory running Lua code in %s",
-				 source->name);
-      return -1;
-
-    case LUA_ERRERR:
-      conf_error_at_locus_range (&source->locus,
-				 "Lua message handler error in %s: %s",
-				 source->name, lua_tostring (state, -1));
-      lua_pop (state, 1);
-      return -1;
-
-#ifdef LUA_ERRGCMM
-    case LUA_ERRGCMM:
-      conf_error_at_locus_range (&source->locus,
-				 "Lua garbage collector error in %s: %s",
-				 source->name, lua_tostring (state, -1));
-      lua_pop (state, 1);
-      return -1;
-#endif
-
-    default:
-      conf_error_at_locus_range (&source->locus, "unhandled Lua error %d",
-				 res);
-      return -1;
-    }
-
-  return 0;
-}
-
+
 static void pndlua_set_http (lua_State *L, POUND_HTTP *http,
 			     struct stringbuf *sb);
 static void pndlua_unset_http (lua_State *L);
@@ -348,6 +192,9 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
 }
 
 
+/*
+ * Define addition Lua functions.
+ */
 static void
 check_args (lua_State *L, char *fname, int nargs)
 {
@@ -356,6 +203,10 @@ check_args (lua_State *L, char *fname, int nargs)
   luaL_error (L, "'%s' requires %d arguments", fname, nargs);
 }
 
+/*
+ * pound.log(prio, text)
+ *  Log text using priority prio.
+ */
 static int
 pndlua_pound_log (lua_State *L)
 {
@@ -368,8 +219,12 @@ pndlua_pound_log (lua_State *L)
   logmsg (prio, "%s", msg);
   return 0;
 }
-
 
+/*
+ * Additional functions for defining table elements.
+ */
+
+/* In a table at -1, define a method "name". */
 static void
 pndlua_dcl_function (lua_State *L, char const *name, lua_CFunction func)
 {
@@ -378,6 +233,7 @@ pndlua_dcl_function (lua_State *L, char const *name, lua_CFunction func)
   lua_rawset (L, -3);
 }
 
+/* In a table at -1, define integer variable "name" with the given value. */
 static void
 pndlua_dcl_integer (lua_State *L, char const *name, int value)
 {
@@ -386,16 +242,7 @@ pndlua_dcl_integer (lua_State *L, char const *name, int value)
   lua_rawset (L, -3);
 }
 
-/*FIXME
-static void
-pndlua_dcl_string (lua_State *L, char const *name, char const *value)
-{
-  lua_pushstring (L, name);
-  lua_pushstring (L, value);
-  lua_rawset (L, -3);
-}
-*/
-
+/* Create a metatable and store it in the registry under the given name. */
 static void
 pndlua_new_metatable (lua_State *L, char const *name)
 {
@@ -411,26 +258,37 @@ pndlua_new_metatable (lua_State *L, char const *name)
   lua_setfield (L, LUA_REGISTRYINDEX, name);
 }
 
-struct cfidx
-{
-  char *name;
-  lua_CFunction fun;
-};
-
+/*
+ * Lookup a name in a poor man's hash table.  The table consists of an
+ * array of luaL_Reg reg and index string letidx.  Entries in reg are
+ * ordered by name.  Elements in letidx are related to those in cdidx as:
+ *
+ *                letidx[i] == reg[i].name[i]
+ *
+ * Thus, number of elements in reg equals strlen(letidx).
+ *
+ * On success, the function returns a pointer to the function stored under
+ * the given name.  On failure, it returns NULL.
+ */
 static lua_CFunction
-pndlua_cfidx_find (char const *letidx, luaL_Reg *cfidx, char const *field)
+pndlua_reg_locate (char const *letidx, luaL_Reg *reg, char const *name)
 {
   int i;
   char *p;
-  size_t cfidx_size = strlen (letidx);
+  size_t reg_size = strlen (letidx);
 
-  if ((p = strchr (letidx, field[0])) != NULL)
-    for (i = p - letidx; i < cfidx_size && cfidx[i].name[0] == field[0]; i++)
-      if (strcmp (field, cfidx[i].name) == 0)
-	return cfidx[i].func;
+  if ((p = strchr (letidx, name[0])) != NULL)
+    for (i = p - letidx; i < reg_size && reg[i].name[0] == name[0]; i++)
+      if (strcmp (name, reg[i].name) == 0)
+	return reg[i].func;
   return NULL;
 }
 
+/*
+ * Obtain userdata from an object at stack index idx.  The object must
+ * be a table such that the userdata is stored in obj[0].  Raise an error
+ * if this is not a case or if the obtained pointer is NULL.
+ */
 static void *
 pndlua_get_userdata (lua_State *L, int idx)
 {
@@ -453,25 +311,23 @@ ro_newindex (lua_State *L)
   return 0;
 }
 
-/* HTTP accessors. */
-/*
-  http.req   - returns HTTP request
-  http.resp  - returns HTTP response
-
-  req.line    - full request line
-  req.method  - request method (string)
-  req.headers - headers (table)
-  req.version - HTTP version (table)
-  req.url
-  req.path
-  req.query   - query (table)
-
-  tostring(VERSION) string
-  VERSION.major - major number
-  VERSION.minor - minor number
-
-  QUERY         - string
-  QUERY[k]      - value of parameter k
+/* HTTP accessors.
+ *
+ * http.req   - returns HTTP request
+ * http.resp  - returns HTTP response
+ *
+ * req.line    - full request line
+ * req.method  - request method (string)
+ * req.headers - headers (table)
+ * req.version - HTTP version (table)
+ *   tostring(req.version) - string
+ *   req.version.major     - major number
+ *   req.version.minor     - minor number
+ * req.url
+ * req.path
+ * req.query   - query (table)
+ *   tostring(req.query)   - full query as a string.
+ *   req.query[k]          - value of query parameter k.
  */
 
 struct req_ud
@@ -570,6 +426,16 @@ pndlua_header_list_append (lua_State *L, HTTP_HEADER_LIST *head, int idx, int mo
     }
 }
 
+/*
+ * Append header or headers to the header list.  Field name is at stack
+ * index 2, and new value is at index 3.  The value can be one of:
+ *
+ *   nil        - all headers with that field name are removed from the
+ *                list;
+ *   string     - "field: value" is appended to the list;
+ *   table      - all headers with that field name are removed from the
+ *                list, and the values from the table are added instead.
+ */
 static int
 headers_set (lua_State *L, HTTP_HEADER_LIST *head)
 {
@@ -616,7 +482,7 @@ req_headers_newindex (lua_State *L)
 static int
 req_headers_len (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
   struct http_header *hdr;
   int n = 0;
   DLIST_FOREACH (hdr, &ud->req->headers, link)
@@ -625,6 +491,15 @@ req_headers_len (lua_State *L)
   return 1;
 }
 
+/*
+ * Create and push on stack a new http.req (or http.resp) object.
+ *
+ * Argument n gives the stack index at which the userdata with struct
+ * req_ud is located.
+ *
+ * If rw is 1, the new object will be read-write, otherwise it will be
+ * read-only.
+ */
 static int
 req_new_headers (lua_State *L, int n, int rw)
 {
@@ -671,10 +546,11 @@ req_version_str (lua_State *L)
   return 1;
 }
 
+/* Implementation of http.req.version table. */
 static int
 req_version (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
   char *p;
 
   /* Create the object */
@@ -708,7 +584,7 @@ req_version (lua_State *L)
 static int
 req_url (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
   http_request_get_url (ud->req, &v);
   lua_pushstring (L, v);
@@ -718,7 +594,7 @@ req_url (lua_State *L)
 static int
 req_path (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_path (ud->req, &v))
     luaL_error (L, "out of memory");
@@ -729,7 +605,7 @@ req_path (lua_State *L)
 static int
 req_query_str (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_query (ud->req, &v))
     luaL_error (L, "out of memory");
@@ -799,7 +675,7 @@ pndlua_req_index (lua_State *L)
   lua_CFunction fun;
 
   static char letidx[] = "hlmpquv";
-  static struct luaL_Reg cfidx[] = {
+  static struct luaL_Reg reg[] = {
     { "headers", req_headers },
     { "line", req_line },
     { "method", req_method },
@@ -810,7 +686,7 @@ pndlua_req_index (lua_State *L)
   };
 
   field = lua_tostring (L, 2);
-  if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
     luaL_error (L, "no such field");
   return fun (L);
 }
@@ -826,6 +702,9 @@ pndlua_dcl_req (lua_State *L)
   lua_pop (L, 1);
 }
 
+/*
+ * Implementation of the http global.
+ */
 struct http_ud
 {
   POUND_HTTP *phttp;
@@ -884,7 +763,7 @@ pndlua_resp_index (lua_State *L)
   lua_CFunction fun;
 
   static char letidx[] = "bchr";
-  static struct luaL_Reg cfidx[] = {
+  static struct luaL_Reg reg[] = {
     { "body",  resp_get_body },
     { "code",  resp_get_code },
     { "headers", resp_get_headers },
@@ -892,7 +771,7 @@ pndlua_resp_index (lua_State *L)
   };
 
   field = lua_tostring (L, 2);
-  if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
     luaL_error (L, "no such field");
   return fun (L);
 }
@@ -976,7 +855,7 @@ pndlua_resp_newindex (lua_State *L)
   lua_CFunction fun;
 
   static char letidx[] = "bchr";
-  static struct luaL_Reg cfidx[] = {
+  static struct luaL_Reg reg[] = {
     { "body",  resp_set_body },
     { "code",  resp_set_code },
     { "headers", resp_set_headers },
@@ -984,7 +863,7 @@ pndlua_resp_newindex (lua_State *L)
   };
 
   field = lua_tostring (L, 2);
-  if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
     luaL_error (L, "no such field");
   return fun (L);
 }
@@ -1040,13 +919,13 @@ pndlua_http_index (lua_State *L, int rw)
   lua_CFunction fun;
 
   static char *letidx[] = { "r", "rr" };
-  static struct luaL_Reg cfidx[] = {
+  static struct luaL_Reg reg[] = {
     { "req", http_req },
     { "resp", http_resp }
   };
 
   field = lua_tostring (L, 2);
-  if ((fun = pndlua_cfidx_find (letidx[rw], cfidx, field)) == NULL)
+  if ((fun = pndlua_reg_locate (letidx[rw], reg, field)) == NULL)
     luaL_error (L, "no such field");
   return fun (L);
 }
@@ -1063,6 +942,11 @@ pndlua_http_req_index (lua_State *L)
   return pndlua_http_index (L, 0);
 }
 
+/*
+ * Prepare and set the "http" global in the Lua state.  If sb is not NULL,
+ * the http.resp element will be available and assignments to http.resp.body
+ * will be stored there.
+ */
 static void
 pndlua_set_http (lua_State *L, POUND_HTTP *phttp, struct stringbuf *sb)
 {
@@ -1090,6 +974,9 @@ pndlua_set_http (lua_State *L, POUND_HTTP *phttp, struct stringbuf *sb)
   lua_setglobal (L, "http");
 }
 
+/*
+ * Unset the "http" global.
+ */
 static void
 pndlua_unset_http (lua_State *L)
 {
@@ -1097,18 +984,68 @@ pndlua_unset_http (lua_State *L)
   lua_setglobal (L, "http");
 }
 
-static struct kwtab severity_table[] = {
-  { "EMERG",   LOG_EMERG },
-  { "ALERT",   LOG_ALERT },
-  { "CRIT",    LOG_CRIT },
-  { "ERR",     LOG_ERR },
-  { "WARNING", LOG_WARNING },
-  { "NOTICE",  LOG_NOTICE },
-  { "INFO",    LOG_INFO },
-  { "DEBUG",   LOG_DEBUG },
-  { NULL }
+/*
+ * Lua path manipulation.
+ *
+ * Two configuration statements are provided for the purpose: "Path" modifies
+ * package.path and "CPath" modifies package.cpath. In both cases, the
+ * argument gets prepended to the corresponding Lua variable.
+ */
+
+/* This structure represents a single path element. */
+struct path_dir
+{
+  SLIST_ENTRY (path_dir) next; /* Link to the next element. */
+  char name[1];                /* Element name (allocated after the struct). */
+};
+typedef SLIST_HEAD(,path_dir) PATH_HEAD;
+
+enum
+  {
+    PNDLUA_PATH,
+    PNDLUA_CPATH
+  };
+
+/*
+ * Arguments to each path configuration statement are split on ';' and
+ * the resulting elements are appended to the corresponding path_head
+ * list.  The elements are concatenated again right before prepending
+ * them to the corresponding 'package.*' variable. This allows for multiple
+ * "Path" ("CPath") statement and ensures their relative ordering is preserved
+ * in the resulting path.
+ *
+ * Both lists are freed after Lua subsystem is initialized.
+ */
+static char *path_name[] = { "path", "cpath" };
+static PATH_HEAD path_head[2] = {
+  SLIST_HEAD_INITIALIZER (path_head[0]),
+  SLIST_HEAD_INITIALIZER (path_head[1])
 };
 
+/* Adds a single name to the path list. */
+static void
+path_list_add (PATH_HEAD *head, char const *name)
+{
+  struct path_dir *dir = xmalloc (sizeof (*dir) + strlen (name));
+  strcpy (dir->name, name);
+  SLIST_INSERT_TAIL (head, dir, next);
+}
+
+static void
+path_list_free (PATH_HEAD *head)
+{
+  while (!SLIST_EMPTY (head))
+    {
+      struct path_dir *dir = SLIST_FIRST (head);
+      SLIST_REMOVE_HEAD (head, next);
+      free (dir);
+    }
+}
+
+/*
+ * Re-assemble path list path_head[type] and prepend it to the right
+ * 'package.*' global in the Lua state.
+ */
 static void
 pndlua_add_path (lua_State *L, int type)
 {
@@ -1135,7 +1072,22 @@ pndlua_add_path (lua_State *L, int type)
   lua_setfield (L, -2, path_name[type]);
   lua_pop (L, 1);
 }
+
+static struct kwtab severity_table[] = {
+  { "EMERG",   LOG_EMERG },
+  { "ALERT",   LOG_ALERT },
+  { "CRIT",    LOG_CRIT },
+  { "ERR",     LOG_ERR },
+  { "WARNING", LOG_WARNING },
+  { "NOTICE",  LOG_NOTICE },
+  { "INFO",    LOG_INFO },
+  { "DEBUG",   LOG_DEBUG },
+  { NULL }
+};
 
+/*
+ * Create and initialize new pound Lua state.
+ */
 static lua_State *
 pndlua_new_state (void)
 {
@@ -1161,7 +1113,93 @@ pndlua_new_state (void)
 
   return state;
 }
+
+/*
+ * This structure identifies a single Lua source along with the location
+ * of the place in configuration file that requires it to be loaded.
+ */
+struct pndlua_source
+{
+  char *name;                       /* Full file name. */
+  struct locus_range locus;         /* Config location. */
+  SLIST_ENTRY (pndlua_source) next; /* Link to the next source. */
+};
 
+/*
+ * Lua sources are stored in two single-linked lists:
+ *  global_sources - for sources required using the "LoadGlobal" directive,
+ *  thread_sources - for those required with the "Load" directive.
+ */
+static SLIST_HEAD (pndlua_source_head,pndlua_source)
+  global_sources = SLIST_HEAD_INITIALIZER (global_sources),
+  thread_sources = SLIST_HEAD_INITIALIZER (thread_sources);
+
+static int
+source_load (lua_State *state, struct pndlua_source *source)
+{
+  int res;
+
+  if (luaL_loadfile (state, source->name) != LUA_OK)
+    {
+      conf_error_at_locus_range (&source->locus,
+				 "error loading Lua file %s: %s",
+				 source->name,
+				 lua_tostring (state, -1));
+      lua_pop (state, 1);
+      return -1;
+    }
+
+  res = lua_pcall (state, 0, LUA_MULTRET, 0);
+  switch (res)
+    {
+    case LUA_OK:
+      break;
+
+    case LUA_ERRRUN:
+      conf_error_at_locus_range (&source->locus,
+				 "Lua runtime error: %s",
+				 lua_tostring (state, -1));
+      lua_pop (state, 1);
+      return -1;
+
+    case LUA_ERRMEM:
+      conf_error_at_locus_range (&source->locus,
+				 "out of memory running Lua code in %s",
+				 source->name);
+      return -1;
+
+    case LUA_ERRERR:
+      conf_error_at_locus_range (&source->locus,
+				 "Lua message handler error in %s: %s",
+				 source->name, lua_tostring (state, -1));
+      lua_pop (state, 1);
+      return -1;
+
+#ifdef LUA_ERRGCMM
+    case LUA_ERRGCMM:
+      conf_error_at_locus_range (&source->locus,
+				 "Lua garbage collector error in %s: %s",
+				 source->name, lua_tostring (state, -1));
+      lua_pop (state, 1);
+      return -1;
+#endif
+
+    default:
+      conf_error_at_locus_range (&source->locus, "unhandled Lua error %d",
+				 res);
+      return -1;
+    }
+
+  return 0;
+}
+
+/*
+ * Load each Lua source into the Lua state of the ith context. When
+ * loading, initialize the pound.loadctx global with the value i.
+ *
+ * Bail out at the first error.  Return 0 on success, -1 on error (an
+ * error message has already been issued in that case).
+ */
 static int
 source_list_load (int i, struct pndlua_source_head *head)
 {
@@ -1201,16 +1239,111 @@ source_list_free (struct pndlua_source_head *head)
       free (source);
     }
 }
+
+/*
+ * Lua closure list maintenance.
+ *
+ * Each LuaCond and LuaBackend statement results in creation of a new struct
+ * pndlua_closure, and saving a pointer to in the closure list closure_head.
+ *
+ * When all Lua sources have been loaded, the list is traversed in order to
+ * determine the context for each its element: thread, if the function func
+ * is found in thread-specific Lua state, and global, if it is found in the
+ * global state. If the function is not found in either one, an error is
+ * reported.
+ *
+ * The list is freed when the Lua subsystem have been initialized.
+ *
+ * List elements have the following structure:
+ */
+struct closure_entry
+{
+  struct pndlua_closure *closure;
+  SLIST_ENTRY (closure_entry) next;
+};
 
+/* Closure list. */
+static SLIST_HEAD (,closure_entry) closure_head =
+  SLIST_HEAD_INITIALIZER (closure_head);
+
+/* Add new closure to the list. */
+static void
+closure_head_add (struct pndlua_closure *closure)
+{
+    struct closure_entry *ent;
+    XZALLOC (ent);
+    ent->closure = closure;
+    SLIST_INSERT_TAIL (&closure_head, ent, next);
+}
+
+/* Free the closure list. */
+static void
+closure_head_free (void)
+{
+  while (!SLIST_EMPTY (&closure_head))
+    {
+      struct closure_entry *ent = SLIST_FIRST (&closure_head);
+      SLIST_REMOVE_HEAD (&closure_head, next);
+      free (ent);
+    }
+}
+
+/*
+ * Resolve a single closure: i.e. determine whether its function is
+ * in thread-specific or in the global state. Return 0 if it has been
+ * resolved, otherwise report an error and return -1.
+ */
+static int
+closure_resolve (struct pndlua_closure *closure)
+{
+  if (pndlua_ctx_count > 1 &&
+      function_is_defined (pndlua_ctx[1].state, closure->func))
+    closure->ctx = PNDLUA_CTX_THREAD;
+  else if (function_is_defined (pndlua_ctx[0].state, closure->func))
+    closure->ctx = PNDLUA_CTX_GLOBAL;
+  else
+    {
+      conf_error_at_locus_range (&closure->locus,
+				 "Lua function %s not defined",
+				 closure->func);
+      return -1;
+    }
+  return 0;
+}
+
+/*
+ * Resolve each element in the list.
+ */
+static int
+closure_head_resolve (void)
+{
+  struct closure_entry *ent;
+  int err = 0;
+  SLIST_FOREACH (ent, &closure_head, next)
+    if (closure_resolve (ent->closure))
+      ++err;
+  return err;
+}
+
+/*
+ * Initialize Lua subsystem.
+ */
 int
 pndlua_init (void)
 {
   int i;
 
+  /*
+   * Count the contexts. Global context is always available. Per-thread
+   * contexts are created only if one or more "Load" statements were given.
+   */
   pndlua_ctx_count = 1;
   if (!SLIST_EMPTY (&thread_sources))
     pndlua_ctx_count += worker_max_count;
 
+  /*
+   * Initialize contexts and store them in pndlua_avail list.
+   */
   pndlua_ctx = xcalloc (pndlua_ctx_count, sizeof (*pndlua_ctx));
   pndlua_ctx[0].state = pndlua_new_state ();
   for (i = 1; i < pndlua_ctx_count; i++)
@@ -1242,6 +1375,10 @@ pndlua_init (void)
   return 0;
 }
 
+/*
+ * Configuration parser.
+ */
+
 static int
 parse_lua_path (int n)
 {
