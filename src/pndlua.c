@@ -261,9 +261,10 @@ pndlua_new_metatable (lua_State *L, char const *name)
 /*
  * Lookup a name in a poor man's hash table.  The table consists of an
  * array of luaL_Reg reg and index string letidx.  Entries in reg are
- * ordered by name.  Elements in letidx are related to those in cdidx as:
+ * ordered by name.  Elements in letidx are related to those in reg as
+ * follows:
  *
- *                letidx[i] == reg[i].name[i]
+ *                letidx[i] == reg[i].name[0]
  *
  * Thus, number of elements in reg equals strlen(letidx).
  *
