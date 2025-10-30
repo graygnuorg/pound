@@ -254,9 +254,9 @@ source_load (lua_State *state, struct pndlua_source *source)
   return 0;
 }
 
-static void pndlua_set_http (lua_State *s, POUND_HTTP *http,
+static void pndlua_set_http (lua_State *L, POUND_HTTP *http,
 			     struct stringbuf *sb);
-static void pndlua_unset_http (lua_State *s);
+static void pndlua_unset_http (lua_State *L);
 
 int
 pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
@@ -349,66 +349,66 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
 
 
 static void
-check_args (lua_State *s, char *fname, int nargs)
+check_args (lua_State *L, char *fname, int nargs)
 {
-  if (lua_gettop (s) == nargs)
+  if (lua_gettop (L) == nargs)
     return;
-  luaL_error (s, "'%s' requires %d arguments", fname, nargs);
+  luaL_error (L, "'%s' requires %d arguments", fname, nargs);
 }
 
 static int
-pndlua_pound_log (lua_State *s)
+pndlua_pound_log (lua_State *L)
 {
   char const *msg;
   int prio;
 
-  check_args (s, "log", 2);
-  prio = luaL_checkinteger (s, 1);
-  msg = luaL_checkstring (s, 2);
+  check_args (L, "log", 2);
+  prio = luaL_checkinteger (L, 1);
+  msg = luaL_checkstring (L, 2);
   logmsg (prio, "%s", msg);
   return 0;
 }
 
 
 static void
-pndlua_dcl_function (lua_State *s, char const *name, lua_CFunction func)
+pndlua_dcl_function (lua_State *L, char const *name, lua_CFunction func)
 {
-  lua_pushstring (s, name);
-  lua_pushcfunction (s, func);
-  lua_rawset (s, -3);
+  lua_pushstring (L, name);
+  lua_pushcfunction (L, func);
+  lua_rawset (L, -3);
 }
 
 static void
-pndlua_dcl_integer (lua_State *s, char const *name, int value)
+pndlua_dcl_integer (lua_State *L, char const *name, int value)
 {
-  lua_pushstring (s, name);
-  lua_pushinteger (s, value);
-  lua_rawset (s, -3);
+  lua_pushstring (L, name);
+  lua_pushinteger (L, value);
+  lua_rawset (L, -3);
 }
 
 /*FIXME
 static void
-pndlua_dcl_string (lua_State *s, char const *name, char const *value)
+pndlua_dcl_string (lua_State *L, char const *name, char const *value)
 {
-  lua_pushstring (s, name);
-  lua_pushstring (s, value);
-  lua_rawset (s, -3);
+  lua_pushstring (L, name);
+  lua_pushstring (L, value);
+  lua_rawset (L, -3);
 }
 */
 
 static void
-pndlua_new_metatable (lua_State *s, char const *name)
+pndlua_new_metatable (lua_State *L, char const *name)
 {
-  lua_newtable (s);
+  lua_newtable (L);
   /* Leave the value on stack upon exit. */
-  lua_pushvalue (s, -1);
+  lua_pushvalue (L, -1);
 
   /* Create __name field. */
-  lua_pushstring (s, name);
-  lua_setfield (s, -2, "__name");  /* metatable.__name = tname */
+  lua_pushstring (L, name);
+  lua_setfield (L, -2, "__name");  /* metatable.__name = tname */
 
   /* Register the table. */
-  lua_setfield (s, LUA_REGISTRYINDEX, name);
+  lua_setfield (L, LUA_REGISTRYINDEX, name);
 }
 
 struct cfidx
@@ -447,9 +447,9 @@ pndlua_get_userdata (lua_State *L, int idx)
 }
 
 static int
-ro_newindex (lua_State *s)
+ro_newindex (lua_State *L)
 {
-  luaL_error (s, "attempt to modify read-only data");
+  luaL_error (L, "attempt to modify read-only data");
   return 0;
 }
 
@@ -480,29 +480,29 @@ struct req_ud
 };
 
 static int
-req_line (lua_State *s)
+req_line (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
-  lua_pushstring (s, ud->req->request);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  lua_pushstring (L, ud->req->request);
   return 1;
 }
 
 static int
-req_method (lua_State *s)
+req_method (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
-  lua_pushstring (s, method_name (ud->req->method));
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  lua_pushstring (L, method_name (ud->req->method));
   return 1;
 }
 
 static int
-req_headers_str (lua_State *s)
+req_headers_str (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   struct http_header *hdr;
   luaL_Buffer b;
 
-  luaL_buffinit (s, &b);
+  luaL_buffinit (L, &b);
   DLIST_FOREACH (hdr, &ud->req->headers, link)
     {
       luaL_addstring (&b, hdr->header);
@@ -514,36 +514,37 @@ req_headers_str (lua_State *s)
 }
 
 static int
-req_headers_index (lua_State *s)
+req_headers_index (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
-  char const *field = lua_tostring (s, 2);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
+  char const *field = lua_tostring (L, 2);
   char const *val;
   struct http_header *hdr;
 
-  hdr = http_header_list_locate_name (&ud->req->headers, field, strlen (field));
+  hdr = http_header_list_locate_name (&ud->req->headers, field,
+				      strlen (field));
   if (hdr == NULL)
-    lua_pushnil (s);
+    lua_pushnil (L);
   else
     {
       if ((val = http_header_get_value (hdr)) == NULL)
-	luaL_error (s, "out of memory");
-      lua_pushstring (s, val);
+	luaL_error (L, "out of memory");
+      lua_pushstring (L, val);
       if ((hdr = http_header_list_next (hdr)) != NULL)
 	{
 	  int n = 1;
 
 	  /* Return multiple values as a table. */
-	  lua_newtable (s);
-	  lua_rotate (s, -2, 1);
-	  lua_rawseti (s, -2, 0);
+	  lua_newtable (L);
+	  lua_rotate (L, -2, 1);
+	  lua_rawseti (L, -2, 0);
 
 	  do
 	    {
 	      if ((val = http_header_get_value (hdr)) == NULL)
-		luaL_error (s, "out of memory");
-	      lua_pushstring (s, val);
-	      lua_rawseti (s, -2, n);
+		luaL_error (L, "out of memory");
+	      lua_pushstring (L, val);
+	      lua_rawseti (L, -2, n);
 	      n++;
 	    }
 	  while ((hdr = http_header_list_next (hdr)) != NULL);
@@ -570,229 +571,229 @@ pndlua_header_list_append (lua_State *L, HTTP_HEADER_LIST *head, int idx, int mo
 }
 
 static int
-headers_set (lua_State *s, HTTP_HEADER_LIST *head)
+headers_set (lua_State *L, HTTP_HEADER_LIST *head)
 {
-  char const *field = lua_tostring (s, 2);
+  char const *field = lua_tostring (L, 2);
 
-  if (lua_isnil (s, 3))
+  if (lua_isnil (L, 3))
     {
       http_header_list_remove_field (head, field);
     }
-  else if (lua_istable (s, 3))
+  else if (lua_istable (L, 3))
     {
       http_header_list_remove_field (head, field);
 
-      lua_pushnil (s);  /* first key */
-      while (lua_next (s, 3) != 0)
+      lua_pushnil (L);  /* first key */
+      while (lua_next (L, 3) != 0)
 	{
-	  lua_pushstring (s, field);
-	  lua_pushstring (s, ": ");
-	  lua_rotate (s, -3, -1);
-	  lua_concat (s, 3);
-	  pndlua_header_list_append (s, head, -1, H_APPEND);
-	  lua_pop (s, 1);
+	  lua_pushstring (L, field);
+	  lua_pushstring (L, ": ");
+	  lua_rotate (L, -3, -1);
+	  lua_concat (L, 3);
+	  pndlua_header_list_append (L, head, -1, H_APPEND);
+	  lua_pop (L, 1);
 	}
     }
-  else if (lua_isstring (s, 3))
+  else if (lua_isstring (L, 3))
     {
-      lua_pushvalue (s, 2);
-      lua_pushstring (s, ": ");
-      lua_pushvalue (s, 3);
-      lua_concat (s, 3);
-      pndlua_header_list_append (s, head, -1, H_REPLACE);
-      lua_pop (s, 1);
+      lua_pushvalue (L, 2);
+      lua_pushstring (L, ": ");
+      lua_pushvalue (L, 3);
+      lua_concat (L, 3);
+      pndlua_header_list_append (L, head, -1, H_REPLACE);
+      lua_pop (L, 1);
     }
   return 0;
 }
 
 static int
-req_headers_newindex (lua_State *s)
+req_headers_newindex (lua_State *L)
 {
-  struct req_ud *ud = pndlua_get_userdata (s, 1);
-  return headers_set (s, &ud->req->headers);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  return headers_set (L, &ud->req->headers);
 }
 
 static int
-req_headers_len (lua_State *s)
+req_headers_len (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   struct http_header *hdr;
   int n = 0;
   DLIST_FOREACH (hdr, &ud->req->headers, link)
     n++;
-  lua_pushinteger (s, n);
+  lua_pushinteger (L, n);
   return 1;
 }
 
 static int
-req_new_headers (lua_State *s, int n, int rw)
+req_new_headers (lua_State *L, int n, int rw)
 {
   /* Create the object */
-  lua_newtable (s);
+  lua_newtable (L);
   /* Account for new element on stack. */
   if (n < 0)
     n--;
   /* t[0] = ud */
-  lua_rawgeti (s, n, 0);
-  lua_rawseti (s, -2, 0);
+  lua_rawgeti (L, n, 0);
+  lua_rawseti (L, -2, 0);
 
   /* Prepare metatable */
-  lua_newtable (s);
+  lua_newtable (L);
 
-  lua_pushcfunction (s, req_headers_str);
-  lua_setfield (s, -2, "__tostring");
+  lua_pushcfunction (L, req_headers_str);
+  lua_setfield (L, -2, "__tostring");
 
-  lua_pushcfunction (s, req_headers_index);
-  lua_setfield (s, -2, "__index");
+  lua_pushcfunction (L, req_headers_index);
+  lua_setfield (L, -2, "__index");
 
-  lua_pushcfunction (s, rw ? req_headers_newindex : ro_newindex);
-  lua_setfield (s, -2, "__newindex");
+  lua_pushcfunction (L, rw ? req_headers_newindex : ro_newindex);
+  lua_setfield (L, -2, "__newindex");
 
-  lua_pushcfunction (s, req_headers_len);
-  lua_setfield (s, -2, "__len");
+  lua_pushcfunction (L, req_headers_len);
+  lua_setfield (L, -2, "__len");
 
   /* Set metatable. */
-  lua_setmetatable (s, -2);
+  lua_setmetatable (L, -2);
 
   return 1;
 }
 
 static int
-req_headers (lua_State *s)
+req_headers (lua_State *L)
 {
-  return req_new_headers (s, 1, 0);
+  return req_new_headers (L, 1, 0);
 }
 
 static int
-req_version_str (lua_State *s)
+req_version_str (lua_State *L)
 {
-  lua_pushvalue (s, lua_upvalueindex (1));
+  lua_pushvalue (L, lua_upvalueindex (1));
   return 1;
 }
 
 static int
-req_version (lua_State *s)
+req_version (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   char *p;
 
   /* Create the object */
-  lua_newtable (s);
+  lua_newtable (L);
 
   /* Prepare metatable */
-  lua_newtable (s);
+  lua_newtable (L);
   /* Create __name field. */
   p = strrchr (ud->req->request, '/');
   if (!p)
-    luaL_error (s, "malformed request");
+    luaL_error (L, "malformed request");
   p++;
-  lua_pushstring (s, p);
-  lua_pushvalue (s, -1);
-  lua_setfield (s, -3, "__name");  /* metatable.__name = tname */
+  lua_pushstring (L, p);
+  lua_pushvalue (L, -1);
+  lua_setfield (L, -3, "__name");  /* metatable.__name = tname */
 
-  lua_pushcclosure (s, req_version_str, 1);
-  lua_setfield (s, -2, "__tostring");
+  lua_pushcclosure (L, req_version_str, 1);
+  lua_setfield (L, -2, "__tostring");
 
   /* Set metatable. */
-  lua_setmetatable (s, -2);
+  lua_setmetatable (L, -2);
 
-  lua_pushinteger (s, 1);
-  lua_setfield (s, -2, "major");
-  lua_pushinteger (s, ud->req->version);
-  lua_setfield (s, -2, "minor");
+  lua_pushinteger (L, 1);
+  lua_setfield (L, -2, "major");
+  lua_pushinteger (L, ud->req->version);
+  lua_setfield (L, -2, "minor");
 
   return 1;
 }
 
 static int
-req_url (lua_State *s)
+req_url (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   char const *v;
   http_request_get_url (ud->req, &v);
-  lua_pushstring (s, v);
+  lua_pushstring (L, v);
   return 1;
 }
 
 static int
-req_path (lua_State *s)
+req_path (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_path (ud->req, &v))
-    luaL_error (s, "out of memory");
-  lua_pushstring (s, v);
+    luaL_error (L, "out of memory");
+  lua_pushstring (L, v);
   return 1;
 }
 
 static int
-req_query_str (lua_State *s)
+req_query_str (lua_State *L)
 {
-  struct req_ud *ud  = pndlua_get_userdata (s, 1);
+  struct req_ud *ud  = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_query (ud->req, &v))
-    luaL_error (s, "out of memory");
-  lua_pushstring (s, v ? v : "");
+    luaL_error (L, "out of memory");
+  lua_pushstring (L, v ? v : "");
   return 1;
 }
 
 static int
-req_query_len (lua_State *s)
+req_query_len (lua_State *L)
 {
-  struct req_ud *ud = pndlua_get_userdata (s, 1);
-  lua_pushinteger (s, http_request_count_query_param (ud->req));
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushinteger (L, http_request_count_query_param (ud->req));
   return 1;
 }
 
 static int
-req_query_index (lua_State *s)
+req_query_index (lua_State *L)
 {
-  struct req_ud *ud = pndlua_get_userdata (s, 1);
-  char const *field = lua_tostring (s, 2);
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  char const *field = lua_tostring (L, 2);
   char const *val;
   switch (http_request_get_query_param_value (ud->req, field, &val))
     {
     case RETRIEVE_ERROR:
-      luaL_error (s, "out of memory");
+      luaL_error (L, "out of memory");
       break;
     case RETRIEVE_NOT_FOUND:
-      lua_pushnil (s);
+      lua_pushnil (L);
       break;
     case RETRIEVE_OK:
-      lua_pushstring (s, val);
+      lua_pushstring (L, val);
     }
   return 1;
 }
 
 static int
-req_query (lua_State *s)
+req_query (lua_State *L)
 {
   /* Create the object */
-  lua_newtable (s);
+  lua_newtable (L);
   /* t[0] = ud */
-  lua_rawgeti (s, 1, 0);
-  lua_rawseti (s, -2, 0);
+  lua_rawgeti (L, 1, 0);
+  lua_rawseti (L, -2, 0);
 
   /* Prepare metatable */
-  lua_newtable (s);
+  lua_newtable (L);
 
-  lua_pushcfunction (s, req_query_str);
-  lua_setfield (s, -2, "__tostring");
+  lua_pushcfunction (L, req_query_str);
+  lua_setfield (L, -2, "__tostring");
 
-  lua_pushcfunction (s, req_query_index);
-  lua_setfield (s, -2, "__index");
+  lua_pushcfunction (L, req_query_index);
+  lua_setfield (L, -2, "__index");
 
-  lua_pushcfunction (s, req_query_len);
-  lua_setfield (s, -2, "__len");
+  lua_pushcfunction (L, req_query_len);
+  lua_setfield (L, -2, "__len");
 
   /* Set metatable. */
-  lua_setmetatable (s, -2);
+  lua_setmetatable (L, -2);
 
   return 1;
 }
 
 static int
-pndlua_req_index (lua_State *s)
+pndlua_req_index (lua_State *L)
 {
   char const *field;
   lua_CFunction fun;
@@ -808,21 +809,21 @@ pndlua_req_index (lua_State *s)
     { "version", req_version },
   };
 
-  field = lua_tostring (s, 2);
+  field = lua_tostring (L, 2);
   if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
-    luaL_error (s, "no such field");
-  return fun (s);
+    luaL_error (L, "no such field");
+  return fun (L);
 }
 
 static char const pndlua_req_class[] = "req";
 
 static void
-pndlua_dcl_req (lua_State *s)
+pndlua_dcl_req (lua_State *L)
 {
-  pndlua_new_metatable (s, pndlua_req_class);
+  pndlua_new_metatable (L, pndlua_req_class);
   /* Prepare the __index entry. */
-  pndlua_dcl_function (s, "__index", pndlua_req_index);
-  lua_pop (s, 1);
+  pndlua_dcl_function (L, "__index", pndlua_req_index);
+  lua_pop (L, 1);
 }
 
 struct http_ud
@@ -832,52 +833,52 @@ struct http_ud
 };
 
 static int
-resp_get_body (lua_State *s)
+resp_get_body (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
-  lua_pushlstring (s, stringbuf_value (ud->sb), stringbuf_len (ud->sb));
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushlstring (L, stringbuf_value (ud->sb), stringbuf_len (ud->sb));
   return 1;
 }
 
 static int
-resp_get_code (lua_State *s)
+resp_get_code (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
-  lua_pushinteger (s, ud->phttp->response_code);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushinteger (L, ud->phttp->response_code);
   return 1;
 }
 
 static int
-resp_get_headers (lua_State *s)
+resp_get_headers (lua_State *L)
 {
-  struct http_ud *http = pndlua_get_userdata (s, 1);
+  struct http_ud *http = pndlua_get_userdata (L, 1);
   struct req_ud *rud;
   int rc;
 
   /* Create request userdata. */
-  lua_newtable (s);
-  rud = lua_newuserdata (s, sizeof (*rud));
+  lua_newtable (L);
+  rud = lua_newuserdata (L, sizeof (*rud));
   rud->req = &http->phttp->response;
-  lua_rawseti (s, -2, 0);
+  lua_rawseti (L, -2, 0);
   /* Create the headers table. */
-  rc = req_new_headers (s, -1, 1);
+  rc = req_new_headers (L, -1, 1);
   /* Swap return value and the original userdata. */
-  lua_rotate (s, -2, 1);
+  lua_rotate (L, -2, 1);
   /* Get rid of the original userdata. */
-  lua_pop (s, 1);
+  lua_pop (L, 1);
   return rc;
 }
 
 static int
-resp_get_reason (lua_State *s)
+resp_get_reason (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
-  lua_pushstring (s, ud->phttp->response.request);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushstring (L, ud->phttp->response.request);
   return 1;
 }
 
 static int
-pndlua_resp_index (lua_State *s)
+pndlua_resp_index (lua_State *L)
 {
   char const *field;
   lua_CFunction fun;
@@ -890,86 +891,86 @@ pndlua_resp_index (lua_State *s)
     { "reason", resp_get_reason }
   };
 
-  field = lua_tostring (s, 2);
+  field = lua_tostring (L, 2);
   if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
-    luaL_error (s, "no such field");
-  return fun (s);
+    luaL_error (L, "no such field");
+  return fun (L);
 }
 
 static int
-resp_set_body (lua_State *s)
+resp_set_body (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
 
   stringbuf_reset (ud->sb);
-  if (!lua_isnil (s, 3))
+  if (!lua_isnil (L, 3))
     {
-      char const *val = lua_tostring (s, 3);
+      char const *val = lua_tostring (L, 3);
       stringbuf_add_string (ud->sb, val);
     }
   return 0;
 }
 
 static int
-resp_set_code (lua_State *s)
+resp_set_code (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
-  int code = lua_tointeger (s, 3);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  int code = lua_tointeger (L, 3);
   if (code >= 100 && code < 600)
     {
       ud->phttp->response_code = code;
     }
   else
-    luaL_argerror (s, 3, "argument out of allowed range");
+    luaL_argerror (L, 3, "argument out of allowed range");
   return 0;
 }
 
 static int
-resp_set_headers (lua_State *s)
+resp_set_headers (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
   HTTP_HEADER_LIST *head = &ud->phttp->response.headers;
 
   http_header_list_free (head);
-  if (lua_istable (s, 3))
+  if (lua_istable (L, 3))
     {
-      lua_pushnil (s);
-      while (lua_next (s, 3) != 0)
+      lua_pushnil (L);
+      while (lua_next (L, 3) != 0)
 	{
-	  lua_pushvalue (s, -2);
-	  lua_pushstring (s, ": ");
-	  lua_rotate (s, -3, -1);
-	  lua_concat (s, 3);
-	  pndlua_header_list_append (s, head, -1, H_APPEND);
-	  lua_pop (s, 1);
+	  lua_pushvalue (L, -2);
+	  lua_pushstring (L, ": ");
+	  lua_rotate (L, -3, -1);
+	  lua_concat (L, 3);
+	  pndlua_header_list_append (L, head, -1, H_APPEND);
+	  lua_pop (L, 1);
 	}
     }
-  else if (!lua_isnil (s, 3))
-    luaL_argerror (s, 3, NULL);
+  else if (!lua_isnil (L, 3))
+    luaL_argerror (L, 3, NULL);
   return 0;
 }
 
 static int
-resp_set_reason (lua_State *s)
+resp_set_reason (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (s, 1);
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
 
   free (ud->phttp->response.request);
-  if (lua_isnil (s, 3))
+  if (lua_isnil (L, 3))
     {
       ud->phttp->response.request = NULL;
     }
   else
     {
-      ud->phttp->response.request = strdup (lua_tostring (s, 3));
+      ud->phttp->response.request = strdup (lua_tostring (L, 3));
       if (!ud->phttp->response.request)
-	luaL_error (s, "out of memory");
+	luaL_error (L, "out of memory");
     }
   return 0;
 }
 
 static int
-pndlua_resp_newindex (lua_State *s)
+pndlua_resp_newindex (lua_State *L)
 {
   char const *field;
   lua_CFunction fun;
@@ -982,58 +983,58 @@ pndlua_resp_newindex (lua_State *s)
     { "reason", resp_set_reason }
   };
 
-  field = lua_tostring (s, 2);
+  field = lua_tostring (L, 2);
   if ((fun = pndlua_cfidx_find (letidx, cfidx, field)) == NULL)
-    luaL_error (s, "no such field");
-  return fun (s);
+    luaL_error (L, "no such field");
+  return fun (L);
 }
 
 static char const pndlua_resp_class[] = "resp";
 
 static void
-pndlua_dcl_resp (lua_State *s)
+pndlua_dcl_resp (lua_State *L)
 {
-  pndlua_new_metatable (s, pndlua_resp_class);
-  pndlua_dcl_function (s, "__index", pndlua_resp_index);
-  pndlua_dcl_function (s, "__newindex", pndlua_resp_newindex);
-  lua_pop (s, 1);
+  pndlua_new_metatable (L, pndlua_resp_class);
+  pndlua_dcl_function (L, "__index", pndlua_resp_index);
+  pndlua_dcl_function (L, "__newindex", pndlua_resp_newindex);
+  lua_pop (L, 1);
 }
 
 static int
-http_req (lua_State *s)
+http_req (lua_State *L)
 {
-  struct http_ud *http = pndlua_get_userdata (s, 1);
+  struct http_ud *http = pndlua_get_userdata (L, 1);
   struct req_ud *rud;
 
-  lua_newtable (s);
-  rud = lua_newuserdata (s, sizeof (*rud));
-  lua_rawseti (s, -2, 0);
+  lua_newtable (L);
+  rud = lua_newuserdata (L, sizeof (*rud));
+  lua_rawseti (L, -2, 0);
 
   rud->req = &http->phttp->request;
 
-  lua_getfield (s, LUA_REGISTRYINDEX, pndlua_req_class);
-  lua_setmetatable (s, -2);
+  lua_getfield (L, LUA_REGISTRYINDEX, pndlua_req_class);
+  lua_setmetatable (L, -2);
 
   return 1;
 }
 
 static int
-http_resp (lua_State *s)
+http_resp (lua_State *L)
 {
   /* Create the object */
-  lua_newtable (s);
+  lua_newtable (L);
   /* t[0] = ud */
-  lua_rawgeti (s, 1, 0);
-  lua_rawseti (s, -2, 0);
+  lua_rawgeti (L, 1, 0);
+  lua_rawseti (L, -2, 0);
 
-  lua_getfield (s, LUA_REGISTRYINDEX, pndlua_resp_class);
-  lua_setmetatable (s, -2);
+  lua_getfield (L, LUA_REGISTRYINDEX, pndlua_resp_class);
+  lua_setmetatable (L, -2);
 
   return 1;
 }
 
 static int
-pndlua_http_index (lua_State *s, int rw)
+pndlua_http_index (lua_State *L, int rw)
 {
   char const *field;
   lua_CFunction fun;
@@ -1044,56 +1045,56 @@ pndlua_http_index (lua_State *s, int rw)
     { "resp", http_resp }
   };
 
-  field = lua_tostring (s, 2);
+  field = lua_tostring (L, 2);
   if ((fun = pndlua_cfidx_find (letidx[rw], cfidx, field)) == NULL)
-    luaL_error (s, "no such field");
-  return fun (s);
+    luaL_error (L, "no such field");
+  return fun (L);
 }
 
 static int
-pndlua_http_full_index (lua_State *s)
+pndlua_http_full_index (lua_State *L)
 {
-  return pndlua_http_index (s, 1);
+  return pndlua_http_index (L, 1);
 }
 
 static int
-pndlua_http_req_index (lua_State *s)
+pndlua_http_req_index (lua_State *L)
 {
-  return pndlua_http_index (s, 0);
+  return pndlua_http_index (L, 0);
 }
 
 static void
-pndlua_set_http (lua_State *s, POUND_HTTP *phttp, struct stringbuf *sb)
+pndlua_set_http (lua_State *L, POUND_HTTP *phttp, struct stringbuf *sb)
 {
   struct http_ud *ud;
 
   /* Create table with userdata at t[0] */
-  lua_newtable (s);
-  ud = lua_newuserdata (s, sizeof (*ud));
-  lua_rawseti (s, -2, 0);
+  lua_newtable (L);
+  ud = lua_newuserdata (L, sizeof (*ud));
+  lua_rawseti (L, -2, 0);
   ud->phttp = phttp;
   if (sb)
     stringbuf_init_log (sb); // FIXME: Use custom log function for Lua.
   ud->sb = sb;
 
-  pndlua_new_metatable (s, "http");
+  pndlua_new_metatable (L, "http");
   /* Create __index entry. */
-  pndlua_dcl_function (s, "__index",
+  pndlua_dcl_function (L, "__index",
 		       sb ? pndlua_http_full_index : pndlua_http_req_index);
   /* Create __newindex entry. */
-  pndlua_dcl_function (s, "__newindex", ro_newindex);
+  pndlua_dcl_function (L, "__newindex", ro_newindex);
 
   /* Set metatable. */
-  lua_setmetatable (s, -2);
+  lua_setmetatable (L, -2);
 
-  lua_setglobal (s, "http");
+  lua_setglobal (L, "http");
 }
 
 static void
-pndlua_unset_http (lua_State *s)
+pndlua_unset_http (lua_State *L)
 {
-  lua_pushnil (s);
-  lua_setglobal (s, "http");
+  lua_pushnil (L);
+  lua_setglobal (L, "http");
 }
 
 static struct kwtab severity_table[] = {
