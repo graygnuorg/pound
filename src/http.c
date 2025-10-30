@@ -1417,6 +1417,90 @@ file_response (POUND_HTTP *phttp)
   return rc;
 }
 
+static int
+http_response_ok (POUND_HTTP *phttp)
+{
+  return phttp->response_code >= 100 && phttp->response_code <= 599;
+}
+
+static int
+lua_response (POUND_HTTP *phttp)
+{
+  struct pndlua_closure *pclos = &phttp->backend->v.lua;
+  int i;
+  char **argv;
+  int res = -1;
+  struct stringbuf sb;
+
+  argv = calloc (pclos->argc, sizeof (argv[0]));
+  if (!argv)
+    {
+      lognomem ();
+      return -1;
+    }
+
+  for (i = 0; i < pclos->argc; i++)
+    {
+      argv[i] = expand_string (pclos->argv[i], phttp, &phttp->request, "lua");
+      if (argv[i] == 0)
+	goto err;
+    }
+
+  stringbuf_init_log (&sb);
+  res = pndlua_backend (phttp, pclos, argv, &sb);
+
+ err:
+  for (i = 0; i < pclos->argc && argv[i]; i++)
+    free (argv[i]);
+  free (argv);
+
+  if (res != -1)
+    {
+      /* Verify response. */
+      if (!http_response_ok (phttp))
+	{
+	  phttp_log (phttp, PHTTP_LOG_BACKEND, -1, 0, "malformed response");
+	  res = -1;
+	}
+      else
+	{
+	  int n;
+	  char const *reason = phttp->response.request;
+	  if (reason && *reason)
+	    {
+	      if (c_isdigit (reason[0]) &&
+		  c_isdigit (reason[1]) &&
+		  c_isdigit (reason[2]) &&
+		  c_isblank (reason[3]))
+		{
+		  reason = c_trimlws (reason + 4, NULL);
+		}
+	    }
+	  else if ((n = http_status_to_pound (phttp->response_code)) != -1)
+	    reason = http_status[n].reason;
+	  else
+	    reason = "";
+
+	  phttp->res_bytes = stringbuf_len (&sb);
+
+	  bio_http_reply_start_list (phttp->cl,
+				     phttp->request.version,
+				     phttp->response_code,
+				     reason,
+				     &phttp->response.headers,
+				     (CONTENT_LENGTH) phttp->res_bytes);
+	  BIO_write (phttp->cl, stringbuf_value (&sb), phttp->res_bytes);
+	  BIO_flush (phttp->cl);
+
+	  res = HTTP_STATUS_OK;
+	}
+    }
+  stringbuf_free (&sb);
+
+  return res;
+
+}
+
 static void
 drain_eol (BIO *in)
 {
@@ -2306,7 +2390,7 @@ qualify_header (struct http_header *hdr)
 }
 
 static struct http_header *
-http_header_alloc (char *text)
+http_header_alloc (char const *text)
 {
   struct http_header *hdr;
 
@@ -2468,7 +2552,7 @@ http_header_list_next (struct http_header *hdr)
  * new value.
  */
 int
-http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
+http_header_list_append (HTTP_HEADER_LIST *head, char const *text, int replace)
 {
   struct http_header *hdr;
 
@@ -2484,7 +2568,7 @@ http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace)
 
 	case H_APPEND:
 	  {
-	    char *val = http_header_get_value (hdr);
+	    char const *val = http_header_get_value (hdr);
 	    if (*val)
 	      {
 		struct stringbuf sb;
@@ -2534,6 +2618,24 @@ http_header_list_append_list (HTTP_HEADER_LIST *head, HTTP_HEADER_LIST *add)
       DLIST_INSERT_TAIL (head, copy, link);
     }
   return 0;
+}
+
+void
+http_header_list_remove_field (HTTP_HEADER_LIST *head, char const *field)
+{
+  struct http_header *hdr, *tmp;
+  size_t len = strlen (field);
+
+  /* Remove existing headers with this field name. */
+  DLIST_FOREACH_SAFE (hdr, tmp, head, link)
+    {
+      if (http_header_name_len (hdr) == len &&
+	  c_strncasecmp (http_header_name_ptr (hdr), field, len) == 0)
+	{
+	  DLIST_REMOVE (head, hdr, link);
+	  http_header_free (hdr);
+	}
+    }
 }
 
 void
@@ -5318,6 +5420,10 @@ http_process_request (POUND_HTTP *phttp)
 
     case BE_FILE:
       res = file_response (phttp);
+      break;
+
+    case BE_LUA:
+      res = lua_response (phttp);
       break;
 
     case BE_MATRIX:

@@ -2230,7 +2230,7 @@ static int
 parse_lua_match (void *call_data, void *section_data)
 {
   SERVICE_COND *cond = service_cond_append (call_data, COND_LUA);
-  return pndlua_parse_cond (&cond->clua);
+  return pndlua_parse_closure (&cond->clua);
 }
 
 static int
@@ -2438,6 +2438,20 @@ parse_sendfile_backend (void *call_data, void *section_data)
   balancer_add_backend (balancer_list_get_normal (bml), be);
 
   return CFGPARSER_OK;
+}
+
+static int
+parse_lua_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  BACKEND *be;
+  int rc;
+
+  be = xbackend_create (BE_LUA, 1, last_token_locus_range ());
+  if ((rc = pndlua_parse_closure (&be->v.lua)) == CFGPARSER_OK ||
+      rc == CFGPARSER_OK_NONL)
+    balancer_add_backend (balancer_list_get_normal (bml), be);
+  return rc;
 }
 
 struct service_session
@@ -3284,6 +3298,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "Control",
     .parser = parse_control_backend,
+    .off = offsetof (SERVICE, balancers)
+  },
+  {
+    .name = "LuaBackend",
+    .parser = parse_lua_backend,
     .off = offsetof (SERVICE, balancers)
   },
   {

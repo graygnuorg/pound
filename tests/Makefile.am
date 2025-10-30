@@ -110,6 +110,7 @@ TESTSUITE_AT = \
  loglevrun.at\
  logsup.at\
  lstset.at\
+ lua-be.at\
  lua-load.at\
  lua-cond.at\
  lua-http.at\
