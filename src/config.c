@@ -2655,7 +2655,7 @@ static CFGPARSER_TABLE match_conditions[] = {
     .parser = parse_cond_string_matcher
   },
   {
-    .name = "Lua",
+    .name = "LuaMatch",
     .parser = parse_lua_match
   },
   {

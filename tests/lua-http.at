@@ -29,12 +29,12 @@ PT_CHECK([Lua
 End
 ListenHTTP
 	Service
-		Lua "chkhost" "example.com"
+		LuaMatch "chkhost" "example.com"
 		Backend
 		End
 	End
 	Service
-		Lua "chkhost" "foo.bar"
+		LuaMatch "chkhost" "foo.bar"
 		Backend
 		End
 	End

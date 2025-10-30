@@ -1244,7 +1244,7 @@ source_list_free (struct pndlua_source_head *head)
 /*
  * Lua closure list maintenance.
  *
- * Each LuaCond and LuaBackend statement results in creation of a new struct
+ * Each LuaMatch and LuaBackend statement results in creation of a new struct
  * pndlua_closure, and saving a pointer to in the closure list closure_head.
  *
  * When all Lua sources have been loaded, the list is traversed in order to

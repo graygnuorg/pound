@@ -120,7 +120,7 @@
 
 (defvar pound-matcher-keywords-2
   '("Header"
-    "Lua"
+    "LuaMatch"
     "StringMatch"
     "QueryParam"))
 

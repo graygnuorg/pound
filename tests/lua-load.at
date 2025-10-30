@@ -42,13 +42,13 @@ End
 ListenHTTP
 	Service
 		Path "/echo/foo"
-		Lua "xtest"
+		LuaMatch "xtest"
 		Backend
 		End
 	End
 	Service
 		Path "/echo/bar"
-		Lua "gtest"
+		LuaMatch "gtest"
 		Backend
 		End
 	End

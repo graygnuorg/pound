@@ -13,8 +13,8 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Lua conditional])
-AT_KEYWORDS([cond lua lua-cond])
+AT_SETUP([LuaMatch])
+AT_KEYWORDS([cond lua lua-match])
 
 AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
 
@@ -31,7 +31,7 @@ End
 ListenHTTP
 	Service
 		Header ["X-Test" -re "([0-9]+)$"]
-		Lua "xtest" "$1"
+		LuaMatch "xtest" "$1"
 		Backend
 		End
 	End
