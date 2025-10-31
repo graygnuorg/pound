@@ -670,10 +670,6 @@ input_gettkn (struct cfginput *input, struct token **tok)
 		    case '\\':
 		      break;
 
-		    case 'n':
-		      c = '\n';
-		      break;
-
 		    case EOF:
 		      conf_error_at_locus_point (&input->locus,
 						 "end of file in quoted string");

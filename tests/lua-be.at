@@ -34,7 +34,7 @@ AT_DATA([backend.lua],
    else
       http.resp.code = code
    end
-   http.resp.body = body
+   http.resp.body = string.gsub(body, '\\n', '\n')
    http.resp.reason = reason
 end
 ]])
@@ -44,7 +44,7 @@ PT_CHECK([Lua
 End
 ListenHTTP
 	Service
-		LuaBackend "be_simple" "200" "Response text\nGoes here\n"
+		LuaBackend "be_simple" "200" "Response text\\nGoes here\\n"
 	End
 End
 ],
@@ -63,7 +63,7 @@ PT_CHECK([[Lua
 End
 ListenHTTP
 	Service
-		LuaBackend "be_simple" "%[header X-Code]" "Response text\nGoes here\n"
+		LuaBackend "be_simple" "%[header X-Code]" "Response text\\nGoes here\\n"
 	End
 End
 ]],
