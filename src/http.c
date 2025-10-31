@@ -1447,6 +1447,8 @@ lua_response (POUND_HTTP *phttp)
       return -1;
     }
 
+  stringbuf_init_log (&sb);
+
   for (i = 0; i < pclos->argc; i++)
     {
       argv[i] = expand_string (pclos->argv[i], phttp, &phttp->request, "lua");
@@ -1454,7 +1456,6 @@ lua_response (POUND_HTTP *phttp)
 	goto err;
     }
 
-  stringbuf_init_log (&sb);
   res = pndlua_backend (phttp, pclos, argv, &sb);
 
  err:
