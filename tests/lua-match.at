@@ -51,4 +51,67 @@ end
 200
 end
 ])
+
+AT_DATA([xtestmod.lua],
+[local matcher = {}
+function matcher.xtest(a)
+    pound.log(pound.DEBUG, "xtest called with argument " .. a)
+    return tonumber(a) > 10
+end
+return matcher
+])
+
+PT_CHECK([Lua
+	Load "xtestmod.lua"
+End
+ListenHTTP
+	Service
+		Header ["X-Test" -re "([0-9]+)$"]
+		LuaMatch "xtestmod.xtest" "$1"
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: 2
+end
+
+503
+end
+
+GET /echo/foo
+X-Test: 22
+end
+
+200
+end
+])
+
+PT_CHECK([Lua
+	Load "xtestmod.lua" "m10"
+End
+ListenHTTP
+	Service
+		Header ["X-Test" -re "([0-9]+)$"]
+		LuaMatch "m10.xtest" "$1"
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: 2
+end
+
+503
+end
+
+GET /echo/foo
+X-Test: 22
+end
+
+200
+end
+])
 AT_CLEANUP

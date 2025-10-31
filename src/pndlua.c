@@ -87,13 +87,60 @@ pndlua_get (void)
 }
 
 static inline int
-function_is_defined (lua_State *state, char const *name)
+pushname (lua_State *L, char const *name)
 {
-  int f;
+  char const *p;
 
-  lua_getglobal (state, name);
-  f = lua_isfunction (state, -1);
-  lua_pop (state, 1);
+  p = strchr (name, '.');
+  if (p)
+    {
+      lua_pushlstring (L, name, p - name);
+      name = p + 1;
+      p = lua_tostring (L, -1);
+      if (lua_getglobal (L, p) == LUA_TNIL)
+	{
+	  lua_pop (L, 2);
+	  return -1;
+	}
+      lua_remove (L, -2);
+
+      while (name)
+	{
+	  if (!lua_istable (L, -1))
+	    {
+	      lua_pop (L, 1);
+	      return -1;
+	    }
+	  p = strchr (name, '.');
+	  if (p)
+	    {
+	      lua_pushlstring (L, name, p - name);
+	      name = p + 1;
+	      lua_getfield (L, -2, lua_tostring (L, -1));
+	    }
+	  else
+	    {
+	      lua_getfield (L, -1, name);
+	      name = NULL;
+	    }
+	  lua_remove (L, -2);
+	}
+    }
+  else
+    lua_getglobal (L, name);
+  return 0;
+}
+
+static inline int
+function_is_defined (lua_State *L, char const *name)
+{
+  int f = 0;
+
+  if (pushname (L, name) == 0)
+    {
+      f = lua_isfunction (L, -1);
+      lua_pop (L, 1);
+    }
   return f;
 }
 
@@ -122,7 +169,7 @@ pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
 
   pndlua_set_http (state, phttp, NULL);
 
-  lua_getglobal (state, cond->func);
+  pushname (state, cond->func);
   for (i = 0; i < cond->argc; i++)
     lua_pushstring (state, argv[i]);
 
@@ -170,7 +217,7 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
 
   pndlua_set_http (state, phttp, sb);
 
-  lua_getglobal (state, be->func);
+  pushname (state, be->func);
   for (i = 0; i < be->argc; i++)
     lua_pushstring (state, argv[i]);
 
@@ -742,10 +789,8 @@ resp_get_headers (lua_State *L)
   lua_rawseti (L, -2, 0);
   /* Create the headers table. */
   rc = req_new_headers (L, -1, 1);
-  /* Swap return value and the original userdata. */
-  lua_rotate (L, -2, 1);
   /* Get rid of the original userdata. */
-  lua_pop (L, 1);
+  lua_remove (L, -2);
   return rc;
 }
 
@@ -1121,7 +1166,8 @@ pndlua_new_state (void)
  */
 struct pndlua_source
 {
-  char *name;                       /* Full file name. */
+  char *filename;                   /* Full file name. */
+  char *modname;                    /* Module name. */
   struct locus_range locus;         /* Config location. */
   SLIST_ENTRY (pndlua_source) next; /* Link to the next source. */
 };
@@ -1136,21 +1182,21 @@ static SLIST_HEAD (pndlua_source_head,pndlua_source)
   thread_sources = SLIST_HEAD_INITIALIZER (thread_sources);
 
 static int
-source_load (lua_State *state, struct pndlua_source *source)
+source_load (lua_State *L, struct pndlua_source *source, int nresults)
 {
   int res;
 
-  if (luaL_loadfile (state, source->name) != LUA_OK)
+  if (luaL_loadfile (L, source->filename) != LUA_OK)
     {
       conf_error_at_locus_range (&source->locus,
 				 "error loading Lua file %s: %s",
-				 source->name,
-				 lua_tostring (state, -1));
-      lua_pop (state, 1);
+				 source->filename,
+				 lua_tostring (L, -1));
+      lua_pop (L, 1);
       return -1;
     }
 
-  res = lua_pcall (state, 0, LUA_MULTRET, 0);
+  res = lua_pcall (L, 0, nresults, 0);
   switch (res)
     {
     case LUA_OK:
@@ -1159,29 +1205,29 @@ source_load (lua_State *state, struct pndlua_source *source)
     case LUA_ERRRUN:
       conf_error_at_locus_range (&source->locus,
 				 "Lua runtime error: %s",
-				 lua_tostring (state, -1));
-      lua_pop (state, 1);
+				 lua_tostring (L, -1));
+      lua_pop (L, 1);
       return -1;
 
     case LUA_ERRMEM:
       conf_error_at_locus_range (&source->locus,
 				 "out of memory running Lua code in %s",
-				 source->name);
+				 source->filename);
       return -1;
 
     case LUA_ERRERR:
       conf_error_at_locus_range (&source->locus,
 				 "Lua message handler error in %s: %s",
-				 source->name, lua_tostring (state, -1));
-      lua_pop (state, 1);
+				 source->filename, lua_tostring (L, -1));
+      lua_pop (L, 1);
       return -1;
 
 #ifdef LUA_ERRGCMM
     case LUA_ERRGCMM:
       conf_error_at_locus_range (&source->locus,
 				 "Lua garbage collector error in %s: %s",
-				 source->name, lua_tostring (state, -1));
-      lua_pop (state, 1);
+				 source->filename, lua_tostring (L, -1));
+      lua_pop (L, 1);
       return -1;
 #endif
 
@@ -1191,6 +1237,50 @@ source_load (lua_State *state, struct pndlua_source *source)
       return -1;
     }
 
+  return 0;
+}
+
+static int
+source_load_module (lua_State *L, struct pndlua_source *source)
+{
+  if (source->modname == NULL)
+    {
+      static char const suf[] = ".lua";
+      static size_t suflen = sizeof (suf) - 1;
+      WORKDIR *wd;
+      char const *basename;
+      size_t baselen;
+
+      if ((basename = filename_split_wd (source->filename, &wd)) == NULL)
+	{
+	  conf_error_at_locus_range (&source->locus,
+				     "can't split filename: %s",
+				     strerror (errno));
+	  return -1;
+	}
+      baselen = strlen (basename);
+      if (baselen > suflen && strcmp (basename + baselen - suflen, suf) == 0)
+	baselen -= suflen;
+      source->modname = xstrndup (basename, baselen);
+    }
+
+  luaL_getsubtable (L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
+  lua_getfield (L, -1, source->modname);  /* LOADED[modname] */
+  if (!lua_toboolean (L, -1))
+    {
+      lua_pop (L, 1);
+      if (source_load (L, source, 1))
+	return -1;
+      if (!lua_istable (L, -1))
+	{
+	  lua_pop (L, 2);
+	  return 0;
+	}
+      lua_pushvalue (L, -1);  /* make copy of module (call result) */
+      lua_setfield (L, -2, source->modname);  /* LOADED[modname] = module */
+    }
+  lua_remove(L, -2);  /* remove LOADED table */
+  lua_setglobal (L, source->modname);  /* _G[modname] = module */
   return 0;
 }
 
@@ -1215,7 +1305,7 @@ source_list_load (int i, struct pndlua_source_head *head)
 
   SLIST_FOREACH (source, head, next)
     {
-      if ((rc = source_load (L, source)) != 0)
+      if ((rc = source_load_module (L, source)) != 0)
 	break;
     }
 
@@ -1236,7 +1326,8 @@ source_list_free (struct pndlua_source_head *head)
       struct pndlua_source *source = SLIST_FIRST (head);
       SLIST_REMOVE_HEAD (head, next);
       locus_range_unref (&source->locus);
-      free (source->name);
+      free (source->filename);
+      free (source->modname);
       free (source);
     }
 }
@@ -1426,12 +1517,20 @@ parse_lua_load (struct pndlua_source_head *head)
     return CFGPARSER_FAIL;
 
   XZALLOC (src);
-  src->name = filename;
+  src->filename = filename;
   locus_range_init (&src->locus);
   locus_range_copy (&src->locus, &tok->locus);
   SLIST_INSERT_TAIL (head, src, next);
 
-  return 0;
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+
+  if (tok->type == T_STRING)
+    src->modname = xstrdup (tok->str);
+  else if (tok->type != '\n')
+    return CFGPARSER_FAIL;
+
+  return CFGPARSER_OK_NONL;
 }
 
 static int
