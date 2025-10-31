@@ -1333,7 +1333,7 @@ static char file_headers[] = "Content-Type: text/plain\r\n";
 static int
 file_response (POUND_HTTP *phttp)
 {
-  char *file_name;
+  char const *file_name;
   struct http_request req;
   BIO *bin;
   int rc, fd;
@@ -1353,9 +1353,17 @@ file_response (POUND_HTTP *phttp)
       rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  file_name = phttp->request.path;
+  if (http_request_get_path (&phttp->request, &file_name))
+    {
+      http_request_free (&req);
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+    }
+  if (*file_name == '/')
+    file_name++;
+  if (!*file_name)
+    rc = HTTP_STATUS_NOT_FOUND;
 
-  if ((fd = openat (phttp->backend->v.file.wd, file_name, O_RDONLY)) == -1)
+  else if ((fd = openat (phttp->backend->v.file.wd, file_name, O_RDONLY)) == -1)
     {
       if (errno == ENOENT)
 	{
@@ -3519,7 +3527,7 @@ parse_http_request (struct http_request *req, int group)
 
   if (status == HTTP_STATUS_OK)
     {
-      req->method = md->meth;
+     req->method = md->meth;
       if ((req->url = xstrndup (url, ulen)) == NULL)
 	{
 	  lognomem ();

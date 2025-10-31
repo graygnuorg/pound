@@ -25,10 +25,26 @@ AT_DATA([arar.txt],[ARAR
 
 PT_CHECK([ListenHTTP
 	Service
+		SendFile "."
+	End
+End
+],
+[GET /arar.txt
+end
+
+200
+Content-Type: text/plain
+
+ARAR
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
 		Path -re "/public/(.+)"
 		SetPath "$1"
 		Rewrite response
-			SetHeader "Content-Type: text/plain"
+			SetHeader "Content-Type: text/html"
 		End
 		SendFile "."
 	End
@@ -38,7 +54,7 @@ End
 end
 
 200
-Content-Type: text/plain
+Content-Type: text/html
 
 ARAR
 end
