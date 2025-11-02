@@ -2225,7 +2225,6 @@ parse_cond_tbf (void *call_data, void *section_data)
   return CFGPARSER_OK;
 }
 
-
 static int
 parse_lua_match (void *call_data, void *section_data)
 {
@@ -2233,6 +2232,132 @@ parse_lua_match (void *call_data, void *section_data)
   return pndlua_parse_closure (&cond->clua);
 }
 
+static SERVICE_COND *named_cond_lookup (char const *name);
+
+static int
+parse_cond_eval (void *call_data, void *section_data)
+{
+  struct token *tok;
+  SERVICE_COND *cond, *ref;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if ((ref = named_cond_lookup (tok->str)) == NULL)
+    {
+      conf_error ("%s: no such condition", tok->str);
+      return CFGPARSER_FAIL;
+    }
+
+  cond = service_cond_append (call_data, COND_REF);
+  cond->cond = ref;
+
+  return CFGPARSER_OK;
+}
+
+/* Named conditions. */
+typedef struct named_cond
+{
+  char *name;
+  SERVICE_COND cond;
+  struct locus_range locus;
+} NAMED_COND;
+
+#define HT_TYPE NAMED_COND
+#define HT_NO_HASH_FREE
+#define HT_NO_DELETE
+#define HT_NO_FOREACH
+#include "ht.h"
+
+static NAMED_COND_HASH *named_cond_hash;
+
+static SERVICE_COND *
+named_cond_lookup (char const *name)
+{
+  SERVICE_COND *cond = NULL;
+  if (named_cond_hash)
+    {
+      NAMED_COND key, *ncond;
+      key.name = (char*)name;
+      if ((ncond = NAMED_COND_RETRIEVE (named_cond_hash, &key)) != NULL)
+	cond = &ncond->cond;
+    }
+  return cond;
+}
+
+static NAMED_COND *
+named_cond_new (char *name, int op)
+{
+  NAMED_COND *nc, *old;
+
+  if (!named_cond_hash)
+    named_cond_hash = NAMED_COND_HASH_NEW ();
+  XZALLOC (nc);
+  nc->name = name;
+  service_cond_init (&nc->cond, COND_BOOL);
+  nc->cond.boolean.op = op;
+  locus_range_init (&nc->locus);
+  locus_range_copy (&nc->locus, last_token_locus_range ());
+
+  old = NAMED_COND_INSERT (named_cond_hash, nc);
+  if (old != NULL)
+    {
+      conf_error ("%s redefined", name);
+      conf_error_at_locus_range (&old->locus, "originally defined here");
+      //FIXME named_cond_free (nc);
+      return NULL;
+    }
+
+  return nc;
+}
+
+static int parse_bool_cond (SERVICE_COND *cond, void *section_data);
+
+static int
+parse_named_cond (void *call_data, void *section_data)
+{
+  struct token *tok;
+  char *name;
+  int op = BOOL_AND;
+  NAMED_COND *nc;
+  int result;
+  struct locus_range const *r;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+  name = xstrdup (tok->str);
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  if (tok->type == T_IDENT)
+    {
+      if (c_strcasecmp (tok->str, "and") == 0)
+	op = BOOL_AND;
+      else if (c_strcasecmp (tok->str, "or") == 0)
+	op = BOOL_OR;
+      else
+	{
+	  conf_error ("expected AND or OR, but found %s", tok->str);
+	  return CFGPARSER_FAIL;
+	}
+    }
+  else
+    {
+      op = BOOL_AND;
+      putback_tkn (tok);
+    }
+
+  nc = named_cond_new (name, op);
+
+  if (nc == NULL)
+    return CFGPARSER_FAIL;
+
+  result = parse_bool_cond (&nc->cond, section_data);
+
+  if ((r = last_token_locus_range ()) != NULL)
+    locus_point_copy (&nc->locus.end, &r->end);
+  return result;
+}
+
 static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
@@ -2670,6 +2795,10 @@ static CFGPARSER_TABLE match_conditions[] = {
     .name = "ClientCert",
     .parser = parse_cond_client_cert
   },
+  {
+    .name = "Eval",
+    .parser = parse_cond_eval
+  },
   { NULL }
 };
 
@@ -2708,11 +2837,17 @@ static CFGPARSER_TABLE logcon_parsetab[] = {
 };
 
 static int
+parse_bool_cond (SERVICE_COND *cond, void *section_data)
+{
+  return parser_loop (logcon_parsetab, cond, section_data, NULL);
+}
+
+static int
 parse_cond (int op, SERVICE_COND *cond, void *section_data)
 {
   SERVICE_COND *subcond = service_cond_append (cond, COND_BOOL);
   subcond->boolean.op = op;
-  return parser_loop (logcon_parsetab, subcond, section_data, NULL);
+  return parse_bool_cond (subcond, section_data);
 }
 
 static int parse_else (void *call_data, void *section_data);
@@ -5363,6 +5498,10 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "Backend",
     .parser = parse_named_backend,
     .off = offsetof (POUND_DEFAULTS, named_backend_table)
+  },
+  {
+    .name = "Condition",
+    .parser = parse_named_cond
   },
   {
     .name = "ListenHTTP",

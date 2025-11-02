@@ -72,6 +72,7 @@
 
 (defvar pound-named-section-keywords
   '("Backend"
+    "Condition"
     "Service"
     "ListenHTTP"
     "ListenHTTPS"))
@@ -119,7 +120,8 @@
     "URL"))
 
 (defvar pound-matcher-keywords-2
-  '("Header"
+  '("Eval"
+    "Header"
     "LuaMatch"
     "StringMatch"
     "QueryParam"))
@@ -390,6 +392,10 @@
    (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)[ \t]+\\(and\\|or\\)\\>"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
+   (list "^[ \t]*\\(Condition\\)[ \t]+\\(\".*\"\\)[ \t]+\\(and\\|or\\)\\>"
+	 '(1 font-lock-keyword-face)
+	 '(2 font-lock-string-face)
+	 '(3 font-lock-constant-face))
 
    ;; Sections
    (list (concat "^[ \t]*"
@@ -404,6 +410,7 @@
 (defvar pound-true-sections
   '("Backend"
     "Service"
+    "Condition"
     "CombineHeaders"
     "Resolver"
     "Rewrite"
@@ -466,7 +473,7 @@ a Service, as opposed to the top-level Control (whether block or directive)"
 (defun pound-top-level-form ()
   "Move point to the beginning of the nearest top-level block statement.
 Return t if such was found, nil otherwise."
-  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
+  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|\\(Condition[ \t]+\".*\"\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
       (cond
        ((and (pound-streq (match-string 1) "Control")
 	     (pound-at-control-backend))

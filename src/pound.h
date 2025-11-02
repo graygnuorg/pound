@@ -728,7 +728,8 @@ enum service_cond_type
     COND_CLIENT_CERT,
     COND_DYN,
     COND_TBF,
-    COND_LUA
+    COND_LUA,
+    COND_REF    /* Reference to another condition. */
   };
 
 struct dyn_service_cond

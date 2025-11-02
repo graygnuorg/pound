@@ -3544,7 +3544,7 @@ parse_http_request (struct http_request *req, int group)
 
   return status;
 }
-
+
 static int
 match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
 	       struct submatch *sm)
@@ -3796,6 +3796,10 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	else
 	  res = -1;
       }
+      break;
+
+    case COND_REF:
+      res = match_cond (cond->cond, phttp, req);
       break;
     }
   watcher_unlock (cond->watcher);
