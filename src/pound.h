@@ -386,9 +386,11 @@ enum
     H_APPEND    /* Append to the value (assume #(values)) */
   };
 
-int http_header_list_append (HTTP_HEADER_LIST *head, char *text, int replace);
+int http_header_list_append (HTTP_HEADER_LIST *head, char const *text,
+			     int replace);
 int http_header_list_append_list (HTTP_HEADER_LIST *head,
 				  HTTP_HEADER_LIST *add);
+void http_header_list_remove_field (HTTP_HEADER_LIST *head, char const *field);
 
 struct query_param
 {
@@ -478,6 +480,21 @@ JOB_ID job_enqueue_after (unsigned t, JOB_FUNC func, void *data);
 void job_cancel (JOB_ID id);
 int job_get_timestamp (JOB_ID jid, struct timespec *ts);
 
+enum
+  {
+    PNDLUA_CTX_GLOBAL,
+    PNDLUA_CTX_THREAD
+  };
+
+struct pndlua_closure
+{
+  int ctx;
+  char *func;
+  int argc;
+  char **argv;
+  struct locus_range locus;
+};
+
 /* matcher chain */
 typedef struct _matcher
 {
@@ -510,7 +527,8 @@ typedef enum
     BE_ERROR,
     BE_METRICS,
     BE_BACKEND_REF,     /* See be_name in BACKEND */
-    BE_FILE
+    BE_FILE,
+    BE_LUA
   }
   BACKEND_TYPE;
 
@@ -627,6 +645,7 @@ typedef struct _backend
     struct be_file file;
     struct be_redirect redirect;
     struct be_error error;
+    struct pndlua_closure lua;
     char *be_name;              /* Name of the backend; Used during parsing. */
   } v;
 
@@ -708,7 +727,8 @@ enum service_cond_type
     COND_STRING_MATCH,/* String match. */
     COND_CLIENT_CERT,
     COND_DYN,
-    COND_TBF
+    COND_TBF,
+    COND_LUA
   };
 
 struct dyn_service_cond
@@ -769,6 +789,7 @@ typedef struct _service_cond
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
     X509 *x509;              /* COND_CLIENT_CERT */
+    struct pndlua_closure clua; /* COND_LUA */
     struct tbf_cond tbf;     /* COND_TBF */
   };
   SLIST_ENTRY (_service_cond) next;
@@ -1326,6 +1347,7 @@ enum
 int http_request_get_url (struct http_request *, char const **);
 int http_request_get_query (struct http_request *, char const **);
 int http_request_get_path (struct http_request *req, char const **retval);
+int http_request_count_query_param (struct http_request *req);
 int http_request_get_query_param_value (struct http_request *req,
 					char const *name,
 					char const **retval);
@@ -1360,3 +1382,41 @@ int is_combinable_header (struct http_header *hdr);
 
 TBF *tbf_alloc (uint64_t rate, unsigned burst);
 int tbf_eval (TBF *env, char const *keyid);
+
+#if ENABLE_LUA
+int pndlua_init (void);
+int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv);
+int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond,
+		    char **argv, struct stringbuf *sb);
+int pndlua_parse_config (void *call_data, void *section_data);
+int pndlua_parse_closure (struct pndlua_closure *cond);
+#else
+static inline int pndlua_init (void) { return 0; }
+static inline int
+cfg_no_lua (void)
+{
+  conf_error ("%s", "this pound is compiled without support for Lua");
+  return CFGPARSER_FAIL;
+}
+static inline int
+pndlua_parse_config (void *call_data, void *section_data)
+{
+  return cfg_no_lua ();
+}
+static inline int
+pndlua_parse_closure (struct pndlua_closure *cond)
+{
+  return cfg_no_lua ();
+}
+static inline int
+pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
+{
+  return -1;
+}
+static inline int
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv,
+		struct stringbuf *sb)
+{
+  return -1;
+}
+#endif

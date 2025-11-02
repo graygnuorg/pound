@@ -1252,17 +1252,6 @@ static CFGPARSER_TABLE use_backend_parsetab[] = {
   { NULL }
 };
 
-static inline int
-parser_loop (CFGPARSER_TABLE *ptab,
-	     void *call_data, void *section_data,
-	     struct locus_range *retrange)
-{
-  return cfgparser_loop (ptab, call_data, section_data,
-			 feature_is_set (FEATURE_WARN_DEPRECATED)
-			   ? DEPREC_WARN : DEPREC_OK,
-			 retrange);
-}
-
 static BACKEND *
 parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl)
 {
@@ -2238,6 +2227,13 @@ parse_cond_tbf (void *call_data, void *section_data)
 
 
 static int
+parse_lua_match (void *call_data, void *section_data)
+{
+  SERVICE_COND *cond = service_cond_append (call_data, COND_LUA);
+  return pndlua_parse_closure (&cond->clua);
+}
+
+static int
 parse_redirect_backend (void *call_data, void *section_data)
 {
   BALANCER_LIST *bml = call_data;
@@ -2443,6 +2439,20 @@ parse_sendfile_backend (void *call_data, void *section_data)
 
   return CFGPARSER_OK;
 }
+
+static int
+parse_lua_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  BACKEND *be;
+  int rc;
+
+  be = xbackend_create (BE_LUA, 1, last_token_locus_range ());
+  if ((rc = pndlua_parse_closure (&be->v.lua)) == CFGPARSER_OK ||
+      rc == CFGPARSER_OK_NONL)
+    balancer_add_backend (balancer_list_get_normal (bml), be);
+  return rc;
+}
 
 struct service_session
 {
@@ -2643,6 +2653,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "StringMatch",
     .parser = parse_cond_string_matcher
+  },
+  {
+    .name = "LuaMatch",
+    .parser = parse_lua_match
   },
   {
     .name = "Match",
@@ -3284,6 +3298,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "Control",
     .parser = parse_control_backend,
+    .off = offsetof (SERVICE, balancers)
+  },
+  {
+    .name = "LuaBackend",
+    .parser = parse_lua_backend,
     .off = offsetof (SERVICE, balancers)
   },
   {
@@ -5393,6 +5412,10 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .parser = parse_resolver
   },
   {
+    .name = "Lua",
+    .parser = pndlua_parse_config
+  },
+  {
     .name = "WatcherTTL",
     .parser = cfg_assign_unsigned,
     .data = &watcher_ttl
@@ -5792,6 +5815,10 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
+
+      if (pndlua_init ())
+	return -1;
+
       if (worker_min_count > worker_max_count)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
@@ -5936,6 +5963,14 @@ struct string_value pound_settings[] = {
 				 "kqueue"
 #else
 				 "periodic"
+#endif
+    }
+  },
+  { "Lua support", STRING_CONSTANT, { .s_const =
+#if ENABLE_LUA
+				     "enabled"
+#else
+				     "disabled"
 #endif
     }
   },

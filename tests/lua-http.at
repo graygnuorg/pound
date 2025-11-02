@@ -13,53 +13,55 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([SendFile backend])
-AT_KEYWORDS([sendfile file])
+AT_SETUP([Lua http module])
+AT_KEYWORDS([cond lua lua-http])
 
-m4_pushdef([ARAR],
-[Flumen est Arar, quod per fines Haeduorum et Sequanorum in Rhodanum influit,
-incredibili lenitate, ita ut oculis in utram partem fluat iudicari non possit.])
+AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
 
-AT_DATA([arar.txt],[ARAR
-])
+AT_DATA([xhost.lua],
+[[function chkhost(a)
+   return a == http.req.headers['host']:match("([^:]+):[0-9]+")
+end
+]])
 
-PT_CHECK([ListenHTTP
-	Service
-		SendFile "."
-	End
+PT_CHECK([Lua
+	Load "xhost.lua"
 End
-],
-[GET /arar.txt
-end
-
-200
-Content-Type: text/plain
-
-ARAR
-end
-])
-
-PT_CHECK([ListenHTTP
+ListenHTTP
 	Service
-		Path -re "/public/(.+)"
-		SetPath "$1"
-		Rewrite response
-			SetHeader "Content-Type: text/html"
+		LuaMatch "chkhost" "example.com"
+		Backend
 		End
-		SendFile "."
+	End
+	Service
+		LuaMatch "chkhost" "foo.bar"
+		Backend
+		End
 	End
 End
 ],
-[GET /public/arar.txt
+[GET /echo/foo
+Host: example.com
 end
 
 200
-Content-Type: text/html
+x-backend-number: 0
+end
 
-ARAR
+GET /echo/foo
+Host: foo.bar
+end
+
+200
+x-backend-number: 1
+end
+
+GET /echo/foo
+Host: foo.bar.baz
+end
+
+503
 end
 ])
-
-m4_popdef([ARAR])
 
 AT_CLEANUP

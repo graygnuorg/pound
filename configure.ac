@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.18],[gray@gnu.org],
+AC_INIT([pound],[4.18.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
@@ -210,6 +210,25 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
+AC_ARG_WITH([lua],
+ [AS_HELP_STRING([--with-lua],
+		 [compile with Lua library])],
+ [status_lua=${withval}],
+ [status_lua=probe])
+
+if test $status_lua != no; then
+  PKG_PROG_PKG_CONFIG
+  PKG_CHECK_MODULES([LUA], [lua >= 5.3],
+      [status_lua=yes
+       AC_DEFINE([ENABLE_LUA], [1],
+		 [Define if Lua extension language is supported])],
+      [status_lua=no])
+  AC_MSG_CHECKING([For liblua 5.3 or newer])
+  AC_MSG_RESULT([$status_lua])
+fi
+
+AM_CONDITIONAL([COND_LUA], [test $status_lua = yes])
+
 # **********************
 # Event monitoring
 # **********************
@@ -286,6 +305,7 @@ Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
 Test dynamic backends ......................... $status_dns_tests
 Filesystem event monitoring ................... $status_fsevmon
+Lua support ................................... $status_lua
 *******************************************************************
 
 EOF
@@ -304,6 +324,7 @@ else
 fi
 status_dynamic_backends=$status_dynamic_backends
 status_dns_tests=$status_dns_tests
+status_lua=$status_lua
 status_fsevmon=$status_fsevmon
 ])
 

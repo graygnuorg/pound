@@ -7,6 +7,10 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
+Version 4.18.90 (git)
+
+* Support for Lua
+
 Version 4.18, 2025-10-29
 
 * Emacs mode for editing pound configuration files
@@ -1500,7 +1504,7 @@ Copyright (C) 2018-2025 Sergey Poznyakoff
 Local variables:
 mode: outline
 paragraph-separate: "[  ]*$"
-eval: (add-hook 'write-file-hooks 'time-stamp)
+eval: (add-hook 'write-file-functions 'time-stamp)
 time-stamp-start: "changes. "
 time-stamp-format: "%:y-%02m-%02d"
 time-stamp-end: "\n"

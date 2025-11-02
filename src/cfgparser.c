@@ -664,25 +664,28 @@ input_gettkn (struct cfginput *input, struct token **tok)
 	      if (c == '\\')
 		{
 		  c = input_getc (input);
-		  if (!(c == EOF || c == '"' || c == '\\'))
+		  switch (c)
 		    {
+		    case '"':
+		    case '\\':
+		      break;
+
+		    case EOF:
+		      conf_error_at_locus_point (&input->locus,
+						 "end of file in quoted string");
+		      input->token.type = T_ERROR;
+		      goto end;
+
+		    case '\n':
+		      conf_error_at_locus_point (&input->locus,
+						 "end of line in quoted string");
+		      input->token.type = T_ERROR;
+		      goto end;
+
+		    default:
 		      conf_error_at_locus_point (&input->locus,
 						 "unrecognized escape character");
 		    }
-		}
-	      if (c == EOF)
-		{
-		  conf_error_at_locus_point (&input->locus,
-					     "end of file in quoted string");
-		  input->token.type = T_ERROR;
-		  goto end;
-		}
-	      if (c == '\n')
-		{
-		  conf_error_at_locus_point (&input->locus,
-					     "end of line in quoted string");
-		  input->token.type = T_ERROR;
-		  goto end;
 		}
 	      stringbuf_add_char (&input->buf, c);
 	    }

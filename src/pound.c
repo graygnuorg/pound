@@ -308,6 +308,7 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
 
   http_request_init (&res->request);
   http_request_init (&res->response);
+
   /*
    * Note: submatch_queue_init is not called, because res is already
    * filled with zeros.  Revise this if submatch_queue stuff changes.

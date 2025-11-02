@@ -1,4 +1,4 @@
-# Pound - the reverse-proxy load-balancer                -*- automake -*-
+# Pound - the reverse-proxy load-balancer
 # Copyright (C) 2002-2010 Apsis GmbH
 # Copyright (C) 2018-2025 Sergey Poznyakoff
 #

@@ -1,4 +1,4 @@
-# Pound - the reverse-proxy load-balancer                -*- automake -*-
+# Pound - the reverse-proxy load-balancer
 # Copyright (C) 2002-2010 Apsis GmbH
 # Copyright (C) 2018-2025 Sergey Poznyakoff
 #
@@ -17,12 +17,12 @@
 
 AM_CFLAGS = @PTHREAD_CFLAGS@
 
-AM_CPPFLAGS = @SSL_CPPFLAGS@ @PCRE_CFLAGS@ \
+AM_CPPFLAGS = @SSL_CPPFLAGS@ @LUA_CFLAGS@ @PCRE_CFLAGS@ \
  -DSYSCONFDIR=\"$(sysconfdir)\"\
  -DLOCALSTATEDIR=\"$(localstatedir)\"\
  -DPKGDATADIR=\"$(pkgdatadir)\"
 AM_LDFLAGS  = @SSL_LDFLAGS@
-LDADD = libpound.a @PCRE_LIBS@ @PTHREAD_LIBS@
+LDADD = libpound.a @LUA_LIBS@ @PCRE_LIBS@ @PTHREAD_LIBS@
 
 sbin_PROGRAMS=pound
 pound_SOURCES=\
@@ -45,6 +45,9 @@ if COND_PCRE2
 endif
 if COND_DYNAMIC_BACKENDS
   pound_SOURCES += resolver.c dynbe.c
+endif
+if COND_LUA
+  pound_SOURCES += pndlua.c
 endif
 
 if COND_INOTIFY

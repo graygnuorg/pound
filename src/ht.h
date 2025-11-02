@@ -39,7 +39,7 @@
  *     void X_FOREACH_SAFE(X_HASH *, void (*)(X *, void *), void *)
  *
  *   The X_FOREACH and X_FOREACH_SAFE functions iterate over all elements
- *   in hash invoking the supplied callback function on each of them.  Use 
+ *   in hash invoking the supplied callback function on each of them.  Use
  *   X_FOREACH_SAFE if the callback can delete elements from the hash.
  *
  *   If the name of the key field is not "name", the HT_NAME_FIELD must

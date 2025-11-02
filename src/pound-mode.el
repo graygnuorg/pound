@@ -82,6 +82,7 @@
     "Control"
     "CombineHeaders"
     "Else"
+    "Lua"
     "Match"
     "Resolver"
     "Rewrite"
@@ -119,6 +120,7 @@
 
 (defvar pound-matcher-keywords-2
   '("Header"
+    "LuaMatch"
     "StringMatch"
     "QueryParam"))
 
@@ -132,6 +134,7 @@
     "Balancer"
     "CAlist"
     "CNAMEChain"
+    "CPath"
     "CRLlist"
     "Cert"
     "ChangeOwner"
@@ -162,17 +165,21 @@
     "Include"
     "IncludeDir"
     "LineBufferSize"
+    "Load"
+    "LoadGlobal"
     "LogFacility"
     "LogFormat"
     "LogLevel"
     "LogSuppress"
     "LogTag"
+    "LuaBackend"
     "MaxRequest"
     "MaxURI"
     "Metrics"
     "Mode"
     "NoHTTPS11"
     "OverrideTTL"
+    "Path"
     "PidFile"
     "Port"
     "Priority"
@@ -459,7 +466,7 @@ a Service, as opposed to the top-level Control (whether block or directive)"
 (defun pound-top-level-form ()
   "Move point to the beginning of the nearest top-level block statement.
 Return t if such was found, nil otherwise."
-  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\)[ \t]*\\(?:#.*\\)?$" nil t)
+  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
       (cond
        ((and (pound-streq (match-string 1) "Control")
 	     (pound-at-control-backend))

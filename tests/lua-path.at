@@ -13,53 +13,54 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([SendFile backend])
-AT_KEYWORDS([sendfile file])
+AT_SETUP([Lua path])
+AT_KEYWORDS([cond lua lua-path])
 
-m4_pushdef([ARAR],
-[Flumen est Arar, quod per fines Haeduorum et Sequanorum in Rhodanum influit,
-incredibili lenitate, ita ut oculis in utram partem fluat iudicari non possit.])
+AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
 
-AT_DATA([arar.txt],[ARAR
+AT_DATA([path0.lua],
+[pound.log(pound.DEBUG, "PATH=" .. package.path)
 ])
 
-PT_CHECK([ListenHTTP
-	Service
-		SendFile "."
-	End
+PT_CHECK([
+Lua
+	LoadGlobal "path0.lua"
 End
-],
-[GET /arar.txt
-end
-
-200
-Content-Type: text/plain
-
-ARAR
-end
-])
-
-PT_CHECK([ListenHTTP
+ListenHTTP
 	Service
-		Path -re "/public/(.+)"
-		SetPath "$1"
-		Rewrite response
-			SetHeader "Content-Type: text/html"
+		Backend
 		End
-		SendFile "."
 	End
 End
-],
-[GET /public/arar.txt
-end
-
-200
-Content-Type: text/html
-
-ARAR
-end
 ])
 
-m4_popdef([ARAR])
+AT_CHECK([sed -n -e '/^pound: PATH=/{' -e 's///p' -e 'q' -e '}' pound.log],
+[0],
+[stdout])
+
+m4_pushdef([PATH_PREPEND],[/one/?.lua;/two/?/lua])
+m4_pushdef([PATH_PREPEND_Q],[m4_bpatsubst(PATH_PREPEND, [[/.]], [\\\&])])
+
+PT_CHECK([
+Lua
+	Path	"PATH_PREPEND"
+	LoadGlobal "path0.lua"
+End
+ListenHTTP
+	Service
+		Backend
+		End
+	End
+End
+])
+
+AT_CHECK([sed -n -e '/^pound: PATH=/{' -e 's///' \
+                 -e 's/^PATH_PREPEND_Q;//' \
+		 -e p \
+		 -e 'q' \
+		 -e '}' pound.log | cmp - stdout])
+
+m4_popdef([PATH_PREPEND_Q])
+m4_popdef([PATH_PREPEND])
 
 AT_CLEANUP

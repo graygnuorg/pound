@@ -555,6 +555,10 @@ str_be (char *buf, size_t size, BACKEND *be)
       strncpy (buf, "file", size);
       break;
 
+    case BE_LUA:
+      snprintf (buf, size, "lua:%s", be->v.lua.func);
+      break;
+
     default:
       abort ();
     }
@@ -2227,6 +2231,11 @@ backend_serialize (BACKEND *be)
 					  be->v.error.msg.text
 					   ? json_new_string (be->v.error.msg.text)
 					   : json_new_null ());
+		    break;
+
+		  case BE_LUA:
+		    err = json_object_set (obj, "function",
+					   json_new_string (be->v.lua.func));
 		    break;
 		  }
 	      if (enable_backend_stats && be->be_type != BE_MATRIX)

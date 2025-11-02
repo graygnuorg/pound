@@ -1,4 +1,4 @@
-# Pound - the reverse-proxy load-balancer                -*- automake -*-
+# Pound - the reverse-proxy load-balancer
 # Copyright (C) 2024-2025 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
@@ -35,6 +35,3 @@ manual:
 	 $(GENDOCS) -C manual -o otherdoc.texi $(PACKAGE) otherdoc.texi.in
 	$(MAKEINFO) $(AM_MAKEINFOFLAGS) $(MAKEINFOFLAGS) -DWEBDOC \
 	   --html $(MAKEINFO_INIT_FILE_FLAG) $(info_TEXINFOS) -o manual
-
-
-

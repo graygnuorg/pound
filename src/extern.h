@@ -70,3 +70,14 @@ enum
 int feature_is_set (int f);
 
 extern unsigned watcher_ttl;
+
+static inline int
+parser_loop (CFGPARSER_TABLE *ptab,
+	     void *call_data, void *section_data,
+	     struct locus_range *retrange)
+{
+  return cfgparser_loop (ptab, call_data, section_data,
+			 feature_is_set (FEATURE_WARN_DEPRECATED)
+			   ? DEPREC_WARN : DEPREC_OK,
+			 retrange);
+}
