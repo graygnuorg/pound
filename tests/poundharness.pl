@@ -413,7 +413,7 @@ EOT
 	} elsif (/^\s*(Backend|Emergency)/i) {
 	    $be_loc = "$infile:$.";
 	    unshift @state, ST_BACKEND;
-	} elsif (/^\s*((Match)|(Rewrite)|(TrustedIP)|(ACL)|(CombineHeaders))\b/i) {
+	} elsif (/^\s*((Match)|(Rewrite)|(TrustedIP)|(ACL)|(CombineHeaders)|(Condition)|(Lua))\b/i) {
 	    unshift @state, ST_SECTION
 	} elsif (/^(\s*)End/i) {
 	    if ($state[0] == ST_BACKEND) {
