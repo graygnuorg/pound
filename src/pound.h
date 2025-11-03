@@ -729,7 +729,7 @@ enum service_cond_type
     COND_DYN,
     COND_TBF,
     COND_LUA,
-    COND_REF    /* Reference to another condition. */
+    COND_REF    /* Reference to detached condition. */
   };
 
 struct dyn_service_cond
@@ -786,7 +786,7 @@ typedef struct _service_cond
     GENPAT re;
     struct bool_service_cond boolean;
     struct dyn_service_cond dyn;
-    struct _service_cond *cond;
+    int ref;                 /* COND_REF */
     struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
     X509 *x509;              /* COND_CLIENT_CERT */
@@ -1088,6 +1088,9 @@ typedef struct _pound_http
   struct timespec be_start;  /* Time when the request was handed to the
 				backend */
 
+  char *eval_result;         /* Array of return statuses from evaluation of
+				detached conditions. */
+
   int response_code;
 
   CONTENT_LENGTH res_bytes;
@@ -1096,6 +1099,12 @@ typedef struct _pound_http
 } POUND_HTTP;
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
+
+int phttp_eval_result_init (POUND_HTTP *phttp);
+void phttp_eval_result_reset (POUND_HTTP *phttp);
+int phttp_eval_result_get (POUND_HTTP *phttp, int n);
+int phttp_eval_result_cache (POUND_HTTP *phttp, int n, int res);
+SERVICE_COND *detached_cond (int n);
 
 void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
 void http_log (POUND_HTTP *phttp);

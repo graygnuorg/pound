@@ -2231,60 +2231,143 @@ parse_lua_match (void *call_data, void *section_data)
   SERVICE_COND *cond = service_cond_append (call_data, COND_LUA);
   return pndlua_parse_closure (&cond->clua);
 }
-
-static SERVICE_COND *named_cond_lookup (char const *name);
-
-static int
-parse_cond_eval (void *call_data, void *section_data)
-{
-  struct token *tok;
-  SERVICE_COND *cond, *ref;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((ref = named_cond_lookup (tok->str)) == NULL)
-    {
-      conf_error ("%s: no such condition", tok->str);
-      return CFGPARSER_FAIL;
-    }
-
-  cond = service_cond_append (call_data, COND_REF);
-  cond->cond = ref;
-
-  return CFGPARSER_OK;
-}
 
-/* Named conditions. */
+/* Named and detached conditions. */
+
+/*
+ * Named condition represents a detached condition during configuration
+ * file processing.  At the end of parsing phase, all references to named
+ * conditions are resolved, the conditions (SERVICE_COND pointers) they
+ * refer to are moved to the detcond_index array and assigned the condition
+ * number.  Finally, the memory allocated to named conditions is freed.
+ */
 typedef struct named_cond
 {
   char *name;
-  SERVICE_COND cond;
+  SERVICE_COND *cond;
   struct locus_range locus;
+  int idx;
 } NAMED_COND;
 
 #define HT_TYPE NAMED_COND
-#define HT_NO_HASH_FREE
 #define HT_NO_DELETE
-#define HT_NO_FOREACH
+#define HT_NO_FOREACH_SAFE
 #include "ht.h"
 
 static NAMED_COND_HASH *named_cond_hash;
 
-static SERVICE_COND *
+/* Array of detached conditions. */
+SERVICE_COND **detcond_index;
+static int detcond_count;
+
+/* Return a pointer to the detached condition with the given number. */
+SERVICE_COND *
+detached_cond (int n)
+{
+  assert (n >= 0 && n < detcond_count);
+  return detcond_index[n];
+}
+
+/*
+ * eval_result array
+ *
+ * An array of detcond_count char elements is associated with each POUND_HTTP
+ * object.  Each element keeps the result of evaluation of the corresponding
+ * detached condition, increased by 1.  Thus eval_result[n] == 0 means that
+ * condition n has not yet been evaluated.
+ */
+
+/* Allocate and attach eval_result array to the POUND_HTTP object. */
+int
+phttp_eval_result_init (POUND_HTTP *phttp)
+{
+  if (detcond_count)
+    {
+      phttp->eval_result = calloc (detcond_count,
+				   sizeof (phttp->eval_result[0]));
+      return phttp->eval_result == NULL;
+    }
+  return 0;
+}
+
+/* Reset the eval_result array. */
+void
+phttp_eval_result_reset (POUND_HTTP *phttp)
+{
+  memset (phttp->eval_result, 0, detcond_count);
+}
+
+/*
+ * Get result of the latest evaluation of detached condition n.
+ * Returns -1 if the condition has not been evaluated yet.
+ */
+int
+phttp_eval_result_get (POUND_HTTP *phttp, int n)
+{
+  assert (n >= 0 && n < detcond_count);
+  return phttp->eval_result[n] - 1;
+}
+
+/* Store result res of evaluating the detached condition n. */
+int
+phttp_eval_result_cache (POUND_HTTP *phttp, int n, int res)
+{
+  assert (n >= 0 && n < detcond_count);
+  return phttp->eval_result[n] = !!res + 1;
+}
+
+/*
+ * Named condition hash management.
+ */
+
+/*
+ * Free a named condition entry.
+ * The service condition pointer is not freed.
+ */
+static void
+named_cond_free (NAMED_COND *nc)
+{
+  free (nc->name);
+  locus_range_unref (&nc->locus);
+}
+
+/*
+ * Store the condition in the detcond_index array and free the named condition.
+ */
+static void
+named_cond_store (NAMED_COND *nc, void *data)
+{
+  detcond_index[nc->idx] = nc->cond;
+  named_cond_free (nc);
+}
+
+/* Finalize detached condition processing. */
+static void
+named_cond_finish (void)
+{
+  if (detcond_count)
+    {
+      detcond_index = xcalloc (detcond_count, sizeof (detcond_index[0]));
+      NAMED_COND_FOREACH (named_cond_hash, named_cond_store, NULL);
+      NAMED_COND_HASH_FREE (named_cond_hash);
+    }
+}
+
+/* Find named condition by its name. */
+static NAMED_COND *
 named_cond_lookup (char const *name)
 {
-  SERVICE_COND *cond = NULL;
+  NAMED_COND *cond = NULL;
   if (named_cond_hash)
     {
-      NAMED_COND key, *ncond;
+      NAMED_COND key;
       key.name = (char*)name;
-      if ((ncond = NAMED_COND_RETRIEVE (named_cond_hash, &key)) != NULL)
-	cond = &ncond->cond;
+      cond = NAMED_COND_RETRIEVE (named_cond_hash, &key);
     }
   return cond;
 }
 
+/* Allocate new named condition with boolean operation op. */
 static NAMED_COND *
 named_cond_new (char *name, int op)
 {
@@ -2294,8 +2377,8 @@ named_cond_new (char *name, int op)
     named_cond_hash = NAMED_COND_HASH_NEW ();
   XZALLOC (nc);
   nc->name = name;
-  service_cond_init (&nc->cond, COND_BOOL);
-  nc->cond.boolean.op = op;
+  nc->cond = service_cond_alloc (COND_BOOL);
+  nc->cond->boolean.op = op;
   locus_range_init (&nc->locus);
   locus_range_copy (&nc->locus, last_token_locus_range ());
 
@@ -2307,12 +2390,13 @@ named_cond_new (char *name, int op)
       //FIXME named_cond_free (nc);
       return NULL;
     }
-
+  nc->idx = detcond_count++;
   return nc;
 }
 
 static int parse_bool_cond (SERVICE_COND *cond, void *section_data);
 
+/* Parse a standalone Condition statement. */
 static int
 parse_named_cond (void *call_data, void *section_data)
 {
@@ -2351,11 +2435,33 @@ parse_named_cond (void *call_data, void *section_data)
   if (nc == NULL)
     return CFGPARSER_FAIL;
 
-  result = parse_bool_cond (&nc->cond, section_data);
+  result = parse_bool_cond (nc->cond, section_data);
 
   if ((r = last_token_locus_range ()) != NULL)
     locus_point_copy (&nc->locus.end, &r->end);
   return result;
+}
+
+static int
+parse_cond_eval (void *call_data, void *section_data)
+{
+  struct token *tok;
+  SERVICE_COND *cond;
+  NAMED_COND *nc;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if ((nc = named_cond_lookup (tok->str)) == NULL)
+    {
+      conf_error ("%s: no such condition", tok->str);
+      return CFGPARSER_FAIL;
+    }
+
+  cond = service_cond_append (call_data, COND_REF);
+  cond->ref = nc->idx;
+
+  return CFGPARSER_OK;
 }
 
 static int
@@ -5954,6 +6060,8 @@ parse_config_file (char const *file, int nosyslog)
       if (foreach_service (service_finalize,
 			   &pound_defaults.named_backend_table))
 	return -1;
+
+      named_cond_finish ();
 
       if (pndlua_init ())
 	return -1;

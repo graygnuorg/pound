@@ -1303,6 +1303,7 @@ cb_hdr_rewrite (HTTP_HEADER_LIST *hlist, void *data)
 
   http_request_init (&req);
   req.headers = *hlist;
+  phttp_eval_result_reset (phttp);
   if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
       rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -1349,6 +1350,7 @@ file_response (POUND_HTTP *phttp)
   if (http_header_list_parse (&req.headers, file_headers, H_REPLACE, NULL))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
+  phttp_eval_result_reset (phttp);
   if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
       rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -3799,7 +3801,11 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_REF:
-      res = match_cond (cond->cond, phttp, req);
+      if ((res = phttp_eval_result_get (phttp, cond->ref)) == -1)
+	{
+	  res = match_cond (detached_cond (cond->ref), phttp, req);
+	  phttp_eval_result_cache (phttp, cond->ref, res);
+	}
       break;
     }
   watcher_unlock (cond->watcher);
@@ -4319,6 +4325,7 @@ backend_response (POUND_HTTP *phttp)
 
       if (resp_mode == RESP_OK)
 	{
+	  phttp_eval_result_reset (phttp);
 	  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
 			     &phttp->response,
 			     phttp) ||
@@ -5530,6 +5537,7 @@ do_http (POUND_HTTP *phttp)
     {
       http_request_free (&phttp->request);
       http_request_free (&phttp->response);
+      phttp_eval_result_reset (phttp);
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
