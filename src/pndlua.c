@@ -735,7 +735,7 @@ pndlua_req_index (lua_State *L)
 
   field = lua_tostring (L, 2);
   if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
-    luaL_error (L, "no such field");
+    luaL_error (L, "%s: no such field", field);
   return fun (L);
 }
 
@@ -818,7 +818,7 @@ pndlua_resp_index (lua_State *L)
 
   field = lua_tostring (L, 2);
   if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
-    luaL_error (L, "no such field");
+    luaL_error (L, "%s: no such field", field);
   return fun (L);
 }
 
@@ -910,7 +910,7 @@ pndlua_resp_newindex (lua_State *L)
 
   field = lua_tostring (L, 2);
   if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
-    luaL_error (L, "no such field");
+    luaL_error (L, "%s: no such field", field);
   return fun (L);
 }
 
@@ -972,7 +972,7 @@ pndlua_http_index (lua_State *L, int rw)
 
   field = lua_tostring (L, 2);
   if ((fun = pndlua_reg_locate (letidx[rw], reg, field)) == NULL)
-    luaL_error (L, "no such field");
+    luaL_error (L, "%s: no such field", field);
   return fun (L);
 }
 
