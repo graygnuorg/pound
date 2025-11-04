@@ -389,13 +389,9 @@
    (list "^[ \t]*\\(Rewrite\\)[ \t]+\\(request\\|response\\)\\>"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
-   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)[ \t]+\\(and\\|or\\)\\>"
+   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)\\([ \t]+\\(and\\|or\\)\\)?\\>"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
-   (list "^[ \t]*\\(Condition\\)[ \t]+\\(\".*\"\\)[ \t]+\\(and\\|or\\)\\>"
-	 '(1 font-lock-keyword-face)
-	 '(2 font-lock-string-face)
-	 '(3 font-lock-constant-face))
 
    ;; Sections
    (list (concat "^[ \t]*"
