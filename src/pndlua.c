@@ -149,6 +149,31 @@ static void pndlua_set_http (lua_State *L, POUND_HTTP *http,
 			     struct stringbuf *sb);
 static void pndlua_unset_http (lua_State *L);
 
+static lua_State *
+pndlua_lock (struct pndlua_closure *c)
+{
+  lua_State *L;
+
+  if (c->ctx == PNDLUA_CTX_GLOBAL)
+    {
+      pthread_mutex_lock (&pndlua_global_mutex);
+      L = pndlua_ctx[0].state;
+    }
+  else
+    {
+      struct pndlua *pndlua = pndlua_get ();
+      L = pndlua->state;
+    }
+  return L;
+}
+
+static void
+pndlua_unlock (struct pndlua_closure *c)
+{
+  if (c->ctx == PNDLUA_CTX_GLOBAL)
+    pthread_mutex_unlock (&pndlua_global_mutex);
+}
+
 int
 pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
 {
@@ -156,17 +181,7 @@ pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
   int res;
   lua_State *state;
 
-  if (cond->ctx == PNDLUA_CTX_GLOBAL)
-    {
-      pthread_mutex_lock (&pndlua_global_mutex);
-      state = pndlua_ctx[0].state;
-    }
-  else
-    {
-      struct pndlua *pndlua = pndlua_get ();
-      state = pndlua->state;
-    }
-
+  state = pndlua_lock (cond);
   pndlua_set_http (state, phttp, NULL);
 
   pushname (state, cond->func);
@@ -190,9 +205,8 @@ pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
   lua_pop (state, 1);
 
   pndlua_unset_http (state);
+  pndlua_unlock (cond);
 
-  if (cond->ctx == PNDLUA_CTX_GLOBAL)
-    pthread_mutex_unlock (&pndlua_global_mutex);
   return res;
 }
 
@@ -204,17 +218,7 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
   int res;
   lua_State *state;
 
-  if (be->ctx == PNDLUA_CTX_GLOBAL)
-    {
-      pthread_mutex_lock (&pndlua_global_mutex);
-      state = pndlua_ctx[0].state;
-    }
-  else
-    {
-      struct pndlua *pndlua = pndlua_get ();
-      state = pndlua->state;
-    }
-
+  state = pndlua_lock (be);
   pndlua_set_http (state, phttp, sb);
 
   pushname (state, be->func);
@@ -232,9 +236,7 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
     }
 
   pndlua_unset_http (state);
-
-  if (be->ctx == PNDLUA_CTX_GLOBAL)
-    pthread_mutex_unlock (&pndlua_global_mutex);
+  pndlua_unlock (be);
   return res;
 }
 
@@ -265,6 +267,13 @@ pndlua_pound_log (lua_State *L)
   msg = luaL_checkstring (L, 2);
   logmsg (prio, "%s", msg);
   return 0;
+}
+
+static int
+pndlua_pound_tid (lua_State *L)
+{
+  lua_pushinteger (L, (lua_Integer) pthread_self ());
+  return 1;
 }
 
 /*
@@ -1149,6 +1158,7 @@ pndlua_new_state (void)
     pndlua_dcl_integer (state, severity_table[i].name, severity_table[i].tok);
 
   pndlua_dcl_function (state, "log", pndlua_pound_log);
+  pndlua_dcl_function (state, "tid", pndlua_pound_tid);
   lua_setglobal (state, "pound");
 
   for (i = 0; i < sizeof (path_head) / sizeof (path_head[0]); i++)
