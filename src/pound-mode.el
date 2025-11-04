@@ -593,6 +593,8 @@ Other key bindings are:
 	'((pound-font-lock-keywords) nil t nil nil))
   (setq-local case-fold-search t)
   (setq-local indent-line-function 'pound-indent-line)
+  (setq-local comment-start "# ")
+  (setq-local comment-start-skip "#+[\t ]*")
   (setq-local beginning-of-defun-function 'pound-beginning-of-defun
 	      end-of-defun-function 'pound-end-of-defun))
 
