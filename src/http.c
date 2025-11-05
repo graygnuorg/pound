@@ -1303,7 +1303,6 @@ cb_hdr_rewrite (HTTP_HEADER_LIST *hlist, void *data)
 
   http_request_init (&req);
   req.headers = *hlist;
-  phttp_eval_result_reset (phttp);
   if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
       rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -1350,7 +1349,6 @@ file_response (POUND_HTTP *phttp)
   if (http_header_list_parse (&req.headers, file_headers, H_REPLACE, NULL))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  phttp_eval_result_reset (phttp);
   if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
       rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -3128,6 +3126,7 @@ http_request_free (struct http_request *req)
   free (req->query);
   http_request_free_query (req);
   free (req->orig_request_line);
+  free (req->eval_result);
   http_request_init (req);
 }
 
@@ -3801,10 +3800,10 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_REF:
-      if ((res = phttp_eval_result_get (phttp, cond->ref)) == -1)
+      if ((res = http_request_eval_get (req, cond->ref)) == -1)
 	{
 	  res = match_cond (detached_cond (cond->ref), phttp, req);
-	  phttp_eval_result_cache (phttp, cond->ref, res);
+	  http_request_eval_cache (req, cond->ref, res);
 	}
       break;
     }
@@ -4325,7 +4324,6 @@ backend_response (POUND_HTTP *phttp)
 
       if (resp_mode == RESP_OK)
 	{
-	  phttp_eval_result_reset (phttp);
 	  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
 			     &phttp->response,
 			     phttp) ||
@@ -5537,7 +5535,6 @@ do_http (POUND_HTTP *phttp)
     {
       http_request_free (&phttp->request);
       http_request_free (&phttp->response);
-      phttp_eval_result_reset (phttp);
       phttp_lua_stash_reset (phttp);
 
       phttp->ws_state = WSS_INIT;

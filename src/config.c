@@ -2271,49 +2271,41 @@ detached_cond (int n)
 /*
  * eval_result array
  *
- * An array of detcond_count char elements is associated with each POUND_HTTP
- * object.  Each element keeps the result of evaluation of the corresponding
+ * An array of detcond_count char elements is associated with each HTTP
+ * request.  Each element keeps the result of evaluation of the corresponding
  * detached condition, increased by 1.  Thus eval_result[n] == 0 means that
  * condition n has not yet been evaluated.
  */
-
-/* Allocate and attach eval_result array to the POUND_HTTP object. */
-int
-phttp_eval_result_init (POUND_HTTP *phttp)
-{
-  if (detcond_count)
-    {
-      phttp->eval_result = calloc (detcond_count,
-				   sizeof (phttp->eval_result[0]));
-      return phttp->eval_result == NULL;
-    }
-  return 0;
-}
-
-/* Reset the eval_result array. */
-void
-phttp_eval_result_reset (POUND_HTTP *phttp)
-{
-  memset (phttp->eval_result, 0, detcond_count);
-}
 
 /*
  * Get result of the latest evaluation of detached condition n.
  * Returns -1 if the condition has not been evaluated yet.
  */
 int
-phttp_eval_result_get (POUND_HTTP *phttp, int n)
+http_request_eval_get (struct http_request *http, int n)
 {
   assert (n >= 0 && n < detcond_count);
-  return phttp->eval_result[n] - 1;
+  if (!http->eval_result)
+    return -1;
+  return http->eval_result[n] - 1;
 }
 
 /* Store result res of evaluating the detached condition n. */
 int
-phttp_eval_result_cache (POUND_HTTP *phttp, int n, int res)
+http_request_eval_cache (struct http_request *http, int n, int res)
 {
   assert (n >= 0 && n < detcond_count);
-  return phttp->eval_result[n] = !!res + 1;
+  if (!http->eval_result)
+    {
+      http->eval_result = calloc (detcond_count,
+				  sizeof (http->eval_result[0]));
+      if (!http->eval_result)
+	{
+	  lognomem ();
+	  return -1;
+	}
+    }
+  return http->eval_result[n] = !!res + 1;
 }
 
 /*

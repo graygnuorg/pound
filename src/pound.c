@@ -291,12 +291,10 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
       return -1;
     }
   res->buffer = (char*)(res + 1);
-  phttp_eval_result_init (res);
 
   if ((res->from_host.ai_addr = malloc (salen)) == NULL)
     {
       lognomem ();
-      free (res->eval_result);
       free (res);
       return -1;
     }
@@ -432,7 +430,7 @@ pound_http_destroy (POUND_HTTP *arg)
     }
 
   submatch_queue_free (&arg->smq);
-  free (arg->eval_result);
+
   free (arg);
 }
 

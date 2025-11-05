@@ -414,6 +414,8 @@ struct http_request
   QUERY_HEAD query_head;
   char *orig_request_line;   /* Original request line (for logging purposes) */
   int split;
+  char *eval_result;         /* Array of return statuses from evaluation of
+				detached conditions. */
 };
 
 static inline void http_request_init (struct http_request *http)
@@ -424,6 +426,31 @@ static inline void http_request_init (struct http_request *http)
 }
 
 void http_request_free (struct http_request *);
+int http_request_eval_get (struct http_request *http, int n);
+int http_request_eval_cache (struct http_request *http, int n, int res);
+
+/*
+ * Return codes for http_request_get_query_param,
+ * http_request_get_query_param_value, and request accessors.
+ */
+enum
+  {
+    RETRIEVE_OK,
+    RETRIEVE_NOT_FOUND,
+    RETRIEVE_ERROR = -1
+  };
+
+int http_request_get_url (struct http_request *, char const **);
+int http_request_get_query (struct http_request *, char const **);
+int http_request_get_path (struct http_request *req, char const **retval);
+int http_request_count_query_param (struct http_request *req);
+int http_request_get_query_param_value (struct http_request *req,
+					char const *name,
+					char const **retval);
+char const *http_request_orig_line (struct http_request *req);
+int http_request_get_basic_auth (struct http_request *req,
+				 char **u_name, char **u_pass);
+
 
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
@@ -1088,9 +1115,6 @@ typedef struct _pound_http
   struct timespec be_start;  /* Time when the request was handed to the
 				backend */
 
-  char *eval_result;         /* Array of return statuses from evaluation of
-				detached conditions. */
-
   int response_code;
 
   CONTENT_LENGTH res_bytes;
@@ -1104,10 +1128,6 @@ typedef struct _pound_http
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
-int phttp_eval_result_init (POUND_HTTP *phttp);
-void phttp_eval_result_reset (POUND_HTTP *phttp);
-int phttp_eval_result_get (POUND_HTTP *phttp, int n);
-int phttp_eval_result_cache (POUND_HTTP *phttp, int n, int res);
 SERVICE_COND *detached_cond (int n);
 
 void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
@@ -1347,27 +1367,6 @@ struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char c
 struct http_header *http_header_list_next (struct http_header *hdr);
 char *http_header_get_value (struct http_header *hdr);
 
-/*
- * Return codes for http_request_get_query_param,
- * http_request_get_query_param_value, and request accessors.
- */
-enum
-  {
-    RETRIEVE_OK,
-    RETRIEVE_NOT_FOUND,
-    RETRIEVE_ERROR = -1
-  };
-
-int http_request_get_url (struct http_request *, char const **);
-int http_request_get_query (struct http_request *, char const **);
-int http_request_get_path (struct http_request *req, char const **retval);
-int http_request_count_query_param (struct http_request *req);
-int http_request_get_query_param_value (struct http_request *req,
-					char const *name,
-					char const **retval);
-char const *http_request_orig_line (struct http_request *req);
-int http_request_get_basic_auth (struct http_request *req,
-				 char **u_name, char **u_pass);
 
 void service_lb_init (SERVICE *svc);
 void service_lb_reset (SERVICE *svc, BACKEND *be);
