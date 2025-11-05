@@ -122,6 +122,7 @@ Service Selection
 * Regular Expressions::
 * File-based Conditions::
 * ACL::
+* Detached Conditions::
 
 HTTPS
 
@@ -553,8 +554,8 @@ addresses, use @samp{::0}.}.  In @code{Backend} section, these keywords
 specify the address and port of the remote server, where incoming
 requests are to be forwarded.
 
-The @code{Service} section has no matching conditions, so it will
-match all requests.
+The @code{Service} section has no conditional statements, so it will
+apply to all requests.
 
 @menu
 * Service selection::
@@ -569,13 +570,16 @@ match all requests.
 
 @node Service selection
 @section Service Selection
-@cindex matching rules
-@cindex request matching rules
- To route requests to different servers, multiple services are used.
-In this case, each service has one or more @dfn{matching rules},
-i.e. statements that define conditions that a request must match in
-order to be routed to that particular service.  Syntactically, such
-rules have the form:
+@cindex condition
+@cindex conditional
+@cindex matching rule
+@cindex request matching rule
+ Multiple services can be defined in order to route requests to
+different servers, depending on the request content.  In this case,
+each service has one or more @dfn{conditional statements}
+(@dfn{conditionals}, for short), that define conditions which a
+request must match in order to be routed to backends within that
+particular service.  Syntactically, such conditionals have the form: 
 
 @example
 @var{kw} [@var{options}] "@var{pattern}"
@@ -625,11 +629,11 @@ as:
 Host -end ".example.com"
 @end example
 
-The set of options available for use in matching statements is uniform.
+The set of options available for use in conditions is uniform.
 @xref{conditional-option}, for a detailed discussion of available options.
 
-The following configuration snippet illustrates the use of matching
-rules to select appropriate service (and, correspondingly, backend).
+The following configuration snippet illustrates the use of conditions
+to select appropriate service (and, correspondingly, backend).
 It will route all requests for @samp{www.example.com} to backend
 @samp{192.0.2.1:8080}, and requests for @samp{admin.example.com} to
 @samp{192.0.2.4:8080}:
@@ -657,7 +661,7 @@ ListenHTTP
 End
 @end example
 
-Other matching statements use POSIX regexp matching by default.  These are:
+Other conditions use POSIX regexp matching by default.  These are:
 
 @table @code
 @item Header
@@ -694,14 +698,13 @@ QueryParam "type" "(int)|(bool)"
 @end table
 
 @xref{Service Selection Statements}, for a detailed description of these
-and other matching statements.
+and other conditions.
 
-@cindex multiple matching rules
-@cindex matching rules, joining
+@cindex multiple conditions
 @cindex conditions, joining
 @cindex logical @samp{and}, implicit
 @cindex conjunction, implicit
-Multiple matching rules can be used.  Unless expressly specified
+Multiple conditions can be used together.  Unless expressly specified
 otherwise, they are joined by logical @samp{and} operation.  For example:
 
 @example
@@ -770,6 +773,7 @@ End
 * Regular Expressions::
 * File-based Conditions::
 * ACL::
+* Detached Conditions::
 @end menu
 
 @node Regular Expressions
@@ -792,10 +796,10 @@ directive:
 RegexType pcre
 @end example
 
-It affects all request matching directives that appear after it in the
-configuration file, until next @code{RegexType} directive or end of
-file, whichever occurs first.  To change back to POSIX regular
-expressions, use @code{posix} argument:
+It affects all conditions that appear after it in the configuration
+file, until next @code{RegexType} directive or end of file, whichever
+occurs first.  To change back to POSIX regular expressions, use
+@code{posix} argument:
 
 @example
 RegexType posix
@@ -867,9 +871,9 @@ monitoring support: @code{BasicAuth}, @code{Header}, @code{Host},
 @node ACL
 @subsection ACL
 @cindex ACL
-  Access control lists, or @dfn{ACLs}, are special request matching
-statements that evaluate to true for requests originating from one of the
-predefined IP addresses.  Access control lists are defined using the
+  Access control lists, or @dfn{ACLs}, are special conditional
+statements that evaluate to true for requests originating from one
+of the predefined IP addresses.  Access control lists are defined using the
 @code{ACL} section statement, which has three forms: anonymous,
 file reference, and ACL reference.  In all three forms, the @code{ACL}
 statement accepts optional argument @code{-forwarded}, which indicates
@@ -997,6 +1001,94 @@ they came from one of the IP addresses mentioned in the access control
 list with the name @samp{secure}.  Effectively, this means that the
 access to that URL is limited to these IP addresses.
 
+@node Detached Conditions
+@subsection Detached Conditions
+@cindex detached conditional
+@cindex conditional, detached
+@kwindex Condition
+  If a conditional statement is used in multiple places throughout the
+configuration, it could be wise to rewrite it as a @dfn{detached
+condition}.  Detached condition is an abstract conditional
+statement, not connected with any service or listener.  It is assigned
+a unique name that serves as its identifier.  Syntactivally, such
+conditonal is defined using @code{Condition} section in global
+scope of the configuration file:
+
+@example
+@group
+Condition "@var{name}"
+  ...
+End
+@end group
+@end example
+
+@noindent
+Here, the ellipsis represents any number of conditional statements
+described above.
+
+@kwindex eval
+@cindex detached condition, evaluating
+  Once defined, detached conditions can be @dfn{evaluated} in any
+number of @code{Service} or @code{Rewrite} sections, using the
+following construct:
+
+@example
+Eval "@var{name}"
+@end example
+
+  Evaluating a detached condition means applying its contents to the
+incoming request.  In this regard, it can be seen as an equivalent to
+including contents of the @code{Condition} statement in place.  There
+is one major difference, though: each detached condition is evaluated
+only once.  All subsequent @code{Eval} statements just return its
+cached result.  This way, the use of detached conditions can speed up
+request processing (and reduce the CPU load) for conditionals that
+require a lot of calculations, such as long ACLs or complex Lua
+functions (FIXME-pxref@{Lua@}).
+
+  Consider the following configuration snippet (irrelevant statements
+being omitted):
+
+@example
+Condition "secure"
+    ACL -file "secure.acl"
+End
+
+ListenHTTP
+    ...
+    Service "a"
+        Host -re ".*\\.example\\.com"
+        Eval "bigacl"
+        Backend
+            Address 192.0.2.129
+        End
+    End
+    Service "b"
+        Host "example.com"
+        Backend
+            Address 192.0.2.5
+        End
+    End        
+    Service "c"
+        Host "bar.example.com"
+        Eval "bigacl"
+        Backend
+            Address 192.0.2.2
+        End
+    End    
+End
+@end example
+
+  If a request comes for host @samp{bar.example.com} from an IP listed
+in file @file{secure.acl}, it will be matched against conditionals in
+services @samp{a} and @samp{b} before selecting service @samp{c}.
+When processing @samp{a}, the @code{Eval} statement will scan the ACL,
+find that it matches the originator IP and cache that value.  When the
+same statement is encountered in service @samp{c}, no actual ACL
+processing will take place, instead @command{pound} will reuse the
+result cached earlier.  If @file{secure.acl} contains a long list of
+IP addresses, this can save a lot of time.
+
 @node Request modifications
 @section Request modifications
   A service can modify requests before forwarding them to backends.  Several
@@ -1041,7 +1133,7 @@ End
 @cindex parenthesized subexpression
 Arguments to request modification statements are expanded before
 actual use.  During expansion, references to @dfn{parenthesized
-subexpressions} in matching rules are replaced with their actual
+subexpressions} in conditionals are replaced with their actual
 values.  @dfn{Parenthesized subexpression} is a part of a regular
 expression enclosed in parentheses.  It can be referred to in
 string arguments as @samp{$@var{n}}, where @var{n} is its ordinal
@@ -1084,7 +1176,7 @@ End
 @cindex tagged statements
 @cindex referring to subexpressions
 @cindex referring to previous conditionals
-When several matching statements are used, these forms refer to the
+When several conditions are used, these forms refer to the
 last matched one.  Subexpressions in prior statements can be referred to
 using the @samp{$@var{i}(@var{j})} construct.  Here, @var{j} is either
 the @dfn{tag} of the expression to refer to (if the statement was
@@ -1152,10 +1244,10 @@ available accessors.
  Conditional request modifications can be organized in logical
 branches, each branch being applied only if the request matches
 certain condition.  The @code{Rewrite} section encloses a set of
-request matching rules followed by one or more request modification
+conditional statements followed by one or more request modification
 statements, which will be applied if the former match the request.
-Optional @code{Else} sub-section, which in turn contains request matching
-rules and modification statements, will be tried if those rules don't
+Optional @code{Else} sub-section, which in turn contains conditional
+and modification statements, will be tried if those rules don't
 match.  Any number of @code{Else} sub-sections is allowed, each one being
 tried if the previous ones don't match.
 
@@ -1198,8 +1290,8 @@ End
 
 When modifying responses, only two request modification statements
 are allowed: @code{SetHeader} and @code{DeleteHeader}.  The list of
-request matching rules is limited as well: @code{Header} and
-@code{StringMatch}, plus @code{Match} and @code{Not} conditionals.
+conditionals is limited as well: @code{Header} and @code{StringMatch},
+plus @code{Match} and @code{Not} directives. 
 Notice that these conditionals operate on the response, and not on the
 request, as in previous chapters.  For example:
 
@@ -1236,7 +1328,7 @@ Authentication Required}) response is returned with the
 @code{WWW-Authenticate} header requesting basic authentication.
 
 @kwindex BasicAuth
- The @code{BasicAuth} request matching statement verifies if the
+ The @code{BasicAuth} conditional statement verifies if the
 @code{Authorization} header is present and provides correct
 credentials.  The statement matches the request if so.
 
@@ -3161,15 +3253,14 @@ Use the named curve for elliptical curve encryption.
 @subsection Regular Expression Settings
 
 @deffn {Global directive} RegexType @var{type}
-Sets the type of regular expressions to use in request matching
+Sets the type of regular expressions to use in conditional
 statements.  Allowed values for @var{type} are: @code{posix} and
 @code{pcre} (or @code{perl}), case-insensitive.  The latter requires
 compilation time support.
 
-The selected regular expression type remains in effect for all request
-matching directives that follow this statement, until next
-@code{RegexType} statement or end of the configuration file, whichever
-occurs first.
+The selected regular expression type remains in effect for all conditionals
+that follow this statement, until next @code{RegexType} statement or
+end of the configuration file, whichever occurs first.
 
 Regular expression type can be set individually for a directive, using
 the @code{-pcre} or @code{-posix} option (@pxref{conditional-option}).
@@ -3179,13 +3270,13 @@ the @code{-pcre} or @code{-posix} option (@pxref{conditional-option}).
 
 @deffn {Global directive} IgnoreCase @var{bool}
 Ignore case when doing regex matching (default: @samp{false}). This
-directive sets the default for the following service matching
-directives: @code{URL}, @code{Path}, @code{QueryParam}, @code{Query},
-@code{StringMatch}, as well as for the @code{DeleteHeader}
-modification directive.  Its value can be overridden for specific services.
+directive sets the default for the following conditionals: @code{URL},
+@code{Path}, @code{QueryParam}, @code{Query}, @code{StringMatch}, as
+well as for the @code{DeleteHeader} modification directive.  Its value
+can be overridden for specific services.
 
 This statement is deprecated and will be removed in future versions.
-Please, use the @option{-icase} option to the matching directive
+Please, use the @option{-icase} option to the conditional
 instead (@pxref{conditional-option}).
 @end deffn
 
@@ -3236,6 +3327,32 @@ monitors that file for changes.  @xref{File-based Conditions}, for a
 detailed discussion.
 @end deffn
 
+@node Condition
+@subsection Condition
+@kwindex Condition
+
+@deffn {Global directive} Condition "@var{name}"
+Defines a @dfn{detached condition} identified by @var{name} (which
+must be unique among conditions defined in the configuration file).
+This line must be followed by one or more conditional directives
+(@pxref{conditionals}) and terminated by an @code{End}.
+@end deffn
+
+For example:
+
+@example
+@group
+Condition "a"
+    ACL -file "secure"
+    Path -beg "/admin/"
+End
+@end group
+@end example
+
+Detached conditions can be evaluated in @code{Service} and
+@code{Rewrite} statements using the @code{Eval} statement (@pxref{Eval
+statement}).  For a detailed discussion, see @ref{Detached Conditions}.
+
 @node File inclusion
 @section File inclusion
 
@@ -3257,7 +3374,7 @@ Set the @dfn{include directory}, i.e. the directory where
 configuration directives: @code{Include}, @code{BasicAuth},
 @code{ErrorFile} (or @code{Err400} through @code{Err503}), as well as
 in the argument to @option{-file} (@option{-filewatch}) option in
-service matching directives (@xref{-file}, and @pxref{File-based Conditions}).
+conditionals (@xref{-file}, and @pxref{File-based Conditions}).
 
 This directive can appear multiple times.  In that case, the directory
 set by each @code{IncludeDir} remains in effect until next one
@@ -3984,9 +4101,9 @@ DeleteHeader -icase "@var{pattern}"
 @subsubsection The @code{rewrite} statement
 @kwindex Rewrite
 The @code{Rewrite} block statement associates one or more header
-modification directives discussed above with @dfn{request matching
-directives}, so that request modification takes place only
-when the request matches certain conditions.
+modification directives discussed above with @dfn{conditionals}, so
+that request modification takes place only when the request matches
+certain conditions.
 
 Syntactically, a @code{Rewrite} section is:
 
@@ -4015,6 +4132,7 @@ is found whose @var{conditional_directives} yield @samp{true}, or
 @var{modification_directives} are applied to the request.
 
 @anchor{request matching directives}
+@anchor{conditionals}
  @dfn{Request matching directives} or @dfn{request conditionals} are special
 statements that, being applied to a HTTP request, yield @samp{true} or
 @samp{false} depending on whether the request satisfies the condition
@@ -4086,6 +4204,14 @@ For consistency with other conditions, @code{BasicAuth} accepts the
 following options: @option{-file} and @option{-filewatch}.  The
 latter enables the default behavior and so need not be specified
 explicitly.  The former disables file change monitoring.
+@end deffn
+
+@anchor{Eval statement}
+@deffn {Request Conditional} Eval "@var{name}"
+Evaluates the @dfn{detached condition} @var{name}.  The result is
+cached, so that each detached condition is evaluated at most once.
+All @code{Eval} directives referring to its name will reuse the cached
+value.  @xref{Detached Conditions}, for a detailed discussion.
 @end deffn
 
 @deffn {Request Conditional} Header [@var{options}] "@var{pattern}"
@@ -4315,8 +4441,8 @@ Not URL -beg "/static/"
 @end example
 
 @kwindex Match
-The @code{Match} block statement can be used to join multiple header
-matching directives.  Its syntax is:
+The @code{Match} block statement can be used to join multiple
+conditional statements.  Its syntax is:
 
 @example
 Match @var{op}
@@ -4325,7 +4451,7 @@ End
 @end example
 
 @noindent
-where @dots{} stands for any number of matching directives, and
+where @dots{} stands for any number of conditionals, and
 @var{op} is a boolean operation: @code{AND} or @code{OR}
 (case-insensitive).  For example, the statement
 
@@ -4354,9 +4480,9 @@ End
 
 @noindent
 will match only if both these conditions are met.  As a syntactical
-short-cut, two or more matching statements appearing outside of
-@code{Match} are joined by an implicit logical @code{AND}, so that the
-latter example is equivalent to:
+short-cut, two or more conditionals appearing outside of @code{Match}
+are joined by an implicit logical @code{AND}, so that the latter
+example is equivalent to:
 
 @example
 @group
@@ -4365,7 +4491,7 @@ Path -beg "/ssl"
 @end group
 @end example
 
-The @code{Match} statement, like any other matching directive, can be
+The @code{Match} statement, like any other conditional, can be
 prefixed with @code{Not}, which reverts its meaning.
 
 @node Response Modification
@@ -4423,6 +4549,13 @@ the requesting server:
 @end example
 
  The conditional directives allowed for use in this statement are:
+
+@deffn {Rewrite response conditional} Eval "@var{name}"
+Evaluates the @dfn{detached condition} @var{name}.  The result
+is cached, so that each detached condition is evaluated at most once.
+All @code{Eval} directives referring to its name will reuse the cached
+value.  @xref{Detached Conditions}, for a detailed discussion.
+@end deffn
 
 @deffn {Rewrite response conditional} Header [@var{options}] "@var{pattern}"
 Returns @samp{true}, if the response contains at least one header
@@ -4759,6 +4892,13 @@ that are defined in global scope).  It also cannot be used if the
 @code{ClientCert} statement on its own.
 @end deffn
 
+@deffn {Service Conditional} Eval "@var{name}"
+Evaluates the @dfn{detached condition} @var{name}.  The result is
+cached, so that each detached condition is evaluated at most once.
+All @code{Eval} directives referring to its name will reuse the cached
+value.  @xref{Detached Conditions}, for a detailed discussion.
+@end deffn
+
 @deffn {Service Conditional} Header [@var{options}] "@var{pattern}"
 Yields @samp{true}, if the request contains at least one header
 matching the given @var{pattern}.  By default, @var{pattern} is treated as
@@ -4840,7 +4980,7 @@ End
 @end example
 
 @noindent
-where @dots{} stands for any number of matching directives, and
+where @dots{} stands for any number of conditionals, and
 @var{op} is a boolean operation: @code{AND} or @code{OR}
 (case-insensitive).  @xref{Match in service statement}, for a detailed
 discussion with examples.
@@ -4900,7 +5040,7 @@ consists of zero or more option flags, described in
 
 @deffn {Service statement} Rewrite [ request | response ] ... End
 This block statement associates one or more header modification
-directives discussed above with @dfn{request matching directives}, so that
+directives discussed above with @dfn{conditionals}, so that
 request modification takes place only when the request matches certain
 conditions.
 
@@ -5445,7 +5585,7 @@ directives: @code{URL}, @code{Path}, @code{QueryParam}, @code{Query},
 modification directive.
 
 This statement is deprecated and will be removed in future versions.
-Please, use the @option{-icase} option to the matching directive
+Please, use the @option{-icase} option with the conditional directive
 instead (@pxref{conditional-option}).
 @end deffn
 

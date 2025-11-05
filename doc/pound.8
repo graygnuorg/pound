@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "October 28, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "November 5, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -367,55 +367,21 @@ Unless specified otherwise, directives may appear in any order.
 Global directives may appear anywhere at the top level within the
 configuration file, although it is customary for them to be at the
 start.
+.SS Program settings
 .TP
-\fBUser\fR "\fIuser_name\fR"
-Specify the user
+\fBDaemon\fR \fIbool\fR
+Instructs
 .B pound
-will run as (must be defined in the system user database).
-.TP
-\fBGroup\fR "\fIgroup_name\fR"
-Specify the group
+to run in the foreground (if \fIfalse\fR) or as a daemon (if
+\fItrue\fR). By default
 .B pound
-will run as (must be defined in the system group database).
-.TP
-\fBLineBufferSize\fR \fIN\fR
-Sets the line buffer size.  Line buffer is used when reading request
-line, backend response status line, and header fields in both requests
-and responses.  Thus, this value limits the maximum length allowed for
-these parts of HTTP messages.  By default, it is set to the internal
-buffer size (4096 bytes, configurable at compile time using the
-\fB\-\-with\-maxbuf\fR option).  It cannot be set to a value less than
-that default.
-.TP
-\fBRootJail\fR "\fIdirectory\fR"
-Specify the directory that
+runs as a daemon (i.e. detaches itself from the controlling terminal and
+continues operating in the background). By setting this directive to
+\fIfalse\fR you
+can force
 .B pound
-will chroot to at runtime.
-.TP
-\fBHeaderOption\fR \fIopt\fR...
-Sets default options for header addition.  \fIopt\fR is one of:
-\fBnone\fR to disable additional headers, \fBforwarded\fR to enable
-adding
-.BR X\-Forwarded\-For ,
-.BR X\-Forwarded\-Proto ,
-and
-.B X\-Forwarded\-Port
-headers, and
-.B ssl
-to enable passing information about SSL certificates in various
-.B X\-SSL\-*
-headers.  The option may be prefixed with
-.B no\-
-in which case it disables the corresponding header group.  The default is
-.IP
-.RS
-.B HeaderOption forwarded ssl
-.RE
-.IP
-This setting can be overridden on a per-listener basis.  See the
-description of \fBHeaderOption\fR directive in \fBHTTP Listener\fR
-section, and section \fBBUILT-IN HEADERS\fR, for a detailed
-discussion of various header modification directives and their effect.
+to work like a regular process.  See also \fB\-F\fR and \fB\-e\fR
+options, above.
 .TP
 \fBBalancer\fR \fBrandom\fR | \fBiwrr\fR
 Defines the load-balancing strategy to use.  Possible arguments are:
@@ -429,42 +395,82 @@ The \fBBalancer\fR statement in the global scope applies to all
 \fBService\fR directives that don't contain \fBBalancer\fR
 definitions of their own.
 .TP
-\fBDaemon\fR \fIbool\fR
-Instructs
+\fBControl\fR "\fIpathname\fR"
+Set the control socket path.
+See the
+.B Control socket
+section below, for a detailed description of this feature.
+.TP
+\fBIgnoreCase\fR \fIbool\fR
+Ignore letter case when doing regex matching (default: \fIfalse\fR). This
+directive sets the default for the following service matching
+directives:
+.BR URL ,
+.BR Path ,
+.BR QueryParam ,
+.BR Query ,
+.BR StringMatch ,
+as well as for the \fBDeleteHeader\fR modification directive.  Its
+value can be overridden for specific services.
+.IP
+This statement is deprecated and will be removed in future versions.
+Please, use the \fB\-icase\fR option to the service matching directive
+instead.  See the discussion of \fIoptions\fR in
+.B Service Matching Directives
+section below.
+.TP
+\fBLineBufferSize\fR \fIN\fR
+Sets the line buffer size.  Line buffer is used when reading request
+line, backend response status line, and header fields in both requests
+and responses.  Thus, this value limits the maximum length allowed for
+these parts of HTTP messages.  By default, it is set to the internal
+buffer size (4096 bytes, configurable at compile time using the
+\fB\-\-with\-maxbuf\fR option).  It cannot be set to a value less than
+that default.
+.TP
+\fBPIDFile\fR "\fIfilename\fR"
+Sets the name of the file where to store program PID.  It can be
+overridden by the
+.B \-p
+command line option.
+.IP
+.I Notice
+the following:
+.RS
+.nr step 1 1
+.IP \n[step].
+When running with a supervisor, this file holds PID of the supervisor
+process.  Otherwise, it holds PID of the main
 .B pound
-to run in the foreground (if \fIfalse\fR) or as a daemon (if
-\fItrue\fR). By default
+process.  This means it is always suitable for signalling the program
+using the traditional \fBkill `cat filename`\fR technique.
+.IP \n+[step].
+Before shutting down,
 .B pound
-runs as a daemon (i.e. detaches itself from the controlling terminal and
-continues operating in the background). By specifying this option you
-can force
-.B pound
-to work like a regular process. Useful for debugging or if you want to
-use something like \fIdaemontools\fR.
+removes this file.  However, this may not be possible if it switches to
+privileges of another user after startup (i.e. at least one of \fBUser\fR or
+\fBGroup\fR are set in the configuration file) and the file is stored in
+a directory whose permissions forbid write access for that user.
+.RE
+.TP
+\fBRegexType posix\fR | \fBpcre\fR | \fBperl\fR
+Sets the type of regular expressions to use in request matching
+statements.
+.B posix
+selects POSIX extended regular expressions and
+.B pcre
+or
+.B perl
+select Perl-compatible regular expressions.  The latter requires
+compile-time support.  The selected regular expression type remains in
+effect until next
+.B RegexType
+statement or end of the configuration file, whichever occurs first.
 .TP
 \fBSupervisor\fR \fIbool\fR
 When running in daemon mode, start a \fIsupervisor\fR process first.
 This process will monitor the subordinate \fBpound\fR process, restarting
 it if it fails.
-.TP
-\fBWorkerMinCount\fR \fIN\fR
-Sets minimum number of worker threads that must always be running.
-The default is 5.
-See the section
-.B WORKER MODEL
-above for a detailed discussion.
-.TP
-\fBWorkerMaxCount\fR \fIN\fR
-Sets maximum number of worker threads.  The default is 128.
-See the section
-.B WORKER MODEL
-above for a detailed discussion.
-.TP
-\fBWorkerIdleTimeout\fR \fISEC\fR
-Sets idle timeout for a worker thread.  Default is 30 seconds.
-See the section
-.B WORKER MODEL
-above for a detailed discussion.
 .TP
 \fBThreads\fR \fIN\fR
 This statement, retained for backward compatibility with previous
@@ -478,6 +484,55 @@ WorkerMinCount \fIN\fR
 WorkerMaxCount \fIN\fR
 .EE
 .RE
+.TP
+\fBWorkerIdleTimeout\fR \fISEC\fR
+Sets idle timeout for a worker thread.  Default is 30 seconds.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.TP
+\fBWorkerMinCount\fR \fIN\fR
+Sets minimum number of worker threads that must always be running.
+The default is 5.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.TP
+\fBWorkerMaxCount\fR \fIN\fR
+Sets maximum number of worker threads.  The default is 128.
+See the section
+.B WORKER MODEL
+above for a detailed discussion.
+.SS Privilege selection
+.TP
+\fBUser\fR "\fIuser_name\fR"
+Specify the user
+.B pound
+will run as (must be defined in the system user database).
+.TP
+\fBGroup\fR "\fIgroup_name\fR"
+Specify the group
+.B pound
+will run as (must be defined in the system group database).
+.TP
+\fBRootJail\fR "\fIdirectory\fR"
+Specify the directory that
+.B pound
+will chroot to at runtime.
+.SS SSL engine settings
+.TP
+\fBSSLEngine\fR "\fIname\fR"
+Use an OpenSSL hardware acceleration card called \fIname\fR. Available
+only if OpenSSL-engine is installed on your system.
+.TP
+\fBECDHcurve\fR "\fIname\fR"
+Use the named curve for elliptical curve encryption (default: prime256v1).
+.SS Logging
+.TP
+\fBAnonymise\fR
+(alternative spelling \fBAnonymize\fR also accepted) Replace the last
+byte of the client address with 0 for logging purposes.
+Default: log the client address in full.
 .TP
 \fBLogFacility\fR \fIident\fR
 Specify the log facility to use.
@@ -611,24 +666,7 @@ e.g.
 TrustedIP "proxy_addresses"
 .EE
 .RE
-.TP
-\fBIgnoreCase\fR \fIbool\fR
-Ignore letter case when doing regex matching (default: \fIfalse\fR). This
-directive sets the default for the following service matching
-directives:
-.BR URL ,
-.BR Path ,
-.BR QueryParam ,
-.BR Query ,
-.BR StringMatch ,
-as well as for the \fBDeleteHeader\fR modification directive.  Its
-value can be overridden for specific services.
-.IP
-This statement is deprecated and will be removed in future versions.
-Please, use the \fB\-icase\fR option to the service matching directive
-instead.  See the discussion of \fIoptions\fR in
-.B Service Matching Directives
-section below.
+.SS Timeouts
 .TP
 \fBAlive\fR \fIn\fR
 Specify how often
@@ -649,25 +687,12 @@ time-out on a slow network or over-loaded server, or lower it down if
 you start getting DOS attacks or run into problems with IE clients.
 This value can be overridden for specific listeners.
 .TP
-\fBTimeOut\fR \fIn\fR
-How long should
-.B pound
-wait for a response from the backend (in seconds). Default: 15 seconds.
-This value can be overridden for specific backends.
-.TP
 \fBConnTO\fR \fIn\fR
 How long should
 .B pound
 wait for a connection to the backend (in seconds). Default: the
 .B TimeOut
 value. This value can be overridden for specific backends.
-.TP
-\fBWSTimeOut\fR \fIn\fR
-How long should
-.B pound
-wait for data from either backend or client in a connection upgraded to
-a WebSocket (in seconds). Default: 600 seconds.
-This value can be overridden for specific backends.
 .TP
 \fBGrace\fR \fIn\fR
 How long should
@@ -679,18 +704,28 @@ immediately. You can bypass this behaviour by stopping
 with a TERM or QUIT signal, in which case the program exits without any
 delay.
 .TP
-\fBSSLEngine\fR "\fIname\fR"
-Use an OpenSSL hardware acceleration card called \fIname\fR. Available
-only if OpenSSL-engine is installed on your system.
+\fBTimeOut\fR \fIn\fR
+How long should
+.B pound
+wait for a response from the backend (in seconds). Default: 15 seconds.
+This value can be overridden for specific backends.
 .TP
-\fBECDHcurve\fR "\fIname\fR"
-Use the named curve for elliptical curve encryption (default: prime256v1).
+\fBWSTimeOut\fR \fIn\fR
+How long should
+.B pound
+wait for data from either backend or client in a connection upgraded to
+a WebSocket (in seconds). Default: 600 seconds.
+This value can be overridden for specific backends.
 .TP
-\fBControl\fR "\fIpathname\fR"
-Set the control socket path.
-See the
-.B Control socket
-section below, for a detailed description of this feature.
+\fBWatcherTTL \fIN\fR
+If conditions with \fB\-filewatch\fR flag are used, and the underlying
+operating system doesn't provide file system monitoring API
+.RB ( inotify
+or
+.BR kqueue ),
+this directive defines the interval between two successive checks
+of file modification times.
+.SS Header manipulation
 .TP
 \fBCombineHeaders\fR ... \fBEnd\fR
 Declare names of the headers that can appear multiple times in a
@@ -700,6 +735,32 @@ must appear one per line between \fBCombineHeaders\fR and \fBEnd\fR.
 See the section
 .BR "MULTI-VALUE HEADERS" ,
 for a detailed discussion of this feature.
+.TP
+\fBHeaderOption\fR \fIopt\fR...
+Sets default options for header addition.  \fIopt\fR is one of:
+\fBnone\fR to disable additional headers, \fBforwarded\fR to enable
+adding
+.BR X\-Forwarded\-For ,
+.BR X\-Forwarded\-Proto ,
+and
+.B X\-Forwarded\-Port
+headers, and
+.B ssl
+to enable passing information about SSL certificates in various
+.B X\-SSL\-*
+headers.  The option may be prefixed with
+.B no\-
+in which case it disables the corresponding header group.  The default is
+.IP
+.RS
+.B HeaderOption forwarded ssl
+.RE
+.IP
+This setting can be overridden on a per-listener basis.  See the
+description of \fBHeaderOption\fR directive in \fBHTTP Listener\fR
+section, and section \fBBUILT-IN HEADERS\fR, for a detailed
+discussion of various header modification directives and their effect.
+.SS File inclusion
 .TP
 \fBIncludeDir\fR "\fIdir\fR"
 Sets the \fIinclude directory\fR.  This is the directory
@@ -726,11 +787,7 @@ files will be sorted lexicographically.
 .IP
 This directive is allowed both at topmost level and in any subsections
 of the configuration file.
-.TP
-\fBAnonymise\fR
-(alternative spelling \fBAnonymize\fR also accepted) Replace the last
-byte of the client address with 0 for logging purposes.
-Default: log the client address in full.
+.SS Access control lists
 .TP
 \fBACL\fR "\fIname\fR"
 Define a \fInamed access control list\fR (\fIACL\fR).  An ACL is a
@@ -779,54 +836,26 @@ the file will be checked for changes periodically.  The interval
 between two successive checks is defined by the
 .B WatcherTTL
 setting.
-.TP
-\fBPIDFile\fR "\fIfilename\fR"
-Sets the name of the file where to store program PID.  It can be
-overridden by the
-.B \-p
-command line option.
-.IP
-.I Notice
-the following:
-.RS
-.nr step 1 1
-.IP \n[step].
-When running with a supervisor, this file holds PID of the supervisor
-process.  Otherwise, it holds PID of the main
-.B pound
-process.  This means it is always suitable for signalling the program
-using the traditional \fBkill `cat filename`\fR technique.
-.IP \n+[step].
-Before shutting down,
-.B pound
-removes this file.  However, this may not be possible if it switches to
-privileges of another user after startup (i.e. at least one of \fBUser\fR or
-\fBGroup\fR are set in the configuration file) and the file is stored in
-a directory whose permissions forbid write access for that user.
-.RE
-.TP
-\fBRegexType posix\fR | \fBpcre\fR | \fBperl\fR
-Sets the type of regular expressions to use in request matching
-statements.
-.B posix
-selects POSIX extended regular expressions and
-.B pcre
-or
-.B perl
-select Perl-compatible regular expressions.  The latter requires
-compile-time support.  The selected regular expression type remains in
-effect until next
-.B RegexType
-statement or end of the configuration file, whichever occurs first.
-.TP
-\fBWatcherTTL \fIN\fR
-If conditions with \fB\-filewatch\fR flag are used, and the underlying
-operating system doesn't provide file system monitoring API
-.RB ( inotify
-or
-.BR kqueue ),
-this directive defines the interval between two successive checks
-of file modification times.
+.SS Detached conditions
+.EX
+\fBCondition \fR"\fINAME\fR"
+    ...
+\fBEnd\fR    
+.EE
+.PP
+Saves away a set of conditional statements for further evaluation.
+Ellipsis represents a sequence of conditional statements as described
+in section \fIService Matching Directives\fR.  The detached condition
+can be used where a normal conditional is allowed, using the following
+construct:
+.PP
+.EX
+\fBEval \fR"\fINAME\fR"
+.EE
+.PP
+Detached conditions are evaluated at most once.  Result of
+evaluation is cached and used by all subsequent \fBEval\fR statements 
+that refer to the same \fINAME\fR.
 .SS Control socket
 .B Pound
 can be instructed to listen for management requests,
@@ -1598,9 +1627,18 @@ This conditional cannot be used in standalone services (i.e. services
 that are defined in global scope), or if the \fBListenHTTPS\fR section
 that hosts the service has the \fBClientCert\fR statement on its own.
 .TP
+\fBEval\fR "\fINAME\fR"
+Evaluate detached condition \fINAME\fR.  The condition should be
+defined using a \fBCondition\fR statement preceding this one (see
+above, section
+.BR "GLOBAL DIRECTIVES" ).
+If multiple \fBEval\fR statements refer to the same \fINAME\fR, the
+condition is evaluated once, and the result is reused by subsequent
+statements.
+.TP
 \fBHeader\fR [\fIoptions\fR] "\fIpattern\fR"
 The request must contain at least one header matching the given
-\fIpattern\fR.  By default, \fIpattern\fR is treated as
+\fIpattern\fR.  By default, \fIpattern\fR is treated as a
 case-insensitive extended regular expression.  This can be changed by
 \fIoptions\fR, described below.
 .TP

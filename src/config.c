@@ -2273,7 +2273,7 @@ detached_cond (int n)
  *
  * An array of detcond_count char elements is associated with each HTTP
  * request.  Each element keeps the result of evaluation of the corresponding
- * detached condition, increased by 1.  Thus eval_result[n] == 0 means that
+ * detached condition, increased by 1.  Thus, eval_result[n] == 0 means that
  * condition n has not yet been evaluated.
  */
 

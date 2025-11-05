@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-10-29
+Pound -- history of user-visible changes. 2025-11-05
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -9,7 +9,34 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.18.90 (git)
 
+* Detached conditions
+
+Detached condition is a set of conditional statements not associated
+with any service, which is assigned a unique symbolic name.  Detached
+conditions are defined using the Condition statement in the global
+scope of pound configuration file, e.g.:
+
+  Condition "protected"
+     Path -beg "/admin"
+     ACL -file "internal.acl"
+     BasicAuth "htpasswd"
+  End
+
+Detached conditions can be invoked using the "Eval" statement, which
+is allowed anyplace where the normal conditional is allowed.  Result
+of evaluation is cached and reused in subsequent Eval statements
+referring to the same way.  E.g.:
+
+  Service
+     Eval "protected"
+     ...
+  End
+
+Detached conditions is a convenient way to define conditional
+statements with are used repeatedly in multiple Service statements.
+
 * Support for Lua
+
 
 Version 4.18, 2025-10-29
 
