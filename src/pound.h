@@ -1095,6 +1095,10 @@ typedef struct _pound_http
 
   CONTENT_LENGTH res_bytes;
 
+#if ENABLE_LUA
+  char stash_init[2];
+#endif
+
   SLIST_ENTRY(_pound_http) next;
 } POUND_HTTP;
 
@@ -1394,6 +1398,10 @@ TBF *tbf_alloc (uint64_t rate, unsigned burst);
 int tbf_eval (TBF *env, char const *keyid);
 
 #if ENABLE_LUA
+static inline void phttp_lua_stash_reset (POUND_HTTP *p)
+{
+  p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
+}
 int pndlua_init (void);
 int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv);
 int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond,
@@ -1401,6 +1409,7 @@ int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond,
 int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_closure (struct pndlua_closure *cond);
 #else
+# define phttp_lua_stash_reset(p)
 static inline int pndlua_init (void) { return 0; }
 static inline int
 cfg_no_lua (void)

@@ -1038,6 +1038,91 @@ pndlua_unset_http (lua_State *L)
   lua_pushnil (L);
   lua_setglobal (L, "http");
 }
+
+static int
+pndlua_stash_init (lua_State *L)
+{
+    int ctx = L == pndlua_ctx[0].state ? PNDLUA_CTX_GLOBAL : PNDLUA_CTX_THREAD;
+    struct http_ud *ud;
+    int result;
+
+    lua_getglobal (L, "http");
+    ud = pndlua_get_userdata (L, -1);
+    lua_pop (L, 1);
+    result = ud->phttp->stash_init[ctx];
+    ud->phttp->stash_init[ctx] = 1;
+    return result;
+}
+
+/*
+ * Stash implementation.
+ *
+ * Global variable stash can be used to share data between various
+ * LuaMatch and LuaBackend invocations, run in the same thread while
+ * processing one HTTP request.
+ *
+ * When accessed for the first time, the variable is initialized to
+ * an empty table.  Any values stored in this table will remain there
+ * until processing of the HTTP request is finished.
+ */
+static char stash_name[] = "stash";
+
+static void
+stash_assert (lua_State *L)
+{
+  if (!pndlua_stash_init (L))
+    {
+      lua_pushinteger (L, (lua_Integer) pthread_self ());
+      lua_newtable (L);
+      lua_rawset (L, 1);   /* stash = stash[thread_id] */
+    }
+  lua_pushinteger (L, (lua_Integer) pthread_self ());
+  lua_rawget (L, 1);
+}
+
+static int
+stash_index (lua_State *L)
+{
+  stash_assert (L);
+  lua_pushvalue (L, 2);  /* key */
+  lua_rawget (L, -2);    /* stash[key] */
+  lua_remove (L, -2);
+  return 1;
+}
+
+static int
+stash_newindex (lua_State *L)
+{
+  stash_assert (L);
+
+  lua_pushvalue (L, 2); /* key */
+  lua_pushvalue (L, 3); /* value */
+  lua_rawset (L, -3);   /* stash[key] = value */
+
+  lua_pop (L, 1);
+  return 0;
+}
+
+static void
+pndlua_mkstash (lua_State *L)
+{
+  /* Create the table. */
+  lua_newtable (L);
+
+  /* Prepare metatable */
+  lua_newtable (L);
+
+  lua_pushcfunction (L, stash_index);
+  lua_setfield (L, -2, "__index");
+
+  lua_pushcfunction (L, stash_newindex);
+  lua_setfield (L, -2, "__newindex");
+
+  /* Set metatable. */
+  lua_setmetatable (L, -2);
+
+  lua_setglobal (L, stash_name);
+}
 
 /*
  * Lua path manipulation.
@@ -1160,6 +1245,8 @@ pndlua_new_state (void)
   pndlua_dcl_function (state, "log", pndlua_pound_log);
   pndlua_dcl_function (state, "tid", pndlua_pound_tid);
   lua_setglobal (state, "pound");
+
+  pndlua_mkstash (state);
 
   for (i = 0; i < sizeof (path_head) / sizeof (path_head[0]); i++)
     pndlua_add_path (state, i);

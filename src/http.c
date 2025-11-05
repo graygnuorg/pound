@@ -5538,6 +5538,7 @@ do_http (POUND_HTTP *phttp)
       http_request_free (&phttp->request);
       http_request_free (&phttp->response);
       phttp_eval_result_reset (phttp);
+      phttp_lua_stash_reset (phttp);
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
