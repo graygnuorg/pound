@@ -4,3 +4,4 @@ dh512.h
 pound
 poundctl
 libpound.a
+*.elc
