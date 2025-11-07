@@ -1055,6 +1055,9 @@ submatch_init (struct submatch *sm)
   sm->subject = NULL;
 }
 
+static inline void submatch_queue_init (struct submatch_queue *smq) {
+  memset (smq, 0, sizeof (*smq));
+}
 void submatch_queue_free (struct submatch_queue *smq);
 
 enum

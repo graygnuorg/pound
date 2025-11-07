@@ -77,6 +77,7 @@ TESTSUITE_AT = \
  ctl-core.at\
  ctl-listener.at\
  ctl-service.at\
+ dti.at\
  detcond.at\
  disable.at\
  dyn_a.at\

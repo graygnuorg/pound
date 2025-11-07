@@ -3802,8 +3802,16 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
     case COND_REF:
       if ((res = http_request_eval_get (req, cond->ref)) == -1)
 	{
+	  /* Save away current submatch queue. */
+	  struct submatch_queue smq = phttp->smq;
+	  /* Reinitialize the queue. */
+	  submatch_queue_init (&phttp->smq);
+	  /* Evaluate the condition and cache the result. */
 	  res = match_cond (detached_cond (cond->ref), phttp, req);
 	  http_request_eval_cache (req, cond->ref, res);
+	  /* Restore submatch queue. */
+	  submatch_queue_free (&phttp->smq);
+	  phttp->smq = smq;
 	}
       break;
     }
@@ -5535,6 +5543,7 @@ do_http (POUND_HTTP *phttp)
     {
       http_request_free (&phttp->request);
       http_request_free (&phttp->response);
+      submatch_queue_free (&phttp->smq);
       phttp_lua_stash_reset (phttp);
 
       phttp->ws_state = WSS_INIT;

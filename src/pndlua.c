@@ -242,7 +242,7 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
 
 
 /*
- * Define addition Lua functions.
+ * Define auxiliary Lua functions.
  */
 static void
 check_args (lua_State *L, char *fname, int nargs)
@@ -344,7 +344,7 @@ pndlua_reg_locate (char const *letidx, luaL_Reg *reg, char const *name)
 /*
  * Obtain userdata from an object at stack index idx.  The object must
  * be a table such that the userdata is stored in obj[0].  Raise an error
- * if this is not a case or if the obtained pointer is NULL.
+ * if this is not the case or if the obtained pointer is NULL.
  */
 static void *
 pndlua_get_userdata (lua_State *L, int idx)

@@ -1039,12 +1039,16 @@ Eval "@var{name}"
   Evaluating a detached condition means applying its contents to the
 incoming request.  In this regard, it can be seen as an equivalent to
 including contents of the @code{Condition} statement in place.  There
-is one major difference, though: each detached condition is evaluated
-only once.  All subsequent @code{Eval} statements just return its
-cached result.  This way, the use of detached conditions can speed up
-request processing (and reduce the CPU load) for conditionals that
-require a lot of calculations, such as long ACLs or complex Lua
-functions (FIXME-pxref@{Lua@}).
+are two major differences, though.  First, any parenthesized groups in
+regular expressions (@pxref{parenthesized subexpression}) are visible
+only within condition itself.  In other words, they cannot be referred
+to from outside the @code{Condition} block.  Secondly, and most
+importantly, no matter how often used in the configuration, each
+detached condition is evaluated only once.  All subsequent @code{Eval}
+statements just return the result of first evaluation.  This way, the
+use of detached conditions can speed up request processing (and reduce
+the CPU load) for conditionals that require a lot of calculations,
+such as long ACLs or complex Lua functions (FIXME-pxref@{Lua@}).
 
   Consider the following configuration snippet (irrelevant statements
 being omitted):
@@ -1131,6 +1135,7 @@ End
 @cindex backreference expansion
 @cindex expansion, backreference
 @cindex parenthesized subexpression
+@anchor{parenthesized subexpression}
 Arguments to request modification statements are expanded before
 actual use.  During expansion, references to @dfn{parenthesized
 subexpressions} in conditionals are replaced with their actual

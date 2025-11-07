@@ -88,6 +88,7 @@ m4_include([acl.at])
 m4_include([nacl.at])
 m4_include([tbf.at])
 m4_include([detcond.at])
+m4_include([dti.at])
 
 AT_BANNER([Lua])
 m4_include([lua-load.at])
