@@ -88,6 +88,7 @@ This edition of the @cite{Pound Manual}, last updated
 * HTTPS::
 * Balancer::
 * Worker model::
+* Lua::
 * Logging::
 * Configuration::
 * poundctl::
@@ -135,6 +136,10 @@ Request balancing
 * Sessions::
 * Balancer groups::
 * Dynamic backends::
+
+Extending @command{pound} functionality with Lua
+
+* Lua API::
 
 Configuration
 
@@ -1048,7 +1053,7 @@ detached condition is evaluated only once.  All subsequent @code{Eval}
 statements just return the result of first evaluation.  This way, the
 use of detached conditions can speed up request processing (and reduce
 the CPU load) for conditionals that require a lot of calculations,
-such as long ACLs or complex Lua functions (FIXME-pxref@{Lua@}).
+such as long ACLs or complex Lua functions (@pxref{Lua}).
 
   Consider the following configuration snippet (irrelevant statements
 being omitted):
@@ -2289,6 +2294,234 @@ remains idle longer than that and total number of workers is greater
 than the allotted minimum (@code{WorkerMinCount}), this idle worker is
 terminated.
 
+@node Lua
+@chapter Extending @command{pound} functionality with Lua
+@cindex Lua
+@url{http://lua.org,Lua} is a lightweight extension language developed
+at the Pontifical Catholic University of Rio de Janeiro.
+@command{Pound} can use extensions written in Lua to implement new
+conditionals and backends.@footnote{To check if the binary supports Lua,
+run @command{pound -V} and examine its output.}
+
+@cindex lua loading mode
+The lua interpreter itself is not thread-safe, therefore two modes
+are implemented for loading Lua source files: @dfn{per-thread} and
+@dfn{global}.  In per-thread mode, each Lua file is loaded into each
+worker thread separately.  This is the default.  In global mode
+sources are loaded only once and exist in one copy, available for use
+in all threads.  No matter what mode is used, Lua sources are read and
+interpreted only once, at program startup.
+
+@cindex per-thread lua loading
+Main advantage of per-thread mode is speed.  Each thread runs its own
+copy of Lua interpreter and doesn't have to synchronize its actions
+with other threads.  Its disadvantage is a bit higher memory usage.
+
+@cindex global lua loading
+@anchor{global lua loading}
+Sources loaded in global mode reside in one interpreter, common for
+all threads.  Consequently, before calling a Lua function, a thread
+must lock the interpreter for its use, and unlock it afterwards.
+While the interpreter is in use by a single thread, remaining threads
+must wait for it to be released in order to use the interpreter.  This
+results in certain performance penalty.
+
+Both modes can be used together.  No matter which mode is used, Lua
+functions sharing the same mode can use a special global variable to
+exchange data between them, if they are called in different stages of
+request processing.  For example, a Lua test can pass its results to
+the Lua backend.
+
+@menu
+* Lua API::
+@end menu
+
+@node Lua API
+@section Lua API
+
+@subheading The @code{pound} module.
+
+@deftypemethod {pound} integer loadctx
+This variable is initialized when loading Lua source files to the
+ordinal number of the Lua @dfn{state} where the file is being loaded.
+For globally loaded sources (@pxref{global lua loading}), this
+variable is set to 0.  For per-thread loading, it is set to a positive
+integer identifying the state.
+@end deftypemethod
+
+@deftypemethod {pound} void log (int @var{prio}, string @var{message})
+Outputs @var{message} to the logging channel @var{prio}.
+@end deftypemethod
+
+The following constants can be used for @var{prio} argument:
+
+@defcv {Constant} pound DEBUG
+Debug messages.
+@end defcv
+
+@defcv {Constant} pound INFO
+Informative messages.
+@end defcv
+
+@defcv {Constant} pound NOTICE
+Important notices.
+@end defcv
+
+@defcv {Constant} pound WARNING
+Warning messages.
+@end defcv
+
+@defcv {Constant} pound ERR
+Errors.
+@end defcv
+
+@defcv {Constant} pound CRIT
+Critical errors.
+@end defcv
+
+@defcv {Constant} pound ALERT
+Serious alerts.
+@end defcv
+
+@defcv {Constant} pound EMERG
+Emergency messages
+@end defcv
+
+@deftypemethod pound integer tid ()
+Returns identifier of the current @code{pound} thread.
+@end deftypemethod
+
+@subheading The @code{http} module.
+
+This built-in module contains variables and methods describing the
+HTTP request being handled.
+
+@deftypemethod http table req
+Returns a table describing the request.  This is a read-only table,
+whose fields and methods are described below.
+@end deftypemethod
+
+@deftypecv {Field} req string method
+HTTP method used in the request.
+@end deftypecv
+
+
+@deftypecv {Field} req string line
+Request line, i.e. part of the request between the method and HTTP
+version designator.
+@end deftypecv
+
+@deftypecv {Field} req string url
+URL part of the request.
+@end deftypecv
+
+@deftypecv {Field} req string path
+Pathname part of the request.
+@end deftypecv
+
+@deftypecv {Field} req table version
+HTTP version of the request.  Used in string context, returns version
+as a string:
+
+@example
+tostring(http.req.version) @result{} "1.1"
+@end example
+
+Two variables are provided to access version parts:
+
+@deftypecv {Field} version integer major
+Major part or the version.
+@end deftypecv
+
+@deftypecv {Field} version integer minor
+Minor part or the version.
+@end deftypecv
+@end deftypecv
+
+@deftypecv {Field} req table query
+Query part of the request.  Converted to string, returns the query in
+full:
+
+@example
+tostring(http.req.query) @result{} "t=history&r1=10"
+@end example
+
+Accessed as table, returns values of parameters used as keys:
+
+@example
+@group
+http.req.query['t'] @result{} "history"
+http.req.query.r1 @result{} "10"
+@end group
+@end example
+@end deftypecv
+
+@anchor{http.req.headers}
+@deftypecv {Field} req table headers
+Returns headers of the request.  Converted to string, returns all
+headers as a (multiline) string, terminated with a newline.  Indexed
+as a table, returns values of fields used as keys.
+
+@example
+@group
+tostring(http.req.headers) @result{} "Host: example.net\nContent-Type:text/plain\n"
+http.req.headers['Host'] @result{} "example.net"
+@end group
+@end example
+@end deftypecv
+
+For functions invoked using @code{LuaBackend} directive, the @code{http}
+module provides methods for examining and updating the response.
+
+@deftypecv Field http table resp
+A table describing the response.  It is a read-write table.
+Assigning to its fields modifies the response that will be sent out by
+@code{pound} when the @code{LuaBackend} function returns.
+@end deftypecv
+
+@deftypecv Field resp integer code
+HTTP status code of the response.  An integer number in the range
+@code{[100,599]}.  The @code{LuaBackend} function must set this field/
+@end deftypecv
+
+@deftypecv Field resp string reason
+Textual reason describing the response.  Setting it is optional.  If
+not set, and the @code{resp.code} is set to one of the values
+supported by @command{pound} (@pxref{Error definitions}), the standard
+reason will be used instead.
+@end deftypecv
+
+@deftypecv {Field} resp table headers
+Headers of the response.  When read, these behave similarly to request
+headers, described above (@pxref{http.req.headers}).  Setting this field to
+@code{nil} removes all headers.  Setting it to a table, fills all
+headers from it.  Otherwise, each header can be set separately, as
+
+@example
+http.resp.headers['Host'] = "example.org"
+@end example
+@end deftypecv
+
+@deftypecv Field resp string body
+The request body.
+@end deftypecv
+
+@subheading The @code{stash} table
+
+@deftypevr {Lua variable} table stash
+This global variable can be used to exchange data between Lua
+functions called within the same Lua @dfn{state}, but invoked from
+different @command{pound} handlers.  For example, a test invoked by
+@code{LuaMatch} directive can leave there some data for use by the backend
+(@code{LuaBackend}).
+
+Upon receiving the HTTP request, this table is guaranteed to be
+empty.  The values stored in it persist until the response is sent.
+
+Notice, that @code{stash} is unique for each Lua state, so functions
+loaded globally cannot pass data to per-thread functions, and vice versa.
+@end deftypevr
+
 @node Logging
 @chapter Logging
 @cindex Logging
@@ -3357,6 +3590,52 @@ End
 Detached conditions can be evaluated in @code{Service} and
 @code{Rewrite} statements using the @code{Eval} statement (@pxref{Eval
 statement}).  For a detailed discussion, see @ref{Detached Conditions}.
+
+@node Lua Settings
+@subsection The @code{Lua} statement
+
+@kwindex Lua
+Global Lua settings reside in @code{Lua} section:
+
+@example
+@group
+Lua
+   ...
+End
+@end group
+@end example
+
+Following statements are allowed for use in this section:
+
+@deffn {Lua directive} Load "@var{filename}"
+Load Lua source file @var{filename} in per-thread mode.  Unless
+specified as an absolute pathname, the file will be looked in the
+@dfn{include directory} (@pxref{include directory}).
+@end deffn
+
+@deffn {Lua directive} LoadGlobal "@var{filename}"
+Load Lua source file @var{filename} in global mode.  Unless
+specified as an absolute pathname, the file will be looked in the
+@dfn{include directory} (@pxref{include directory}).
+@end deffn
+
+@deffn {Lua directive} Path "@var{path}"
+Prepend @var{path} to the Lua @code{package.path}.  This is a
+semicolon-delimited list of patterns that specifies where the Lua
+@code{require} statement searches for Lua sources.  In patterns, the
+question mark serves as a wildcard and will be replaced by the name of
+the module being loaded.  The path is scanned from left to right.
+
+Multiple @code{Path} statements are allowed.  After parsing, the
+values from all @code{Path} statements are joined into a single
+prefix, which is then prepended to the defaulut value of
+@code{package.path}.
+@end deffn
+
+@deffn {Lua directive} CPath "@var{path}"
+Similar to @code{Path} (see above), but modifies @code{package.cpath},
+a variable that controls where Lua looks for shared libraries.
+@end deffn
 
 @node File inclusion
 @section File inclusion
@@ -4931,6 +5210,17 @@ This statement is provided to facilitate handling of @dfn{virtual
 hosts}.  @xref{Service selection}, for details.
 @end deffn
 
+@deffn {Service Conditional} LuaMatch "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with the supplied arguments.  Use its
+return value (which must be boolean) as the result of the test.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request modifications}.
+@end deffn
+
 @deffn {Service Conditional} Path [@var{options}] "@var{pattern}"
 Returns @samp{true}, if the path part of the incoming request matches
 @var{pattern}.
@@ -5387,6 +5677,20 @@ consulted.  If it is not present, the default error page is used.
 This directive is useful in a catch-all service, which outputs an
 error page if no service matching the incoming request was found.
 @xref{Error responses}, for a discussion.
+@end deffn
+
+@deffn {Service Conditional} LuaBackend "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with the supplied arguments.  The function
+should set the response code (@FIXME-pxref{http.resp.code}) and fill
+the response body (@FIXME-pxref{http.resp.body}) prior to returning.
+If it fails to do so, @command{pound} will generate a standard 500
+response.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request modifications}.
 @end deffn
 
 @deffn {Service directive} Redirect [@var{code}] "@var{url}"
