@@ -1337,6 +1337,29 @@ source_load (lua_State *L, struct pndlua_source *source, int nresults)
   return 0;
 }
 
+static inline int
+c_is_lua_var_beg (int c)
+{
+  return c_isalpha (c) || c == '_';
+}
+
+static inline int
+c_is_lua_var (int c)
+{
+  return c_isalnum (c) || c == '_';
+}
+
+static inline int
+is_lua_var_name (char const *s)
+{
+  if (!c_is_lua_var_beg (*s))
+    return 0;
+  while (*++s)
+    if (!c_is_lua_var (*s))
+      return 0;
+  return 1;
+}
+
 static int
 source_load_module (lua_State *L, struct pndlua_source *source)
 {
@@ -1346,7 +1369,7 @@ source_load_module (lua_State *L, struct pndlua_source *source)
       static size_t suflen = sizeof (suf) - 1;
       WORKDIR *wd;
       char const *basename;
-      size_t baselen;
+      size_t baselen, i;
 
       if ((basename = filename_split_wd (source->filename, &wd)) == NULL)
 	{
@@ -1358,7 +1381,19 @@ source_load_module (lua_State *L, struct pndlua_source *source)
       baselen = strlen (basename);
       if (baselen > suflen && strcmp (basename + baselen - suflen, suf) == 0)
 	baselen -= suflen;
-      source->modname = xstrndup (basename, baselen);
+      if (c_is_lua_var_beg (basename[0]))
+	source->modname = xstrndup (basename, baselen);
+      else
+	{
+	  source->modname = xmalloc (baselen + 2);
+	  source->modname[0] = '_';
+	  memcpy (source->modname, basename, baselen);
+	  baselen++;
+	  source->modname[baselen] = 0;
+	}
+      for (i = 0; i < baselen; i++)
+	if (!c_is_lua_var (source->modname[i]))
+	  source->modname[i] = '_';
     }
 
   luaL_getsubtable (L, LUA_REGISTRYINDEX, LUA_LOADED_TABLE);
@@ -1623,7 +1658,15 @@ parse_lua_load (struct pndlua_source_head *head)
     return CFGPARSER_FAIL;
 
   if (tok->type == T_STRING)
-    src->modname = xstrdup (tok->str);
+    {
+      if (!is_lua_var_name (tok->str))
+	{
+	  conf_error ("%s", "not a valid Lua variable name");
+	  return CFGPARSER_FAIL;
+	}
+
+      src->modname = xstrdup (tok->str);
+    }
   else if (tok->type != '\n')
     return CFGPARSER_FAIL;
 
