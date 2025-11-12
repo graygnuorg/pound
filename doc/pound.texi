@@ -139,6 +139,10 @@ Request balancing
 
 Extending @command{pound} functionality with Lua
 
+* LuaLoad::    Loading Lua sources.
+* LuaMatch::   Lua conditionals.
+* Stash::      Sharing data between Lua functions.
+* LuaBackend:: Lua backends.
 * Lua API::
 
 Configuration
@@ -584,7 +588,7 @@ different servers, depending on the request content.  In this case,
 each service has one or more @dfn{conditional statements}
 (@dfn{conditionals}, for short), that define conditions which a
 request must match in order to be routed to backends within that
-particular service.  Syntactically, such conditionals have the form: 
+particular service.  Syntactically, such conditionals have the form:
 
 @example
 @var{kw} [@var{options}] "@var{pattern}"
@@ -1077,14 +1081,14 @@ ListenHTTP
         Backend
             Address 192.0.2.5
         End
-    End        
+    End
     Service "c"
         Host "bar.example.com"
         Eval "bigacl"
         Backend
             Address 192.0.2.2
         End
-    End    
+    End
 End
 @end example
 
@@ -1301,7 +1305,7 @@ End
 When modifying responses, only two request modification statements
 are allowed: @code{SetHeader} and @code{DeleteHeader}.  The list of
 conditionals is limited as well: @code{Header} and @code{StringMatch},
-plus @code{Match} and @code{Not} directives. 
+plus @code{Match} and @code{Not} directives.
 Notice that these conditionals operate on the response, and not on the
 request, as in previous chapters.  For example:
 
@@ -2329,12 +2333,349 @@ results in certain performance penalty.
 Both modes can be used together.  No matter which mode is used, Lua
 functions sharing the same mode can use a special global variable to
 exchange data between them, if they are called in different stages of
-request processing.  For example, a Lua test can pass its results to
-the Lua backend.
+request processing.  This way, for example, a Lua test can pass its
+results to the Lua backend.
 
 @menu
+* LuaLoad::    Loading Lua sources.
+* LuaMatch::   Lua conditionals.
+* Stash::      Sharing data between Lua functions.
+* LuaBackend:: Lua backends.
 * Lua API::
 @end menu
+
+@node LuaLoad
+@section Global Lua Configuration
+  Lua sources are loaded in the global @code{Lua} section, using two
+statements: @code{Load} and @code{LoadGlobal}.  Both take as argument
+the name of a Lua source file to parse and load.  If the name is
+relative, the file is looked in the @ref{include directory}.
+
+The @code{Load} statement loads the file to per-thread Lua
+interpreters, while @code{LoadGlobal} loads it to the global one.
+Example usage:
+
+@example
+@group
+Lua
+    Load "auth-bearer.lua"
+End
+@end group
+@end example
+
+If the file ends with a @code{return} statement, it is loaded as in
+Lua @code{require}.  The return value is then available in Lua global
+whose name is obtained from the filename using the following
+procedure:
+
+@enumerate 1
+@item
+Remove the @samp{.lua} suffix.
+
+@item
+Unless first character is a letter of latin alphabet or underscore,
+add underscore at the beginning.
+
+@item
+In the resulting string, replace each character other than letter,
+digit or underscore with an underscore.
+@end enumerate
+
+Thus, if the file @file{auth-bearer.lua} ends with a @code{return},
+the returned value will be available in Lua as @code{auth_bearer}.
+
+You can also supply variable name explicitly, as second argument,
+e.g.:
+
+@example
+@group
+Lua
+    Load "auth-bearer.lua" "bearer"
+End
+@end group
+@end example
+
+Of course, you can use as many @code{Load} (or @code{LoadGlobal})
+statements as there are files you wish to load.
+
+The @code{Lua} can also be used to modify Lua search paths.  Two
+statements are provided for this purpose: @code{Path} modifies search
+path for Lua source files (@code{package.path}), and @code{CPath}
+modifies search path for dynamic libraries (@code{package.cpath}).
+Both statements add their argument at the beginning of the
+corresponding @code{package} path.  Improving the example above:
+
+@example
+@group
+Lua
+    Path "/usr/share/pound/?.lua"
+    Load "auth-bearer.lua" "bearer"
+End
+@end group
+@end example
+
+Notice that @code{Path} statement has no effect on where @code{Load}
+looks for its argument (it always uses @command{pound} include path
+to locate relative file names).  Instead, it affects @code{require}
+statements in loaded Lua sources.
+
+@node LuaMatch
+@section Lua conditionals
+  Lua functions are most commonly used to implement new conditions,
+that can be used to select the @code{Service} section to use.  Such
+conditions are applied using the @code{LuaMatch} statement in
+@code{Service}.  The statement takes at least one argument: the name
+of Lua function to call.  It can be followed by any number of string
+values, which will be passed to the function as its arguments.  Before
+being passed to the function, this values undergo backreference
+expansion and request accessor interpretation (@pxref{Request
+modifications}).
+
+  The function name argument can be either an unqualified name, as
+@samp{mycond}, or a fully qualified one, as @samp{modname.mycond}.
+Use the latter form to call functions defined in modules.
+
+  Information about HTTP request is provided to Lua functions via
+the built-in variable @code{http.req}, described in @ref{Lua API}.
+
+  To illustrate the concept, here's the definition of a Lua test that
+returns @code{true} if the request header named in its first argument
+matches any of its remaining arguments, treated as anchored Lua patterns:
+
+@example
+@group
+function isheader(name, ...)
+   local args = @{ ... @}
+   for _, pat in ipairs(args) do
+      if string.find(http.req.headers[name], "^"..pat.."$") then
+         return true
+      end
+   end
+   return false
+end
+@end group
+@end example
+
+Supposing that this function is defined in file @file{isheader.lua},
+it can be used as follows:
+
+@example
+Lua
+    Load "isheader.lua"
+End
+ListenHTTP
+    ...
+    Service
+        LuaMatch "host" "foo[.]bar" "www[.]fo+[.]bar"
+        Backend
+            ...
+        End
+    End
+End
+@end example
+
+ As a more practical example, the function below implements
+@dfn{Bearer} authorization scheme.
+
+@example
+local bearer = @{@}
+local jwt = require 'jwt'
+
+function bearer.ok(secret)
+   -- Read in the Authorization header.
+   local bh = http.req.headers['Authorization']
+   if bh == nil then
+      return false
+   end
+
+   -- Check if it starts with "Bearer".
+   local n, k = bh:find('%s+')
+   if n == nil or bh:sub(1,n-1):lower() ~= 'bearer' then
+      return false
+   end
+
+   -- Extract the token and parse it.
+   local j, err = jwt.new(bh:sub(k+1))
+   if err ~= nil then
+      return false
+   end
+
+   -- Verify the token.
+   if not j:verify(secret) then
+      return false
+   end
+
+   -- Check expiration time.
+   if j.payload.exp ~= nil then
+      local exp = tonumber(j.payload.exp)
+      if exp == nil then
+         return false
+      elseif os.time() < j.payload.exp then
+         return false
+      end
+   end
+
+   return true
+end
+
+return bearer
+@end example
+
+ The following configuration fragment uses @code{bearer.ok} function
+as a condition, to reject requests without a valid bearer token:
+
+@example
+@group
+Service
+    Not LuaMatch "bearer.ok" "secret"
+    Rewrite response
+        SetHeader "WWW-Authenticate: Bearer realm=\"Restricted access\""
+    End
+    Error 401
+End
+@end group
+@end example
+
+@node Stash
+@section Sharing data between Lua functions
+@cindex stash
+  It is often necessary to share data between Lua functions used as
+conditions in @command{pound} configuration file.  An obvious way
+of doing so is using Lua global variables.  This approach, however,
+poses one major problem: values stored in globals will persist not
+only when processing a single HTTP request, but also between different
+HTTP requests, and this can cause undesirable effects.
+
+  To avoid this, @command{pound} provides a special built-in variable
+@code{stash}.  Its value is a table guaranteed to be cleared when a
+worker thread starts processing a new HTTP request.  Applications can
+fill it with whatever values they like.
+
+  To illustrate its use let's change the @code{bearer} module from the
+previous section so it can be used to select the service to use based
+on JWT claims.  First, the @code{bearer.ok} function should store the
+parsed JWT object in stash before returning.  Its last lines will then
+look like:
+
+@example
+@group
+   stash.bearer = j
+   return true
+end
+@end group
+@end example
+
+  Then, we implement a new method, which checks if the hostname given
+as its argument is listed in one of the JWT claims:
+
+@example
+@group
+function bearer.urlOK(host)
+   return stash.bearer ~= nil and
+          stash.bearer.payload['http://' .. host] == true
+end
+@end group
+@end example
+
+  Now this method can be used as a conditional to select the service
+to use as shown in the example below:
+
+@example
+@group
+Service "auth"
+    Not LuaMatch "bearer.ok" "secret"
+    Rewrite response
+        SetHeader "WWW-Authenticate: Bearer realm=\"Restricted access\""
+    End
+    Error 401
+End
+
+Service "foo"
+    LuaMatch "bearer.urlOK" "foo.com"
+    Backend
+        Address 127.0.0.1
+        Port 8081
+    End
+End
+
+Service "bar"
+    LuaMatch "bearer.urlOK" "bar.com"
+    ...
+End
+@end group
+@end example
+
+The service @samp{auth}, same as in the previous example, verifies
+that the request carries a valid bearer token and, if so, saves off
+the JWT for further use.  Subsequent services make use of this saved
+value to verify if the corresponding claim is true: the service
+@samp{foo} is selected if the claim @samp{http://foo.com} is true, and so on.
+
+@node LuaBackend
+@section Lua backends
+  Lua extensions can also be used to define new backends.  Similarly
+to conditions, a function implementing a backend can have an arbitrary
+number of arguments.  It is not supposed to return any values, though.
+Before returning, it should define the response to be returned to the
+client.  It does so by assigning values to the fields in the internal
+variable @code{http.resp}:
+
+@table @code
+@item code
+This field must be initialized to the HTTP status code (an integer
+value in the range 100 to 599).  If it is not initialized after the
+backend function returns, @command{pound} will respond with the
+default @samp{internal server error} page.
+
+@item reason
+This is a textual reason corresponding to the status code.  This value
+is optional.  If not set, @command{pound} will use the default value
+for the returned status code, if it is one of the codes supported
+internally (@pxref{Error definitions}).  Otherwise the reason field
+will remain empty.
+
+@item headers
+A table of response HTTP headers.
+
+@item body
+Response body as a string.
+@end table
+
+  Here is an example of Lua backend function.  The function below
+can be used to return meaningful error status if the JWT authorization
+implemented in previous sections fails.  It supposes that function
+@code{bearer.ok}, before returning on error, initializes @code{stash}
+fields @samp{error} and @samp{error_description} to the error code and
+textual description, correspondingly.
+
+@example
+@group
+function bearer.error_backend()
+   local text = 'Bearer realm="Restricted access"'
+   if stash.bearer.error ~= nil then
+      text = text .. ', error="' .. stash.bearer.error .. '"'
+      if stash.bearer.error_description ~= nil then
+         text = text .. ', error_description="' .. stash.bearer.error_description .. '"'
+      end
+   end
+
+   http.resp.headers['WWW-Authenticate'] = text
+
+   http.resp.code = 401
+end
+@end group
+@end example
+
+To use this backend, we modify the @samp{auth} backend as follows:
+
+@example
+@group
+Service "auth"
+    Not LuaMatch "bearer.ok" "secret"
+    LuaBackend "bearer.error_backend"
+End
+@end group
+@end example
 
 @node Lua API
 @section Lua API
@@ -2608,7 +2949,7 @@ Such additional logging is configured using two directives:
 @code{LogLevel} and @code{LogFormat}.  The @code{LogLevel} directive
 can appear either in listener scope, in which case it affects only
 this particular listener, or in global scope, where it affects all
-listeners that don't configure it on their own.  The value of this 
+listeners that don't configure it on their own.  The value of this
 directive can be either an integer number in range 0 through 5
 (inclusive), or a quoted string.  Numeric value requests one of the
 @dfn{built-in log formats}.  String value refers either to a built-in
@@ -7026,7 +7367,7 @@ each time you load a file with that name to your editor, it will
 automatically select @code{pound-mode} as its default major mode.
 Depending on your customs, you may further modify
 @code{auto-mode-alist} to associate @code{pound-mode} with more
-files.  For example, if your main configuration file includes 
+files.  For example, if your main configuration file includes
 files from @file{/etc/pound} directory (@pxref{File inclusion}), it
 might be a good idea to add the following:
 
