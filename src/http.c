@@ -3031,7 +3031,9 @@ http_request_set_query (struct http_request *req, char const *rawquery)
 
   if (http_request_split (req))
       return -1;
-  if ((p = strdup (rawquery)) == NULL)
+  if (!rawquery)
+    p = NULL;
+  else if ((p = strdup (rawquery)) == NULL)
     {
       lognomem ();
       return -1;
@@ -4074,14 +4076,20 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  break;
 
 	case REWRITE_QUERY_PARAM_SET:
-	  if ((s = expand_string (op->v.qp.value, phttp, request,
-				  "query parameter")) != NULL)
+	  if (op->v.qp.value == NULL)
+	    res = http_request_set_query_param (request, op->v.qp.name, NULL);
+	  else if ((s = expand_string (op->v.qp.value, phttp, request,
+				       "query parameter")) != NULL)
 	    {
 	      res = http_request_set_query_param (request, op->v.qp.name, s);
 	      free (s);
 	    }
 	  else
 	    res = -1;
+	  break;
+
+	case REWRITE_QUERY_DELETE:
+	  res = http_request_set_query (request, NULL);
 	  break;
 
 	default:

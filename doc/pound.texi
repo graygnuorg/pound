@@ -1123,8 +1123,11 @@ Rewrite the path part of the URL.
 @item SetQuery
 Rewrite the query part of the URL.
 
+@item DeleteQuery
+Delete the query part of the URL.
+
 @item SetQueryParam
-Set a single query parameter.
+Set or delete a single query parameter.
 @end table
 
 For example, the following service declaration will add the header
@@ -4622,9 +4625,16 @@ a valid query with the special characters properly encoded using
 percent encoding.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetQueryParam "@var{name}" "@var{value}"
-Set the query parameter @var{name} to the @var{value}.  Value must be
-properly encoded if it contains reserved characters.
+@deffn {ListenerHTTP directive} DeleteQuery
+Delete query part of the URL.
+@end deffn
+
+@deffn {ListenerHTTP directive} SetQueryParam "@var{name}" ["@var{value}"]
+Used with two arguments, sets query parameter @var{name} to the
+@var{value}.  Value must be properly encoded if it contains reserved
+characters.
+
+Used with one argument, deletes the parameter @var{name}.
 @end deffn
 
 @deffn {ListenerHTTP directive} SetHeader "@var{name}: @var{value}"
@@ -5643,9 +5653,16 @@ a valid query with the special characters properly encoded using
 percent encoding.
 @end deffn
 
-@deffn {Service directive} SetQueryParam "@var{name}" "@var{value}"
-Set the query parameter @var{name} to the @var{value}.  The value must be
-properly encoded if it contains reserved characters.
+@deffn {Service directive} DeleteQuery
+Delete query part of the URL.
+@end deffn
+
+@deffn {Service directive} SetQueryParam "@var{name}" ["@var{value}"]
+Used with two arguments, sets query parameter @var{name} to the
+@var{value}.  Value must be properly encoded if it contains reserved
+characters.
+
+Used with one argument, deletes the parameter @var{name}.
 @end deffn
 
 @deffn {Service directive} SetHeader "@var{name}: @var{value}"

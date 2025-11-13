@@ -2955,6 +2955,7 @@ static int parse_delete_header (void *call_data, void *section_data);
 static int parse_set_url (void *call_data, void *section_data);
 static int parse_set_path (void *call_data, void *section_data);
 static int parse_set_query (void *call_data, void *section_data);
+static int parse_delete_query (void *call_data, void *section_data);
 static int parse_set_query_param (void *call_data, void *section_data);
 static int parse_sub_rewrite (void *call_data, void *section_data);
 
@@ -2977,6 +2978,10 @@ static CFGPARSER_TABLE rewrite_ops[] = {
   {
     .name = "SetQuery",
     .parser = parse_set_query
+  },
+  {
+    .name = "DeleteQuery",
+    .parser = parse_delete_query
   },
   {
     .name = "SetQueryParam",
@@ -3115,6 +3120,13 @@ parse_set_query (void *call_data, void *section_data)
 }
 
 static int
+parse_delete_query (void *call_data, void *section_data)
+{
+  rewrite_op_alloc (call_data, REWRITE_QUERY_DELETE);
+  return CFGPARSER_OK;
+}
+
+static int
 parse_set_query_param (void *call_data, void *section_data)
 {
   REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_QUERY_PARAM_SET);
@@ -3124,8 +3136,20 @@ parse_set_query_param (void *call_data, void *section_data)
     return CFGPARSER_FAIL;
   op->v.qp.name = xstrdup (tok->str);
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
+  if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;
+  if (tok->type == '\n')
+    {
+      op->v.qp.value = NULL;
+      return CFGPARSER_OK_NONL;
+    }
+  else if (tok->type != T_STRING)
+    {
+      conf_error ("expected %s, but found %s", "string",
+		  token_type_str (tok->type));
+      return CFGPARSER_FAIL;
+    }
+
   op->v.qp.value = xstrdup (tok->str);
 
   return CFGPARSER_OK;
@@ -3340,6 +3364,7 @@ rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
 SETFN_SVC_DECL (set_url)
 SETFN_SVC_DECL (set_path)
 SETFN_SVC_DECL (set_query)
+SETFN_SVC_DECL (delete_query)
 SETFN_SVC_DECL (set_query_param)
 SETFN_SVC_DECL (set_header)
 SETFN_SVC_DECL (delete_header)
@@ -3480,6 +3505,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "SetQuery",
     .parser = SETFN_SVC_NAME (set_query),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "DeleteQuery",
+    .parser = SETFN_SVC_NAME (delete_query),
     .off = offsetof (SERVICE, rewrite)
   },
   {
@@ -4084,6 +4114,11 @@ static CFGPARSER_TABLE http_common[] = {
   {
     .name = "SetPath",
     .parser = SETFN_SVC_NAME (set_path),
+    .off = offsetof (LISTENER, rewrite)
+  },
+  {
+    .name = "DeleteQuery",
+    .parser = SETFN_SVC_NAME (delete_query),
     .off = offsetof (LISTENER, rewrite)
   },
   {

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-05
+Pound -- history of user-visible changes. 2025-11-13
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -37,6 +37,14 @@ statements with are used repeatedly in multiple Service statements.
 
 * Support for Lua
 
+* New request modification statement: DeleteQuery
+
+Removes query part of the request URL.
+
+* One-argument form of SetQueryParam
+
+When used with one argument (name of a query parameter), SetQueryParam
+causes removal of that query parameter.
 
 Version 4.18, 2025-10-29
 

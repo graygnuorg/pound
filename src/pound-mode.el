@@ -150,6 +150,7 @@
     "Daemon"
     "Debug"
     "DeleteHeader"
+    "DeleteQuery"
     "Disable"
     "Disabled"
     "ECDHCurve"
