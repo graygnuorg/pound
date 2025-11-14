@@ -27,6 +27,7 @@
 #define CCTYPE_PUNCT   0x0100
 #define CCTYPE_SPACE   0x0200
 #define CCTYPE_XLETR   0x0400
+#define CCTYPE_UNRSRV  0x0800 /* RFC 3986 section 2.2 unreserved characters */
 #define CC_TAB_MAX     128
 
 extern int cc_tab[CC_TAB_MAX];

@@ -418,6 +418,67 @@ phttp_log (POUND_HTTP *phttp, int flags, int status, int en,
   stringbuf_free (&sb);
 }
 
+static char xdig[] = "0123456789ABCDEF";
+
+static inline int
+xtod (int c)
+{
+  char *p = strchr (xdig, c_toupper (c));
+  return p ? p - xdig : -1;
+}
+
+static char *
+urlencode (char const *input, char const *exc)
+{
+  int c;
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  while ((c = *input++) != 0)
+    {
+      if (c_is_class (c, CCTYPE_UNRSRV) || (exc && strchr (exc, c)))
+	stringbuf_add_char (&sb, c);
+      else
+	{
+	  stringbuf_add_char (&sb, '%');
+	  stringbuf_add_char (&sb, xdig[c >> 4]);
+	  stringbuf_add_char (&sb, xdig[c & 0xf]);
+	}
+    }
+  stringbuf_add_char (&sb, 0);
+  return stringbuf_finish (&sb);
+}
+
+static char *
+urldecode (char const *input, char **end)
+{
+  int c;
+  struct stringbuf sb;
+  stringbuf_init_log (&sb);
+  while ((c = *input++) != 0)
+    {
+      if (c == '%')
+	{
+	  int n;
+	  c = xtod (*input++);
+	  if (c == -1)
+	    break;
+	  n = c << 4;
+	  c = xtod (*input++);
+	  if (c == -1)
+	    break;
+	  n += c;
+	  stringbuf_add_char (&sb, n);
+	}
+      else
+	stringbuf_add_char (&sb, c);
+    }
+  if (c == -1)
+    --input;
+  if (end)
+    *end = (char*)input;
+  return stringbuf_finish (&sb);
+}
+
 static int
 submatch_realloc (struct submatch *sm, GENPAT re)
 {
@@ -509,6 +570,23 @@ submatch_exec (GENPAT re, char const *subject, struct submatch *sm)
       if ((sm->subject = strdup (subject)) == NULL)
 	return 0;
     }
+  return res;
+}
+
+static int
+submatch_exec_decode (GENPAT re, char const *subject, int decode,
+		      struct submatch *sm)
+{
+  int res;
+  char *decoded = NULL;
+  if (decode)
+    {
+      if ((decoded = urldecode (subject, NULL)) == NULL)
+	return -1;
+      subject = decoded;
+    }
+  res = submatch_exec (re, subject, sm);
+  free (decoded);
   return res;
 }
 
@@ -932,6 +1010,22 @@ expand_string (char const *str, POUND_HTTP *phttp, struct http_request *req,
       || (p = stringbuf_finish (&sb)) == NULL)
     stringbuf_free (&sb);
   return p;
+}
+
+char *
+expand_string_encode (char const *str, int encode, char const *exc,
+		      POUND_HTTP *phttp,
+		      struct http_request *req,
+		      char *what)
+{
+  char *s = expand_string (str, phttp, req, what);
+  if (s && encode)
+    {
+      char *enc = urlencode (s, exc);
+      free (s);
+      s = enc;
+    }
+  return s;
 }
 
 static char *
@@ -3640,8 +3734,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (http_request_get_path (req, &str) == -1)
 	res = -1;
       else
-	res = submatch_exec (cond->re, str,
-			     submatch_queue_push (&phttp->smq, cond->tag));
+	res = submatch_exec_decode (cond->re, str, cond->decode,
+				 submatch_queue_push (&phttp->smq, cond->tag));
       break;
 
     case COND_QUERY:
@@ -3669,7 +3763,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  if (str == NULL)
 	    res = 0;
 	  else
-	    res = submatch_exec (cond->sm.re, str,
+	    res = submatch_exec_decode (cond->sm.re, str, cond->decode,
 				 submatch_queue_push (&phttp->smq, cond->tag));
 	}
       break;
@@ -4047,9 +4141,10 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
   {
     char *name;
     int (*setter) (struct http_request *, char const *);
+    char *xenc;
   } rwtab[] = {
     [REWRITE_URL_SET]    = { "url", http_request_set_url },
-    [REWRITE_PATH_SET]   = { "path", http_request_set_path },
+    [REWRITE_PATH_SET]   = { "path", http_request_set_path, "/" },
     [REWRITE_QUERY_SET]  = { "query", http_request_set_query },
   };
 
@@ -4078,8 +4173,9 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	case REWRITE_QUERY_PARAM_SET:
 	  if (op->v.qp.value == NULL)
 	    res = http_request_set_query_param (request, op->v.qp.name, NULL);
-	  else if ((s = expand_string (op->v.qp.value, phttp, request,
-				       "query parameter")) != NULL)
+	  else if ((s = expand_string_encode (op->v.qp.value, op->encode, NULL,
+					      phttp, request,
+					      "query parameter")) != NULL)
 	    {
 	      res = http_request_set_query_param (request, op->v.qp.name, s);
 	      free (s);
@@ -4093,8 +4189,10 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  break;
 
 	default:
-	  if ((s = expand_string (op->v.str, phttp, request,
-				  rwtab[op->type].name)) != NULL)
+	  if ((s = expand_string_encode (op->v.str, op->encode,
+					 rwtab[op->type].xenc,
+					 phttp, request,
+					 rwtab[op->type].name)) != NULL)
 	    {
 	      res = rwtab[op->type].setter (request, s);
 	      free (s);

@@ -1737,7 +1737,7 @@ sub process_http_request {
 			 });
 	}
     } else {
-	$http->reply(500, "Malformed URI");
+	$http->reply(500, "Malformed URI: ".$http->uri);
     }
     $http->close;
 }

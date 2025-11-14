@@ -36,6 +36,11 @@ PT_CHECK([ListenHTTP
 			Address
 			Port
 		End
+	End
+	Service
+		QueryParam "index" -decode -end "s?"
+		Backend
+		End
 	End		
 End
 ],
@@ -61,6 +66,14 @@ end
 
 200
 x-backend-number: 2
+end
+
+GET /echo/foo?index=questions%3F
+Host: example.com
+end
+
+200
+x-backend-number: 3
 end
 ])
 AT_CLEANUP

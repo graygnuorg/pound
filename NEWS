@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-13
+Pound -- history of user-visible changes. 2025-11-14
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -40,6 +40,18 @@ statements with are used repeatedly in multiple Service statements.
 * New request modification statement: DeleteQuery
 
 Removes query part of the request URL.
+
+* Percent encoding and decoding
+
+The Path and QueryParam conditional statements accept new option
+-decode.  When given this option, the value will undergo
+percent-decoding prior to comparison.  E.g.:
+
+   QueryParam "t" -decode "?"
+
+Similarly, SetPath and SetQueryParam statements accept new option
+-encode.  When given this option, the value will be percent-encoded
+prior to setting it.
 
 * One-argument form of SetQueryParam
 

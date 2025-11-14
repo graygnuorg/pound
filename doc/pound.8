@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 5, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "November 14, 2025" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1349,15 +1349,17 @@ be a valid header line.
 \fBSetURL\fR "\fIvalue\fR"
 Sets the URL part of the request. Argument is subject to string expansion.
 .TP
-\fBSetPath\fR "\fIvalue\fR"
-Sets the path part of the request. Argument is subject to string expansion.
+\fBSetPath\fR [\fB\-encode\fR] "\fIvalue\fR"
+Sets the path part of the request. Argument is subject to string
+expansion, and, if \fB\-encode\fR is given, percent-encoding.
 .TP
 \fBSetQuery\fR "\fIvalue\fR"
 Sets the query part of the request. Argument is subject to string expansion.
 .TP
-\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
+\fBSetQueryParam\fR "\fIname\fR" [\fB\-encode\fR] "\fIvalue\fR"
 Modifies the query.  Sets the query parameter \fIname\fR to
-\fIvalue\fR. The \fIvalue\fR argument is subject to string expansion.
+\fIvalue\fR. The \fIvalue\fR argument is subject to string expansion,
+and, if \fB\-encode\fR is given, percent-encoding.
 .TP
 .BR Rewrite " [" request | response "] ... [ " Else " ... ] " End
 Conditionally modify request or response depending on whether it
@@ -1783,13 +1785,24 @@ subsequent modification statements to refer to a subexpression of this
 statement's pattern, using the following syntax:
 .BI $ I ( T )\fR,
 where \fII\fR is the ordinal number of the subexpression.
-.PP
+.IP
 For example, the following will match any request whose \fBHost\fR
 header begins with "www." (case-insensitive):
-.PP
-.EE
-Host -icase -beg "www."
+.IP
+.RS
 .EX
+Host -icase -beg "www."
+.EE
+.RE
+.PP
+Additionally,
+.B Path
+and
+.B QueryParam
+directives accept the option
+.BR \-decode ,
+which causes the obtained value to undergo percent-decoding prior to
+comparison.
 .SS Compatibility directives
 The following directives are provided for backward compatibility with
 older versions of
@@ -1872,14 +1885,17 @@ server.
 \fBSetURL\fR "\fIvalue\fR"
 Sets the URL part of the request.
 .TP
-\fBSetPath\fR "\fIvalue\fR"
-Sets the path part.
+\fBSetPath\fR [\fB\-encode\fR] "\fIvalue\fR"
+Sets the path part.  If given the \fB\-encode\fR option, after usual
+expansions, \fIvalue\fR will be percent-encoded.
 .TP
 \fBSetQuery\fR "\fIvalue\fR"
 Sets the query part.
 .TP
-\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
-Modifies the query.  Sets the query parameter \fIname\fR to \fIvalue\fR.
+\fBSetQueryParam\fR "\fIname\fR" [\fB\-encode\fR] "\fIvalue\fR"
+Modifies the query.  Sets the query parameter \fIname\fR to
+\fIvalue\fR.  If given the \fB\-encode\fR option, after usual
+expansions, \fIvalue\fR will be percent-encoded.
 .TP
 .BR Rewrite " [" request | response "] ... [ " Else " ... ] " End
 Conditionally modify request or response depending on whether it
@@ -2602,17 +2618,19 @@ Basic request modification directives are:
 \fBSetURL\fR "\fIvalue\fR"
 Set the URL of the incoming request to \fIvalue\fR.
 .TP
-\fBSetPath\fR "\fIvalue\fR"
-Set the path part of the URL to the given string.
+\fBSetPath\fR [\fB\-encode\fR] "\fIvalue\fR"
+Set the path part of the URL to the given string.  The \fB\-encode\fR
+option enables percent-encoding of \fIvalue\fR.
 .TP
 \fBSetQuery\fR "\fIvalue\fR"
 Set the query part of the URL to the given string.  \fIvalue\fR must be
 a valid query with the special characters properly encoded using
 percent encoding.
 .TP
-\fBSetQueryParam\fR "\fIname\fR" "\fIvalue\fR"
-Set the query parameter \fIname\fR to the \fIvalue\fR.  Value must be
-properly encoded if it contains reserved characters.
+\fBSetQueryParam\fR "\fIname\fR" [\fB\-encode\fR] "\fIvalue\fR"
+Set the query parameter \fIname\fR to the \fIvalue\fR.  If
+\fB\-encode\fR is given, after usual expansions \fIvalue\fR will
+undergo percent-encoding.
 .TP
 \fBSetHeader\fR "\fIname\fB: \fIvalue\fR"
 Sets the HTTP header.  If the header \fIname\fR already exists, it

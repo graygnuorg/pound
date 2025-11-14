@@ -92,6 +92,15 @@ struct config_option
   int has_arg;
 };
 
+static char const *
+config_option_name (struct config_option const *optab, int code)
+{
+  for (; optab->name; optab++)
+    if (optab->code == code)
+      return optab->name;
+  return NULL;
+}
+
 static struct config_option const *
 config_option_find (struct config_option const *optab, char const *name)
 {
@@ -1444,9 +1453,19 @@ stringbuf_escape_regex (struct stringbuf *sb, char const *p)
     }
 }
 
+struct match_param
+{
+  char *from_file;
+  int watch;
+  STRING *tag;
+  int decode;
+};
+
+#define MATCH_PARAM_INITIALIZER { NULL, 0, NULL, -1 }
+
 static int
 parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
-		  char **from_file, int *watch, STRING **tag)
+		  struct match_param *param)
 {
   enum
   {
@@ -1461,7 +1480,8 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     MATCH_FILEWATCH,
     MATCH_POSIX,
     MATCH_PCRE,
-    MATCH_TAG
+    MATCH_TAG,
+    MATCH_DECODE
   };
 
   static struct config_option optab[] = {
@@ -1478,24 +1498,38 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
     { "pcre",      MATCH_PCRE },
     { "perl",      MATCH_PCRE },
     { "tag",       MATCH_TAG, 1 },
+    { "decode",    MATCH_DECODE },
     { NULL }
   };
 
-  struct config_option *optptr = from_file ? optab : optab + 2;
+  int disabled = 0;
+#define MATCH_OPTION_MASK(n) (1<<(n))
+#define MATCH_OPTION_DISABLED(n) (disabled & MATCH_OPTION_MASK(n))
 
-  if (from_file)
-    *from_file = NULL;
+  if (param == NULL)
+    disabled |= MATCH_OPTION_MASK (MATCH_FILE)
+      | MATCH_OPTION_MASK (MATCH_FILEWATCH)
+      | MATCH_OPTION_MASK (MATCH_TAG)
+      | MATCH_OPTION_MASK (MATCH_DECODE);
+  else if (param->decode == -1)
+    disabled |= MATCH_OPTION_MASK (MATCH_DECODE);
 
   for (;;)
     {
       int n;
       char const *arg;
 
-      if (gettok_option (optptr, &n, &arg) == CFGPARSER_FAIL)
+      if (gettok_option (optab, &n, &arg) == CFGPARSER_FAIL)
 	return CFGPARSER_FAIL;
 
       if (n == -1)
 	break;
+
+      if (MATCH_OPTION_DISABLED (n))
+	{
+	  conf_error ("unexpected token: %s", config_option_name (optab, n));
+	  return CFGPARSER_FAIL;
+	}
 
       switch (n)
 	{
@@ -1508,13 +1542,13 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 	  break;
 
 	case MATCH_FILE:
-	  *from_file = xstrdup (arg);
-	  *watch = 0;
+	  param->from_file = xstrdup (arg);
+	  param->watch = 0;
 	  break;
 
 	case MATCH_FILEWATCH:
-	  *from_file = xstrdup (arg);
-	  *watch = 1;
+	  param->from_file = xstrdup (arg);
+	  param->watch = 1;
 	  break;
 
 	case MATCH_RE:
@@ -1551,14 +1585,11 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 	  break;
 
 	case MATCH_TAG:
-	  if (tag)
-	    *tag = string_init (arg);
-	  else
-	    {
-	      conf_error ("unexpected token: %s", "-tag");
-	      return CFGPARSER_FAIL;
-	    }
+	  param->tag = string_init (arg);
 	  break;
+
+	case MATCH_DECODE:
+	  param->decode = 1;
 	}
     }
   return CFGPARSER_OK;
@@ -1627,7 +1658,7 @@ parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
   struct token *tok;
   int rc;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL, NULL, NULL))
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL))
     return CFGPARSER_FAIL;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -1810,16 +1841,16 @@ parse_cond_matcher (SERVICE_COND *top_cond,
   int rc;
   struct stringbuf sb;
   SERVICE_COND *cond;
-  char *from_file;
-  int watch;
   STRING *ref;
-  STRING *tag = NULL;
+  struct match_param match_param = MATCH_PARAM_INITIALIZER;
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &from_file,
-			&watch, &tag))
+  if (type == COND_PATH || type == COND_QUERY_PARAM)
+    match_param.decode = 0;
+
+  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &match_param))
     return CFGPARSER_FAIL;
 
-  if (from_file)
+  if (match_param.from_file)
     {
       switch (type)
 	{
@@ -1833,30 +1864,33 @@ parse_cond_matcher (SERVICE_COND *top_cond,
 	  break;
 	}
 
-      if (watch)
+      if (match_param.watch)
 	{
 	  cond = service_cond_append (top_cond, COND_DYN);
-	  cond->tag = tag;
+	  cond->tag = match_param.tag;
+	  cond->decode = match_param.decode;
 	  cond->dyn.boolean.op = BOOL_OR;
 	  cond->dyn.string = ref;
 	  cond->dyn.cond_type = type;
 	  cond->dyn.pat_type = gp_type;
 	  cond->dyn.flags = flags;
-	  if (dyncond_register (cond, from_file, last_token_locus_range ()))
+	  if (dyncond_register (cond, match_param.from_file,
+				last_token_locus_range ()))
 	    return CFGPARSER_FAIL;
 	}
       else
 	{
 	  cond = service_cond_append (top_cond, COND_BOOL);
-	  cond->tag = tag;
+	  cond->tag = match_param.tag;
+	  cond->decode = match_param.decode;
 	  cond->boolean.op = BOOL_OR;
-	  rc = dyncond_read_immediate (cond, from_file,
+	  rc = dyncond_read_immediate (cond, match_param.from_file,
 				       ref, type, gp_type, flags);
 	  string_unref (ref);
 	  if (rc)
 	    return rc;
 	}
-      free (from_file);
+      free (match_param.from_file);
     }
   else
     {
@@ -1867,7 +1901,8 @@ parse_cond_matcher (SERVICE_COND *top_cond,
 
       xstringbuf_init (&sb);
       cond = service_cond_append (top_cond, type);
-      cond->tag = tag;
+      cond->tag = match_param.tag;
+      cond->decode = match_param.decode;
       switch (type)
 	{
 	case COND_HOST:
@@ -3072,11 +3107,34 @@ rewrite_op_alloc (REWRITE_OP_HEAD *head, enum rewrite_type type)
 }
 
 static int
-parse_rewrite_op (REWRITE_OP_HEAD *head, enum rewrite_type type)
+parse_encode_option (int *p)
+{
+  static struct config_option optab[] = {
+    { "encode", 1, 0 },
+    { NULL }
+  };
+  if (*p == -1)
+    {
+      char const *a;
+      if (gettok_option (optab, p, &a) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+    }
+  return CFGPARSER_OK;
+}
+
+static int
+parse_rewrite_op (REWRITE_OP_HEAD *head, enum rewrite_type type, int encode)
 {
   REWRITE_OP *op = rewrite_op_alloc (head, type);
   struct token *tok;
 
+  if (encode)
+    {
+      op->encode = -1;
+      if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      op->encode = op->encode == 1;
+    }
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
 
@@ -3098,25 +3156,25 @@ parse_delete_header (void *call_data, void *section_data)
 static int
 parse_set_header (void *call_data, void *section_data)
 {
-  return parse_rewrite_op (call_data, REWRITE_HDR_SET);
+  return parse_rewrite_op (call_data, REWRITE_HDR_SET, 0);
 }
 
 static int
 parse_set_url (void *call_data, void *section_data)
 {
-  return parse_rewrite_op (call_data, REWRITE_URL_SET);
+  return parse_rewrite_op (call_data, REWRITE_URL_SET, 0);
 }
 
 static int
 parse_set_path (void *call_data, void *section_data)
 {
-  return parse_rewrite_op (call_data, REWRITE_PATH_SET);
+  return parse_rewrite_op (call_data, REWRITE_PATH_SET, 1);
 }
 
 static int
 parse_set_query (void *call_data, void *section_data)
 {
-  return parse_rewrite_op (call_data, REWRITE_QUERY_SET);
+  return parse_rewrite_op (call_data, REWRITE_QUERY_SET, 0);
 }
 
 static int
@@ -3132,9 +3190,18 @@ parse_set_query_param (void *call_data, void *section_data)
   REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_QUERY_PARAM_SET);
   struct token *tok;
 
+  op->encode = -1;
+  if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
   op->v.qp.name = xstrdup (tok->str);
+
+  /* -encode option is allowed both before and after parameter name, */
+  if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+  op->encode = op->encode == 1;
 
   if ((tok = gettkn_any ()) == NULL)
     return CFGPARSER_FAIL;

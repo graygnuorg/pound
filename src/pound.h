@@ -806,6 +806,7 @@ typedef struct _service_cond
 {
   enum service_cond_type type;
   STRING *tag;
+  int decode;
   WATCHER *watcher;
   union
   {
@@ -860,6 +861,7 @@ typedef struct rewrite_op
 {
   SLIST_ENTRY (rewrite_op) next; /* Next op in the list. */
   enum rewrite_type type;        /* Rewrite operation type. */
+  int encode;                    /* Percent-encode value before setting. */
   union
   {
     struct rewrite_rule *rule;   /* type == REWRITE_REWRITE_RULE */

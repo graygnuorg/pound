@@ -4615,8 +4615,10 @@ changed to point to the backend with the correct protocol.
 Set the URL of the incoming request to @var{url}.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetPath "@var{value}"
-Set the path part of the URL to the given string.
+@deffn {ListenerHTTP directive} SetPath [-encode] "@var{value}"
+@kwindex -encode
+Set the path part of the URL to the given string.  If @option{-encode}
+option is given, the value will be percent-encoded prior to setting it.
 @end deffn
 
 @deffn {ListenerHTTP directive} SetQuery "@var{value}"
@@ -4629,10 +4631,14 @@ percent encoding.
 Delete query part of the URL.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetQueryParam "@var{name}" ["@var{value}"]
+@deffn {ListenerHTTP directive} SetQueryParam "@var{name}" [-encode] "@var{value}"
+@deffnx {ListenerHTTP directive} SetQueryParam "@var{name}"
+@kwindex -encode
 Used with two arguments, sets query parameter @var{name} to the
-@var{value}.  Value must be properly encoded if it contains reserved
-characters.
+@var{value}.  If @option{-encode} is given, @var{value} will be
+percent-encoded prior to being assigned to the parameter.  Otherwise,
+it will be assigned verbatim.  The @option{-encode} option is allowed
+before @var{name} argument as well.
 
 Used with one argument, deletes the parameter @var{name}.
 @end deffn
@@ -4925,19 +4931,27 @@ Returns @samp{true}, if the path part of the incoming request matches
 Returns @samp{true}, if the query part of the incoming request matches
 @var{pattern}.  The argument must be properly percent-encoded, if it
 contains whitespace or other non-printable characters.
+
+@var{options} is zero or more conditional options, as discussed in
+@ref{conditional-option}.
 @end deffn
 
 @deffn {Request Conditional} QueryParam "@var{name}" [@var{options}] "@var{pattern}"
 Returns @samp{true}, if query parameter @var{name} is defined and
 its value matches @var{pattern}.
 
-@xref{conditional-option}, for a detailed discussion of @var{options} and
-their effect on matching.
+@kwindex -decode
+@var{options} is zero or more conditional options (@pxref{conditional-option}),
+or @option{-decode}, which instructs the program to percent-decode the
+value prior to comparison.
 @end deffn
 
 @deffn {Request Conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions} and matches the
 resulting value against @var{pattern}.
+
+@xref{conditional-option}, for a detailed discussion of @var{options} and
+their effect on matching.
 @end deffn
 
 @deffn {Request Conditional} TBF @var{key} @var{rate} @var{burst}
@@ -5200,6 +5214,9 @@ matching the given @var{pattern}.
 @deffn {Rewrite response conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions}, and matches the
 resulting value against @var{pattern}.
+
+@xref{conditional-option}, for a detailed discussion of @var{options} and
+their effect on matching.
 @end deffn
 
   Both conditionals treat their @var{pattern} argument as
@@ -5581,19 +5598,27 @@ Returns @samp{true}, if the path part of the incoming request matches
 Returns @samp{true}, if the query part of the incoming request matches
 @var{pattern}.  The argument must be properly percent-encoded, if it
 contains whitespace or other non-printable characters.
+
+@xref{conditional-option}, for a detailed discussion of @var{options} and
+their effect on matching.
 @end deffn
 
 @deffn {Service Conditional} QueryParam "@var{name}" [@var{options}] "@var{pattern}"
 Returns @samp{true}, if the value of the query parameter @var{name}
 matches @var{pattern}.
 
-@xref{conditional-option}, for a detailed discussion of @var{options} and
-their effect on matching.
+@kwindex -decode
+@var{options} is zero or more conditional options (@pxref{conditional-option}),
+or @option{-decode}, which instructs the program to percent-decode the
+value prior to comparison.
 @end deffn
 
 @deffn {Service Conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions}, and matches the
 resulting value against @var{pattern}.
+
+@xref{conditional-option}, for a detailed discussion of @var{options} and
+their effect on matching.
 @end deffn
 
 @deffn {Service Conditional} URL [@var{options}] "@var{pattern}"
@@ -5643,8 +5668,10 @@ applied first, followed by the ones from the service.
 Set the URL of the incoming request to @var{url}.
 @end deffn
 
-@deffn {Service directive} SetPath "@var{value}"
-Set the path part of the URL to the given string.
+@deffn {Service directive} SetPath [-encode] "@var{value}"
+@kwindex -encode
+Set the path part of the URL to the given string.  If @option{-encode}
+option is given, the value will be percent-encoded prior to setting it.
 @end deffn
 
 @deffn {Service directive} SetQuery "@var{value}"
@@ -5657,9 +5684,15 @@ percent encoding.
 Delete query part of the URL.
 @end deffn
 
-@deffn {Service directive} SetQueryParam "@var{name}" ["@var{value}"]
+@deffn {Service directive} SetQueryParam "@var{name}" [-encode] ["@var{value}"]
+@kwindex -encode
 Used with two arguments, sets query parameter @var{name} to the
-@var{value}.  Value must be properly encoded if it contains reserved
+@var{value}.  If @option{-encode} is given, @var{value} will be
+percent-encoded prior to being assigned to the parameter.  Otherwise,
+it will be assigned verbatim.  The @option{-encode} option is allowed
+after @var{name} argument as well.
+
+Used with one argument, deletes the parameter @var{name}.
 characters.
 
 Used with one argument, deletes the parameter @var{name}.
