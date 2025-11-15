@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-14
+Pound -- history of user-visible changes. 2025-11-15
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -8,6 +8,27 @@ on 2022-09-19.  See the README file for details.
 Please send pound bug reports to <gray@gnu.org>
 
 Version 4.18.90 (git)
+
+* Support for Lua
+
+Functions written in Lua can be used to implement complex request matching
+conditions and backends.  Lua sources are loaded using Load statement
+in the Lua global section:
+
+   Lua
+      Load "impl.lua"
+   End
+
+A function returning boolean value can be used as a conditional:
+
+   LuaMatch "myfun" "arg"
+
+Any number of arguments (all of string type) can be provided.
+Arguments undergo usual expansions prior to being passed to the
+function.
+
+A similar statement, LuaBackend, is provided for functions
+implementing new backends.
 
 * Detached conditions
 
@@ -25,21 +46,24 @@ scope of pound configuration file, e.g.:
 Detached conditions can be invoked using the "Eval" statement, which
 is allowed anyplace where the normal conditional is allowed.  Result
 of evaluation is cached and reused in subsequent Eval statements
-referring to the same way.  E.g.:
+referring to the same condition.  E.g.:
 
   Service
      Eval "protected"
      ...
   End
 
-Detached conditions is a convenient way to define conditional
+Detached conditions provide a convenient way to define conditional
 statements with are used repeatedly in multiple Service statements.
-
-* Support for Lua
 
 * New request modification statement: DeleteQuery
 
 Removes query part of the request URL.
+
+* One-argument form of SetQueryParam
+
+When used with one argument (name of a query parameter), SetQueryParam
+causes removal of that query parameter.
 
 * Percent encoding and decoding
 
@@ -52,11 +76,6 @@ percent-decoding prior to comparison.  E.g.:
 Similarly, SetPath and SetQueryParam statements accept new option
 -encode.  When given this option, the value will be percent-encoded
 prior to setting it.
-
-* One-argument form of SetQueryParam
-
-When used with one argument (name of a query parameter), SetQueryParam
-causes removal of that query parameter.
 
 Version 4.18, 2025-10-29
 
