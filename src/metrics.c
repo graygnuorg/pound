@@ -331,7 +331,7 @@ static struct metric_family queue_len_metric_families[] = {
   { "pound_queue_len",
     "counter",
     NULL,
-    "Number of requests waiting in queue.",
+    "Number of connections waiting in queue.",
     gen_number },
   { NULL }
 };
