@@ -38,6 +38,10 @@ pound_workers@{type="min"@} 5
 @end example
 @end deftypevr
 
+@deftypevr {Metric family} counter pound_queue_len
+Number of connections waiting in the input queue.
+@end deftypevr
+
 @deftypevr {Metric family} stateset pound_listener_enabled
 State of a listener: enabled/disabled.  Indexed by the listener
 ordinal number and, if available, its name.

@@ -49,6 +49,7 @@ Workers:
   Active:  {{ .active }}
 Idle timeout: {{ .timeout }}
 {{end}}{{ /* with */ -}}
+Queue: {{ .queue_len }}
 {{end}}{{ /* define */ }}
 
 {{define "milliseconds" -}}

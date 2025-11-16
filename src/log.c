@@ -861,7 +861,7 @@ static struct http_log_spec http_log_spec[] = {
        than a 0 when no bytes are sent. */
     { 'b', i_response_size_clf },
     /* The time taken to serve the request, in microseconds. */
-    { 'D', i_process_time_ms },
+    { 'D', i_process_time_us },
     /* Remote hostname - same as %a */
     { 'h', i_remote_ip },
     /* The request protocol. */

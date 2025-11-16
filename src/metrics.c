@@ -252,7 +252,7 @@ static int gen_backend_request_stddev (EXPOSITION *exp, struct metric *metric,
 				 METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_workers (EXPOSITION *exp, struct metric *metric,
 			METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_uptime (EXPOSITION *exp, struct metric *metric,
+static int gen_number (EXPOSITION *exp, struct metric *metric,
 		       METRIC_LABELS *pfx, struct json_value *obj);
 
 static struct metric_family listener_metric_families[] = {
@@ -323,10 +323,18 @@ static struct metric_family uptime_metric_families[] = {
     "counter",
     NULL,
     "Pound uptime, milliseconds since startup.",
-    gen_uptime },
+    gen_number },
   { NULL }
 };
 
+static struct metric_family queue_len_metric_families[] = {
+  { "pound_queue_len",
+    "counter",
+    NULL,
+    "Number of requests waiting in queue.",
+    gen_number },
+  { NULL }
+};
 
 /*
  * Metric family definitions describe how to iterate over the root
@@ -791,7 +799,7 @@ gen_workers (EXPOSITION *exp, struct metric *metric,
 }
 
 static int
-gen_uptime (EXPOSITION *exp, struct metric *metric,
+gen_number (EXPOSITION *exp, struct metric *metric,
 	    METRIC_LABELS *pfx, struct json_value *val)
 {
   struct metric_sample *samp;
@@ -811,7 +819,9 @@ exposition_fill_core (EXPOSITION *exp, struct json_value *obj)
       json_object_get_type (core, "uptime", json_number, &val) ||
       exposition_apply_family (exp, NULL, uptime_metric_families, val) ||
       json_object_get_type (core, "workers", json_object, &val) ||
-      exposition_apply_family (exp, NULL, workers_metric_families, val))
+      exposition_apply_family (exp, NULL, workers_metric_families, val) ||
+      json_object_get_type (core, "queue_len", json_number, &val) ||
+      exposition_apply_family (exp, NULL, queue_len_metric_families, val))
     return -1;
   return 0;
 }
