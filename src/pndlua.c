@@ -204,9 +204,8 @@ pndlua_call (POUND_HTTP *phttp, struct pndlua_closure const *clos, char **argv,
   else if (flags & PLC_RETBOOL)
     {
       res = lua_toboolean (state, -1);
+      lua_pop (state, 1);
     }
-
-  lua_pop (state, 1);
 
   pndlua_unset_http (state);
   pndlua_unlock (clos);

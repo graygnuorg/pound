@@ -3562,6 +3562,8 @@ although it is customary for them to be at its start.
 * SSL Settings::
 * Regexp Settings::
 * ACL definition::
+* Condition::
+* Lua Settings::
 @end menu
 
 @node Runtime directives

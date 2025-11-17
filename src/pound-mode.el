@@ -175,6 +175,7 @@
     "LogLevel"
     "LogSuppress"
     "LogTag"
+    "LuaModify"
     "LuaBackend"
     "MaxRequest"
     "MaxURI"
