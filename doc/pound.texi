@@ -1641,8 +1641,8 @@ built-in default text is used.  @xref{Error definitions}.
 using plain HTTP listener as an example.  Now we will discuss how to
 use HTTPS both for listeners and backends.
 
- To accept HTTPS requests you need to declare @code{ListenerHTTPS}
-listener.  It is similar to plain @code{ListenerHTTP} described above,
+ To accept HTTPS requests you need to declare @code{ListenHTTPS}
+listener.  It is similar to plain @code{ListenHTTP} described above,
 except that it requires a @dfn{certificate} to be declared.  For
 example:
 
@@ -4590,7 +4590,7 @@ the request has passed through.  Default value is
 IP address for logging.  @xref{%a}, for details.
 @end deffn
 
-@deffn {ListenerHTTP directive} TrustedIP
+@deffn {ListenHTTP directive} TrustedIP
 Defines a list of @dfn{trusted proxy}
 IP addresses, which is used to determine the originator IP.
 @xref{%a}, for details.
@@ -4606,33 +4606,48 @@ appearing in both sections, the directive from @code{ListenHTTP}
 directives from the @code{Service} section.  Directives from the same
 section are applied in order of their appearance.
 
-@deffn {ListenerHTTP directive} RewriteDestination @var{bool}
+@deffn {ListenHTTP Statement} LuaModify "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with supplied arguments.  The function
+is supposed to modify the request.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request
+modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{Lua}, for a detailed discussion.
+@end deffn
+
+@deffn {ListenHTTP directive} RewriteDestination @var{bool}
 If set to @samp{true}, the @code{Destination:} request header will be
 changed to point to the backend with the correct protocol.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetURL "@var{url}"
+@deffn {ListenHTTP directive} SetURL "@var{url}"
 Set the URL of the incoming request to @var{url}.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetPath [-encode] "@var{value}"
+@deffn {ListenHTTP directive} SetPath [-encode] "@var{value}"
 @kwindex -encode
 Set the path part of the URL to the given string.  If @option{-encode}
 option is given, the value will be percent-encoded prior to setting it.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetQuery "@var{value}"
+@deffn {ListenHTTP directive} SetQuery "@var{value}"
 Set the query part of the URL to the given string.  @var{Value} must be
 a valid query with the special characters properly encoded using
 percent encoding.
 @end deffn
 
-@deffn {ListenerHTTP directive} DeleteQuery
+@deffn {ListenHTTP directive} DeleteQuery
 Delete query part of the URL.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetQueryParam "@var{name}" [-encode] "@var{value}"
-@deffnx {ListenerHTTP directive} SetQueryParam "@var{name}"
+@deffn {ListenHTTP directive} SetQueryParam "@var{name}" [-encode] "@var{value}"
+@deffnx {ListenHTTP directive} SetQueryParam "@var{name}"
 @kwindex -encode
 Used with two arguments, sets query parameter @var{name} to the
 @var{value}.  If @option{-encode} is given, @var{value} will be
@@ -4643,9 +4658,9 @@ before @var{name} argument as well.
 Used with one argument, deletes the parameter @var{name}.
 @end deffn
 
-@deffn {ListenerHTTP directive} SetHeader "@var{name}: @var{value}"
-@deffnx {ListenerHTTP directive} HeaderAdd "@var{name}: @var{value}"
-@deffnx {ListenerHTTP directive} AddHeader "@var{name}: @var{value}"
+@deffn {ListenHTTP directive} SetHeader "@var{name}: @var{value}"
+@deffnx {ListenHTTP directive} HeaderAdd "@var{name}: @var{value}"
+@deffnx {ListenHTTP directive} AddHeader "@var{name}: @var{value}"
 Sets the HTTP header.  If the header @var{name} already exists, it
 will be overwritten.  Otherwise, new header will be added to the end
 of the header list.
@@ -4655,7 +4670,7 @@ backward compatibility with earlier @command{pound} versions.  You are
 advised against using them.
 @end deffn
 
-@deffn {ListenerHTTP directive} DeleteHeader [@var{options}] "@var{pattern}"
+@deffn {ListenHTTP directive} DeleteHeader [@var{options}] "@var{pattern}"
 Remove from the request all headers matching @var{pattern}.  The
 @code{HeaderRemove} and @code{HeadRemove} forms are retained for
 backward compatibility with earlier @command{pound} versions.  You are
@@ -4725,8 +4740,8 @@ The following options are mutually exclusive: @code{-beg},
 last one takes effect.
 @end deffn
 
-@deffn {ListenerHTTP directive} HeaderRemove "@var{pattern}"
-@deffnx {ListenerHTTP directive} HeadRemove "@var{pattern}"
+@deffn {ListenHTTP directive} HeaderRemove "@var{pattern}"
+@deffnx {ListenHTTP directive} HeadRemove "@var{pattern}"
 These are obsolete keywords, equivalent to
 
 @example
@@ -4920,6 +4935,21 @@ their effect on matching.
 
 This statement is provided to facilitate handling of @dfn{virtual
 hosts}.  @xref{Service selection}, for details.
+@end deffn
+
+@deffn {Request Conditional} LuaMatch "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with the supplied arguments.  Use its
+return value (which must be boolean) as the result of the test.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request
+modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{LuaMatch}, for a detailed discussion.
 @end deffn
 
 @deffn {Request Conditional} Path [@var{options}] "@var{pattern}"
@@ -5146,7 +5176,7 @@ prefixed with @code{Not}, which reverts its meaning.
 @node Response Modification
 @subsection Response Modification
 
-@deffn {ListenerHTTP directive} RewriteLocation @var{n}
+@deffn {ListenHTTP directive} RewriteLocation @var{n}
 This statement controls whether @code{Location:} and
 @code{Content-location:} headers in HTTP responses are modified before
 sending them back to the client.
@@ -5211,6 +5241,20 @@ Returns @samp{true}, if the response contains at least one header
 matching the given @var{pattern}.
 @end deffn
 
+@deffn {Rewrite response conditional} LuaMatch "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with the supplied arguments.  Use its
+return value (which must be boolean) as the result of the test.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{LuaMatch}, for a detailed discussion.
+@end deffn
+
 @deffn {Rewrite response conditional} StringMatch "@var{string}" [@var{options}] "@var{pattern}"
 Expands @var{string} as described in @ref{String Expansions}, and matches the
 resulting value against @var{pattern}.
@@ -5230,6 +5274,21 @@ Remove matching headers from the response.  By
 default, @var{pattern} is treated as extended POSIX regular
 expression.  Use @var{options} to alter this behavior.
 @xref{deleteheader-option}, for a list of available options.
+@end deffn
+
+@deffn {Response modification} LuaModify "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with supplied arguments.  The function
+is supposed to modify the response.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request
+modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{Lua}, for a detailed discussion.
 @end deffn
 
 @deffn {Response modification} SetHeader "@var{name}: @var{value}"
@@ -5259,7 +5318,7 @@ the listener where that service is located.  To do so use the
 following statement:
 @end enumerate
 
-@deffn {ListenerHTTP directive} RewriteErrors @var{bool}
+@deffn {ListenHTTP directive} RewriteErrors @var{bool}
 Enables or disables error response rewriting for that listener.
 
 The same statement is available for use within a service (see below).
@@ -5586,7 +5645,11 @@ The @var{func} can be either an unqualified function name, or function
 name with module qualifier (@code{module.func}).
 
 Each @var{arg} is subject to to backreference expansion and
-request accessor interpretation, as discussed in @ref{Request modifications}.
+request accessor interpretation, as discussed in @ref{Request
+modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{LuaMatch}, for a detailed discussion.
 @end deffn
 
 @deffn {Service Conditional} Path [@var{options}] "@var{pattern}"
@@ -5722,6 +5785,21 @@ By default, @var{pattern} is treated as extended POSIX regular
 expression.  The @var{options} argument can be used to alter this.  It
 consists of zero or more option flags, described in
 @ref{deleteheader-option}.
+@end deffn
+
+@deffn {Service Statement} LuaModify "@var{func}" ["@var{arg}"...]
+Run Lua function @var{func} with supplied arguments.  The function
+is supposed to modify the request.
+
+The @var{func} can be either an unqualified function name, or function
+name with module qualifier (@code{module.func}).
+
+Each @var{arg} is subject to to backreference expansion and
+request accessor interpretation, as discussed in @ref{Request
+modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{Lua}, for a detailed discussion.
 @end deffn
 
 @deffn {Service statement} Rewrite [ request | response ] ... End
@@ -6070,7 +6148,7 @@ error page if no service matching the incoming request was found.
 @xref{Error responses}, for a discussion.
 @end deffn
 
-@deffn {Service Conditional} LuaBackend "@var{func}" ["@var{arg}"...]
+@deffn {Service directive} LuaBackend "@var{func}" ["@var{arg}"...]
 Run Lua function @var{func} with the supplied arguments.  The function
 should set the response code (@FIXME-pxref{http.resp.code}) and fill
 the response body (@FIXME-pxref{http.resp.body}) prior to returning.
@@ -6082,6 +6160,9 @@ name with module qualifier (@code{module.func}).
 
 Each @var{arg} is subject to to backreference expansion and
 request accessor interpretation, as discussed in @ref{Request modifications}.
+
+This statement is available only if @command{pound} was built with Lua
+support.  @xref{LuaBackend}, for a detailed discussion.
 @end deffn
 
 @deffn {Service directive} Redirect [@var{code}] "@var{url}"
