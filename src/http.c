@@ -1058,17 +1058,50 @@ expand_url (char const *url, POUND_HTTP *phttp, int has_uri)
     stringbuf_free (&sb);
   return p;
 }
+
+typedef int (*PNDLUA_FUN) (POUND_HTTP *phttp,
+			   struct pndlua_closure const *clos,
+			   char **argv, void *data);
 
-static int rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-			  struct http_request *request, POUND_HTTP *phttp);
+static int
+pndlua_apply (PNDLUA_FUN plfun, POUND_HTTP *phttp, struct http_request *req,
+	      struct pndlua_closure const *clos, void *data)
+{
+  int i;
+  char **argv;
+  int res = -1;
+
+  argv = calloc (clos->argc, sizeof (argv[0]));
+  if (!argv)
+    {
+      lognomem ();
+      return -1;
+    }
+
+  for (i = 0; i < clos->argc; i++)
+    {
+      argv[i] = expand_string (clos->argv[i], phttp, req, "lua");
+      if (argv[i] == 0)
+	goto err;
+    }
+
+  res = plfun (phttp, clos, argv, data);
+
+ err:
+  for (i = 0; i < clos->argc && argv[i]; i++)
+    free (argv[i]);
+  free (argv);
+
+  return res;
+}
+
+static int rewrite_apply (POUND_HTTP *phttp, struct http_request *request,
+			  int what);
 
 static int
 control_response (POUND_HTTP *phttp)
 {
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp)
-      || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-			phttp))
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
   return control_response_basic (phttp);
 }
@@ -1118,10 +1151,7 @@ redirect_response (POUND_HTTP *phttp)
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp) ||
-      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp))
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   xurl = expand_url (redirect->url, phttp, redirect->has_uri);
@@ -1284,10 +1314,7 @@ acme_response (POUND_HTTP *phttp)
   char *file_name;
   int rc = HTTP_STATUS_OK;
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp) ||
-      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp))
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   file_name = expand_url ("$1", phttp, 1);
@@ -1397,8 +1424,7 @@ cb_hdr_rewrite (HTTP_HEADER_LIST *hlist, void *data)
 
   http_request_init (&req);
   req.headers = *hlist;
-  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
-      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
+  if (rewrite_apply (phttp, &req, REWRITE_RESPONSE))
     rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
   *hlist = req.headers;
   DLIST_INIT (&req.headers);
@@ -1433,18 +1459,14 @@ file_response (POUND_HTTP *phttp)
   int rc, fd;
   struct stat st;
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp) ||
-      rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp))
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   http_request_init (&req);
   if (http_header_list_parse (&req.headers, file_headers, H_REPLACE, NULL))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE], &req, phttp) ||
-      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE], &req, phttp))
+  if (rewrite_apply (phttp, &req, REWRITE_RESPONSE))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   if (http_request_get_path (&phttp->request, &file_name))
@@ -1528,32 +1550,9 @@ http_response_ok (POUND_HTTP *phttp)
 static int
 lua_response (POUND_HTTP *phttp)
 {
-  struct pndlua_closure *pclos = &phttp->backend->v.lua;
-  int i;
-  char **argv;
-  int res = -1;
-
-  argv = calloc (pclos->argc, sizeof (argv[0]));
-  if (!argv)
-    {
-      lognomem ();
-      return -1;
-    }
-
-  for (i = 0; i < pclos->argc; i++)
-    {
-      argv[i] = expand_string (pclos->argv[i], phttp, &phttp->request, "lua");
-      if (argv[i] == 0)
-	goto err;
-    }
-
-  res = pndlua_backend (phttp, pclos, argv);
-
- err:
-  for (i = 0; i < pclos->argc && argv[i]; i++)
-    free (argv[i]);
-  free (argv);
-
+  int res = pndlua_apply (pndlua_backend, phttp,
+			  &phttp->request,
+			  &phttp->backend->v.lua, NULL);
   if (res != -1)
     {
       /* Verify response. */
@@ -2934,7 +2933,7 @@ http_request_get_url (struct http_request *req, char const **retval)
   return 0;
 }
 
-static int
+int
 http_request_set_url (struct http_request *req, char const *url)
 {
   char *p;
@@ -2959,7 +2958,7 @@ http_request_get_path (struct http_request *req, char const **retval)
   return 0;
 }
 
-static int
+int
 http_request_set_path (struct http_request *req, char const *path)
 {
   char *val;
@@ -3117,7 +3116,7 @@ http_request_get_query_param_value (struct http_request *req, char const *name,
   return rc;
 }
 
-static int
+int
 http_request_set_query (struct http_request *req, char const *rawquery)
 {
   char *p;
@@ -3137,7 +3136,7 @@ http_request_set_query (struct http_request *req, char const *rawquery)
   return http_request_rebuild_url (req);
 }
 
-static int
+int
 http_request_set_query_param (struct http_request *req, char const *name,
 			      char const *raw_value)
 {
@@ -3175,10 +3174,16 @@ http_request_set_query_param (struct http_request *req, char const *name,
       break;
 
     case 0:
-      if (raw_value == 0)
+      if (raw_value == NULL)
 	{
 	  DLIST_REMOVE (&req->query_head, qp, link);
 	  query_param_free (qp);
+	  if (DLIST_EMPTY (&req->query_head))
+	    {
+	      free (req->query);
+	      req->query = NULL;
+	      return http_request_rebuild_url (req);
+	    }
 	}
       else
 	{
@@ -3660,37 +3665,6 @@ match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
   return 0;
 }
 
-static int
-match_lua (SERVICE_COND *cond, POUND_HTTP *phttp, struct http_request *req)
-{
-  int i;
-  char **argv;
-  int res = -1;
-
-  argv = calloc (cond->clua.argc, sizeof (argv[0]));
-  if (!argv)
-    {
-      lognomem ();
-      return -1;
-    }
-
-  for (i = 0; i < cond->clua.argc; i++)
-    {
-      argv[i] = expand_string (cond->clua.argv[i], phttp, req, "lua");
-      if (argv[i] == 0)
-	goto err;
-    }
-
-  res = pndlua_match (phttp, &cond->clua, argv);
-
- err:
-  for (i = 0; i < cond->clua.argc && argv[i]; i++)
-    free (argv[i]);
-  free (argv);
-
-  return res;
-}
-
 /*
  * Match request (or response) REQ obtained from PHTTP against condition COND.
  * Return value:
@@ -3881,7 +3855,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_LUA:
-      res = match_lua (cond, phttp, req);
+      res = pndlua_apply (pndlua_match, phttp, req, &cond->clua, NULL);
       break;
 
     case COND_TBF:
@@ -4131,11 +4105,11 @@ add_ssl_headers (POUND_HTTP *phttp)
 
 static int rewrite_rule_check (REWRITE_RULE *rule,
 			       struct http_request *request,
-			       POUND_HTTP *phttp);
+			       POUND_HTTP *phttp, int what);
 
 static int
 rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
-		  POUND_HTTP *phttp)
+		  POUND_HTTP *phttp, int what)
 {
   int res = 0;
   REWRITE_OP *op;
@@ -4157,7 +4131,7 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
       switch (op->type)
 	{
 	case REWRITE_REWRITE_RULE:
-	  res = rewrite_rule_check (op->v.rule, request, phttp);
+	  res = rewrite_rule_check (op->v.rule, request, phttp, what);
 	  break;
 
 	case REWRITE_HDR_DEL:
@@ -4192,6 +4166,11 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 	  res = http_request_set_query (request, NULL);
 	  break;
 
+	case REWRITE_LUA:
+	  res = pndlua_apply (pndlua_modify, phttp, request,
+			      &op->v.lua, &what);
+	  break;
+
 	default:
 	  if ((s = expand_string_encode (op->v.str, op->encode,
 					 rwtab[op->type].xenc,
@@ -4214,7 +4193,7 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 
 static int
 rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
-		    POUND_HTTP *phttp)
+		    POUND_HTTP *phttp, int what)
 {
   int res = 0;
 
@@ -4222,7 +4201,7 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
     {
       if (match_cond (&rule->cond, phttp, request) == 1)
 	{
-	  res = rewrite_op_apply (&rule->ophead, request, phttp);
+	  res = rewrite_op_apply (&rule->ophead, request, phttp, what);
 	  break;
 	}
     }
@@ -4231,18 +4210,37 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 }
 
 static int
-rewrite_apply (REWRITE_RULE_HEAD *rewrite_rules,
-	       struct http_request *request, POUND_HTTP *phttp)
+rewrite_apply_rules (POUND_HTTP *phttp, int what,
+		     REWRITE_RULE_HEAD *rewrite_rules,
+		     struct http_request *request)
 {
   int res = 0;
   REWRITE_RULE *rule;
 
   SLIST_FOREACH (rule, rewrite_rules, next)
     {
-      if ((res = rewrite_rule_check (rule, request, phttp)) != 0)
+      if ((res = rewrite_rule_check (rule, request, phttp, what)) != 0)
 	break;
     }
   return res;
+}
+
+static int
+rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what)
+{
+  REWRITE_RULE_HEAD *rwhead[2] = {
+    &phttp->lstn->rewrite[what],
+    &phttp->svc->rewrite[what]
+  };
+  if (what == REWRITE_RESPONSE)
+    {
+      REWRITE_RULE_HEAD *t = rwhead[0];
+      rwhead[0] = rwhead[1];
+      rwhead[1] = t;
+    }
+
+  return rewrite_apply_rules (phttp, what, rwhead[0], request) ||
+    rewrite_apply_rules (phttp, what, rwhead[1], request);
 }
 
 /*
@@ -4442,12 +4440,7 @@ backend_response (POUND_HTTP *phttp)
 
       if (resp_mode == RESP_OK)
 	{
-	  if (rewrite_apply (&phttp->svc->rewrite[REWRITE_RESPONSE],
-			     &phttp->response,
-			     phttp) ||
-	      rewrite_apply (&phttp->lstn->rewrite[REWRITE_RESPONSE],
-			     &phttp->response,
-			     phttp))
+	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
 	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
@@ -4966,10 +4959,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
-  if (rewrite_apply (&phttp->lstn->rewrite[REWRITE_REQUEST], &phttp->request,
-		     phttp)
-      || rewrite_apply (&phttp->svc->rewrite[REWRITE_REQUEST], &phttp->request,
-			phttp))
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*

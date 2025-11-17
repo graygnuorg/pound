@@ -95,6 +95,8 @@ m4_include([lua-load.at])
 m4_include([lua-path.at])
 m4_include([lua-match.at])
 m4_include([lua-http.at])
+m4_include([lua-modreq.at])
+m4_include([lua-modresp.at])
 m4_include([lua-be.at])
 
 AT_BANNER([Dynamically updated conditions])

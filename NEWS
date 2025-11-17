@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-15
+Pound -- history of user-visible changes. 2025-11-17
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -27,8 +27,13 @@ Any number of arguments (all of string type) can be provided.
 Arguments undergo usual expansions prior to being passed to the
 function.
 
-A similar statement, LuaBackend, is provided for functions
-implementing new backends.
+Two more similar statements are added:
+
+   LuaModify   - Applies a Lua function to modify the request (or
+                 response).  It can be used in ListenHTTP,
+                 ListenHTTPS, Service, and Rewrite statements.
+
+   LuaBackend  - Calls a Lua function that implements a backend.
 
 * Detached conditions
 

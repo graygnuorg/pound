@@ -2993,6 +2993,7 @@ static int parse_set_query (void *call_data, void *section_data);
 static int parse_delete_query (void *call_data, void *section_data);
 static int parse_set_query_param (void *call_data, void *section_data);
 static int parse_sub_rewrite (void *call_data, void *section_data);
+static int parse_lua_modify (void *call_data, void *section_data);
 
 static CFGPARSER_TABLE rewrite_ops[] = {
   {
@@ -3021,6 +3022,10 @@ static CFGPARSER_TABLE rewrite_ops[] = {
   {
     .name = "SetQueryParam",
     .parser = parse_set_query_param
+  },
+  {
+    .name = "LuaModify",
+    .parser = parse_lua_modify
   },
   { NULL }
 };
@@ -3223,6 +3228,13 @@ parse_set_query_param (void *call_data, void *section_data)
 
 }
 
+static int
+parse_lua_modify (void *call_data, void *section_data)
+{
+  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_LUA);
+  return pndlua_parse_closure (&op->v.lua);
+}
+
 static REWRITE_RULE *
 rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
 {
@@ -3264,6 +3276,10 @@ static CFGPARSER_TABLE match_response_conditions[] = {
     .parser = parse_cond_string_matcher
   },
   {
+    .name = "LuaMatch",
+    .parser = parse_lua_match
+  },
+  {
     .name = "Match",
     .parser = parse_match
   },
@@ -3282,6 +3298,10 @@ static CFGPARSER_TABLE rewrite_response_ops[] = {
   {
     .name = "DeleteHeader",
     .parser = parse_delete_header
+  },
+  {
+    .name = "LuaModify",
+    .parser = parse_lua_modify
   },
   { NULL },
 };
@@ -3435,6 +3455,7 @@ SETFN_SVC_DECL (delete_query)
 SETFN_SVC_DECL (set_query_param)
 SETFN_SVC_DECL (set_header)
 SETFN_SVC_DECL (delete_header)
+SETFN_SVC_DECL (lua_modify)
 
 /*
  * Support for backward-compatible HeaderRemove and HeadRemove directives.
@@ -3557,6 +3578,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "DeleteHeader",
     .parser = SETFN_SVC_NAME (delete_header),
+    .off = offsetof (SERVICE, rewrite)
+  },
+  {
+    .name = "LuaModify",
+    .parser = SETFN_SVC_NAME (lua_modify),
     .off = offsetof (SERVICE, rewrite)
   },
   {
@@ -4198,7 +4224,11 @@ static CFGPARSER_TABLE http_common[] = {
     .parser = SETFN_SVC_NAME (set_query_param),
     .off = offsetof (LISTENER, rewrite)
   },
-
+  {
+    .name = "LuaModify",
+    .parser = SETFN_SVC_NAME (lua_modify),
+    .off = offsetof (LISTENER, rewrite)
+  },
   {
     .name = "HeaderOption",
     .parser = parse_header_options,

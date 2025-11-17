@@ -454,6 +454,11 @@ char const *http_request_orig_line (struct http_request *req);
 int http_request_get_basic_auth (struct http_request *req,
 				 char **u_name, char **u_pass);
 
+int http_request_set_path (struct http_request *req, char const *path);
+int http_request_set_url (struct http_request *req, char const *url);
+int http_request_set_query (struct http_request *req, char const *rawquery);
+int http_request_set_query_param (struct http_request *req, char const *name,
+				  char const *raw_value);
 
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
@@ -854,7 +859,8 @@ enum rewrite_type
     REWRITE_PATH_SET,
     REWRITE_QUERY_SET,
     REWRITE_QUERY_PARAM_SET,
-    REWRITE_QUERY_DELETE
+    REWRITE_QUERY_DELETE,
+    REWRITE_LUA
   };
 
 typedef SLIST_HEAD(,rewrite_op) REWRITE_OP_HEAD;
@@ -875,6 +881,7 @@ typedef struct rewrite_op
       char *value;
     } qp;                        /* type == REWRITE_QUERY_PARAM_SET */
     char *str;                   /* type == REWRITE_*_SET */
+    struct pndlua_closure lua;   /* type == REWRITE_LUA */
   } v;
 } REWRITE_OP;
 
@@ -1411,9 +1418,12 @@ static inline void phttp_lua_stash_reset (POUND_HTTP *p)
   p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
 }
 int pndlua_init (void);
-int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv);
-int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond,
-		    char **argv);
+int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+		  char **argv, void *data);
+int pndlua_modify (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+		   char **argv, void *data);
+int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+		    char **argv, void *data);
 int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_closure (struct pndlua_closure *cond);
 #else
@@ -1436,12 +1446,20 @@ pndlua_parse_closure (struct pndlua_closure *cond)
   return cfg_no_lua ();
 }
 static inline int
-pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
+pndlua_match (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+	      char **argv, void *data)
 {
   return -1;
 }
 static inline int
-pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
+pndlua_modify (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+	       char **argv, void *data)
+{
+  return -1;
+}
+static inline int
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *cond,
+		char **argv, void *data)
 {
   return -1;
 }

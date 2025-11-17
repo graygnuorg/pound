@@ -149,7 +149,7 @@ static void pndlua_set_http (lua_State *L, POUND_HTTP *http, int modresp);
 static void pndlua_unset_http (lua_State *L);
 
 static lua_State *
-pndlua_lock (struct pndlua_closure *c)
+pndlua_lock (struct pndlua_closure const *c)
 {
   lua_State *L;
 
@@ -167,7 +167,7 @@ pndlua_lock (struct pndlua_closure *c)
 }
 
 static void
-pndlua_unlock (struct pndlua_closure *c)
+pndlua_unlock (struct pndlua_closure const *c)
 {
   if (c->ctx == PNDLUA_CTX_GLOBAL)
     pthread_mutex_unlock (&pndlua_global_mutex);
@@ -178,7 +178,7 @@ pndlua_unlock (struct pndlua_closure *c)
 #define PLC_MODRESP 0x2
 
 int
-pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
+pndlua_call (POUND_HTTP *phttp, struct pndlua_closure const *clos, char **argv,
 	     int flags)
 {
   int i;
@@ -215,13 +215,24 @@ pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
 }
 
 int
-pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv)
+pndlua_match (POUND_HTTP *phttp, struct pndlua_closure const *clos,
+	      char **argv, void *data)
 {
   return pndlua_call (phttp, clos, argv, PLC_RETBOOL);
 }
 
 int
-pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv)
+pndlua_modify (POUND_HTTP *phttp, struct pndlua_closure const *clos,
+	       char **argv, void *data)
+{
+  int target = *(int*)data;
+  return pndlua_call (phttp, clos, argv,
+		      target == REWRITE_RESPONSE ? PLC_MODRESP : 0);
+}
+
+int
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *clos,
+		char **argv, void *data)
 {
   return pndlua_call (phttp, clos, argv, PLC_MODRESP);
 }
@@ -354,6 +365,12 @@ ro_newindex (lua_State *L)
   return 0;
 }
 
+static int
+pndlua_memerr (lua_State *L)
+{
+  return luaL_error (L, "out of memory");
+}
+
 /* HTTP accessors.
  *
  * http.req   - returns HTTP request
@@ -427,7 +444,7 @@ req_headers_index (lua_State *L)
   else
     {
       if ((val = http_header_get_value (hdr)) == NULL)
-	luaL_error (L, "out of memory");
+	pndlua_memerr (L);
       lua_pushstring (L, val);
       if ((hdr = http_header_list_next (hdr)) != NULL)
 	{
@@ -441,7 +458,7 @@ req_headers_index (lua_State *L)
 	  do
 	    {
 	      if ((val = http_header_get_value (hdr)) == NULL)
-		luaL_error (L, "out of memory");
+		pndlua_memerr (L);
 	      lua_pushstring (L, val);
 	      lua_rawseti (L, -2, n);
 	      n++;
@@ -462,7 +479,7 @@ pndlua_header_list_append (lua_State *L, HTTP_HEADER_LIST *head, int idx, int mo
   switch (http_header_list_append (head, lua_tostring (L, idx), mode))
     {
     case -1:
-      luaL_error (L, "out of memory");
+      pndlua_memerr (L);
       break;
     case 1:
       luaL_error (L, "internal error");
@@ -512,6 +529,7 @@ headers_set (lua_State *L, HTTP_HEADER_LIST *head)
       pndlua_header_list_append (L, head, -1, H_REPLACE);
       lua_pop (L, 1);
     }
+  
   return 0;
 }
 
@@ -540,11 +558,9 @@ req_headers_len (lua_State *L)
  * Argument n gives the stack index at which the userdata with struct
  * req_ud is located.
  *
- * If rw is 1, the new object will be read-write, otherwise it will be
- * read-only.
  */
 static int
-req_new_headers (lua_State *L, int n, int rw)
+req_new_headers (lua_State *L, int n)
 {
   /* Create the object */
   lua_newtable (L);
@@ -564,7 +580,7 @@ req_new_headers (lua_State *L, int n, int rw)
   lua_pushcfunction (L, req_headers_index);
   lua_setfield (L, -2, "__index");
 
-  lua_pushcfunction (L, rw ? req_headers_newindex : ro_newindex);
+  lua_pushcfunction (L, req_headers_newindex);
   lua_setfield (L, -2, "__newindex");
 
   lua_pushcfunction (L, req_headers_len);
@@ -579,7 +595,7 @@ req_new_headers (lua_State *L, int n, int rw)
 static int
 req_headers (lua_State *L)
 {
-  return req_new_headers (L, 1, 0);
+  return req_new_headers (L, 1);
 }
 
 static int
@@ -640,7 +656,7 @@ req_path (lua_State *L)
   struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_path (ud->req, &v))
-    luaL_error (L, "out of memory");
+    pndlua_memerr (L);
   lua_pushstring (L, v);
   return 1;
 }
@@ -651,7 +667,7 @@ req_query_str (lua_State *L)
   struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
   if (http_request_get_query (ud->req, &v))
-    luaL_error (L, "out of memory");
+    pndlua_memerr (L);
   lua_pushstring (L, v ? v : "");
   return 1;
 }
@@ -673,7 +689,7 @@ req_query_index (lua_State *L)
   switch (http_request_get_query_param_value (ud->req, field, &val))
     {
     case RETRIEVE_ERROR:
-      luaL_error (L, "out of memory");
+      pndlua_memerr (L);
       break;
     case RETRIEVE_NOT_FOUND:
       lua_pushnil (L);
@@ -682,6 +698,27 @@ req_query_index (lua_State *L)
       lua_pushstring (L, val);
     }
   return 1;
+}
+
+static int
+req_query_newindex (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  char const *field = lua_tostring (L, 2);
+  if (lua_isnil (L, 3))
+    {
+      http_request_set_query_param (ud->req, field, NULL);
+    }
+  else if (lua_istable (L, 3))
+    {
+      luaL_argerror (L, 3, NULL);
+    }
+  else
+    {
+      http_request_set_query_param (ud->req, field, luaL_tolstring (L, 3, NULL));
+      lua_pop (L, 1);
+    }
+  return 0;
 }
 
 static int
@@ -702,6 +739,9 @@ req_query (lua_State *L)
   lua_pushcfunction (L, req_query_index);
   lua_setfield (L, -2, "__index");
 
+  lua_pushcfunction (L, req_query_newindex);
+  lua_setfield (L, -2, "__newindex");
+  
   lua_pushcfunction (L, req_query_len);
   lua_setfield (L, -2, "__len");
 
@@ -734,6 +774,85 @@ pndlua_req_index (lua_State *L)
   return fun (L);
 }
 
+static int
+set_headers (lua_State *L, HTTP_HEADER_LIST *head)
+{
+  http_header_list_free (head);
+  if (lua_istable (L, 3))
+    {
+      lua_pushnil (L);
+      while (lua_next (L, 3) != 0)
+	{
+	  lua_pushvalue (L, -2);
+	  lua_pushstring (L, ": ");
+	  lua_rotate (L, -3, -1);
+	  lua_concat (L, 3);
+	  pndlua_header_list_append (L, head, -1, H_APPEND);
+	  lua_pop (L, 1);
+	}
+    }
+  else if (!lua_isnil (L, 3))
+    luaL_argerror (L, 3, NULL);
+  return 0;
+}
+
+static int
+req_set_headers (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  return set_headers (L, &ud->req->headers);
+}
+
+static int
+req_set_path (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  if (http_request_set_path (ud->req, lua_tostring (L, 3)))
+    pndlua_memerr (L);
+  return 0;
+}
+
+static int
+req_set_url (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  if (http_request_set_url (ud->req, lua_tostring (L, 3)))
+    pndlua_memerr (L);
+  return 0;
+}
+
+static int
+req_set_query (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  if (http_request_set_query (ud->req, lua_tostring (L, 3)))
+    pndlua_memerr (L);
+  return 0;
+}
+
+static int
+pndlua_req_newindex (lua_State *L)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "hlmpquv";
+  static struct luaL_Reg reg[] = {
+    { "headers", req_set_headers },
+    { "line", ro_newindex },
+    { "method", ro_newindex },
+    { "path", req_set_path },
+    { "query", req_set_query },
+    { "url", req_set_url },
+    { "version", ro_newindex },
+  };
+
+  field = lua_tostring (L, 2);
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
+    luaL_error (L, "%s: no such field", field);
+  return fun (L);
+}
+
 static char const pndlua_req_class[] = "req";
 
 static void
@@ -742,6 +861,7 @@ pndlua_dcl_req (lua_State *L)
   pndlua_new_metatable (L, pndlua_req_class);
   /* Prepare the __index entry. */
   pndlua_dcl_function (L, "__index", pndlua_req_index);
+  pndlua_dcl_function (L, "__newindex", pndlua_req_newindex);
   lua_pop (L, 1);
 }
 
@@ -787,7 +907,7 @@ resp_get_headers (lua_State *L)
   rud->req = &http->phttp->response;
   lua_rawseti (L, -2, 0);
   /* Create the headers table. */
-  rc = req_new_headers (L, -1, 1);
+  rc = req_new_headers (L, -1);
   /* Get rid of the original userdata. */
   lua_remove (L, -2);
   return rc;
@@ -830,7 +950,7 @@ resp_set_body (lua_State *L)
   if (!body)
     {
       if ((body = malloc (sizeof (*body))) == NULL)
-	return luaL_error (L, "out of memory");
+	return pndlua_memerr (L);
       stringbuf_init_log (body);
       ud->phttp->response.body = body;
     }
@@ -863,25 +983,7 @@ static int
 resp_set_headers (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  HTTP_HEADER_LIST *head = &ud->phttp->response.headers;
-
-  http_header_list_free (head);
-  if (lua_istable (L, 3))
-    {
-      lua_pushnil (L);
-      while (lua_next (L, 3) != 0)
-	{
-	  lua_pushvalue (L, -2);
-	  lua_pushstring (L, ": ");
-	  lua_rotate (L, -3, -1);
-	  lua_concat (L, 3);
-	  pndlua_header_list_append (L, head, -1, H_APPEND);
-	  lua_pop (L, 1);
-	}
-    }
-  else if (!lua_isnil (L, 3))
-    luaL_argerror (L, 3, NULL);
-  return 0;
+  return set_headers (L, &ud->phttp->response.headers);
 }
 
 static int
@@ -898,7 +1000,7 @@ resp_set_reason (lua_State *L)
     {
       ud->phttp->response.request = strdup (lua_tostring (L, 3));
       if (!ud->phttp->response.request)
-	luaL_error (L, "out of memory");
+	return pndlua_memerr (L);
     }
   return 0;
 }

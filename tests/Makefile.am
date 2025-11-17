@@ -115,6 +115,8 @@ TESTSUITE_AT = \
  lua-be.at\
  lua-load.at\
  lua-match.at\
+ lua-modresp.at\
+ lua-modreq.at\
  lua-http.at\
  lua-path.at\
  maxrequest.at\
