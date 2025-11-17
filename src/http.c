@@ -1532,7 +1532,6 @@ lua_response (POUND_HTTP *phttp)
   int i;
   char **argv;
   int res = -1;
-  struct stringbuf sb;
 
   argv = calloc (pclos->argc, sizeof (argv[0]));
   if (!argv)
@@ -1541,8 +1540,6 @@ lua_response (POUND_HTTP *phttp)
       return -1;
     }
 
-  stringbuf_init_log (&sb);
-
   for (i = 0; i < pclos->argc; i++)
     {
       argv[i] = expand_string (pclos->argv[i], phttp, &phttp->request, "lua");
@@ -1550,7 +1547,7 @@ lua_response (POUND_HTTP *phttp)
 	goto err;
     }
 
-  res = pndlua_backend (phttp, pclos, argv, &sb);
+  res = pndlua_backend (phttp, pclos, argv);
 
  err:
   for (i = 0; i < pclos->argc && argv[i]; i++)
@@ -1568,6 +1565,7 @@ lua_response (POUND_HTTP *phttp)
       else
 	{
 	  int n;
+	  struct stringbuf *body;
 	  char const *reason = phttp->response.request;
 	  if (reason && *reason)
 	    {
@@ -1584,7 +1582,8 @@ lua_response (POUND_HTTP *phttp)
 	  else
 	    reason = "";
 
-	  phttp->res_bytes = stringbuf_len (&sb);
+	  body = phttp->response.body;
+	  phttp->res_bytes = body ? stringbuf_len (body) : 0;
 
 	  bio_http_reply_start_list (phttp->cl,
 				     phttp->request.version,
@@ -1592,13 +1591,13 @@ lua_response (POUND_HTTP *phttp)
 				     reason,
 				     &phttp->response.headers,
 				     (CONTENT_LENGTH) phttp->res_bytes);
-	  BIO_write (phttp->cl, stringbuf_value (&sb), phttp->res_bytes);
+	  if (body)
+	    BIO_write (phttp->cl, stringbuf_value (body), phttp->res_bytes);
 	  BIO_flush (phttp->cl);
 
 	  res = HTTP_STATUS_OK;
 	}
     }
-  stringbuf_free (&sb);
 
   return res;
 
@@ -3223,6 +3222,11 @@ http_request_free (struct http_request *req)
   http_request_free_query (req);
   free (req->orig_request_line);
   free (req->eval_result);
+  if (req->body)
+    {
+      stringbuf_free (req->body);
+      free (req->body);
+    }
   http_request_init (req);
 }
 

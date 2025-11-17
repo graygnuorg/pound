@@ -416,6 +416,9 @@ struct http_request
   int split;
   char *eval_result;         /* Array of return statuses from evaluation of
 				detached conditions. */
+  struct stringbuf *body;    /* Response body overridden by modification
+				request. Deliberately not using any stream
+				type here. */
 };
 
 static inline void http_request_init (struct http_request *http)
@@ -1410,7 +1413,7 @@ static inline void phttp_lua_stash_reset (POUND_HTTP *p)
 int pndlua_init (void);
 int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv);
 int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond,
-		    char **argv, struct stringbuf *sb);
+		    char **argv);
 int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_closure (struct pndlua_closure *cond);
 #else
@@ -1438,8 +1441,7 @@ pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
   return -1;
 }
 static inline int
-pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv,
-		struct stringbuf *sb)
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
 {
   return -1;
 }

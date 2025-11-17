@@ -145,8 +145,7 @@ function_is_defined (lua_State *L, char const *name)
 }
 
 
-static void pndlua_set_http (lua_State *L, POUND_HTTP *http,
-			     struct stringbuf *sb);
+static void pndlua_set_http (lua_State *L, POUND_HTTP *http, int modresp);
 static void pndlua_unset_http (lua_State *L);
 
 static lua_State *
@@ -174,22 +173,26 @@ pndlua_unlock (struct pndlua_closure *c)
     pthread_mutex_unlock (&pndlua_global_mutex);
 }
 
+#define PLC_NONE    0
+#define PLC_RETBOOL 0x1
+#define PLC_MODRESP 0x2
+
 int
 pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
-	     int retbool, struct stringbuf *sb)
+	     int flags)
 {
   int i;
   int res;
   lua_State *state;
 
   state = pndlua_lock (clos);
-  pndlua_set_http (state, phttp, sb);
+  pndlua_set_http (state, phttp, !!(flags & PLC_MODRESP));
 
   pushname (state, clos->func);
   for (i = 0; i < clos->argc; i++)
     lua_pushstring (state, argv[i]);
 
-  res = lua_pcall (state, clos->argc, !!retbool, 0);
+  res = lua_pcall (state, clos->argc, !!(flags & PLC_RETBOOL), 0);
   if (res)
     {
       conf_error_at_locus_range (&clos->locus,
@@ -198,7 +201,7 @@ pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
 				 lua_tostring (state, -1));
       res = -1;
     }
-  else if (retbool)
+  else if (flags & PLC_RETBOOL)
     {
       res = lua_toboolean (state, -1);
     }
@@ -214,14 +217,13 @@ pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
 int
 pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv)
 {
-  return pndlua_call (phttp, clos, argv, 1, NULL);
+  return pndlua_call (phttp, clos, argv, PLC_RETBOOL);
 }
 
 int
-pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
-		struct stringbuf *sb)
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv)
 {
-  return pndlua_call (phttp, clos, argv, 0, sb);
+  return pndlua_call (phttp, clos, argv, PLC_MODRESP);
 }
 
 
@@ -749,14 +751,18 @@ pndlua_dcl_req (lua_State *L)
 struct http_ud
 {
   POUND_HTTP *phttp;
-  struct stringbuf *sb;
+  int modresp;
 };
 
 static int
 resp_get_body (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushlstring (L, stringbuf_value (ud->sb), stringbuf_len (ud->sb));
+  struct stringbuf *body = ud->phttp->response.body;
+  if (body)
+    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
+  else
+    lua_pushlstring (L, "", 0);
   return 1;
 }
 
@@ -819,12 +825,22 @@ static int
 resp_set_body (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
+  struct stringbuf *body = ud->phttp->response.body;
 
-  stringbuf_reset (ud->sb);
+  if (!body)
+    {
+      if ((body = malloc (sizeof (*body))) == NULL)
+	return luaL_error (L, "out of memory");
+      stringbuf_init_log (body);
+      ud->phttp->response.body = body;
+    }
+
+  stringbuf_reset (body);
   if (!lua_isnil (L, 3))
     {
       char const *val = lua_tostring (L, 3);
-      stringbuf_add_string (ud->sb, val);
+      if (stringbuf_add_string (body, val))
+	luaL_error (L, "out if memory");
     }
   return 0;
 }
@@ -952,10 +968,13 @@ http_resp (lua_State *L)
 }
 
 static int
-pndlua_http_index (lua_State *L, int rw)
+pndlua_http_index (lua_State *L)
 {
+  struct http_ud *http = pndlua_get_userdata (L, 1);
   char const *field;
   lua_CFunction fun;
+
+  int rw = http->modresp != 0;
 
   static char *letidx[] = { "r", "rr" };
   static struct luaL_Reg reg[] = {
@@ -969,25 +988,13 @@ pndlua_http_index (lua_State *L, int rw)
   return fun (L);
 }
 
-static int
-pndlua_http_full_index (lua_State *L)
-{
-  return pndlua_http_index (L, 1);
-}
-
-static int
-pndlua_http_req_index (lua_State *L)
-{
-  return pndlua_http_index (L, 0);
-}
-
 /*
- * Prepare and set the "http" global in the Lua state.  If sb is not NULL,
+ * Prepare and set the "http" global in the Lua state.  If modresp is not 0,
  * the http.resp element will be available and assignments to http.resp.body
- * will be stored there.
+ * will be allowed.
  */
 static void
-pndlua_set_http (lua_State *L, POUND_HTTP *phttp, struct stringbuf *sb)
+pndlua_set_http (lua_State *L, POUND_HTTP *phttp, int modresp)
 {
   struct http_ud *ud;
 
@@ -996,14 +1003,11 @@ pndlua_set_http (lua_State *L, POUND_HTTP *phttp, struct stringbuf *sb)
   ud = lua_newuserdata (L, sizeof (*ud));
   lua_rawseti (L, -2, 0);
   ud->phttp = phttp;
-  if (sb)
-    stringbuf_init_log (sb); // FIXME: Use custom log function for Lua.
-  ud->sb = sb;
+  ud->modresp = modresp;
 
   pndlua_new_metatable (L, "http");
   /* Create __index entry. */
-  pndlua_dcl_function (L, "__index",
-		       sb ? pndlua_http_full_index : pndlua_http_req_index);
+  pndlua_dcl_function (L, "__index", pndlua_http_index);
   /* Create __newindex entry. */
   pndlua_dcl_function (L, "__newindex", ro_newindex);
 
