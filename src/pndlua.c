@@ -175,29 +175,30 @@ pndlua_unlock (struct pndlua_closure *c)
 }
 
 int
-pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
+pndlua_call (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
+	     int retbool, struct stringbuf *sb)
 {
   int i;
   int res;
   lua_State *state;
 
-  state = pndlua_lock (cond);
-  pndlua_set_http (state, phttp, NULL);
+  state = pndlua_lock (clos);
+  pndlua_set_http (state, phttp, sb);
 
-  pushname (state, cond->func);
-  for (i = 0; i < cond->argc; i++)
+  pushname (state, clos->func);
+  for (i = 0; i < clos->argc; i++)
     lua_pushstring (state, argv[i]);
 
-  res = lua_pcall (state, cond->argc, 1, 0);
+  res = lua_pcall (state, clos->argc, !!retbool, 0);
   if (res)
     {
-      conf_error_at_locus_range (&cond->locus,
+      conf_error_at_locus_range (&clos->locus,
 				 "(%"PRItid") error calling Lua function %s: %s",
-				 POUND_TID (), cond->func,
+				 POUND_TID (), clos->func,
 				 lua_tostring (state, -1));
       res = -1;
     }
-  else
+  else if (retbool)
     {
       res = lua_toboolean (state, -1);
     }
@@ -205,39 +206,22 @@ pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *cond, char **argv)
   lua_pop (state, 1);
 
   pndlua_unset_http (state);
-  pndlua_unlock (cond);
+  pndlua_unlock (clos);
 
   return res;
 }
 
 int
-pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *be, char **argv,
+pndlua_match (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv)
+{
+  return pndlua_call (phttp, clos, argv, 1, NULL);
+}
+
+int
+pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure *clos, char **argv,
 		struct stringbuf *sb)
 {
-  int i;
-  int res;
-  lua_State *state;
-
-  state = pndlua_lock (be);
-  pndlua_set_http (state, phttp, sb);
-
-  pushname (state, be->func);
-  for (i = 0; i < be->argc; i++)
-    lua_pushstring (state, argv[i]);
-
-  res = lua_pcall (state, be->argc, 0, 0);
-  if (res)
-    {
-      conf_error_at_locus_range (&be->locus,
-				 "(%"PRItid") error calling Lua function %s: %s",
-				 POUND_TID (), be->func,
-				 lua_tostring (state, -1));
-      res = -1;
-    }
-
-  pndlua_unset_http (state);
-  pndlua_unlock (be);
-  return res;
+  return pndlua_call (phttp, clos, argv, 0, sb);
 }
 
 

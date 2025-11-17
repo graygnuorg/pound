@@ -545,8 +545,8 @@ thr_dispatch (void *unused)
 			}
 
 		      if (pound_http_enqueue (clnt, lstn,
-					   (struct sockaddr *) &clnt_addr,
-					   clnt_length))
+					      (struct sockaddr *) &clnt_addr,
+					      clnt_length))
 			close (clnt);
 		    }
 		}
