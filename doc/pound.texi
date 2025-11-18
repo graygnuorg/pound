@@ -2823,6 +2823,7 @@ Assigning to its fields modifies the response that will be sent out by
 @code{pound} when the @code{LuaBackend} function returns.
 @end deftypecv
 
+@anchor{http.resp.code}
 @deftypecv Field resp integer code
 HTTP status code of the response.  An integer number in the range
 @code{[100,599]}.  The @code{LuaBackend} function must set this field/
@@ -2846,6 +2847,7 @@ http.resp.headers['Host'] = "example.org"
 @end example
 @end deftypecv
 
+@anchor{http.resp.body}
 @deftypecv Field resp string body
 The request body.
 @end deftypecv
@@ -6152,8 +6154,8 @@ error page if no service matching the incoming request was found.
 
 @deffn {Service directive} LuaBackend "@var{func}" ["@var{arg}"...]
 Run Lua function @var{func} with the supplied arguments.  The function
-should set the response code (@FIXME-pxref{http.resp.code}) and fill
-the response body (@FIXME-pxref{http.resp.body}) prior to returning.
+should set the response code (@pxref{http.resp.code}) and fill
+the response body (@pxref{http.resp.body}) prior to returning.
 If it fails to do so, @command{pound} will generate a standard 500
 response.
 
