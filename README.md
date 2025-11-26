@@ -1,16 +1,16 @@
 # Pound
 
 __Pound__ is a reverse proxy, load balancer and HTTPS front-end for Web
-servers. It was developed to enable distributing the load among
+servers. It was initially developed to distribute the load among
 several Web-servers and to allow for a convenient SSL wrapper for those Web
-servers that do not offer it natively. __Pound__ is distributed under the
-GNU General Public License, Version 3, or (at your option) any later
-version.
+servers that do not offer it natively. Since then, it has acquired a lot
+more features. __Pound__ is distributed under the GNU General Public License,
+Version 3, or (at your option) any later version.
 
 The original version of __pound__ was written by Robert Segall at
 [Apsis GmbH](https://web.archive.org/web/20221202094441/https://apsis.ch/).
 In 2018, Sergey Poznyakoff added support for OpenSSL 1.x to the then current
-version of the program (2.8).  This version of __pound__, hosted on
+version of the program (2.8).  That version of __pound__, hosted on
 *github* was further modified by Rick O'Sullivan and Frank Schmirler,
 who added WebSocket support.
 
@@ -77,6 +77,9 @@ If you compile it on a Debian-based system, you need to install the
 If you plan using Perl-compatible regular expressions, install
 [PCRE2](https://www.pcre.org/) (the `libpcre2-dev` package, on debian).
 
+You may wish to install [Lua](https://www.lua.org) for extending __pound__
+functionality, (`lua5.4-dev`).
+
 Additional software is needed for testing.  See [Testing](#user-content-testing), for details.
 
 ## Compilation
@@ -142,6 +145,14 @@ configuration options:
 
   By default, dynamic backends are enabled whenever this library is
   present.
+
+* `--enable-lua` or `--disable-lua`
+
+  Enable or disable use of [Lua](https://www.lua.org) extension modules.
+  By default, it is enabled if the Lua library and header files are
+  installed and are of suitable version. You will need Lua version 5.3
+  or 5.4 for this to work. Use `--disable-lua`, if you are don't need this
+  feature or want to get a smaller binary without extra dependencies.
 
 * `--enable-pcre` or `--disable-pcre`
 
@@ -558,6 +569,11 @@ HTTP server functionality.  These are:
 
   Generates Openmetric telemetry response.
 
+* `Lua`
+
+  Special backends can be implemented in Lua language, if its use was
+  enabled at compile time.
+
 ### Sessions
 
 __Pound__ is able to keep track of sessions between client browser
@@ -698,9 +714,8 @@ a mechanism called *cookie injection* in order to achieve this: a
 cookie is added to backend responses and tracked by the reverse proxy.
 
 __Pound__ was designed to be as transparent as possible, therefore this
-mechanism is not supported. If you really need this sort of persistent
-mapping, use the client address session mechanism (`Type IP`), which
-achieves the same result without changing the contents in any way.
+mechanism is not directly supported. It can, however, be [implemented using
+Lua extensions](https://www.gnu.org.ua/software/pound/manual/Cookie-injection.html).
 
 ### Logging
 

@@ -210,9 +210,9 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
-AC_ARG_WITH([lua],
- [AS_HELP_STRING([--with-lua],
-		 [compile with Lua library])],
+AC_ARG_ENABLE([lua],
+ [AS_HELP_STRING([--enable-lua],
+		 [enable Lua extensions])],
  [status_lua=${withval}],
  [status_lua=probe])
 

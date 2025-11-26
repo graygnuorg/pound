@@ -141,9 +141,14 @@ Extending @command{pound} functionality with Lua
 
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
+* LuaModify::  Changing requests and responses in Lua.
 * Stash::      Sharing data between Lua functions.
 * LuaBackend:: Lua backends.
 * Lua API::
+
+Changing requests and responses in Lua
+
+* Cookie injection::
 
 Configuration
 
@@ -173,6 +178,8 @@ Global directives
 * SSL Settings::
 * Regexp Settings::
 * ACL definition::
+* Condition::
+* Lua Settings::
 
 Management Interface
 
@@ -2342,6 +2349,7 @@ results to the Lua backend.
 @menu
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
+* LuaModify::  Changing requests and responses in Lua.
 * Stash::      Sharing data between Lua functions.
 * LuaBackend:: Lua backends.
 * Lua API::
@@ -2424,6 +2432,7 @@ statements in loaded Lua sources.
 
 @node LuaMatch
 @section Lua conditionals
+
   Lua functions are most commonly used to implement new conditions,
 that can be used to select the @code{Service} section to use.  Such
 conditions are applied using the @code{LuaMatch} statement in
@@ -2538,6 +2547,181 @@ Service
 End
 @end group
 @end example
+
+@node LuaModify
+@section Changing requests and responses in Lua
+@cindex LuaModify
+  The @code{LuaModify} configuration statement instructs
+@command{pound} to invoke a Lua function, ignoring its return value,
+if any.  In other words, the function is called for its side effects,
+whatever they are.
+
+  Syntactically, it is similar to the @code{LuaMatch} statement,
+discussed in the previous section: the function name is supplied as
+its first parameter and the arguments, if any, as its remaining
+parameters.  Only string arguments are allowed.
+
+  The statement can appear anyplace where other request modification
+statements are allowed: i.e. in @code{ListenHTTP} (or
+@code{ListenHTTPS}), @code{Service}, @code{Match} and @code{Rewrite}
+sections.
+
+  Most often this statement is used to modify the incoming
+request before sending it out to the backend, or the response before
+returning it back to the client.  To do so, the function invoked by
+@code{LuaMatch} can use the @code{http} Lua module, discussed in
+@ref{lua-http}, in particular its fields @code{http.req} and
+@code{http.resp}.
+
+@menu
+* Cookie injection::
+@end menu
+
+@node Cookie injection
+@subsection Cookie Injection
+@cindex cookie injection
+  Cookie injection is a special technique that ensures that
+requests from a client are always forwarded to the same backend, even
+if the backend server in question does not provide any mechanism for
+session tracking.  It works as follows.  Upon first connection,
+@command{pound} adds to the backend response a @code{Set-Cookie}
+header with a unique cookie generated for this purpose.  This ensures
+that further requests from that client will bear this cookie.  If
+@command{pound} is configured to use that cookie for session tracking
+(@pxref{Sessions}), all subsequent requests from that client will go to
+the same backend.
+
+  In this subsection we will show how to implement cookie injection
+in Lua using the @code{LuaModify} directive.
+
+  Let's start from the Lua code.  We will need a function that,
+being invoked with the name of cookie as its argument, will check if
+that cookie is present in the request and if not, will create it by
+adding a @code{Set-Cookie} header to the response from backend.  Let's
+use the @code{lua-uuid} module to generate unique cookie value.
+Assuming functions @code{get_cookie} and @code{set_cookie} can be used
+to obtain or set a cookie, the function @code{insert} will look as
+follows:
+
+@example
+@group
+function inject(name, ttl)
+   local cookie = get_cookie(name)
+   if cookie == nil then
+      set_cookie(name, tostring(uuid.new()), ttl)
+   end
+end
+@end group
+@end example
+
+The @var{name} argument supplies the name of the cookie to check for,
+and the @var{ttl} argument provides its time-to-live in seconds, which
+is used if the cookie needs to be set.  The entire Lua module
+implementing this and the two auxiliary functions can be written as
+follows:
+
+@example
+local _M = @{@}
+
+// Return the value of cookie @var{name} or nil if it is not set.
+local function get_cookie(name)
+   // Return true if string @var{s} begins with the @var{name}
+   // followed by an equals sign.
+   function is_name(s)
+      local i,j = s:find(name..'=')
+      if j ~= nil then
+         return s:sub(j+1)
+      else
+         return nil
+      end
+   end
+   // Given partial value of the @code{Cookie} header @var{cookie},
+   // find the cookie @var{name} and return its value.
+   local function find_cookie(cookie, name)
+      if cookie == nil then
+         return nil
+      end
+
+      local i, j = cookie:find(";%s*")
+      if i == nil then
+         return is_name(cookie)
+      else
+         local s = is_name(cookie:sub(1, i-1))
+         if s ~= nil then
+            return s
+         else
+            return find_cookie(cookie:sub(j+1), name)
+         end
+      end
+   end
+
+   return find_cookie(http.req.headers['Cookie'], name)
+end
+
+// Set cookie @var{name} to the given @var{value}.  Use @var{ttl}
+// as its @code{Max-Age}.
+function set_cookie(name, value, ttl)
+   cv = name .. '=' .. value .. '; Max-Age=' .. ttl
+   cookie = http.resp.headers['Set-cookie']
+   if cookie == nil then
+      cookie = @{ cv @}
+   elseif type(cookie) == 'table' then
+      table.insert(cookie, cv)
+   else
+      cookie = @{ cookie, cv @}
+   end
+   http.resp.headers['Set-cookie'] = cookie
+end
+
+local uuid = require('lua-uuid')
+
+// Unless cookie @var{name} is already set, create it and initialize
+// to a unique session identifier.  @var{ttl} supplies @code{Max-Age}.
+function _M.inject(name, ttl)
+   local cookie = get_cookie(name)
+   if cookie == nil then
+      set_cookie(name, tostring(uuid.new()), ttl)
+   end
+end
+
+return _M
+@end example
+
+  Suppose this program is saved in file @file{mksess.lua}, located in
+@command{pound} include path.  First, this program needs to be loaded
+to @command{pound}.  This is done in the global @code{Lua} section:
+
+@example
+@group
+Lua
+    Load "mksess.lua"
+End
+@end group
+@end example
+
+  Then, the @code{Section} section which should implement cookie
+injection, must be configured to track sessions by the value of a
+cookie, and the @code{inject} function must be called on each backend
+response.  Suppose the cookie used for session tracking is named
+@samp{poundsession}.  Then:
+
+@example
+Service
+    Session
+        Type Cookie
+        TTL  300
+        ID   "poundsession"
+    End
+    Rewrite response
+        LuaModify "mksess.inject" "poundsession" "300"
+    End
+    ...
+End
+@end example
+
+@noindent
+Notice, that @var{ttl} argument to @code{mksess.inject} matches that
+in the @code{Session} section.
 
 @node Stash
 @section Sharing data between Lua functions
@@ -2735,6 +2919,7 @@ Emergency messages
 Returns identifier of the current @code{pound} thread.
 @end deftypemethod
 
+@anchor{lua-http}
 @subheading The @code{http} module.
 
 This built-in module contains variables and methods describing the
@@ -4622,7 +4807,7 @@ request accessor interpretation, as discussed in @ref{Request
 modifications}.
 
 This statement is available only if @command{pound} was built with Lua
-support.  @xref{Lua}, for a detailed discussion.
+support.  @xref{LuaModify}, for a detailed discussion.
 @end deffn
 
 @deffn {ListenHTTP directive} RewriteDestination @var{bool}
@@ -5292,7 +5477,7 @@ request accessor interpretation, as discussed in @ref{Request
 modifications}.
 
 This statement is available only if @command{pound} was built with Lua
-support.  @xref{Lua}, for a detailed discussion.
+support.  @xref{LuaModify}, for a detailed discussion.
 @end deffn
 
 @deffn {Response modification} SetHeader "@var{name}: @var{value}"
@@ -5803,7 +5988,7 @@ request accessor interpretation, as discussed in @ref{Request
 modifications}.
 
 This statement is available only if @command{pound} was built with Lua
-support.  @xref{Lua}, for a detailed discussion.
+support.  @xref{LuaModify}, for a detailed discussion.
 @end deffn
 
 @deffn {Service statement} Rewrite [ request | response ] ... End

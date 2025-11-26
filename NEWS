@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-17
+Pound -- history of user-visible changes. 2025-11-26
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -11,9 +11,15 @@ Version 4.18.90 (git)
 
 * Support for Lua
 
-Functions written in Lua can be used to implement complex request matching
-conditions and backends.  Lua sources are loaded using Load statement
-in the Lua global section:
+Functions written in Lua can be used to implement complex request
+matching conditions, modify requests and/or responses, and implement
+new backends.  You will need Lua version 5.3 or newer.  By default,
+configure will enable Lua support if it finds the necessary headers
+and libraries.  This can be controlled using --disable-lua and
+--enable-lua options.
+
+At runtime, Lua sources are loaded using Load statement in the Lua
+global section of the configuration file:
 
    Lua
       Load "impl.lua"
@@ -31,7 +37,7 @@ Two more similar statements are added:
 
    LuaModify   - Applies a Lua function to modify the request (or
                  response).  It can be used in ListenHTTP,
-                 ListenHTTPS, Service, and Rewrite statements.
+                 ListenHTTPS, Service, Match and Rewrite statements.
 
    LuaBackend  - Calls a Lua function that implements a backend.
 
