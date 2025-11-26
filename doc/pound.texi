@@ -97,6 +97,7 @@ This edition of the @cite{Pound Manual}, last updated
 * Time and Date Formats::
 * Old Control Format::
 * GNU Free Documentation License::
+* jwtlua::
 * Index::
 @ifset WEBDOC
 @ifhtml
@@ -2533,6 +2534,9 @@ end
 return bearer
 @end example
 
+@noindent
+@xref{jwtlua}, for the implementation of the @code{jwt} module.
+
  The following configuration fragment uses @code{bearer.ok} function
 as a condition, to reject requests without a valid bearer token:
 
@@ -2623,10 +2627,10 @@ follows:
 @example
 local _M = @{@}
 
-// Return the value of cookie @var{name} or nil if it is not set.
+-- Return the value of cookie @var{name} or nil if it is not set.
 local function get_cookie(name)
-   // Return true if string @var{s} begins with the @var{name}
-   // followed by an equals sign.
+   -- Return true if string @var{s} begins with the @var{name}
+   -- followed by an equals sign.
    function is_name(s)
       local i,j = s:find(name..'=')
       if j ~= nil then
@@ -2635,8 +2639,8 @@ local function get_cookie(name)
          return nil
       end
    end
-   // Given partial value of the @code{Cookie} header @var{cookie},
-   // find the cookie @var{name} and return its value.
+   -- Given partial value of the @code{Cookie} header @var{cookie},
+   -- find the cookie @var{name} and return its value.
    local function find_cookie(cookie, name)
       if cookie == nil then
          return nil
@@ -2658,8 +2662,8 @@ local function get_cookie(name)
    return find_cookie(http.req.headers['Cookie'], name)
 end
 
-// Set cookie @var{name} to the given @var{value}.  Use @var{ttl}
-// as its @code{Max-Age}.
+-- Set cookie @var{name} to the given @var{value}.  Use @var{ttl}
+-- as its @code{Max-Age}.
 function set_cookie(name, value, ttl)
    cv = name .. '=' .. value .. '; Max-Age=' .. ttl
    cookie = http.resp.headers['Set-cookie']
@@ -2675,8 +2679,8 @@ end
 
 local uuid = require('lua-uuid')
 
-// Unless cookie @var{name} is already set, create it and initialize
-// to a unique session identifier.  @var{ttl} supplies @code{Max-Age}.
+-- Unless cookie @var{name} is already set, create it and initialize
+-- to a unique session identifier.  @var{ttl} supplies @code{Max-Age}.
 function _M.inject(name, ttl)
    local cookie = get_cookie(name)
    if cookie == nil then
@@ -7755,6 +7759,15 @@ Defines @command{pound} include directory (@pxref{include directory}).
 @node Old Control Format
 @appendix Old Control Output Format
 @include ctlapi417.texi
+
+@node jwtlua
+@appendix jwt.lua
+This appendix contains the implementation of @code{jwt} Lua module,
+used in examples in @ref{LuaMatch}.
+
+@example
+@include jwtlua.texi
+@end example
 
 @node GNU Free Documentation License
 @appendix GNU Free Documentation License
