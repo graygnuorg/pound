@@ -97,7 +97,7 @@ This edition of the @cite{Pound Manual}, last updated
 * Time and Date Formats::
 * Old Control Format::
 * GNU Free Documentation License::
-* jwtlua::
+* Example Lua modules::
 * Index::
 @ifset WEBDOC
 @ifhtml
@@ -251,6 +251,11 @@ Input object
 * Listener object::
 * Service object::
 * Backend object::
+
+Example Lua modules
+
+* jwt.lua::
+* cookie.lua::
 
 @end detailmenu
 @end menu
@@ -2508,7 +2513,7 @@ function bearer.ok(secret)
    end
 
    -- Extract the token and parse it.
-   local j, err = jwt.new(bh:sub(k+1))
+   local j, err = jwt.parse(bh:sub(k+1))
    if err ~= nil then
       return false
    end
@@ -2535,7 +2540,7 @@ return bearer
 @end example
 
 @noindent
-@xref{jwtlua}, for the implementation of the @code{jwt} module.
+@xref{jwt.lua}, for the implementation of the @code{jwt} module.
 
  The following configuration fragment uses @code{bearer.ok} function
 as a condition, to reject requests without a valid bearer token:
@@ -2601,90 +2606,36 @@ in Lua using the @code{LuaModify} directive.
   Let's start from the Lua code.  We will need a function that,
 being invoked with the name of cookie as its argument, will check if
 that cookie is present in the request and if not, will create it by
-adding a @code{Set-Cookie} header to the response from backend.  Let's
-use the @code{lua-uuid} module to generate unique cookie value.
-Assuming functions @code{get_cookie} and @code{set_cookie} can be used
-to obtain or set a cookie, the function @code{insert} will look as
-follows:
+adding a @code{Set-Cookie} header to the response from backend:
 
 @example
-@group
 function inject(name, ttl)
-   local cookie = get_cookie(name)
-   if cookie == nil then
-      set_cookie(name, tostring(uuid.new()), ttl)
-   end
-end
-@end group
 @end example
 
-The @var{name} argument supplies the name of the cookie to check for,
-and the @var{ttl} argument provides its time-to-live in seconds, which
-is used if the cookie needs to be set.  The entire Lua module
-implementing this and the two auxiliary functions can be written as
-follows:
+Here, the @var{name} argument supplies the name of the cookie to check
+for, and @var{ttl} provides its time-to-live in seconds, which is used
+if the cookie needs to be set.
+
+Functions for operating on cookies are supplied by the @file{cookie.lua}
+module, described in @ref{cookie.lua}.  To generate unique session
+identifiers, we will use the
+@uref{https://luarocks.org/modules/luau-project/lua-uuid, lua-uuid}
+module.
+
+  The resulting Lua module can then be written as follows:
 
 @example
 local _M = @{@}
 
--- Return the value of cookie @var{name} or nil if it is not set.
-local function get_cookie(name)
-   -- Return true if string @var{s} begins with the @var{name}
-   -- followed by an equals sign.
-   function is_name(s)
-      local i,j = s:find(name..'=')
-      if j ~= nil then
-         return s:sub(j+1)
-      else
-         return nil
-      end
-   end
-   -- Given partial value of the @code{Cookie} header @var{cookie},
-   -- find the cookie @var{name} and return its value.
-   local function find_cookie(cookie, name)
-      if cookie == nil then
-         return nil
-      end
-
-      local i, j = cookie:find(";%s*")
-      if i == nil then
-         return is_name(cookie)
-      else
-         local s = is_name(cookie:sub(1, i-1))
-         if s ~= nil then
-            return s
-         else
-            return find_cookie(cookie:sub(j+1), name)
-         end
-      end
-   end
-
-   return find_cookie(http.req.headers['Cookie'], name)
-end
-
--- Set cookie @var{name} to the given @var{value}.  Use @var{ttl}
--- as its @code{Max-Age}.
-function set_cookie(name, value, ttl)
-   cv = name .. '=' .. value .. '; Max-Age=' .. ttl
-   cookie = http.resp.headers['Set-cookie']
-   if cookie == nil then
-      cookie = @{ cv @}
-   elseif type(cookie) == 'table' then
-      table.insert(cookie, cv)
-   else
-      cookie = @{ cookie, cv @}
-   end
-   http.resp.headers['Set-cookie'] = cookie
-end
-
 local uuid = require('lua-uuid')
+local cookie = require('cookie')
 
 -- Unless cookie @var{name} is already set, create it and initialize
 -- to a unique session identifier.  @var{ttl} supplies @code{Max-Age}.
 function _M.inject(name, ttl)
-   local cookie = get_cookie(name)
+   local cookie = cookie.get(name)
    if cookie == nil then
-      set_cookie(name, tostring(uuid.new()), ttl)
+      cookie.set(name, tostring(uuid.new()), ttl)
    end
 end
 
@@ -7760,13 +7711,91 @@ Defines @command{pound} include directory (@pxref{include directory}).
 @appendix Old Control Output Format
 @include ctlapi417.texi
 
-@node jwtlua
-@appendix jwt.lua
-This appendix contains the implementation of @code{jwt} Lua module,
-used in examples in @ref{LuaMatch}.
+@node Example Lua modules
+@appendix Example Lua modules
+This appendix provides implementations of some Lua modules used in
+this manual.
+
+@menu
+* jwt.lua::
+* cookie.lua::
+@end menu
+
+@node jwt.lua
+@appendixsec jwt.lua
+This is the implementation of @file{jwt.lua} module,
+used in examples in @ref{LuaMatch}.  It provides the following
+methods:
+
+@deffn {jwt} parse input
+Parse @var{input} and build a new @acronym{JWT} object on success.
+Return two values: the resulting object, and error message (on
+failure).
+@end deffn
+
+@deffn {jwt} new payload secret
+Create a new @acronym{JWT} object from @var{payload} and encrypt it
+with the supplied @var{secret}.
+@end deffn
+
+The @acronym{JWT} object returned by either of these functions has two
+methods:
+
+@defmethod {jwt} sign secret
+Sign the object using @var{secret}.  Return the signed string suitable
+for use in @code{Authorization:} HTTP header.
+@end defmethod
+
+@defmethod {jwt} verify secret
+The reverse operation: verify if the signature of the object returned
+by @code{parse} matches @var{secret}.  Return @code{true} if it does
+and @code{false} otherwise.
+@end defmethod
+
+The fields of a @acronym{JWT} object are:
+
+@defcv {object field} jwt header
+Header part of @acronym{JWT}, decoded into Lua table.
+@end defcv
+
+@defcv {object field} jwt payload
+Payload part, decoded into Lua table.
+@end defcv
+
+@defcv {object field} jwt signature
+Signature part, as a string.
+@end defcv
+
+@defcv {object field} jwt raw
+A table containing original (undecoded) values of the three parts in
+its fields @code{header}, @code{payload}, and @code{signature}.
+@end defcv
+
+Full text of @file{jwt.lua} follows:
 
 @example
 @include jwtlua.texi
+@end example
+
+@node cookie.lua
+@appendixsec cookie.lua
+The @code{cookie} module, used in @ref{Cookie injection}, provides the
+following two methods:
+
+@deffn {cookie} get name
+Return value of the cookie @var{name} from the incoming request, or
+nil if no such cookie is present.
+@end deffn
+
+@deffn {cookie} set name ttl
+Set cookie @var{name} in the response.  Second argument provides the
+value of @code{Max-Age}.
+@end deffn
+
+Full text of @file{cookie.lua} follows:
+
+@example
+@include cookielua.texi
 @end example
 
 @node GNU Free Documentation License

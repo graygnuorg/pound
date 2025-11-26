@@ -17,7 +17,7 @@
 dist_man_MANS = pound.8 poundctl.8 poundctl.tmpl.5
 info_TEXINFOS = pound.texi
 pound_TEXINFOS = metrics.texi strftime.texi fdl.texi ctlapi417.texi\
-  jwtlua.texi
+  jwtlua.texi cookielua.texi
 
 GENDOCS = perl gendocs.pl
 EXTRA_DIST = gendocs.pl otherdoc.texi.in
