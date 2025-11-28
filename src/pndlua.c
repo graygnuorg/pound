@@ -177,7 +177,7 @@ pndlua_unlock (struct pndlua_closure const *c)
 #define PLC_RETBOOL 0x1
 #define PLC_MODRESP 0x2
 
-int
+static int
 pndlua_call (POUND_HTTP *phttp, struct pndlua_closure const *clos, char **argv,
 	     int flags)
 {
@@ -271,6 +271,198 @@ pndlua_pound_tid (lua_State *L)
   lua_pushinteger (L, (lua_Integer) pthread_self ());
   return 1;
 }
+
+static char pndlua_pound_dump[] = "return function (o)\n\
+   if type(o) == 'nil' or\n\
+      type(o) == 'number' or\n\
+      type(o) == 'boolean' then\n\
+      return tostring(o), nil\n\
+   elseif type(o) == 'string' then\n\
+      return string.format(\"%q\", o)\n\
+   elseif type(o) == 'table' then\n\
+      local s = '{'\n\
+      for k,v in pairs(o) do\n\
+	 i, e = dump(k)\n\
+	 if e ~= nil then\n\
+	    return '', e\n\
+	 end\n\
+	 s = s .. '['.. i ..'] = ' .. dump(v) .. ','\n\
+      end\n\
+      return s .. '}', nil\n\
+   else\n\
+      return '', \"cannot serialize \"..type(o)\n\
+   end\n\
+end";
+
+/*
+ * Copy N stack elements starting from index S in state SRC to state DST.
+ * Return 0 on success.
+ * On error, return -1 and leave error message in tos of SRC.
+ */
+static int
+pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
+{
+  int i;
+
+  pushname (src, "pound.dump");
+  if (s < 0)
+    s -= 2;
+  for (i = 0; i < n; i++)
+    {
+      char const *str;
+
+      switch (lua_type (src, s + i))
+	{
+	case LUA_TNIL:
+	  lua_pushnil (dst);
+	  break;
+
+	case LUA_TBOOLEAN:
+	  lua_pushboolean (dst, lua_toboolean (src, s + i));
+	  break;
+
+	case LUA_TNUMBER:
+	  lua_pushnumber (dst, lua_tonumber (src, s + i));
+	  break;
+
+	case LUA_TSTRING:
+	  lua_pushstring (dst, lua_tostring (src, s + i));
+	  break;
+
+	case LUA_TTABLE:
+	  /* Get next value from the local stack. */
+	  lua_pushvalue (src, -1);
+	  lua_pushvalue (src, s + i);
+	  if (lua_pcall (src, 1, 2, 0) != LUA_OK)
+	    {
+	      lua_pushfstring (src, "error converting argument %d: %s",
+			       i, lua_tostring (src, -1));
+	      lua_remove (src, -2);
+	      lua_remove (src, -2);
+	      if (i)
+		lua_pop (dst, i);
+	      return -1;
+	    }
+
+	  if (lua_type (src, -1) != LUA_TNIL)
+	    {
+	      lua_pushfstring (src, "error converting argument %d: %s",
+			       i, lua_tostring (src, -1));
+	      lua_remove (src, -2);
+	      lua_remove (src, -2);
+	      if (i)
+		lua_pop (dst, i);
+	      return -1;
+	    }
+
+	  lua_pop (src, 1);
+
+	  lua_pushstring (src, "return ");
+	  lua_pushvalue (src, -2);
+	  lua_concat (src, 2);
+	  str = lua_tostring (src, -1);
+
+	  /* Load it to the global stack. */
+	  if (luaL_loadstring (dst, str) != LUA_OK)
+	    {
+	      lua_pushfstring (src, "error passing argument %d: %s",
+			       i, lua_tostring (dst, -1));
+	      lua_remove (src, -2);
+	      lua_remove (src, -2);
+	      lua_pop (dst, i + 1);
+	      return -1;
+	    }
+	  if (lua_pcall (dst, 0, 1, 0) != LUA_OK)
+	    {
+	      lua_pushfstring (src, "error passing argument %d: %s",
+			       i, lua_tostring (dst, -1));
+	      lua_remove (src, -2);
+	      lua_remove (src, -2);
+	      lua_pop (dst, i + 1);
+	      return -1;
+	    }
+
+	  lua_pop (src, 2);
+	  break;
+
+	default:
+	  lua_pushfstring (src,
+			   "error passing argument %d: unsupported data type %s",
+			   i, lua_typename (src, lua_type (src, s + i)));
+	  lua_pop (dst, i + 1);
+	  return -1;
+	}
+    }
+  lua_pop (src, 1);
+  return LUA_OK;
+}
+
+static int
+pndlua_pound_gcall (lua_State *L)
+{
+  int nargs = lua_gettop (L);
+  char const *fname = lua_tostring (L, 1);
+  lua_State *GL;
+  int nret;
+  int res = LUA_OK, r;
+
+  if (L == pndlua_ctx[0].state)
+    {
+      /* Already in global state. */
+      int i;
+      nret = lua_gettop (L);
+      if (lua_getglobal (L, fname) != LUA_TFUNCTION)
+	luaL_error (L, "%s: not a function", fname);
+      for (i = 1; i <= nargs; i++)
+	lua_pushvalue (L, i);
+      lua_call (L, nargs, LUA_MULTRET);
+      return lua_gettop (L) - nret;
+    }
+
+  pthread_mutex_lock (&pndlua_global_mutex);
+
+  GL = pndlua_ctx[0].state;
+  nret = lua_gettop (GL);
+  if (lua_getglobal (GL, fname) != LUA_TFUNCTION)
+    {
+      lua_pop (GL, 1);
+      lua_pushfstring (L, "%s: not a function", fname);
+      res = LUA_ERRRUN;
+      goto err;
+    }
+
+  --nargs;
+
+  /* Pass arguments. */
+  res = pndlua_stkcopy (GL, L, nargs, 2);
+  if (res != LUA_OK)
+    {
+      lua_pop (GL, 1);
+      goto err;
+    }
+
+  /* Call the function. */
+  res = lua_pcall (GL, nargs, LUA_MULTRET, 0);
+  if (res != LUA_OK)
+    {
+      if (pndlua_stkcopy (L, GL, 1, -1) != LUA_OK)
+	lua_pop (GL, 1);
+      goto err;
+    }
+
+  nret = lua_gettop (GL) - nret;
+  if ((r = pndlua_stkcopy (L, GL, nret, - nret)) != LUA_OK)
+    res = r;
+  lua_pop (GL, nret);
+
+ err:
+  pthread_mutex_unlock (&pndlua_global_mutex);
+  if (res != LUA_OK)
+    luaL_error (L, "%s", lua_tostring (L, -1));
+
+  return nret;
+}
+
 
 /*
  * Additional functions for defining table elements.
@@ -282,6 +474,15 @@ pndlua_dcl_function (lua_State *L, char const *name, lua_CFunction func)
 {
   lua_pushstring (L, name);
   lua_pushcfunction (L, func);
+  lua_rawset (L, -3);
+}
+
+static void
+pndlua_dcl_function_chunk (lua_State *L, char const *name, char const *chunk)
+{
+  lua_pushstring (L, name);
+  luaL_loadstring (L, chunk);
+  lua_call (L, 0, 1);
   lua_rawset (L, -3);
 }
 
@@ -528,7 +729,7 @@ headers_set (lua_State *L, HTTP_HEADER_LIST *head)
       pndlua_header_list_append (L, head, -1, H_REPLACE);
       lua_pop (L, 1);
     }
-  
+
   return 0;
 }
 
@@ -740,7 +941,7 @@ req_query (lua_State *L)
 
   lua_pushcfunction (L, req_query_newindex);
   lua_setfield (L, -2, "__newindex");
-  
+
   lua_pushcfunction (L, req_query_len);
   lua_setfield (L, -2, "__len");
 
@@ -1333,6 +1534,8 @@ pndlua_new_state (void)
 
   pndlua_dcl_function (state, "log", pndlua_pound_log);
   pndlua_dcl_function (state, "tid", pndlua_pound_tid);
+  pndlua_dcl_function_chunk (state, "dump", pndlua_pound_dump);
+  pndlua_dcl_function (state, "gcall", pndlua_pound_gcall);
   lua_setglobal (state, "pound");
 
   pndlua_mkstash (state);

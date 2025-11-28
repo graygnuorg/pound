@@ -2825,13 +2825,18 @@ End
 
 @subheading The @code{pound} module.
 
-@deftypemethod {pound} integer loadctx
+@deftypemethod pound string dump (arg)
+Dumps the value of its argument in a string form, suitable for using
+in Lua chunks.
+@end deftypemethod
+
+@defcv {field} pound integer loadctx
 This variable is initialized when loading Lua source files to the
 ordinal number of the Lua @dfn{state} where the file is being loaded.
 For globally loaded sources (@pxref{global lua loading}), this
 variable is set to 0.  For per-thread loading, it is set to a positive
 integer identifying the state.
-@end deftypemethod
+@end defcv
 
 @deftypemethod {pound} void log (int @var{prio}, string @var{message})
 Outputs @var{message} to the logging channel @var{prio}.
@@ -2874,6 +2879,33 @@ Emergency messages
 @deftypemethod pound integer tid ()
 Returns identifier of the current @code{pound} thread.
 @end deftypemethod
+
+@defmethod pound gcall (string @var{func}, ...)
+Call function @var{func} defined in a globally-loaded Lua module,
+passing it the remained arguments.  Return whatever values @var{func}
+returns.
+
+This function makes it possible for a function in a per-thread module
+to invoke a function from global context.  Notice the following
+limitations:
+
+@enumerate 1
+@item
+As for any function from globally-loaded module, the global Lua state
+will be locked until @var{func} returns.
+
+@item
+Types of arguments that can be passed to @var{func} and returned from
+it are limited to the following: @code{nil}, boolean, number, string,
+and table.  In the latter case, the same restriction applies to keys
+and values of the table.  Besides, tables cannot contain reference
+cycles.
+
+@item
+Calling this function from a globally-loaded module is also allowed.
+It is equivalent to calling @code{@var{func}(...)}.
+@end enumerate
+@end defmethod
 
 @anchor{lua-http}
 @subheading The @code{http} module.
