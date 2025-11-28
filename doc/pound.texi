@@ -2318,33 +2318,33 @@ terminated.
 @chapter Extending @command{pound} functionality with Lua
 @cindex Lua
 @url{http://lua.org,Lua} is a lightweight extension language developed
-at the Pontifical Catholic University of Rio de Janeiro.
-@command{Pound} can use extensions written in Lua to implement new
-conditionals and backends.@footnote{To check if the binary supports Lua,
-run @command{pound -V} and examine its output.}
+at the Pontifical Catholic University of Rio de Janeiro.  Functions
+and modules written in Lua can be used to implement new features in
+@command{pound} without the need to modify its sources and recompile
+it.@footnote{To check if the binary supports Lua, run @command{pound
+-V} and examine its output.}
 
 @cindex lua loading mode
-The lua interpreter itself is not thread-safe, therefore two modes
-are implemented for loading Lua source files: @dfn{per-thread} and
-@dfn{global}.  In per-thread mode, each Lua file is loaded into each
-worker thread separately.  This is the default.  In global mode
-sources are loaded only once and exist in one copy, available for use
-in all threads.  No matter what mode is used, Lua sources are read and
-interpreted only once, at program startup.
+Lua source files can be loaded using two distinct modes:
+@dfn{per-thread} and @dfn{global}.  In per-thread mode, each Lua file
+is loaded into each worker thread separately.  This is the default.
+In global mode sources are loaded only once and exist in one copy,
+available for use in all threads.  No matter what mode is used, Lua
+sources are read and interpreted only once, at program startup.
 
 @cindex per-thread lua loading
-Main advantage of per-thread mode is speed.  Each thread runs its own
-copy of Lua interpreter and doesn't have to synchronize its actions
+The main advantage of per-thread mode is speed.  Each thread runs its
+own copy of Lua interpreter and doesn't have to synchronize its actions
 with other threads.  Its disadvantage is a bit higher memory usage.
 
 @cindex global lua loading
 @anchor{global lua loading}
 Sources loaded in global mode reside in one interpreter, common for
-all threads.  Consequently, before calling a Lua function, a thread
+all threads.  Consequently, before calling a Lua function, the thread
 must lock the interpreter for its use, and unlock it afterwards.
 While the interpreter is in use by a single thread, remaining threads
-must wait for it to be released in order to use the interpreter.  This
-results in certain performance penalty.
+must wait for it to be released in order to use it.  This results in
+certain performance penalty.
 
 Both modes can be used together.  No matter which mode is used, Lua
 functions sharing the same mode can use a special global variable to
@@ -2356,7 +2356,7 @@ results to the Lua backend.
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
 * LuaModify::  Changing requests and responses in Lua.
-* Stash::      Sharing data between Lua functions.
+* Stash::      Sharing data between Lua invocations.
 * LuaBackend:: Lua backends.
 * Lua API::
 @end menu
@@ -2679,14 +2679,15 @@ Notice, that @var{ttl} argument to @code{mksess.inject} matches that
 in the @code{Session} section.
 
 @node Stash
-@section Sharing data between Lua functions
+@section Sharing data between Lua invocations
 @cindex stash
   It is often necessary to share data between Lua functions used as
-conditions in @command{pound} configuration file.  An obvious way
-of doing so is using Lua global variables.  This approach, however,
-poses one major problem: values stored in globals will persist not
-only when processing a single HTTP request, but also between different
-HTTP requests, and this can cause undesirable effects.
+conditions and modifiers in @command{pound} configuration file.  An
+obvious way of doing so is using Lua global variables.  This approach,
+however, poses one major problem: values stored in globals will
+persist not only when processing a single HTTP request, but also
+between different HTTP requests, and this can cause undesirable
+effects.
 
   To avoid this, @command{pound} provides a special built-in variable
 @code{stash}.  Its value is a table guaranteed to be cleared when a
