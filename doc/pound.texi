@@ -2363,10 +2363,10 @@ results to the Lua backend.
 
 @node LuaLoad
 @section Global Lua Configuration
-  Lua sources are loaded in the global @code{Lua} section, using two
-statements: @code{Load} and @code{LoadGlobal}.  Both take as argument
-the name of a Lua source file to parse and load.  If the name is
-relative, the file is looked in the @ref{include directory}.
+  Lua sources are loaded from the global @code{Lua} section, using two
+statements: @code{Load} and @code{LoadGlobal}.  These take as argument
+the name of a Lua source file to parse and load.  As usual, relative
+pathnames are looked up in the @ref{include directory}.
 
 The @code{Load} statement loads the file to per-thread Lua
 interpreters, while @code{LoadGlobal} loads it to the global one.
@@ -2382,7 +2382,7 @@ End
 
 If the file ends with a @code{return} statement, it is loaded as in
 Lua @code{require}.  The return value is then available in Lua global
-whose name is obtained from the filename using the following
+variable whose name is obtained from the filename using the following
 procedure:
 
 @enumerate 1
@@ -2415,12 +2415,12 @@ End
 Of course, you can use as many @code{Load} (or @code{LoadGlobal})
 statements as there are files you wish to load.
 
-The @code{Lua} can also be used to modify Lua search paths.  Two
+This section can also be used to modify Lua search paths.  Two
 statements are provided for this purpose: @code{Path} modifies search
 path for Lua source files (@code{package.path}), and @code{CPath}
 modifies search path for dynamic libraries (@code{package.cpath}).
 Both statements add their argument at the beginning of the
-corresponding @code{package} path.  Improving the example above:
+corresponding @code{package} path.  For example:
 
 @example
 @group
@@ -2441,15 +2441,15 @@ statements in loaded Lua sources.
 
   Lua functions are most commonly used to implement new conditions,
 that can be used to select the @code{Service} section to use.  Such
-conditions are applied using the @code{LuaMatch} statement in
-@code{Service}.  The statement takes at least one argument: the name
-of Lua function to call.  It can be followed by any number of string
-values, which will be passed to the function as its arguments.  Before
-being passed to the function, this values undergo backreference
-expansion and request accessor interpretation (@pxref{Request
-modifications}).
+conditions are applied using @code{LuaMatch} statements in
+@code{Service} sections.  The @code{LuaMatch} statement takes at least
+one argument: the name of Lua function to call.  It can be followed by
+any number of string values, which will be passed to the function as
+its arguments.  Before being passed to the function, these values
+undergo backreference expansion and request accessor interpretation
+(@pxref{Request modifications}).
 
-  The function name argument can be either an unqualified name, as
+  The first argument can be either an unqualified name, as
 @samp{mycond}, or a fully qualified one, as @samp{modname.mycond}.
 Use the latter form to call functions defined in modules.
 
@@ -2457,7 +2457,7 @@ Use the latter form to call functions defined in modules.
 the built-in variable @code{http.req}, described in @ref{Lua API}.
 
   To illustrate the concept, here's the definition of a Lua test that
-returns @code{true} if the request header named in its first argument
+returns @code{true} if the value of a header named in its first argument
 matches any of its remaining arguments, treated as anchored Lua patterns:
 
 @example
@@ -2561,16 +2561,16 @@ End
 @section Changing requests and responses in Lua
 @cindex LuaModify
   The @code{LuaModify} configuration statement instructs
-@command{pound} to invoke a Lua function, ignoring its return value,
-if any.  In other words, the function is called for its side effects,
+@command{pound} to invoke a Lua function, ignoring its return value.
+In other words, the function is called for its side effects,
 whatever they are.
 
-  Syntactically, it is similar to the @code{LuaMatch} statement,
+  Syntactically, the statement is similar to @code{LuaMatch},
 discussed in the previous section: the function name is supplied as
 its first parameter and the arguments, if any, as its remaining
 parameters.  Only string arguments are allowed.
 
-  The statement can appear anyplace where other request modification
+  @code{LuaModify} can appear anyplace where other request modification
 statements are allowed: i.e. in @code{ListenHTTP} (or
 @code{ListenHTTPS}), @code{Service}, @code{Match} and @code{Rewrite}
 sections.
@@ -2589,21 +2589,21 @@ returning it back to the client.  To do so, the function invoked by
 @node Cookie injection
 @subsection Cookie Injection
 @cindex cookie injection
-  Cookie injection is a special technique that ensures that
+  Cookie injection is a special technique which ensures that
 requests from a client are always forwarded to the same backend, even
 if the backend server in question does not provide any mechanism for
 session tracking.  It works as follows.  Upon first connection,
 @command{pound} adds to the backend response a @code{Set-Cookie}
 header with a unique cookie generated for this purpose.  This ensures
-that further requests from that client will bear this cookie.  If
-@command{pound} is configured to use that cookie for session tracking
-(@pxref{Sessions}), all subsequent requests from that client will go to
-the same backend.
+that further requests from that client will bear this cookie.  Then,
+it will suffice to configure @command{pound} to use that cookie for
+session tracking (@pxref{Sessions}), and all subsequent requests from
+that client will go to the same backend.
 
   In this subsection we will show how to implement cookie injection
-in Lua using the @code{LuaModify} directive.
+in Lua using @code{LuaModify}.
 
-  Let's start from the Lua code.  We will need a function that,
+  Let's start from the Lua code.  We need a function that,
 being invoked with the name of cookie as its argument, will check if
 that cookie is present in the request and if not, will create it by
 adding a @code{Set-Cookie} header to the response from backend:
@@ -2612,9 +2612,9 @@ adding a @code{Set-Cookie} header to the response from backend:
 function inject(name, ttl)
 @end example
 
-Here, the @var{name} argument supplies the name of the cookie to check
-for, and @var{ttl} provides its time-to-live in seconds, which is used
-if the cookie needs to be set.
+Here, @var{name} supplies the name of the cookie to check for, and
+@var{ttl} provides its time-to-live in seconds, which is used if the
+cookie needs to be set.
 
 Functions for operating on cookies are supplied by the @file{cookie.lua}
 module, described in @ref{cookie.lua}.  To generate unique session
@@ -2630,7 +2630,7 @@ local _M = @{@}
 local uuid = require('lua-uuid')
 local cookie = require('cookie')
 
--- Unless cookie @var{name} is already set, create it and initialize
+-- Unless cookie @var{name} is already set, create and initialize it
 -- to a unique session identifier.  @var{ttl} supplies @code{Max-Age}.
 function _M.inject(name, ttl)
    local cookie = cookie.get(name)
@@ -2654,7 +2654,7 @@ End
 @end group
 @end example
 
-  Then, the @code{Section} section which should implement cookie
+  Then, the @code{Service} section which should implement cookie
 injection, must be configured to track sessions by the value of a
 cookie, and the @code{inject} function must be called on each backend
 response.  Suppose the cookie used for session tracking is named
@@ -2681,21 +2681,21 @@ in the @code{Session} section.
 @node Stash
 @section Sharing data between Lua invocations
 @cindex stash
-  It is often necessary to share data between Lua functions used as
+  Sometimes it is necessary to share data between Lua functions used as
 conditions and modifiers in @command{pound} configuration file.  An
 obvious way of doing so is using Lua global variables.  This approach,
 however, poses one major problem: values stored in globals will
 persist not only when processing a single HTTP request, but also
 between different HTTP requests, and this can cause undesirable
-effects.
+side effects.
 
   To avoid this, @command{pound} provides a special built-in variable
-@code{stash}.  Its value is a table guaranteed to be cleared when a
-worker thread starts processing a new HTTP request.  Applications can
+@code{stash}.  Its value is a table whose contents persist only while
+a singe HTTP request is being processed.  Applications can
 fill it with whatever values they like.
 
-  To illustrate its use let's change the @code{bearer} module from the
-previous section so it can be used to select the service to use based
+  To illustrate its use let's change the @code{bearer} module from
+@ref{LuaMatch}, so it can be used to select the service to use based
 on JWT claims.  First, the @code{bearer.ok} function should store the
 parsed JWT object in stash before returning.  Its last lines will then
 look like:
@@ -2759,20 +2759,20 @@ value to verify if the corresponding claim is true: the service
   Lua extensions can also be used to define new backends.  Similarly
 to conditions, a function implementing a backend can have an arbitrary
 number of arguments.  It is not supposed to return any values, though.
-Before returning, it should define the response to be returned to the
-client.  It does so by assigning values to the fields in the internal
-variable @code{http.resp}:
+Instead, before returning, it should define the response to be returned to the
+client.  It does so by initializing fields of the internal variable
+@code{http.resp}:
 
 @table @code
 @item code
-This field must be initialized to the HTTP status code (an integer
+This field must be assigned the HTTP status code (an integer
 value in the range 100 to 599).  If it is not initialized after the
 backend function returns, @command{pound} will respond with the
 default @samp{internal server error} page.
 
 @item reason
 This is a textual reason corresponding to the status code.  This value
-is optional.  If not set, @command{pound} will use the default value
+is optional.  If not initialized, @command{pound} will use the default value
 for the returned status code, if it is one of the codes supported
 internally (@pxref{Error definitions}).  Otherwise the reason field
 will remain empty.
@@ -2809,7 +2809,7 @@ end
 @end group
 @end example
 
-To use this backend, we modify the @samp{auth} backend as follows:
+To use this backend, we modify the @samp{auth} service as follows:
 
 @example
 @group
@@ -2880,6 +2880,7 @@ Emergency messages
 Returns identifier of the current @code{pound} thread.
 @end deftypemethod
 
+@anchor{gcall}
 @defmethod pound gcall (string @var{func}, ...)
 Call function @var{func} defined in a globally-loaded Lua module,
 passing it the remained arguments.  Return whatever values @var{func}
@@ -2987,7 +2988,8 @@ http.req.headers['Host'] @result{} "example.net"
 @end example
 @end deftypecv
 
-For functions invoked using @code{LuaBackend} directive, the @code{http}
+For functions invoked from @code{LuaBackend} or Lua directives used
+in @code{Rewrite response} context, the @code{http}
 module provides methods for examining and updating the response.
 
 @deftypecv Field http table resp
@@ -3034,11 +3036,13 @@ different @command{pound} handlers.  For example, a test invoked by
 @code{LuaMatch} directive can leave there some data for use by the backend
 (@code{LuaBackend}).
 
-Upon receiving the HTTP request, this table is guaranteed to be
+Upon receiving a new HTTP request, this table is guaranteed to be
 empty.  The values stored in it persist until the response is sent.
 
-Notice, that @code{stash} is unique for each Lua state, so functions
-loaded globally cannot pass data to per-thread functions, and vice versa.
+Notice, that @code{stash} is unique for each Lua state, so that it
+cannot be used to pass data from functions loaded globally to
+per-thread ones, and vice versa.  @xref{gcall}, for a ways to
+interface between local and global contexts.
 @end deftypevr
 
 @node Logging
