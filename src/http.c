@@ -1438,6 +1438,9 @@ error_response (POUND_HTTP *phttp)
   int err = phttp->backend->v.error.status;
   struct http_errmsg *ep;
 
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
   if (phttp->backend->v.error.msg.text)
     ep = &phttp->backend->v.error.msg;
   else if (phttp->lstn->http_err[err])
@@ -1550,9 +1553,13 @@ http_response_ok (POUND_HTTP *phttp)
 static int
 lua_response (POUND_HTTP *phttp)
 {
-  int res = pndlua_apply (pndlua_backend, phttp,
-			  &phttp->request,
-			  &phttp->backend->v.lua, NULL);
+  int res;
+
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  res = pndlua_apply (pndlua_backend, phttp, &phttp->request,
+		      &phttp->backend->v.lua, NULL);
   if (res != -1)
     {
       /* Verify response. */
@@ -1583,6 +1590,9 @@ lua_response (POUND_HTTP *phttp)
 
 	  body = phttp->response.body;
 	  phttp->res_bytes = body ? stringbuf_len (body) : 0;
+
+	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
 	  bio_http_reply_start_list (phttp->cl,
 				     phttp->request.version,
