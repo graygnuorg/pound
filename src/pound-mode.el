@@ -411,6 +411,7 @@
     "Condition"
     "CombineHeaders"
     "Resolver"
+    "Else"
     "Rewrite"
     "Session"))
 
@@ -498,7 +499,7 @@ Return t if such was found, nil otherwise."
 (defun pound-indent-level ()
   (save-excursion
     (beginning-of-line)
-    (let ((atend (looking-at "^[ \t]*End\\>"))
+    (let ((atend (looking-at "^[ \t]*\\(End\\|Else\\)\\>"))
 	  (level (length (pound-get-context))))
       (if (and (> level 0) atend) (1- level) level))))
 
