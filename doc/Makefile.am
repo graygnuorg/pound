@@ -36,3 +36,11 @@ manual:
 	 $(GENDOCS) -C manual -o otherdoc.texi $(PACKAGE) otherdoc.texi.in
 	$(MAKEINFO) $(AM_MAKEINFOFLAGS) $(MAKEINFOFLAGS) -DWEBDOC \
 	   --html $(MAKEINFO_INIT_FILE_FLAG) $(info_TEXINFOS) -o manual
+
+.PHONY: docserver
+docserver: $(top_builddir)/src/pound
+	@if test -f docserver.cfg; then \
+	  $(top_builddir)/src/pound -Winclude-dir=$(builddir) -e -f docserver.cfg; \
+	else \
+	  echo >&2 "This command must be run in a cloned git tree"; \
+	fi
