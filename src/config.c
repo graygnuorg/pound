@@ -2667,26 +2667,17 @@ parse_sendfile_backend (void *call_data, void *section_data)
   BACKEND *be;
   int fd;
   struct locus_range range;
-  struct stat st;
+  WORKDIR *wd = get_include_wd ();
 
   range.beg = last_token_locus_range ()->beg;
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
   range.end = last_token_locus_range ()->end;
 
-  if (stat (tok->str, &st))
+  fd = openat (wd->fd, tok->str, O_DIRECTORY | O_RDONLY | O_NDELAY);
+  if (fd == -1)
     {
-      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-  if (!S_ISDIR (st.st_mode))
-    {
-      conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-  if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
-    {
-      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
+      conf_error ("can't open %s: %s", tok->str, strerror (errno));
       return CFGPARSER_FAIL;
     }
 

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2025-11-26
+Pound -- history of user-visible changes. 2025-11-30
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -87,6 +87,11 @@ percent-decoding prior to comparison.  E.g.:
 Similarly, SetPath and SetQueryParam statements accept new option
 -encode.  When given this option, the value will be percent-encoded
 prior to setting it.
+
+* Relative pathname in SendFile statement.
+
+If the argument to SendFile statement is not an absolute file name, it
+is resolved relative to pound include directory.
 
 Version 4.18, 2025-10-29
 

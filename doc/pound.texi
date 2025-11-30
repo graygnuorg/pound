@@ -2899,8 +2899,8 @@ will be locked until @var{func} returns.
 Types of arguments that can be passed to @var{func} and returned from
 it are limited to the following: @code{nil}, boolean, number, string,
 and table.  In the latter case, the same restriction applies to keys
-and values of the table.  Besides, tables cannot contain reference
-cycles.
+and values of the table.  Besides, tables cannot contain cyclic
+references.
 
 @item
 Calling this function from a globally-loaded module is also allowed.
@@ -6391,6 +6391,9 @@ Service
     SendFile "/var/lib/pound/static"
 End
 @end example
+
+If @var{dir} is not an absolute file name, it is resolved relative to
+@command{pound} include directory (@pxref{include directory}).
 @end deffn
 
 @deffn {Service directive} Control
