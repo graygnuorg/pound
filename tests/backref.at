@@ -170,6 +170,73 @@ x-orig-uri: /echo/i/h/g/f/e/d/c/b
 end
 ])
 
+# Check if backreference groups are indexed properly.
+PT_CHECK([[ListenHTTP
+	Service
+		Path -re "([^./]+\\.([^.]+))$"
+		Rewrite
+			# Unqualified backreference here refers to the last
+			# matched condition, i.e. to the Path.
+			StringMatch "$2" "html"
+			# If the above condition is met, new backreference
+			# group appears on stack, so that backreferences in
+			# Path must be qualified by group index.
+			SetPath "/echo/markup/$1(1)"
+		Else
+			# Same here.  Additionally, this checks that failed
+			# conditionals don't alter backreference group indices.
+			StringMatch "$2" "txt"
+			SetPath "/echo/plaintext/$1(1)"
+		End
+		Backend
+		End
+	End
+End]],
+[GET /index.html
+end
+
+200
+x-orig-uri: /echo/markup/index.html
+end
+
+GET /readme.txt
+end
+
+200
+x-orig-uri: /echo/plaintext/readme.txt
+end
+])
+
+# Text explicit group indexing.
+PT_CHECK([[ListenHTTP
+	Service
+		Path -tag "suffix" -re "([^./]+\\.([^.]+))$"
+		Rewrite
+			StringMatch "$2(suffix)" "html"
+			SetPath "/echo/markup/$1(suffix)"
+		Else
+			StringMatch "$2(suffix)" "txt"
+			SetPath "/echo/plaintext/$1(suffix)"
+		End
+		Backend
+		End
+	End
+End]],
+[GET /index.html
+end
+
+200
+x-orig-uri: /echo/markup/index.html
+end
+
+GET /readme.txt
+end
+
+200
+x-orig-uri: /echo/plaintext/readme.txt
+end
+])
+
 AT_CLEANUP
 
 

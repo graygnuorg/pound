@@ -1049,6 +1049,8 @@ struct submatch
   STRING *tag;
 };
 
+#define SUBMATCH_INITIALIZER { 0, 0, NULL, NULL, NULL }
+
 #define SMQ_SIZE 8
 
 struct submatch_queue
@@ -1056,8 +1058,6 @@ struct submatch_queue
   int cur;
   struct submatch sm[SMQ_SIZE+1];
 };
-
-#define SUBMATCH_INITIALIZER { 0, 0, NULL, NULL }
 
 static inline void
 submatch_init (struct submatch *sm)

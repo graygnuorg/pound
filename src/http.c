@@ -531,12 +531,14 @@ submatch_queue_get (struct submatch_queue const *smq, int n)
 }
 
 static struct submatch *
-submatch_queue_push (struct submatch_queue *smq, STRING *tag)
+submatch_queue_push (struct submatch_queue *smq, STRING *tag,
+		     struct submatch *src)
 {
   struct submatch *sm;
   smq->cur = (smq->cur + 1) % SMQ_SIZE;
   sm = submatch_queue_get (smq, 0);
   submatch_reset (sm);
+  *sm = *src;
   sm->tag = string_ref (tag);
   return sm;
 }
@@ -3691,6 +3693,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
   int r;
   SERVICE_COND *subcond;
   char const *str;
+  struct submatch sm = SUBMATCH_INITIALIZER;
 
   watcher_lock (cond->watcher);
   switch (cond->type)
@@ -3713,25 +3716,22 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
     case COND_URL:
       if (http_request_get_url (req, &str) == -1)
 	res = -1;
-      else
-	res = submatch_exec (cond->re, str,
-			     submatch_queue_push (&phttp->smq, cond->tag));
+      else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
     case COND_PATH:
       if (http_request_get_path (req, &str) == -1)
 	res = -1;
-      else
-	res = submatch_exec_decode (cond->re, str, cond->decode,
-				 submatch_queue_push (&phttp->smq, cond->tag));
+      else if ((res = submatch_exec_decode (cond->re, str, cond->decode, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
     case COND_QUERY:
       if (http_request_get_query (req, &str) == -1)
 	res = -1;
-      else
-	res = submatch_exec (cond->re, str,
-			     submatch_queue_push (&phttp->smq, cond->tag));
+      else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
     case COND_QUERY_PARAM:
@@ -3750,20 +3750,20 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	default:
 	  if (str == NULL)
 	    res = 0;
-	  else
-	    res = submatch_exec_decode (cond->sm.re, str, cond->decode,
-				 submatch_queue_push (&phttp->smq, cond->tag));
+	  else if ((res = submatch_exec_decode (cond->sm.re, str, cond->decode,
+						&sm)) == 1)
+	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	}
       break;
 
     case COND_HDR:
-      res = match_headers (&req->headers, cond->re,
-			   submatch_queue_push (&phttp->smq, cond->tag));
+      if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
     case COND_HOST:
-      res = match_headers (&req->headers, cond->re,
-			   submatch_queue_push (&phttp->smq, cond->tag));
+      if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (res)
 	{
 	  /*
@@ -3820,8 +3820,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 			      "string_match");
 	if (subj)
 	  {
-	    res = submatch_exec (cond->sm.re, subj,
-				 submatch_queue_push (&phttp->smq, cond->tag));
+	    if ((res = submatch_exec (cond->sm.re, subj, &sm)) == 1)
+	      submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	    free (subj);
 	  }
 	else
