@@ -473,7 +473,7 @@ Print short command line usage summary and exit.
 Sets location of the @dfn{PID file}.  This is the file where
 @command{pound} will write its PID after startup.  This option
 overrides the value set by the @code{PIDFile} configuration setting
-(@pxref{PIDFile}).
+(@pxref{PIDFile}).  Use @option{-p -} to disable creation of PID file.
 
 @opindex -v
 @item -v
@@ -3775,6 +3775,10 @@ also be set from command line, using @option{-p} command line option
 Notice the following:
 
 @enumerate 1
+@item
+Setting this directive to @samp{-} (a dash) turns creation of
+a PID file off.
+
 @item
 When running with a supervisor, this file holds PID of the supervisor
 process.  Otherwise, it holds PID of the main @comment{pound} process.

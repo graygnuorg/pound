@@ -6453,6 +6453,8 @@ config_parse (int argc, char **argv)
 
   if (pid_file_option)
     pid_name = pid_file_option;
+  if (strcmp (pid_name, "-") == 0)
+    pid_name = NULL;
 
   if (foreground_option)
     daemonize = 0;

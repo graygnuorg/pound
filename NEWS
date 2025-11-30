@@ -92,6 +92,10 @@ prior to setting it.
 
 If the argument to SendFile statement is not an absolute file name, it
 is resolved relative to pound include directory.
+
+* Turning PID file off.
+
+To disable PID file creation, use PIDFile "-".
 
 Version 4.18, 2025-10-29
 
