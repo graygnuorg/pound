@@ -866,9 +866,19 @@ req_query_str (lua_State *L)
 {
   struct req_ud *ud = pndlua_get_userdata (L, 1);
   char const *v;
-  if (http_request_get_query (ud->req, &v))
-    pndlua_memerr (L);
-  lua_pushstring (L, v ? v : "");
+  switch (http_request_get_query (ud->req, &v))
+    {
+    case RETRIEVE_OK:
+      lua_pushstring (L, v);
+
+    case RETRIEVE_NOT_FOUND:
+      lua_pushnil (L);
+      break;
+
+    case RETRIEVE_ERROR:
+      pndlua_memerr (L);
+      break;
+    }
   return 1;
 }
 

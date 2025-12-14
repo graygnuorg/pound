@@ -2996,9 +2996,11 @@ int
 http_request_get_query (struct http_request *req, char const **retval)
 {
   if (http_request_split (req))
-    return -1;
+    return RETRIEVE_ERROR;
+  if (req->query == NULL)
+    return RETRIEVE_NOT_FOUND;
   *retval = req->query;
-  return 0;
+  return RETRIEVE_OK;
 }
 
 static void
@@ -3025,8 +3027,16 @@ http_request_parse_query (struct http_request *req)
 {
   char const *query;
 
-  if (http_request_get_query (req, &query))
-    return -1;
+  switch (http_request_get_query (req, &query))
+    {
+    case RETRIEVE_OK:
+      break;
+    case RETRIEVE_ERROR:
+      return -1;
+    case RETRIEVE_NOT_FOUND:
+      return 0;
+    }
+
   if (query)
     {
       while (*query)
@@ -3728,10 +3738,21 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       break;
 
     case COND_QUERY:
-      if (http_request_get_query (req, &str) == -1)
-	res = -1;
-      else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
-	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      switch (http_request_get_query (req, &str))
+	{
+	case RETRIEVE_ERROR:
+	  res = -1;
+	  break;
+
+	case RETRIEVE_NOT_FOUND:
+	  res = 0;
+	  break;
+
+	case RETRIEVE_OK:
+	  if ((res = submatch_exec (cond->re, str, &sm)) == 1)
+	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
+	  break;
+	}
       break;
 
     case COND_QUERY_PARAM:
