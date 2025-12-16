@@ -77,13 +77,13 @@ AC_ARG_ENABLE([dns-tests],
 
 if test $status_dns_tests = yes; then
   AC_COMPILE_IFELSE(
-	[AC_LANG_PROGRAM([
+	[AC_LANG_PROGRAM([[
 	      #include <sys/syscall.h>
-	      int x[] = { SYS_connect, SYS_sendto, SYS_recvfrom };
-	   ],
-	   [[void main(){}]])],
-	 [],
-	 [status_dns_tests=no])
+	      int x[1] = { SYS_connect, SYS_sendto, SYS_recvfrom };
+	   ]],
+	   [return 0;])],
+	[],
+	[status_dns_tests=no])
 fi
 
 AM_CONDITIONAL([COND_BUILD_FAKEDNS], [test "$status_dns_tests" = yes])
@@ -238,7 +238,24 @@ AC_CHECK_FUNCS([inotify_init kqueue])
 if test "$ac_cv_header_sys_inotify_h/$ac_cv_func_inotify_init" = yes/yes; then
   status_fsevmon=inotify
 elif test "$ac_cv_header_sys_event_h/$ac_cv_func_kqueue" = yes/yes; then
-  status_fsevmon=kqueue
+  # The code in src/watcher/kqueue.c relies on kqueue being able to report
+  # that the file was modified and closed, either directly (via the
+  # NOTE_CLOSE_WRITE event) or indirectly (looking for NOTE_CLOSE and
+  # NOTE_WRITE). This code is disabled if neither NOTE_CLOSE nor
+  # NOTE_CLOSE_WRITE is defined (notable cases: Darwin and NetBSD).
+  AC_COMPILE_IFELSE(
+    [AC_LANG_PROGRAM([
+       #include <sys/event.h>
+       ],
+       [
+#if defined(NOTE_CLOSE) || defined(NOTE_CLOSE_WRITE)
+	   return 0;
+#else
+# error "Either NOTE_CLOSE or NOTE_CLOSE_WRITE must be defined"
+#endif
+       ])],
+     [status_fsevmon=kqueue],
+     [status_fsevmon=none])
 else
   status_fsevmon=none
 fi
