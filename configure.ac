@@ -79,7 +79,7 @@ if test $status_dns_tests = yes; then
   AC_COMPILE_IFELSE(
 	[AC_LANG_PROGRAM([[
 	      #include <sys/syscall.h>
-	      int x[1] = { SYS_connect, SYS_sendto, SYS_recvfrom };
+	      int x[] = { SYS_connect, SYS_sendto, SYS_recvfrom };
 	   ]],
 	   [return 0;])],
 	[],
