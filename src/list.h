@@ -43,7 +43,7 @@
   while (0)
 
 /* Insert elt at the head of the list. */
-#define SLIST_INSERT_HEAD(elt, head, field)			\
+#define SLIST_INSERT_HEAD(head, elt, field)			\
   do								\
     {								\
       if (((elt)->field = (head)->sl_first) == NULL)		\

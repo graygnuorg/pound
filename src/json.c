@@ -684,7 +684,7 @@ json_object_lookup_or_install (struct json_object *obj, char const *name,
 
   if (!l)
     {
-      SLIST_INSERT_HEAD (m, &obj->pair_head, next);
+      SLIST_INSERT_HEAD (&obj->pair_head, m, next);
     }
   else
     {
