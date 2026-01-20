@@ -1791,6 +1791,95 @@ strtoclen (char const *arg, int base, CONTENT_LENGTH *retval, char **endptr)
   return rc;
 }
 
+static inline char *
+c_skiptoken (char const *p)
+{
+  while (*p && c_istchar (*p))
+    p++;
+  return (char*) p;
+}
+
+/*
+ * RFC 9110, sect. 5.6.4. "Quoted strings"
+ *
+ * quoted-string  = DQUOTE *( qdtext / quoted-pair ) DQUOTE
+ * qdtext         = HTAB / SP / %x21 / %x23-5B / %x5D-7E / obs-text
+ * quoted-pair    = "\" ( HTAB / SP / VCHAR / obs-text )
+ *
+ * obs-text = %x80-FF
+ */
+static char *
+c_skipquote (char const *input)
+{
+  unsigned char *p = (unsigned char *)input;
+  for (;;)
+    {
+      p++;
+      if (*p == 0 || *p == '"')
+	break;
+
+      if (c_isblank (*p) || *p == '|' ||
+	  (*p >= 0x23 && *p <= 0x5b) || (*p >= 0x5d && *p <= 0x7e) ||
+	  (*p >= 0x80 && *p <= 0xff))
+	continue;
+      else if (*p == '\\')
+	{
+	  ++p;
+	  if (c_isblank (*p) || c_isgraph (*p) || (*p >= 0x80 && *p <= 0xff))
+	    continue;
+	}
+
+      break;
+    }
+  return (char*) p;
+}
+
+/*
+ * RFC 9112, 7.7.1:
+ *
+ * chunk-ext      = *( BWS ";" BWS chunk-ext-name
+ *                     [ BWS "=" BWS chunk-ext-val ] )
+ *
+ * chunk-ext-name = token
+ * chunk-ext-val  = token / quoted-string
+ *
+ */
+static int
+eat_chunk_ext (char const *p)
+{
+  while (*p)
+    {
+      p = c_trimlws (p, NULL);
+      if (*p == 0)
+	return 0;
+      else if (*p != ';')
+	return 1;
+
+      p = c_trimlws (p+1, NULL);
+      if (!c_istchar (*p))
+	return 1;
+
+      p = c_trimlws (c_skiptoken (p), NULL);
+      if (*p != '=')
+	return 1;
+      p = c_trimlws (p+1, NULL);
+
+      if (*p == '"')
+	{
+	  p = c_skipquote (p);
+	  if (*p == '"')
+	    p++;
+	  else
+	    return 1;
+	}
+      else if (c_istchar (*p))
+	p = c_skiptoken (p);
+      else
+	return 1;
+    }
+  return 0;
+}
+
 enum
   {
     CL_HEADER,
@@ -1811,8 +1900,16 @@ get_content_length (char const *arg, int mode)
   p = (char*) c_trimlws (p, NULL);
   if (*p)
     {
-      if (!(mode == CL_CHUNK && *p == ';'))
-	return NO_CONTENT_LENGTH;
+      switch (mode)
+	{
+	case CL_CHUNK:
+	  if (eat_chunk_ext (p))
+	    return NO_CONTENT_LENGTH;
+	  break;
+
+	case CL_HEADER:
+	  return NO_CONTENT_LENGTH;
+	}
     }
 
   return n;
@@ -1846,8 +1943,8 @@ copy_chunks (BIO *cl, BIO *be, char *buf, unsigned bufsize,
 	  /*
 	   * not chunk header
 	   */
-	  logmsg (LOG_NOTICE, "(%"PRItid") bad chunk header <%s>: %s",
-		  POUND_TID (), buf, strerror (errno));
+	  logmsg (LOG_NOTICE, "(%"PRItid") bad chunk header <%s>",
+		  POUND_TID (), buf);
 	  return HTTP_STATUS_BAD_REQUEST;
 	}
       if (!no_write)

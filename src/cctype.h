@@ -1,16 +1,16 @@
 /* This file is part of Pound.
    Copyright (C) 2025 Sergey Poznyakoff.
- 
+
    Pound is free software; you can redistribute it and/or modify
    it under the terms of the GNU General Public License as published by
    the Free Software Foundation; either version 3, or (at your option)
    any later version.
- 
+
    Pound is distributed in the hope that it will be useful,
    but WITHOUT ANY WARRANTY; without even the implied warranty of
    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
    GNU General Public License for more details.
- 
+
    You should have received a copy of the GNU General Public License
    along with Pound.  If not, see <http://www.gnu.org/licenses/>. */
 
@@ -28,6 +28,8 @@
 #define CCTYPE_SPACE   0x0200
 #define CCTYPE_XLETR   0x0400
 #define CCTYPE_UNRSRV  0x0800 /* RFC 3986 section 2.2 unreserved characters */
+#define CCTYPE_DELIM   0x1000 /* Delimiter; RFC 9110, sect. 5.6.2 */
+#define CCTYPE_TCHAR   0x2000 /* tchar; ibid. */
 #define CC_TAB_MAX     128
 
 extern int cc_tab[CC_TAB_MAX];
@@ -56,6 +58,8 @@ c_is_class (int c, int class)
 #define c_isxdigit(c) c_is_class (c, CCTYPE_DIGIT|CCTYPE_XLETR)
 #define c_isalnum(c)  c_is_class (c, CCTYPE_ALPHA|CCTYPE_DIGIT)
 #define c_isblank(c)  c_is_class (c, CCTYPE_BLANK)
+#define c_isdelim(c)  c_is_class (c, CCTYPE_DELIM)
+#define c_istchar(c)  c_is_class (c, CCTYPE_TCHAR)
 
 static inline int
 c_tolower (int c)
@@ -79,6 +83,3 @@ size_t c_memrcspn (char const *str, int class, size_t len);
 size_t c_trimrws (char const *str, size_t len);
 char *c_trimlws (char const *str, size_t *plen);
 char *c_trimws (char const *str, size_t *plen);
-
-
-
