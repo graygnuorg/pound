@@ -113,6 +113,7 @@ TESTSUITE_AT = \
  logsup.at\
  lstset.at\
  lua-be.at\
+ lua-gcall.at\
  lua-load.at\
  lua-match.at\
  lua-modresp.at\

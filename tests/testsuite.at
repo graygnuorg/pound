@@ -98,6 +98,7 @@ m4_include([lua-http.at])
 m4_include([lua-modreq.at])
 m4_include([lua-modresp.at])
 m4_include([lua-be.at])
+m4_include([lua-gcall.at])
 
 AT_BANNER([Dynamically updated conditions])
 m4_include([dynacl.at])

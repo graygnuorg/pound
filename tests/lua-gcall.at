@@ -1,0 +1,141 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2025 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+
+AT_SETUP([gcall function])
+AT_KEYWORDS([lua lua-gcall])
+AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
+
+AT_DATA([global.lua],
+[function retscalar(a)
+  return a
+end
+function rettable(a,b,c)
+  return { a = a, b = b, c = c }
+end
+function retmulti(a,b,c)
+  return a,b,c
+end  
+])
+
+AT_DATA([local.lua],
+[[function sdump(o)
+   local skeys = function(t)
+      local kt = {}
+      local i = 1
+      for k,v in pairs(t) do
+	 kt[i] = k
+	 i = i + 1
+      end
+      table.sort(kt, function (a,b)
+		    local ta, tb = type(ta), type(tb)
+		    if ta == tb then
+		       return sdump(a) < sdump(b)
+		    else
+		       return ta < tb
+		    end
+      end)
+      return kt
+   end
+      
+   if type(o) == 'nil' or
+      type(o) == 'number' or
+      type(o) == 'boolean' then
+      return tostring(o), nil
+   elseif type(o) == 'string' then
+      return string.format("%q", o)
+   elseif type(o) == 'table' then
+      local s = '{'
+      for _,k in pairs(skeys(o)) do
+	 i, e = sdump(k)
+	 if e ~= nil then
+	    return '', e
+	 end
+	 s = s .. '['.. i ..'] = ' .. sdump(o[k]) .. ','
+      end
+      return s .. '}', nil
+   else
+      return '', "cannot serialize "..type(o)
+   end
+end
+
+function check_scalar(a)
+  http.resp.headers['x-nil'] = tostring(pound.gcall("retscalar"))
+  http.resp.headers['x-integer'] = string.format("%d",(pound.gcall("retscalar", 137)))
+  http.resp.headers['x-number'] = string.format("%9.7f",(pound.gcall("retscalar", 3.1415926)))
+  http.resp.headers['x-bool'] = tostring(pound.gcall("retscalar", true))
+  http.resp.headers['x-string'] = tostring(pound.gcall("retscalar", "abc"))
+end
+
+function check_table()
+  x = pound.gcall("rettable", 1, "text", {
+	  10, 22,
+          subtab = { name = "SubTable",
+	             value = { 1, false, "string" }
+          }
+      })
+  http.resp.headers['x-table'] = sdump(x)	  
+end  
+]])
+
+PT_CHECK([Lua
+	LoadGlobal "global.lua"
+	Load "local.lua"
+End
+ListenHTTP
+	Rewrite response
+		LuaModify "check_scalar"
+	End
+	Service
+		Backend
+		End
+	End
+End
+],
+[GET /echo/file
+end
+
+200
+x-nil: nil
+x-integer: 137
+x-number: 3.1415926
+x-bool: true
+x-string: abc
+end
+])
+
+PT_CHECK([Lua
+	LoadGlobal "global.lua"
+	Load "local.lua"
+End
+ListenHTTP
+	Rewrite response
+		LuaModify "check_table"
+	End
+	Service
+		Backend
+		End
+	End
+End
+],
+[[GET /echo/file
+end
+
+200
+x-table: {["a"] = 1.0,["b"] = "text",["c"] = {["subtab"] = {["name"] = "SubTable",["value"] = {[1] = 1,[2] = false,[3] = "string",},},[1] = 10,[2] = 22,},}
+end
+]])
+AT_CLEANUP
+
