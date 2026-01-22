@@ -282,11 +282,11 @@ static char pndlua_pound_dump[] = "return function (o)\n\
    elseif type(o) == 'table' then\n\
       local s = '{'\n\
       for k,v in pairs(o) do\n\
-	 i, e = dump(k)\n\
+	 i, e = pound.dump(k)\n\
 	 if e ~= nil then\n\
 	    return '', e\n\
 	 end\n\
-	 s = s .. '['.. i ..'] = ' .. dump(v) .. ','\n\
+	 s = s .. '['.. i ..'] = ' .. pound.dump(v) .. ','\n\
       end\n\
       return s .. '}', nil\n\
    else\n\
@@ -306,7 +306,7 @@ pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 
   pushname (src, "pound.dump");
   if (s < 0)
-    s -= 2;
+    s--;
   for (i = 0; i < n; i++)
     {
       char const *str;
@@ -331,27 +331,28 @@ pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 
 	case LUA_TTABLE:
 	  /* Get next value from the local stack. */
-	  lua_pushvalue (src, -1);
 	  lua_pushvalue (src, s + i);
+	  lua_pushvalue (src, -2);
+	  lua_rotate (src, -2, -1);
 	  if (lua_pcall (src, 1, 2, 0) != LUA_OK)
 	    {
-	      lua_pushfstring (src, "error converting argument %d: %s",
+	      if (i)
+		lua_pop (dst, i);
+	      lua_pushfstring (dst, "error converting argument %d: %s",
 			       i, lua_tostring (src, -1));
 	      lua_remove (src, -2);
 	      lua_remove (src, -2);
-	      if (i)
-		lua_pop (dst, i);
 	      return -1;
 	    }
 
 	  if (lua_type (src, -1) != LUA_TNIL)
 	    {
-	      lua_pushfstring (src, "error converting argument %d: %s",
+	      if (i)
+		lua_pop (dst, i);
+	      lua_pushfstring (dst, "error converting argument %d: %s",
 			       i, lua_tostring (src, -1));
 	      lua_remove (src, -2);
 	      lua_remove (src, -2);
-	      if (i)
-		lua_pop (dst, i);
 	      return -1;
 	    }
 
@@ -365,20 +366,20 @@ pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 	  /* Load it to the global stack. */
 	  if (luaL_loadstring (dst, str) != LUA_OK)
 	    {
-	      lua_pushfstring (src, "error passing argument %d: %s",
+	      lua_pop (dst, i + 1);
+	      lua_pushfstring (dst, "error passing argument %d: %s",
 			       i, lua_tostring (dst, -1));
 	      lua_remove (src, -2);
 	      lua_remove (src, -2);
-	      lua_pop (dst, i + 1);
 	      return -1;
 	    }
 	  if (lua_pcall (dst, 0, 1, 0) != LUA_OK)
 	    {
-	      lua_pushfstring (src, "error passing argument %d: %s",
+	      lua_pop (dst, i + 1);
+	      lua_pushfstring (dst, "error passing argument %d: %s",
 			       i, lua_tostring (dst, -1));
 	      lua_remove (src, -2);
 	      lua_remove (src, -2);
-	      lua_pop (dst, i + 1);
 	      return -1;
 	    }
 
