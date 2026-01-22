@@ -282,11 +282,15 @@ static char pndlua_pound_dump[] = "return function (o)\n\
    elseif type(o) == 'table' then\n\
       local s = '{'\n\
       for k,v in pairs(o) do\n\
-	 i, e = pound.dump(k)\n\
+	 local i, e = pound.dump(k)\n\
 	 if e ~= nil then\n\
 	    return '', e\n\
 	 end\n\
-	 s = s .. '['.. i ..'] = ' .. pound.dump(v) .. ','\n\
+	 v, e = pound.dump(v)\n\
+	 if e ~= nil then\n\
+	    return '', e\n\
+	 end\n\
+	 s = s .. '['.. i ..'] = ' .. v .. ','\n\
       end\n\
       return s .. '}', nil\n\
    else\n\
@@ -303,6 +307,10 @@ static int
 pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 {
   int i;
+  int rc = LUA_OK;
+
+  if (!lua_checkstack (dst, n) || !lua_checkstack (src, 1))
+    return -2;
 
   pushname (src, "pound.dump");
   if (s < 0)
@@ -331,71 +339,86 @@ pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 
 	case LUA_TTABLE:
 	  /* Get next value from the local stack. */
+	  if (!lua_checkstack (src, 2))
+	    {
+	      rc = LUA_ERRMEM;
+	      goto err;
+	    }
 	  lua_pushvalue (src, s + i);
 	  lua_pushvalue (src, -2);
 	  lua_rotate (src, -2, -1);
 	  if (lua_pcall (src, 1, 2, 0) != LUA_OK)
 	    {
-	      if (i)
-		lua_pop (dst, i);
 	      lua_pushfstring (dst, "error converting argument %d: %s",
 			       i, lua_tostring (src, -1));
-	      lua_remove (src, -2);
-	      lua_remove (src, -2);
-	      return -1;
+	      lua_pop (src, 1);
+	      rc = LUA_ERRRUN;
+	      goto err;
 	    }
 
 	  if (lua_type (src, -1) != LUA_TNIL)
 	    {
-	      if (i)
-		lua_pop (dst, i);
 	      lua_pushfstring (dst, "error converting argument %d: %s",
 			       i, lua_tostring (src, -1));
-	      lua_remove (src, -2);
-	      lua_remove (src, -2);
-	      return -1;
+	      lua_pop (src, 2);
+	      rc = LUA_ERRRUN;
+	      goto err;
 	    }
 
 	  lua_pop (src, 1);
+
+	  if (!lua_checkstack (src, 2))
+	    {
+	      rc = LUA_ERRMEM;
+	      goto err;
+	    }
 
 	  lua_pushstring (src, "return ");
 	  lua_pushvalue (src, -2);
 	  lua_concat (src, 2);
 	  str = lua_tostring (src, -1);
+	  lua_remove (src, -2);
 
 	  /* Load it to the global stack. */
 	  if (luaL_loadstring (dst, str) != LUA_OK)
 	    {
-	      lua_pop (dst, i + 1);
 	      lua_pushfstring (dst, "error passing argument %d: %s",
 			       i, lua_tostring (dst, -1));
-	      lua_remove (src, -2);
-	      lua_remove (src, -2);
-	      return -1;
-	    }
-	  if (lua_pcall (dst, 0, 1, 0) != LUA_OK)
-	    {
-	      lua_pop (dst, i + 1);
-	      lua_pushfstring (dst, "error passing argument %d: %s",
-			       i, lua_tostring (dst, -1));
-	      lua_remove (src, -2);
-	      lua_remove (src, -2);
-	      return -1;
+	      i++;
+	      lua_pop (src, 1);
+	      rc = LUA_ERRRUN;
+	      goto err;
 	    }
 
-	  lua_pop (src, 2);
+	  lua_pop (src, 1);
+	  if (lua_pcall (dst, 0, 1, 0) != LUA_OK)
+	    {
+	      lua_pushfstring (dst, "error passing argument %d: %s",
+			       i, lua_tostring (dst, -1));
+	      rc = LUA_ERRRUN;
+	      goto err;
+	    }
+
 	  break;
 
 	default:
-	  lua_pushfstring (src,
-			   "error passing argument %d: unsupported data type %s",
+	  lua_pushfstring (dst,
+			   "error passing argument %d: unsupported data type: %s",
 			   i, lua_typename (src, lua_type (src, s + i)));
-	  lua_pop (dst, i + 1);
-	  return -1;
+	  rc = LUA_ERRRUN;
+	  goto err;
 	}
     }
+ err:
+  if (rc != LUA_OK)
+    {
+      if (rc != LUA_ERRMEM)
+	lua_rotate (dst, -(i+1), 1);
+      if (i)
+	lua_pop (dst, i);
+    }
   lua_pop (src, 1);
-  return LUA_OK;
+  return rc;
 }
 
 static int
@@ -405,7 +428,7 @@ pndlua_pound_gcall (lua_State *L)
   char const *fname = lua_tostring (L, 1);
   lua_State *GL;
   int nret;
-  int res = LUA_OK, r;
+  int res = LUA_OK;
 
   if (L == pndlua_ctx[0].state)
     {
@@ -438,7 +461,9 @@ pndlua_pound_gcall (lua_State *L)
   res = pndlua_stkcopy (GL, L, nargs, 2);
   if (res != LUA_OK)
     {
-      lua_pop (GL, 1);
+      if (pndlua_stkcopy (L, GL, 1, -1) != LUA_OK)
+	res = LUA_ERRMEM;
+      lua_pop (GL, 2);
       goto err;
     }
 
@@ -447,19 +472,31 @@ pndlua_pound_gcall (lua_State *L)
   if (res != LUA_OK)
     {
       if (pndlua_stkcopy (L, GL, 1, -1) != LUA_OK)
-	lua_pop (GL, 1);
+	res = LUA_ERRMEM;
+      lua_pop (GL, 2);
       goto err;
     }
 
   nret = lua_gettop (GL) - nret;
-  if ((r = pndlua_stkcopy (L, GL, nret, - nret)) != LUA_OK)
-    res = r;
+  if ((res = pndlua_stkcopy (L, GL, nret, - nret)) != LUA_OK)
+    {
+      lua_pop (GL, 1);
+      goto err;
+    }
   lua_pop (GL, nret);
 
  err:
   pthread_mutex_unlock (&pndlua_global_mutex);
-  if (res != LUA_OK)
-    luaL_error (L, "%s", lua_tostring (L, -1));
+  switch (res)
+    {
+    case LUA_OK:
+      break;
+    case LUA_ERRMEM:
+      luaL_error (L, "%s", "out of memory");
+      break;
+    default:
+      luaL_error (L, "%s", lua_tostring (L, -1));
+    }
 
   return nret;
 }
