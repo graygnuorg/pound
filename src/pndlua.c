@@ -1213,14 +1213,91 @@ resp_set_body (lua_State *L)
   return 0;
 }
 
+enum
+  {
+    RESP_VERSION_MINOR = 7,
+    RESP_CODE_START = 9,
+    RESP_CODE_END = RESP_CODE_START + 3,
+    RESP_REASON_START
+  };
+
+static int
+normalize_response (char *resp)
+{
+  size_t n = strlen (resp);
+  char *p;
+
+  p = c_trimws (resp, &n);
+  if (p > resp)
+    memmove (resp, p, n);
+  resp[n] = 0;
+
+  if (!(c_strncasecmp (resp, "HTTP/", 5) == 0 &&
+	c_isdigit (resp[5]) && resp[6] == '.' && c_isdigit (resp[7]) &&
+	c_isspace (resp[8])))
+    return -1;
+
+  p = resp + RESP_CODE_START;
+  n = strspn (p, " \t");
+  if (n != 0)
+    memmove (p, p + n, strlen (p) + 1);
+
+  if (!(c_isdigit (resp[RESP_CODE_START]) &&
+	c_isdigit (resp[RESP_CODE_START+1]) &&
+	c_isdigit (resp[RESP_CODE_START+2])))
+    return -1;
+
+  if (resp[RESP_CODE_END] == 0)
+    return 0;
+  if (!c_isspace (resp[RESP_CODE_END]))
+    return -1;
+
+  p = resp + RESP_REASON_START;
+  n = strspn (p, " \t");
+  if (n != 0)
+    memmove (p, p + n, strlen (p) + 1);
+
+  return 0;
+}
+
+#define DEFAULT_RESP "HTTP/1.1 200 OK"
+
+static int
+check_response (POUND_HTTP *phttp)
+{
+  if (phttp->response.request == NULL)
+    {
+      phttp->response.request = strdup (DEFAULT_RESP);
+      if (!phttp->response.request)
+	{
+	  lognomem ();
+	  return -1;
+	}
+      phttp->response.request[RESP_VERSION_MINOR] =
+	phttp->request.version + '0';
+      phttp->response.version = phttp->request.version;
+      return 0;
+    }
+
+  return normalize_response (phttp->response.request);
+}
+
 static int
 resp_set_code (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  int code = lua_tointeger (L, 3);
-  if (code >= 100 && code < 600)
+  char const *s = lua_tostring (L, 3);
+  char *p;
+  long code;
+
+  errno = 0;
+  code = strtol (s, &p, 10);
+  if (errno == 0 && *p == 0 && code >= 100 && code < 600)
     {
+      if (check_response (ud->phttp))
+	luaL_error (L, "refusing to modify malformed response line");
       ud->phttp->response_code = code;
+      memcpy(ud->phttp->response.request + RESP_CODE_START, s, 3);
     }
   else
     luaL_argerror (L, 3, "argument out of allowed range");
@@ -1239,16 +1316,29 @@ resp_set_reason (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
 
-  free (ud->phttp->response.request);
+  if (check_response (ud->phttp))
+    luaL_error (L, "refusing to modify malformed response line");
+
   if (lua_isnil (L, 3))
     {
-      ud->phttp->response.request = NULL;
+      ud->phttp->response.request[RESP_CODE_END] = 0;
     }
   else
     {
-      ud->phttp->response.request = strdup (lua_tostring (L, 3));
-      if (!ud->phttp->response.request)
-	return pndlua_memerr (L);
+      char const *s = lua_tostring (L, 3);
+      size_t n = strlen (s);
+      size_t len = strlen (ud->phttp->response.request);
+
+      if (len < RESP_REASON_START + n)
+	{
+	  char *resp = realloc (ud->phttp->response.request,
+				RESP_REASON_START + n + 1);
+	  if (!resp)
+	    return pndlua_memerr (L);
+	  resp[RESP_CODE_END] = ' ';
+	  ud->phttp->response.request = resp;
+	}
+      strcpy (ud->phttp->response.request + RESP_REASON_START, s);
     }
   return 0;
 }

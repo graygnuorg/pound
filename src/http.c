@@ -1308,6 +1308,26 @@ copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, int no_write,
 }
 
 static int
+bio_memcpy (BIO *out, char const *buf, size_t len, CONTENT_LENGTH *res_bytes)
+{
+  BIO *in;
+  int rc;
+
+  if ((in = BIO_new_mem_buf (buf, len)) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") can't create BIO_new_mem_buf",
+	      POUND_TID ());
+      return -1;
+    }
+
+  rc = copy_bin (in, out, len, 0, res_bytes);
+
+  BIO_free_all (in);
+
+  return rc;
+}
+
+static int
 acme_response (POUND_HTTP *phttp)
 {
   int fd;
@@ -1590,11 +1610,11 @@ lua_response (POUND_HTTP *phttp)
 	  else
 	    reason = "";
 
-	  body = phttp->response.body;
-	  phttp->res_bytes = body ? stringbuf_len (body) : 0;
-
 	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
 	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+	  body = phttp->response.body;
+	  phttp->res_bytes = body ? stringbuf_len (body) : 0;
 
 	  bio_http_reply_start_list (phttp->cl,
 				     phttp->request.version,
@@ -4487,6 +4507,7 @@ backend_response (POUND_HTTP *phttp)
     {
       int chunked; /* True if request contains Transfer-Encoding: chunked */
       int code;
+      CONTENT_LENGTH *res_bytes = &phttp->res_bytes;
 
       /* Free previous response, if any */
       http_request_free (&phttp->response);
@@ -4693,6 +4714,26 @@ backend_response (POUND_HTTP *phttp)
        */
       if (resp_mode == RESP_OK)
 	{
+	  if (phttp->response.body)
+	    {
+	      /*
+	       * Replace the Content-Length header if they supplied
+	       * a new body.
+	       */
+	      char *p;
+	      struct stringbuf sb;
+	      stringbuf_init_log (&sb);
+	      stringbuf_printf (&sb, "Content-Length: %zu",
+				stringbuf_len (phttp->response.body));
+	      if ((p = stringbuf_finish (&sb)) == NULL)
+		{
+		  stringbuf_free (&sb);
+		  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		}
+	      http_header_list_append (&phttp->response.headers, p, H_REPLACE);
+	      stringbuf_free (&sb);
+	    }
+
 	  if (http_request_send (phttp->cl, &phttp->response))
 	    {
 	      if (errno)
@@ -4712,6 +4753,24 @@ backend_response (POUND_HTTP *phttp)
 	  return -1;
 	}
 
+      if (resp_mode == RESP_OK && phttp->response.body)
+	{
+	  int rc = bio_memcpy (phttp->cl,
+			       stringbuf_value (phttp->response.body),
+			       stringbuf_len (phttp->response.body),
+			       &phttp->res_bytes);
+	  if (rc != COPY_OK)
+	    {
+	      phttp_log (phttp, PHTTP_LOG_DFL,
+			 rc, errno,
+			 "%s while sending response",
+			 copy_status_string (rc));
+	      return -1;
+	    }
+	  resp_mode = RESP_DRAIN;
+	  res_bytes = NULL;
+	}
+
       if (!phttp->no_cont)
 	{
 	  /*
@@ -4726,7 +4785,7 @@ backend_response (POUND_HTTP *phttp)
 	      if (copy_chunks (phttp->be, phttp->cl,
 			       phttp->buffer, phttp->lstn->linebufsize,
 			       resp_mode != RESP_OK, 0,
-			       &phttp->res_bytes) != HTTP_STATUS_OK)
+			       res_bytes) != HTTP_STATUS_OK)
 		{
 		  /*
 		   * copy_chunks() has its own error messages
@@ -4741,7 +4800,7 @@ backend_response (POUND_HTTP *phttp)
 	       * for the length
 	       */
 	      int ec = copy_bin (phttp->be, phttp->cl, content_length,
-				 resp_mode != RESP_OK, &phttp->res_bytes);
+				 resp_mode != RESP_OK, res_bytes);
 	      switch (ec)
 		{
 		case COPY_OK:
@@ -4801,7 +4860,8 @@ backend_response (POUND_HTTP *phttp)
 				       "error writing response");
 			  return -1;
 			}
-		      phttp->res_bytes++;
+		      if (res_bytes)
+			++*res_bytes;
 		    }
 		  BIO_flush (phttp->cl);
 
@@ -4835,7 +4895,8 @@ backend_response (POUND_HTTP *phttp)
 			}
 		      else
 			{
-			  phttp->res_bytes += res;
+			  if (res_bytes)
+			    *res_bytes += res;
 			  BIO_flush (phttp->cl);
 			}
 		    }
@@ -4915,7 +4976,8 @@ backend_response (POUND_HTTP *phttp)
 				   "error writing ws response");
 		      return -1;
 		    }
-		  phttp->res_bytes++;
+		  if (res_bytes)
+		    ++*res_bytes;
 		}
 	      BIO_flush (phttp->cl);
 
@@ -4985,7 +5047,8 @@ backend_response (POUND_HTTP *phttp)
 		    }
 		  else
 		    {
-		      phttp->res_bytes += res;
+		      if (res_bytes)
+			*res_bytes += res;
 		      BIO_flush (phttp->cl);
 		    }
 		  p[1].revents = 0;
