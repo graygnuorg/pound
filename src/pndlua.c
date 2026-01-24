@@ -334,7 +334,11 @@ pndlua_stkcopy (lua_State *dst, lua_State *src, int n, int s)
 	  break;
 
 	case LUA_TSTRING:
-	  lua_pushstring (dst, lua_tostring (src, s + i));
+	  {
+	    size_t len;
+	    char const *str = lua_tolstring (src, s + i, &len);
+	    lua_pushlstring (dst, str, len);
+	  }
 	  break;
 
 	case LUA_TTABLE:
@@ -791,6 +795,55 @@ req_headers_len (lua_State *L)
 }
 
 /*
+ * Arguments:
+ *  1 - table
+ *  2 - current key
+ * Returns:
+ *  1 - key
+ *  2 - value
+ */
+static int
+headers_next (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  struct http_header *hdr;
+
+  if (lua_isnil (L, 2))
+    hdr = DLIST_FIRST (&ud->req->headers);
+  else
+    {
+      size_t len;
+      char const *name = lua_tolstring (L, 2, &len);
+      hdr = http_header_list_locate_name (&ud->req->headers, name, len);
+      if (hdr)
+	hdr = DLIST_NEXT (hdr, link);
+    }
+
+  if (hdr)
+    {
+      lua_pushlstring (L, http_header_name_ptr (hdr),
+		       http_header_name_len (hdr));
+      lua_pushlstring (L, http_header_value_ptr (hdr),
+		       http_header_value_len (hdr));
+      return 2;
+    }
+
+  return 0;
+}
+
+static int
+req_headers_pairs (lua_State *L)
+{
+  lua_pushcfunction (L, headers_next);
+  /* Object */
+  lua_pushvalue (L, 1);
+  /* First key */
+  lua_pushnil (L);
+
+  return 3;
+}
+
+/*
  * Create and push on stack a new http.req (or http.resp) object.
  *
  * Argument n gives the stack index at which the userdata with struct
@@ -823,6 +876,9 @@ req_new_headers (lua_State *L, int n)
 
   lua_pushcfunction (L, req_headers_len);
   lua_setfield (L, -2, "__len");
+
+  lua_pushcfunction (L, req_headers_pairs);
+  lua_setfield (L, -2, "__pairs");
 
   /* Set metatable. */
   lua_setmetatable (L, -2);
@@ -1000,13 +1056,26 @@ req_query (lua_State *L)
 }
 
 static int
+req_body (lua_State *L)
+{
+  struct req_ud *ud = pndlua_get_userdata (L, 1);
+  struct stringbuf *body = ud->req->body;
+  if (body)
+    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
+  else
+    lua_pushlstring (L, "", 0);
+  return 1;
+}
+
+static int
 pndlua_req_index (lua_State *L)
 {
   char const *field;
   lua_CFunction fun;
 
-  static char letidx[] = "hlmpquv";
+  static char letidx[] = "bhlmpquv";
   static struct luaL_Reg reg[] = {
+    { "body", req_body },
     { "headers", req_headers },
     { "line", req_line },
     { "method", req_method },
@@ -1206,8 +1275,9 @@ resp_set_body (lua_State *L)
   stringbuf_reset (body);
   if (!lua_isnil (L, 3))
     {
-      char const *val = lua_tostring (L, 3);
-      if (stringbuf_add_string (body, val))
+      size_t len;
+      char const *val = lua_tolstring (L, 3, &len);
+      if (stringbuf_add (body, val, len))
 	luaL_error (L, "out if memory");
     }
   return 0;

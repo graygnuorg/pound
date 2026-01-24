@@ -371,6 +371,18 @@ http_header_name_len (struct http_header *hdr)
   return hdr->name_end - hdr->name_start;
 }
 
+static inline char const *
+http_header_value_ptr (struct http_header *hdr)
+{
+  return hdr->header + hdr->val_start;
+}
+
+static inline size_t
+http_header_value_len (struct http_header *hdr)
+{
+  return hdr->val_end - hdr->val_start;
+}
+
 typedef DLIST_HEAD(,http_header) HTTP_HEADER_LIST;
 #define HTTP_HEADER_LIST_INITIALIZER DLIST_HEAD_INITIALIZER
 
@@ -964,6 +976,8 @@ typedef struct _service
 				   is notified that a backend from the list is
 				   ready for removal.
 				 */
+  /* Lua scripting. */
+  size_t capture_size;          /* Max. size of captured request body. */
 
   SLIST_ENTRY (_service) next;
 } SERVICE;
@@ -1134,6 +1148,8 @@ typedef struct _pound_http
   int response_code;
 
   CONTENT_LENGTH res_bytes;
+
+  int capturing;
 
 #if ENABLE_LUA
   char stash_init[2];

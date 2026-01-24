@@ -3577,6 +3577,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .off = offsetof (SERVICE, rewrite)
   },
   {
+    .name = "ContentCapture",
+    .parser = cfg_assign_unsigned,
+    .off = offsetof (SERVICE, capture_size)
+  },
+  {
     .name = "SetURL",
     .parser = SETFN_SVC_NAME (set_url),
     .off = offsetof (SERVICE, rewrite)

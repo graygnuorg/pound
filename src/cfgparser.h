@@ -349,6 +349,7 @@ int cfg_assign_string (void *call_data, void *section_data);
 int cfg_assign_string_from_file (void *call_data, void *section_data);
 int cfg_assign_bool (void *call_data, void *section_data);
 int cfg_assign_unsigned (void *call_data, void *section_data);
+int cfg_assign_size (void *call_data, void *section_data);
 int cfg_assign_int (void *call_data, void *section_data);
 int cfg_assign_mode (void *call_data, void *section_data);
 

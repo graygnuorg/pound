@@ -19,6 +19,7 @@
 
 #include "pound.h"
 #include "extern.h"
+#include "capbio.h"
 
 /*
  * Emit to BIO a response line with the given CODE, descriptive TEXT and
@@ -4587,12 +4588,6 @@ backend_response (POUND_HTTP *phttp)
 	    }
 	}
 
-      if (resp_mode == RESP_OK)
-	{
-	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
-	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	}
-
       chunked = 0;
       content_length = NO_CONTENT_LENGTH;
       DLIST_FOREACH (hdr, &phttp->response.headers, link)
@@ -4701,6 +4696,12 @@ backend_response (POUND_HTTP *phttp)
 		  break;
 		}
 	    }
+	}
+
+      if (resp_mode == RESP_OK)
+	{
+	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
+	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
 
       /*
@@ -5064,6 +5065,59 @@ backend_response (POUND_HTTP *phttp)
   return HTTP_STATUS_OK;
 }
 
+static void
+capture_start (POUND_HTTP *phttp)
+{
+  if (phttp->svc->capture_size > 0)
+    {
+      BIO *cap = bio_new_capture (phttp->svc->capture_size);
+      phttp->be = BIO_push (cap, phttp->be);
+      phttp->capturing = 1;
+    }
+  else
+    phttp->capturing = 0;
+}
+
+static void
+capture_end (POUND_HTTP *phttp)
+{
+  if (phttp->capturing)
+    {
+      BIO *cap = phttp->be;
+      phttp->be = BIO_pop (phttp->be);
+      phttp->capturing = 0;
+      if (!BIO_ctrl (cap, BIO_CTLR_CAPTURE_GET_TRNC, 0, NULL))
+	{
+	  long len;
+	  char *ptr;
+
+	  len = BIO_ctrl (cap, BIO_CTLR_CAPTURE_GET_PTR, 0, &ptr);
+	  if (!phttp->request.body)
+	    {
+	      phttp->request.body = malloc (sizeof (*phttp->request.body));
+	      if (!phttp->request.body)
+		{
+		  phttp_log (phttp, PHTTP_LOG_DFL,
+			     -1, errno, "capturing disabled");
+		  BIO_free (cap);
+		  return;
+		}
+	      stringbuf_init_log (phttp->request.body);
+	    }
+	  else
+	    stringbuf_reset (phttp->request.body);
+
+	  if (stringbuf_add (phttp->request.body, ptr, len))
+	    {
+	      phttp_log (phttp, PHTTP_LOG_DFL,
+			 -1, 0, "capturing disabled");
+	      stringbuf_reset (phttp->request.body);
+	    }
+	  BIO_free (cap);
+	}
+    }
+}
+
 /*
  * Pass the request to the backend.  Return 0 on success and pound
  * http error number otherwise.
@@ -5073,6 +5127,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 {
   struct http_header *hdr;
   char const *val;
+  int rc;
 
   /*
    * this is the earliest we can check for Destination - we
@@ -5176,10 +5231,12 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
        * had Transfer-encoding: chunked so read/write all the chunks
        * (HTTP/1.1 only)
        */
-      int rc = copy_chunks (phttp->cl, phttp->be,
-			    phttp->buffer, phttp->lstn->linebufsize,
-			    phttp->backend->be_type != BE_REGULAR,
-			    phttp->lstn->max_req_size, NULL);
+      capture_start (phttp);
+      rc = copy_chunks (phttp->cl, phttp->be,
+			phttp->buffer, phttp->lstn->linebufsize,
+			phttp->backend->be_type != BE_REGULAR,
+			phttp->lstn->max_req_size, NULL);
+      capture_end (phttp);
       if (rc != HTTP_STATUS_OK)
 	{
 	  phttp_log (phttp, PHTTP_LOG_BACKEND,
@@ -5192,8 +5249,10 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
       /*
        * had Content-length, so do raw reads/writes for the length
        */
-      int rc = copy_bin (phttp->cl, phttp->be, content_length,
-			 phttp->backend->be_type != BE_REGULAR, NULL);
+      capture_start (phttp);
+      rc = copy_bin (phttp->cl, phttp->be, content_length,
+		     phttp->backend->be_type != BE_REGULAR, NULL);
+      capture_end (phttp);
       switch (rc)
 	{
 	case COPY_OK:

@@ -64,6 +64,8 @@ endif
 
 noinst_LIBRARIES = libpound.a
 libpound_a_SOURCES = \
+ capbio.c\
+ capbio.h\
  cctype.c\
  cctype.h\
  cfgparser.c\

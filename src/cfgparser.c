@@ -1469,6 +1469,27 @@ cfg_assign_int_range (int *dst, int min, int max)
 }
 
 int
+cfg_assign_size (void *call_data, void *section_data)
+{
+  unsigned long n;
+  char *p;
+  struct token *tok = gettkn_expect (T_NUMBER);
+
+  if (!tok)
+    return CFGPARSER_FAIL;
+
+  errno = 0;
+  n = strtoul (tok->str, &p, 10);
+  if (errno || *p || n > (size_t)-1)
+    {
+      conf_error ("%s", "bad size number");
+      return CFGPARSER_FAIL;
+    }
+  *(size_t *)call_data = n;
+  return 0;
+}
+
+int
 cfg_assign_mode (void *call_data, void *section_data)
 {
   long n;

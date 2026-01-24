@@ -146,6 +146,7 @@
     "ConfigFile"
     "ConfigText"
     "ConnTO"
+    "ContentCapture"
     "Control"
     "Daemon"
     "Debug"
