@@ -1,6 +1,6 @@
 # Pound - the reverse-proxy load-balancer                -*- autoconf -*-
 # Copyright (C) 2002-2010 Apsis GmbH
-# Copyright (C) 2018-2025 Sergey Poznyakoff
+# Copyright (C) 2018-2026 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.19],[gray@gnu.org],
+AC_INIT([pound],[4.19.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])

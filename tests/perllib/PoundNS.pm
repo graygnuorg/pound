@@ -1,5 +1,5 @@
 # This file is part of pound testsuite
-# Copyright (C) 2024-2025 Sergey Poznyakoff
+# Copyright (C) 2024-2026 Sergey Poznyakoff
 # Copyright (C) 2007 Dick Franks, Olaf Kolkman, Michael Fuhr
 #
 # Pound is free software; you can redistribute it and/or modify

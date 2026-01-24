@@ -48,7 +48,7 @@
 @end iftex
 
 @copying
-Copyright @copyright{} 2024--2025 Sergey Poznyakoff
+Copyright @copyright{} 2024--2026 Sergey Poznyakoff
 
 @quotation
 Permission is granted to copy, distribute and/or modify this document

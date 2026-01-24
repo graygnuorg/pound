@@ -18,7 +18,7 @@
  *
  * LICENSE
  *   This library is part of pound testsuite.
- *   Copyright (C) 2024-2025 Sergey Poznyakoff
+ *   Copyright (C) 2024-2026 Sergey Poznyakoff
  *
  *   Pound is free software; you can redistribute it and/or modify
  *   it under the terms of the GNU General Public License as published by
