@@ -1191,98 +1191,6 @@ struct http_ud
   int modresp;
 };
 
-static int
-resp_get_body (lua_State *L)
-{
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  struct stringbuf *body = ud->phttp->response.body;
-  if (body)
-    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
-  else
-    lua_pushlstring (L, "", 0);
-  return 1;
-}
-
-static int
-resp_get_code (lua_State *L)
-{
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushinteger (L, ud->phttp->response_code);
-  return 1;
-}
-
-static int
-resp_get_headers (lua_State *L)
-{
-  struct http_ud *http = pndlua_get_userdata (L, 1);
-  struct req_ud *rud;
-  int rc;
-
-  /* Create request userdata. */
-  lua_newtable (L);
-  rud = lua_newuserdata (L, sizeof (*rud));
-  rud->req = &http->phttp->response;
-  lua_rawseti (L, -2, 0);
-  /* Create the headers table. */
-  rc = req_new_headers (L, -1);
-  /* Get rid of the original userdata. */
-  lua_remove (L, -2);
-  return rc;
-}
-
-static int
-resp_get_reason (lua_State *L)
-{
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushstring (L, ud->phttp->response.request);
-  return 1;
-}
-
-static int
-pndlua_resp_index (lua_State *L)
-{
-  char const *field;
-  lua_CFunction fun;
-
-  static char letidx[] = "bchr";
-  static struct luaL_Reg reg[] = {
-    { "body",  resp_get_body },
-    { "code",  resp_get_code },
-    { "headers", resp_get_headers },
-    { "reason", resp_get_reason }
-  };
-
-  field = lua_tostring (L, 2);
-  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
-    luaL_error (L, "%s: no such field", field);
-  return fun (L);
-}
-
-static int
-resp_set_body (lua_State *L)
-{
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  struct stringbuf *body = ud->phttp->response.body;
-
-  if (!body)
-    {
-      if ((body = malloc (sizeof (*body))) == NULL)
-	return pndlua_memerr (L);
-      stringbuf_init_log (body);
-      ud->phttp->response.body = body;
-    }
-
-  stringbuf_reset (body);
-  if (!lua_isnil (L, 3))
-    {
-      size_t len;
-      char const *val = lua_tolstring (L, 3, &len);
-      if (stringbuf_add (body, val, len))
-	luaL_error (L, "out if memory");
-    }
-  return 0;
-}
-
 enum
   {
     RESP_VERSION_MINOR = 7,
@@ -1353,6 +1261,118 @@ check_response (POUND_HTTP *phttp)
 }
 
 static int
+resp_get_body (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  struct stringbuf *body = ud->phttp->response.body;
+  if (body)
+    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
+  else
+    lua_pushlstring (L, "", 0);
+  return 1;
+}
+
+static int
+resp_get_code (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushinteger (L, ud->phttp->response_code);
+  return 1;
+}
+
+static int
+resp_get_headers (lua_State *L)
+{
+  struct http_ud *http = pndlua_get_userdata (L, 1);
+  struct req_ud *rud;
+  int rc;
+
+  /* Create request userdata. */
+  lua_newtable (L);
+  rud = lua_newuserdata (L, sizeof (*rud));
+  rud->req = &http->phttp->response;
+  lua_rawseti (L, -2, 0);
+  /* Create the headers table. */
+  rc = req_new_headers (L, -1);
+  /* Get rid of the original userdata. */
+  lua_remove (L, -2);
+  return rc;
+}
+
+static int
+resp_get_reason (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  if (normalize_response (ud->phttp->response.request))
+    return 0;
+  lua_pushstring (L, ud->phttp->response.request + RESP_REASON_START);
+  return 1;
+}
+
+static int
+pndlua_resp_index (lua_State *L)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "bchr";
+  static struct luaL_Reg reg[] = {
+    { "body",  resp_get_body },
+    { "code",  resp_get_code },
+    { "headers", resp_get_headers },
+    { "reason", resp_get_reason }
+  };
+
+  field = lua_tostring (L, 2);
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
+    luaL_error (L, "%s: no such field", field);
+  return fun (L);
+}
+
+static int
+resp_set_body (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  struct stringbuf *body = ud->phttp->response.body;
+
+  if (!body)
+    {
+      if ((body = malloc (sizeof (*body))) == NULL)
+	return pndlua_memerr (L);
+      stringbuf_init_log (body);
+      ud->phttp->response.body = body;
+    }
+
+  stringbuf_reset (body);
+  if (!lua_isnil (L, 3))
+    {
+      size_t len;
+      char const *val = lua_tolstring (L, 3, &len);
+      if (stringbuf_add (body, val, len))
+	luaL_error (L, "out if memory");
+    }
+  return 0;
+}
+
+static void
+set_reason (lua_State *L, struct http_ud *ud, char const *s)
+{
+  size_t n = strlen (s);
+  size_t len = strlen (ud->phttp->response.request);
+
+  if (len < RESP_REASON_START + n)
+    {
+      char *resp = realloc (ud->phttp->response.request,
+			    RESP_REASON_START + n + 1);
+      if (!resp)
+	pndlua_memerr (L);
+      resp[RESP_CODE_END] = ' ';
+      ud->phttp->response.request = resp;
+    }
+  strcpy (ud->phttp->response.request + RESP_REASON_START, s);
+}
+
+static int
 resp_set_code (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
@@ -1368,6 +1388,12 @@ resp_set_code (lua_State *L)
 	luaL_error (L, "refusing to modify malformed response line");
       ud->phttp->response_code = code;
       memcpy(ud->phttp->response.request + RESP_CODE_START, s, 3);
+      if (!ud->phttp->response.request[RESP_REASON_START])
+	{
+	  char const *reason = http_status_reason (code);
+	  if (reason)
+	    set_reason (L, ud, reason);
+	}
     }
   else
     luaL_argerror (L, 3, "argument out of allowed range");
@@ -1390,26 +1416,9 @@ resp_set_reason (lua_State *L)
     luaL_error (L, "refusing to modify malformed response line");
 
   if (lua_isnil (L, 3))
-    {
-      ud->phttp->response.request[RESP_CODE_END] = 0;
-    }
+    ud->phttp->response.request[RESP_CODE_END] = 0;
   else
-    {
-      char const *s = lua_tostring (L, 3);
-      size_t n = strlen (s);
-      size_t len = strlen (ud->phttp->response.request);
-
-      if (len < RESP_REASON_START + n)
-	{
-	  char *resp = realloc (ud->phttp->response.request,
-				RESP_REASON_START + n + 1);
-	  if (!resp)
-	    return pndlua_memerr (L);
-	  resp[RESP_CODE_END] = ' ';
-	  ud->phttp->response.request = resp;
-	}
-      strcpy (ud->phttp->response.request + RESP_REASON_START, s);
-    }
+    set_reason (L, ud, lua_tostring (L, 3));
   return 0;
 }
 

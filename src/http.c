@@ -279,7 +279,8 @@ bio_err_reply (BIO *bio, int proto, int err, struct http_errmsg *msg,
 	{
 	  struct stringbuf sb;
 	  stringbuf_init_log (&sb);
-	  stringbuf_printf (&sb, "%d %s",
+	  stringbuf_printf (&sb, "HTTP/1.%d %d %s",
+			    proto,
 			    http_status[err].code,
 			    http_status[err].reason);
 	  if ((*resp_line = stringbuf_finish (&sb)) == NULL)
@@ -1593,23 +1594,7 @@ lua_response (POUND_HTTP *phttp)
 	}
       else
 	{
-	  int n;
 	  struct stringbuf *body;
-	  char const *reason = phttp->response.request;
-	  if (reason && *reason)
-	    {
-	      if (c_isdigit (reason[0]) &&
-		  c_isdigit (reason[1]) &&
-		  c_isdigit (reason[2]) &&
-		  c_isblank (reason[3]))
-		{
-		  reason = c_trimlws (reason + 4, NULL);
-		}
-	    }
-	  else if ((n = http_status_to_pound (phttp->response_code)) != -1)
-	    reason = http_status[n].reason;
-	  else
-	    reason = "";
 
 	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
 	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -1620,7 +1605,9 @@ lua_response (POUND_HTTP *phttp)
 	  bio_http_reply_start_list (phttp->cl,
 				     phttp->request.version,
 				     phttp->response_code,
-				     reason,
+				     /* FIXME: Use RESP_REASON_START from
+					pndlua.c */
+				     phttp->response.request + 13, 
 				     &phttp->response.headers,
 				     (CONTENT_LENGTH) phttp->res_bytes);
 	  if (body)
