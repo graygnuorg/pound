@@ -2825,9 +2825,17 @@ End
 
 @subheading The @code{pound} module.
 
-@deftypemethod pound string dump (arg)
+@deftypemethod pound string,err dump (arg)
 Dumps the value of its argument in a string form, suitable for using
-in Lua chunks.
+in Lua chunks.  On success, the function returns the resulting string
+and @code{nil}.  On error (@var{arg} contained @dfn{userdata} or other
+data types that cannot be handled, the function returns @code{nil} and
+a textual message describing the reason for the failure.
+
+For the function to succeed, @var{arg} must be of one of the following
+data types: @code{nil}, boolean, number, string, and table.  If it is
+a table, the same restriction applies to all its keys and values,
+recursively.
 @end deftypemethod
 
 @defcv {field} pound integer loadctx
@@ -2919,10 +2927,17 @@ Returns a table describing the request.  This is a read-only table,
 whose fields and methods are described below.
 @end deftypemethod
 
+@deftypecv {Field} req string body
+Request body, in the raw form (as sent by the remote party).  This
+field is present, only if @dfn{content capturing} is enabled in the
+@code{Service} section for which the Lua code is executed
+(@pxref{ContentCapture}), and the actual content length was less than
+or equal to the capture size limit.
+@end deftypecv
+
 @deftypecv {Field} req string method
 HTTP method used in the request.
 @end deftypecv
-
 
 @deftypecv {Field} req string line
 Request line, i.e. part of the request between the method and HTTP
@@ -5911,6 +5926,14 @@ the backend.  A similar set of statements can be used in listeners
 (@pxref{Request Modification}).  In case both the listener and service
 contain request modification statements, those from the listener are
 applied first, followed by the ones from the service.
+
+@anchor{ContentCapture}
+@deffn {Service directive} ContentCapture @var{size}
+Instructs the service to capture at most @var{size} bytes of the
+incoming request while sending it over to the backend.  The captured
+request can be used by Lua functions as @code{http.req.body}
+(@pxref{lua-http, http.req.body}).
+@end deffn
 
 @deffn {Service directive} SetURL "@var{url}"
 Set the URL of the incoming request to @var{url}.

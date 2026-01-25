@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "November 14, 2025" "pound" "System Manager's Manual"
+.TH POUND 8 "January 25, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1628,6 +1628,18 @@ matching that from the file \fIfilename\fR (PEM format).
 This conditional cannot be used in standalone services (i.e. services
 that are defined in global scope), or if the \fBListenHTTPS\fR section
 that hosts the service has the \fBClientCert\fR statement on its own.
+.TP
+\fBContentCapture\fR \fISIZE\fR
+Enables capturing of the incoming request content.  If the content
+length is less than or equal to \fISIZE\fR, the content is captured
+and stored away while sending it over to the backend.  The saved value
+is made available to Lua procedures (invoked by
+.BR LuaMatch ,
+.BR LuaModify ,
+and
+.BR LuaBackend)
+via the variable
+.BR http.req.body .
 .TP
 \fBEval\fR "\fINAME\fR"
 Evaluate detached condition \fINAME\fR.  The condition should be

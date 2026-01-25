@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-01-24
+Pound -- history of user-visible changes. 2026-01-25
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -9,8 +9,20 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.19.90 (git)
 
-* Lua support improved
+* Changes in Lua API
 
+** http.req.body
+
+This field contains the captured content of the incoming request.  For
+it to be available, content capturing must be explicitly enabled for
+the service on whose behalf the Lua code is called.  Content capturing
+is enabled by the following new configuration statement:
+
+   ContentCapture SIZE
+
+where SIZE sets the upper limit on the captured content size.  If the
+actual content length is greater than this value, saved material is
+discarded and http.req.body is set to nil.
 
 Version 4.19, 2025-12-11
 
