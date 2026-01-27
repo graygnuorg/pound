@@ -47,7 +47,7 @@ static int
 cap_free (BIO *b)
 {
   struct capture_bio_st *cp;
-  
+
   if (b == NULL)
     return 0;
 
@@ -57,7 +57,7 @@ cap_free (BIO *b)
       BIO_free (cp->mem);
       free (cp);
     }
-  
+
   BIO_set_data (b, NULL);
   BIO_set_init (b, 0);
   return 1;
@@ -73,25 +73,28 @@ cap_write_ex (BIO *b, const char *buf, size_t size, size_t *in_size)
   if (!BIO_write_ex (next, buf, size, &n))
     return 0;
 
-  *in_size = n;
-
-  for (i = 0; i < n; )
+  if (cp->mem)
     {
-      size_t s = n - i, m;
-      if (cp->cap != (size_t)-1 && s > (m = cp->cap - cp->len))
-	s = m;
-      if (s == 0)
+      *in_size = n;
+
+      for (i = 0; i < n; )
 	{
-	  cp->trnc = 1;
-	  break;
+	  size_t s = n - i, m;
+	  if (cp->cap != (size_t)-1 && s > (m = cp->cap - cp->len))
+	    s = m;
+	  if (s == 0)
+	    {
+	      cp->trnc = 1;
+	      break;
+	    }
+	  if (!BIO_write_ex (cp->mem, buf + i, s, &m))
+	    {
+	      cp->cap = cp->len;
+	      break;
+	    }
+	  i += m;
+	  cp->len += m;
 	}
-      if (!BIO_write_ex (cp->mem, buf + i, s, &m))
-	{
-	  cp->cap = cp->len;
-	  break;
-	}
-      i += m;
-      cp->len += m;
     }
 
   return 1;
@@ -127,10 +130,17 @@ cap_ctrl (BIO *b, int cmd, long lval, void *pval)
       break;
 
     case BIO_CTLR_CAPTURE_GET_PTR:
+      if (!cp->mem)
+	return 0;
       return BIO_get_mem_data (cp->mem, pval);
 
     case BIO_CTLR_CAPTURE_GET_TRNC:
       return cp->trnc;
+
+    case BIO_CTLR_CAPTURE_GET_MEM:
+      *(BIO**)pval = cp->mem;
+      cp->mem = NULL;
+      break;
 
     default:
       return BIO_ctrl (BIO_next(b), cmd, lval, pval);
@@ -147,7 +157,7 @@ BIO_f_capture (void)
     {
       int n = BIO_get_new_index ();
       assert(n != -1);
-      
+
       cap = BIO_meth_new (n | BIO_TYPE_FILTER, "capture");
       assert(cap != NULL);
 

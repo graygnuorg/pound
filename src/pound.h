@@ -76,6 +76,8 @@
 #define PORT_HTTP_STR TOSTR(PORT_HTTP)
 #define PORT_HTTPS_STR TOSTR(PORT_HTTPS)
 
+#define MAX_REQUEST_RESEND 4
+
 #if HAVE_OPENSSL_SSL_H
 # define OPENSSL_THREAD_DEFINES
 # include <openssl/ssl.h>
@@ -428,9 +430,8 @@ struct http_request
   int split;
   char *eval_result;         /* Array of return statuses from evaluation of
 				detached conditions. */
-  struct stringbuf *body;    /* Response body overridden by modification
-				request. Deliberately not using any stream
-				type here. */
+  BIO *body;                 /* For requests: captured response body.
+				For responses: modified response body. */
 };
 
 static inline void http_request_init (struct http_request *http)
@@ -1153,6 +1154,7 @@ typedef struct _pound_http
 
 #if ENABLE_LUA
   char stash_init[2];
+  int resend;
 #endif
 
   SLIST_ENTRY(_pound_http) next;
@@ -1432,7 +1434,19 @@ int tbf_eval (TBF *env, char const *keyid);
 static inline void phttp_lua_stash_reset (POUND_HTTP *p)
 {
   p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
+  p->resend = 0;
 }
+
+static inline int phttp_resending (POUND_HTTP *p)
+{
+  return p->resend;
+}
+
+static inline void phttp_clear_resend (POUND_HTTP *p)
+{
+  p->resend = 0;
+}
+
 int pndlua_init (void);
 int pndlua_match (POUND_HTTP *phttp, struct pndlua_closure const *cond,
 		  char **argv, void *data);
@@ -1444,7 +1458,9 @@ int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_closure (struct pndlua_closure *cond);
 #else
 # define phttp_lua_stash_reset(p)
-static inline int pndlua_init (void) { return 0; }
+# define phttp_resending(p) 0
+# define phttp_clear_resend(p)
+# define pndlua_init() 0
 static inline int
 cfg_no_lua (void)
 {

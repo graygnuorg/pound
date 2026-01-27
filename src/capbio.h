@@ -24,8 +24,24 @@ enum
     BIO_CTLR_CAPTURE_GET_CAP,
     BIO_CTLR_CAPTURE_GET_LEN,
     BIO_CTLR_CAPTURE_GET_PTR,
-    BIO_CTLR_CAPTURE_GET_TRNC
+    BIO_CTLR_CAPTURE_GET_TRNC,
+    BIO_CTLR_CAPTURE_GET_MEM
   };
-  
+
 const BIO_METHOD *BIO_f_capture (void);
 BIO *bio_new_capture (size_t cap);
+
+#define BIO_capture_is_truncated(b) \
+  BIO_ctrl (b, BIO_CTLR_CAPTURE_GET_TRNC, 0, NULL)
+#define BIO_capture_get_mem_data(b,pp) \
+  BIO_ctrl (b, BIO_CTLR_CAPTURE_GET_PTR, 0, pp)
+
+static inline void BIO_capture_expand(BIO *b, size_t s) {
+  BIO_ctrl (b, BIO_CTLR_CAPTURE_SET_CAP, s, NULL);
+}
+static inline BIO *BIO_capture_unwrap(BIO *b) {
+  BIO *mem;
+  BIO_ctrl (b, BIO_CTLR_CAPTURE_GET_MEM, 0, &mem);
+  BIO_free (b);
+  return mem;
+}

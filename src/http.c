@@ -1310,26 +1310,6 @@ copy_bin (BIO *cl, BIO *be, CONTENT_LENGTH cont, int no_write,
 }
 
 static int
-bio_memcpy (BIO *out, char const *buf, size_t len, CONTENT_LENGTH *res_bytes)
-{
-  BIO *in;
-  int rc;
-
-  if ((in = BIO_new_mem_buf (buf, len)) == NULL)
-    {
-      logmsg (LOG_WARNING, "(%"PRItid") can't create BIO_new_mem_buf",
-	      POUND_TID ());
-      return -1;
-    }
-
-  rc = copy_bin (in, out, len, 0, res_bytes);
-
-  BIO_free_all (in);
-
-  return rc;
-}
-
-static int
 acme_response (POUND_HTTP *phttp)
 {
   int fd;
@@ -1594,24 +1574,38 @@ lua_response (POUND_HTTP *phttp)
 	}
       else
 	{
-	  struct stringbuf *body;
+	  BIO *body;
 
 	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
 	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
 	  body = phttp->response.body;
-	  phttp->res_bytes = body ? stringbuf_len (body) : 0;
+	  phttp->res_bytes = body ? BIO_get_mem_data (body, NULL) : 0;
 
 	  bio_http_reply_start_list (phttp->cl,
 				     phttp->request.version,
 				     phttp->response_code,
 				     /* FIXME: Use RESP_REASON_START from
 					pndlua.c */
-				     phttp->response.request + 13, 
+				     phttp->response.request + 13,
 				     &phttp->response.headers,
 				     (CONTENT_LENGTH) phttp->res_bytes);
 	  if (body)
-	    BIO_write (phttp->cl, stringbuf_value (body), phttp->res_bytes);
+	    {
+	      int rc;
+
+	      BIO_set_flags (body, BIO_FLAGS_NONCLEAR_RST);
+	      BIO_reset (body);
+
+	      rc = copy_bin (body, phttp->cl, phttp->res_bytes, 0, NULL);
+	      if (rc != COPY_OK)
+		{
+		  phttp_log (phttp, PHTTP_LOG_BACKEND, -1, 0,
+			     "error sending data: %s",
+			     copy_status_string (rc));
+		}
+	    }
+
 	  BIO_flush (phttp->cl);
 
 	  res = HTTP_STATUS_OK;
@@ -3355,10 +3349,7 @@ http_request_free (struct http_request *req)
   free (req->orig_request_line);
   free (req->eval_result);
   if (req->body)
-    {
-      stringbuf_free (req->body);
-      free (req->body);
-    }
+    BIO_free (req->body);
   http_request_init (req);
 }
 
@@ -4689,6 +4680,8 @@ backend_response (POUND_HTTP *phttp)
 	{
 	  if (rewrite_apply (phttp, &phttp->response, REWRITE_RESPONSE))
 	    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	  if (phttp_resending (phttp))
+	    resp_mode = RESP_DRAIN;
 	}
 
       /*
@@ -4708,11 +4701,11 @@ backend_response (POUND_HTTP *phttp)
 	       * Replace the Content-Length header if they supplied
 	       * a new body.
 	       */
-	      char *p;
 	      struct stringbuf sb;
+	      char *p;
+	      size_t len = BIO_get_mem_data (phttp->response.body, NULL);
 	      stringbuf_init_log (&sb);
-	      stringbuf_printf (&sb, "Content-Length: %zu",
-				stringbuf_len (phttp->response.body));
+	      stringbuf_printf (&sb, "Content-Length: %zu", len);
 	      if ((p = stringbuf_finish (&sb)) == NULL)
 		{
 		  stringbuf_free (&sb);
@@ -4743,10 +4736,14 @@ backend_response (POUND_HTTP *phttp)
 
       if (resp_mode == RESP_OK && phttp->response.body)
 	{
-	  int rc = bio_memcpy (phttp->cl,
-			       stringbuf_value (phttp->response.body),
-			       stringbuf_len (phttp->response.body),
-			       &phttp->res_bytes);
+	  int rc;
+
+	  BIO_set_flags (phttp->response.body, BIO_FLAGS_NONCLEAR_RST);
+	  BIO_reset (phttp->response.body);
+
+	  rc = copy_bin (phttp->response.body, phttp->cl,
+			 BIO_get_mem_data (phttp->response.body, NULL), 0,
+			 &phttp->res_bytes);
 	  if (rc != COPY_OK)
 	    {
 	      phttp_log (phttp, PHTTP_LOG_DFL,
@@ -4756,8 +4753,10 @@ backend_response (POUND_HTTP *phttp)
 	      return -1;
 	    }
 	  resp_mode = RESP_DRAIN;
-	  res_bytes = NULL;
 	}
+
+      if (resp_mode == RESP_DRAIN)
+	res_bytes = NULL;
 
       if (!phttp->no_cont)
 	{
@@ -5055,7 +5054,7 @@ backend_response (POUND_HTTP *phttp)
 static void
 capture_start (POUND_HTTP *phttp)
 {
-  if (phttp->svc->capture_size > 0)
+  if (!phttp_resending (phttp) && phttp->svc->capture_size > 0)
     {
       BIO *cap = bio_new_capture (phttp->svc->capture_size);
       phttp->be = BIO_push (cap, phttp->be);
@@ -5073,34 +5072,15 @@ capture_end (POUND_HTTP *phttp)
       BIO *cap = phttp->be;
       phttp->be = BIO_pop (phttp->be);
       phttp->capturing = 0;
-      if (!BIO_ctrl (cap, BIO_CTLR_CAPTURE_GET_TRNC, 0, NULL))
+      if (!BIO_capture_is_truncated (cap))
 	{
-	  long len;
-	  char *ptr;
-
-	  len = BIO_ctrl (cap, BIO_CTLR_CAPTURE_GET_PTR, 0, &ptr);
-	  if (!phttp->request.body)
-	    {
-	      phttp->request.body = malloc (sizeof (*phttp->request.body));
-	      if (!phttp->request.body)
-		{
-		  phttp_log (phttp, PHTTP_LOG_DFL,
-			     -1, errno, "capturing disabled");
-		  BIO_free (cap);
-		  return;
-		}
-	      stringbuf_init_log (phttp->request.body);
-	    }
-	  else
-	    stringbuf_reset (phttp->request.body);
-
-	  if (stringbuf_add (phttp->request.body, ptr, len))
-	    {
-	      phttp_log (phttp, PHTTP_LOG_DFL,
-			 -1, 0, "capturing disabled");
-	      stringbuf_reset (phttp->request.body);
-	    }
+	  phttp_log (phttp, PHTTP_LOG_BACKEND, -1, 0,
+		     "discarding truncated capture");
 	  BIO_free (cap);
+	}
+      else
+	{
+	  phttp->request.body = BIO_capture_unwrap (cap);
 	}
     }
 }
@@ -5510,6 +5490,7 @@ http_process_request (POUND_HTTP *phttp)
   char *val;
   /* FIXME: this belongs to struct http_request, perhaps. */
   int transfer_encoding;
+  int resend_count;
 
   /*
    * check for correct request
@@ -5771,14 +5752,58 @@ http_process_request (POUND_HTTP *phttp)
       break;
 
     case BE_REGULAR:
-      /* Send the request. */
-      res = send_to_backend (phttp,
-			     !is_http10 (phttp) &&
-			     (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
-			     content_length);
-      if (res == 0)
-	/* Process the response. */
-	res = backend_response (phttp);
+      resend_count = 0;
+      do
+	{
+	  /* Send the request. */
+	  res = send_to_backend (phttp,
+				 !is_http10 (phttp) &&
+				 (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
+				 content_length);
+	  if (phttp_resending (phttp))
+	    {
+	      phttp->cl = BIO_pop (phttp->cl);
+	      phttp_clear_resend (phttp);
+	    }
+
+	  if (res == 0)
+	    {
+	      /* Process the response. */
+	      res = backend_response (phttp);
+	      if (phttp_resending (phttp))
+		{
+		  if (resend_count == MAX_REQUEST_RESEND)
+		    {
+		      res = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		      phttp_log (phttp, PHTTP_LOG_BACKEND,
+				 HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
+				 "refusing to do more than %d resends",
+				 MAX_REQUEST_RESEND);
+		      break;
+		    }
+		  resend_count++;
+
+		  if (!phttp->be)
+		    {
+		      if ((res = select_backend (phttp)) != 0)
+			break;
+		    }
+
+		  http_request_free (&phttp->response);
+		  if (phttp->request.body)
+		    {
+		      BIO_set_flags (phttp->request.body,
+				     BIO_FLAGS_NONCLEAR_RST);
+		      BIO_reset (phttp->request.body);
+		    }
+		  else
+		    phttp->request.body = BIO_new (BIO_s_null ());
+
+		  phttp->cl = BIO_push (phttp->request.body, phttp->cl);
+		}
+	    }
+	}
+      while (res == 0 && phttp_resending (phttp));
       break;
 
     case BE_FILE:
@@ -5880,6 +5905,7 @@ do_http (POUND_HTTP *phttp)
     {
       http_request_free (&phttp->request);
       http_request_free (&phttp->response);
+      phttp->response_code = 0;
       submatch_queue_free (&phttp->smq);
       phttp_lua_stash_reset (phttp);
 

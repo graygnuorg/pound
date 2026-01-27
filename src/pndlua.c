@@ -1059,11 +1059,11 @@ static int
 req_body (lua_State *L)
 {
   struct req_ud *ud = pndlua_get_userdata (L, 1);
-  struct stringbuf *body = ud->req->body;
-  if (body)
-    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
-  else
-    lua_pushlstring (L, "", 0);
+  char *ptr;
+  size_t len;
+
+  len = BIO_get_mem_data (ud->req->body, &ptr);
+  lua_pushlstring (L, ptr, len);
   return 1;
 }
 
@@ -1264,11 +1264,11 @@ static int
 resp_get_body (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  struct stringbuf *body = ud->phttp->response.body;
-  if (body)
-    lua_pushlstring (L, stringbuf_value (body), stringbuf_len (body));
-  else
-    lua_pushlstring (L, "", 0);
+  char *ptr;
+  size_t len;
+
+  len = BIO_get_mem_data (ud->phttp->response.body, &ptr);
+  lua_pushlstring (L, ptr, len);
   return 1;
 }
 
@@ -1333,22 +1333,27 @@ static int
 resp_set_body (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  struct stringbuf *body = ud->phttp->response.body;
+  BIO *body;
 
-  if (!body)
+  if (!ud->phttp->response.body)
     {
-      if ((body = malloc (sizeof (*body))) == NULL)
+      if ((ud->phttp->response.body = BIO_new (BIO_s_mem ())) == NULL)
 	return pndlua_memerr (L);
-      stringbuf_init_log (body);
-      ud->phttp->response.body = body;
+    }
+  else
+    {
+      /* Just in case. */
+      BIO_clear_flags (ud->phttp->response.body, BIO_FLAGS_NONCLEAR_RST);
+      BIO_reset (ud->phttp->response.body);
     }
 
-  stringbuf_reset (body);
+  body = ud->phttp->response.body;
+
   if (!lua_isnil (L, 3))
     {
       size_t len;
       char const *val = lua_tolstring (L, 3, &len);
-      if (stringbuf_add (body, val, len))
+      if (BIO_write (body, val, len) == -1)
 	luaL_error (L, "out if memory");
     }
   return 0;
@@ -1487,6 +1492,14 @@ http_resp (lua_State *L)
 }
 
 static int
+http_resend (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushboolean (L, ud->phttp->resend);
+  return 1;
+}
+
+static int
 pndlua_http_index (lua_State *L)
 {
   struct http_ud *http = pndlua_get_userdata (L, 1);
@@ -1495,16 +1508,29 @@ pndlua_http_index (lua_State *L)
 
   int rw = http->modresp != 0;
 
-  static char *letidx[] = { "r", "rr" };
+  static char *letidx[] = { "r", "rrr" };
   static struct luaL_Reg reg[] = {
     { "req", http_req },
-    { "resp", http_resp }
+    { "resp", http_resp },
+    { "resend", http_resend },
   };
 
   field = lua_tostring (L, 2);
   if ((fun = pndlua_reg_locate (letidx[rw], reg, field)) == NULL)
     luaL_error (L, "%s: no such field", field);
   return fun (L);
+}
+
+static int
+pndlua_http_newindex (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  char const *field = lua_tostring (L, 2);
+
+  if (strcmp(field, "resend"))
+    luaL_error (L, "attempt to modify read-only data");
+  ud->phttp->resend = lua_toboolean (L, 3);
+  return 0;
 }
 
 /*
@@ -1528,7 +1554,7 @@ pndlua_set_http (lua_State *L, POUND_HTTP *phttp, int modresp)
   /* Create __index entry. */
   pndlua_dcl_function (L, "__index", pndlua_http_index);
   /* Create __newindex entry. */
-  pndlua_dcl_function (L, "__newindex", ro_newindex);
+  pndlua_dcl_function (L, "__newindex", pndlua_http_newindex);
 
   /* Set metatable. */
   lua_setmetatable (L, -2);
