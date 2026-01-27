@@ -218,7 +218,7 @@ filename_split_wd (char const *filename, WORKDIR **wdp)
       dir = filename_catn (wd->name, filename, name - filename);
       name++;
     }
-  if ((wd = workdir_get (dir)) == NULL)
+  if (dir && (wd = workdir_get (dir)) == NULL)
     {
       logmsg (LOG_ERR, "can't open directory %s: %s", dir, strerror (errno));
       name = NULL;
