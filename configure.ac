@@ -213,7 +213,7 @@ AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 AC_ARG_ENABLE([lua],
  [AS_HELP_STRING([--enable-lua],
 		 [enable Lua extensions])],
- [status_lua=${withval}],
+ [status_lua=${enableval}],
  [status_lua=probe])
 
 if test $status_lua != no; then
