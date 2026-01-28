@@ -764,6 +764,7 @@ enum service_cond_type
   {
     COND_BOOL,  /* Boolean operation. */
     COND_ACL,   /* ACL match. */
+    COND_METHOD,/* HTTP method match.*/
     COND_URL,   /* URL match. */
     COND_PATH,  /* Path match. */
     COND_QUERY, /* Raw query match. */

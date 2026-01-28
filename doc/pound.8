@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 25, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "January 28, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -840,7 +840,7 @@ setting.
 .EX
 \fBCondition \fR"\fINAME\fR"
     ...
-\fBEnd\fR    
+\fBEnd\fR
 .EE
 .PP
 Saves away a set of conditional statements for further evaluation.
@@ -854,7 +854,7 @@ construct:
 .EE
 .PP
 Detached conditions are evaluated at most once.  Result of
-evaluation is cached and used by all subsequent \fBEval\fR statements 
+evaluation is cached and used by all subsequent \fBEval\fR statements
 that refer to the same \fINAME\fR.
 .SS Control socket
 .B Pound
@@ -1684,6 +1684,9 @@ This statement is provided to facilitate handling of \fIvirtual
 hosts\fR.  See the
 .B EXAMPLES
 section.
+.TP
+\fBMethod\fR [\fIoptions\fR] "\fIpattern\fR"
+Match the request method.
 .TP
 \fBPath\fR [\fIoptions\fR] "\fIpattern\fR"
 Match the path part of the incoming request.

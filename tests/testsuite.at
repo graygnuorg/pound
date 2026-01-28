@@ -72,6 +72,7 @@ AT_BANNER([Listener request modification])
 m4_include([lstset.at])
 
 AT_BANNER([Service selection])
+m4_include([method.at])
 m4_include([header.at])
 m4_include([host.at])
 m4_include([url.at])

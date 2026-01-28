@@ -2298,7 +2298,7 @@ char const *
 method_name (int meth)
 {
   if (meth < 0 || meth >= sizeof (methods) / sizeof (methods[0]))
-    return "BAD";
+    return NULL;
   return methods[meth].name;
 }
 
@@ -3817,6 +3817,13 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	if (tmp)
 	  freeaddrinfo (tmp);
       }
+      break;
+
+    case COND_METHOD:
+      if ((str = method_name (req->method)) == NULL)
+	res = -1;
+      else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
+	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
     case COND_URL:

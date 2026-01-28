@@ -1951,6 +1951,16 @@ parse_cond_acl (void *call_data, void *section_data)
 }
 
 static int
+parse_cond_method_matcher (void *call_data, void *section_data)
+{
+  POUND_DEFAULTS *dfl = section_data;
+  return parse_cond_matcher (call_data, COND_METHOD, dfl->re_type,
+			     dfl->re_type,
+			     (dfl->ignore_case ? GENPAT_ICASE : 0),
+			     NULL);
+}
+
+static int
 parse_cond_url_matcher (void *call_data, void *section_data)
 {
   POUND_DEFAULTS *dfl = section_data;
@@ -2855,6 +2865,10 @@ static CFGPARSER_TABLE match_conditions[] = {
   {
     .name = "ACL",
     .parser = parse_cond_acl
+  },
+  {
+    .name = "Method",
+    .parser = parse_cond_method_matcher
   },
   {
     .name = "URL",

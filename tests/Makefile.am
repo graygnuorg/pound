@@ -122,6 +122,7 @@ TESTSUITE_AT = \
  lua-path.at\
  maxrequest.at\
  maxuri.at\
+ method.at\
  multival.at\
  nacl.at\
  ndynacl.at\

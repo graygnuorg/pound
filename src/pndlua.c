@@ -649,7 +649,11 @@ static int
 req_method (lua_State *L)
 {
   struct req_ud *ud  = pndlua_get_userdata (L, 1);
-  lua_pushstring (L, method_name (ud->req->method));
+  char const *s = method_name (ud->req->method);
+  if (s)
+    lua_pushstring (L, s);
+  else
+    lua_pushnil (L);
   return 1;
 }
 

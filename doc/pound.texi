@@ -5852,6 +5852,10 @@ This statement is available only if @command{pound} was built with Lua
 support.  @xref{LuaMatch}, for a detailed discussion.
 @end deffn
 
+@deffn {Service Conditional} Method [@var{options}] "@var{pattern}"
+Returns @samp{true}, if the request method matches @var{pattern}.
+@end deffn
+
 @deffn {Service Conditional} Path [@var{options}] "@var{pattern}"
 Returns @samp{true}, if the path part of the incoming request matches
 @var{pattern}.
