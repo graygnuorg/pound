@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-01-28
+Pound -- history of user-visible changes. 2026-01-31
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -18,6 +18,22 @@ matches the supplied pattern, e.g.:
       Method "POST"
       ...
   End
+
+* New internal backend: Success
+
+Always returns a 200 response code.  This is intended mainly for
+handling special requests.  For example, the service definition
+below replies to the OPTIONS requests:
+
+   Service
+      Match "OPTIONS"
+      Rewrite response
+         SetHeader "Access-Control-Allow-Origin: example.com"
+         SetHeader "Access-Control-Allow-Methods: GET,POST,PUT"
+         SetHeader "Access-Control-Max-Age: 1800"
+      End
+      Success
+   End
 
 * Changes in Lua API
 

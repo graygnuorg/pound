@@ -156,6 +156,7 @@ TESTSUITE_AT = \
  sessurl.at\
  set.at\
  stringmatch.at\
+ success.at\
  tbf.at\
  template.at\
  url.at\

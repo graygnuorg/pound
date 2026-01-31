@@ -48,6 +48,7 @@
 #include <fcntl.h>
 #include <fnmatch.h>
 #include <limits.h>
+#include <assert.h>
 
 #if HAVE_GETOPT_H
 # include <getopt.h>
@@ -314,6 +315,7 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
   return d;
 }
 
+#include "json.h"
 /* Memory allocation primitives. */
 #include "mem.h"
 /* List definitions. */
@@ -576,7 +578,8 @@ typedef enum
     BE_METRICS,
     BE_BACKEND_REF,     /* See be_name in BACKEND */
     BE_FILE,
-    BE_LUA
+    BE_LUA,
+    BE_SUCCESS
   }
   BACKEND_TYPE;
 
@@ -1194,14 +1197,29 @@ void abend (struct locus_range const *range, char const *fmt, ...)
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);
 
+char const *backend_type_str (BACKEND_TYPE t);
+int backend_to_string (BACKEND *be, char *buf, size_t size);
+
 /* Return a string representation for a back-end address */
-char *str_be (char *buf, size_t size, BACKEND *be);
+static inline char *str_be (char *buf, size_t size, BACKEND *be) {
+  if (backend_to_string (be, buf, size))
+    abort ();
+  return buf;
+}
+
+int backend_specific_serialize (BACKEND *be, struct json_value *obj);
+
+int backend_serialize_dyninfo (struct json_value *obj, BACKEND *be);
+struct json_value *addrinfo_serialize (struct addrinfo *addr);
 
 /* Find the right service for a request */
 SERVICE *get_service (POUND_HTTP *);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
+
+int drain_request (POUND_HTTP *phttp, int chunked,
+		   CONTENT_LENGTH content_length);
 
 #ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
@@ -1393,7 +1411,8 @@ char const *http_status_reason (int code);
 
 struct json_value *workers_serialize (void);
 struct json_value *pound_serialize (void);
-int metrics_response (POUND_HTTP *phttp);
+int metrics_response (POUND_HTTP *phttp, int chunked,
+		      CONTENT_LENGTH content_length);
 
 int match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 		struct http_request *req);

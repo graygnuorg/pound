@@ -115,6 +115,7 @@ m4_include([inclscope.at])
 m4_include([inclglob.at])
 
 AT_BANNER([Special backends])
+m4_include([success.at])
 m4_include([redirect.at])
 m4_include([acme.at])
 m4_include([error.at])

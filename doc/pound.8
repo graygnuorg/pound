@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "January 28, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "January 31, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2003,6 +2003,36 @@ End
 .EE
 .RE
 .TP
+\fBEmergency\fR
+Directives enclosed between
+.B Emergency
+and the following
+.B End
+directives define an emergency backend server (see below for
+details). You may define any number of emergency servers.  A backend
+will be selected from emergency backends if all regular backends are down.
+.TP
+\fBError \fISTATUS\fR [\fIFILE\fR]
+Special case of backend that returns HTTP error page.  The \fISTATUS\fR
+argument supplies HTTP status code.  Optional \fIFILE\fR argument is
+the name of a disk file with the error page content.  If supplied, the
+file is handled as in \fBErrorFile\fR directive, which see.  If not
+present, the content to return in the response is determined as usual:
+first the
+.BI ErrorFile " STATUS"
+statement for the enclosing listener is consulted.  If it is not present, the
+default error page is used.
+.IP
+The \fBError\fR directive is useful in a catch-all service, which
+outputs an error page if no service matching the incoming request was
+found.  See the \fBEXAMPLES\fR section for details.
+.TP
+.B Metrics
+Special backend type that implements Openmetrics protocol output.  See
+the section
+.B Metrics
+below for a detailed discussion.
+.TP
 \fBRedirect\fR [\fIcode\fR] "\fIurl\fR"
 This is a special type of backend. Instead of sending the request to a backend
 .B pound
@@ -2077,21 +2107,6 @@ Redirect "http://abc.example/index.html"
 it will be sent to
 .IR "http://abc.example/index.html".
 .TP
-\fBError \fISTATUS\fR [\fIFILE\fR]
-Special case of backend that returns HTTP error page.  The \fISTATUS\fR
-argument supplies HTTP status code.  Optional \fIFILE\fR argument is
-the name of a disk file with the error page content.  If supplied, the
-file is handled as in \fBErrorFile\fR directive, which see.  If not
-present, the content to return in the response is determined as usual:
-first the
-.BI ErrorFile " STATUS"
-statement for the enclosing listener is consulted.  If it is not present, the
-default error page is used.
-.IP
-The \fBError\fR directive is useful in a catch-all service, which
-outputs an error page if no service matching the incoming request was
-found.  See the \fBEXAMPLES\fR section for details.
-.TP
 \fBSendFile \fIDIR\fR
 Static file backend.  It responds with the content of a file from
 directory \fIDIR\fR.  The path part of the request supplies
@@ -2104,20 +2119,11 @@ Content type of the response is assumed to be
 This can be changed using \fBSetHeader\fR statement (see
 .BR "RESPONSE MODIFICATION" ).
 .TP
-\fBEmergency\fR
-Directives enclosed between
-.B Emergency
-and the following
-.B End
-directives define an emergency backend server (see below for
-details). You may define any number of emergency servers.  A backend
-will be selected from emergency backends if all regular backends are down.
-.TP
-.B Metrics
-Special backend type that implements Openmetrics protocol output.  See
-the section
-.B Metrics
-below for a detailed discussion.
+.B Success
+Special backend that responds with code 200.  It can be used for
+debugging or for side effects, such as setting headers using the
+\fISetHeader\fR statement.
+.SS Session control
 .TP
 \fBSession\fR
 Directives enclosed between

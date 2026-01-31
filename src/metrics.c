@@ -910,11 +910,16 @@ send_reply (POUND_HTTP *phttp, char const *content)
 }
 
 int
-metrics_response (POUND_HTTP *phttp)
+metrics_response (POUND_HTTP *phttp,
+		  int chunked, CONTENT_LENGTH content_length)
 {
   struct json_value *obj;
   EXPOSITION exp;
   int res;
+
+  res = drain_request (phttp, chunked, content_length);
+  if (res != HTTP_STATUS_OK)
+    return res;
 
   if ((obj = pound_serialize ()) == NULL)
     return -1;

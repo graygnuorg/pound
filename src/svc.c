@@ -19,8 +19,6 @@
 
 #include "pound.h"
 #include "extern.h"
-#include "json.h"
-#include <assert.h>
 
 #if ! SET_DH_AUTO
 static void init_rsa (void);
@@ -510,59 +508,6 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 	}
     }
   return res;
-}
-
-/* Return a string representation for a back-end address */
-char *
-str_be (char *buf, size_t size, BACKEND *be)
-{
-  switch (be->be_type)
-    {
-    case BE_REGULAR:
-      addr2str (buf, size, &be->v.reg.addr, 0);
-      break;
-
-    case BE_MATRIX:
-      snprintf (buf, size, "matrix:%s", be->v.mtx.hostname);
-      break;
-
-    case BE_REDIRECT:
-      snprintf (buf, size, "redirect:%s", be->v.redirect.url);
-      break;
-
-    case BE_ACME:
-      snprintf (buf, size, "acme");
-      break;
-
-    case BE_CONTROL:
-      strncpy (buf, "control", size);
-      break;
-
-    case BE_ERROR:
-      if (be->v.error.msg.text)
-	snprintf (buf, size, "error:%d:text",
-		  pound_to_http_status (be->v.error.status));
-      else
-	snprintf (buf, size, "error:%d",
-		  pound_to_http_status (be->v.error.status));
-      break;
-
-    case BE_METRICS:
-      strncpy (buf, "metrics", size);
-      break;
-
-    case BE_FILE:
-      strncpy (buf, "file", size);
-      break;
-
-    case BE_LUA:
-      snprintf (buf, size, "lua:%s", be->v.lua.func);
-      break;
-
-    default:
-      abort ();
-    }
-  return buf;
 }
 
 /*
@@ -1972,43 +1917,7 @@ service_session_serialize (SERVICE *svc)
   return obj;
 }
 
-static char const *
-backend_type_str (BACKEND_TYPE t)
-{
-  switch (t)
-    {
-    case BE_MATRIX:
-      return "matrix";
-
-    case BE_REGULAR:
-      return "backend";
-
-    case BE_REDIRECT:
-      return "redirect";
-
-    case BE_ACME:
-      return "acme";
-
-    case BE_CONTROL:
-      return "control";
-
-    case BE_ERROR:
-      return "error";
-
-    case BE_METRICS:
-      return "metrics";
-
-    case BE_FILE:
-      return "file";
-
-    default: /* BE_REGULAR_REF can't happen at this stage. */
-      break;
-    }
-
-  return "UNKNOWN";
-}
-
-static struct json_value *
+struct json_value *
 addrinfo_serialize (struct addrinfo *addr)
 {
   char buf[MAX_ADDR_BUFSIZE];
@@ -2097,7 +2006,7 @@ find_backend_index (BACKEND *be)
  *  "parent".
  *  For any other backend types, do nothing.
  */
-static int
+int
 backend_serialize_dyninfo (struct json_value *obj, BACKEND *be)
 {
   BACKEND *up = be, *parent;
@@ -2178,66 +2087,7 @@ backend_serialize (BACKEND *be)
 		err = json_object_set (obj, "weight",
 				       json_new_integer (be->balancer->weight));
 	      if (err == 0)
-		switch (be->be_type)
-		  {
-		  case BE_MATRIX:
-		    err = json_object_set (obj, "hostname",
-					   json_new_string (be->v.mtx.hostname))
-		      || json_object_set (obj, "resolve_mode",
-					  json_new_string (resolve_mode_str (be->v.mtx.resolve_mode)))
-		      || json_object_set (obj, "family",
-					  json_new_integer (be->v.mtx.family))
-		      || json_object_set (obj, "servername",
-					  be->v.mtx.servername
-					  ? json_new_string (be->v.mtx.servername)
-					  : json_new_null ())
-		      || backend_serialize_dyninfo (obj, be);
-		    break;
-
-		  case BE_REGULAR:
-		    err = json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
-		      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
-		      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
-		      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-		      || json_object_set (obj, "protocol", json_new_string (backend_is_https (be) ? "https" : "http"))
-		      || json_object_set (obj, "servername",
-					  be->v.reg.servername
-					  ? json_new_string (be->v.reg.servername)
-					  : json_new_null ())
-		      || backend_serialize_dyninfo (obj, be);
-		    break;
-
-		  case BE_REDIRECT:
-		    err = json_object_set (obj, "url", json_new_string (be->v.redirect.url))
-		      || json_object_set (obj, "code", json_new_integer (be->v.redirect.status))
-		      || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
-		    break;
-
-		  case BE_ACME:
-		  case BE_CONTROL:
-		  case BE_METRICS:
-		  case BE_FILE:
-		    /* FIXME */
-		    break;
-
-		  case BE_BACKEND_REF:
-		    /* Can't happen */
-		    break;
-
-		  case BE_ERROR:
-		    err = json_object_set (obj, "status",
-					   json_new_integer (pound_to_http_status (be->v.error.status)))
-		      || json_object_set (obj, "text",
-					  be->v.error.msg.text
-					   ? json_new_string (be->v.error.msg.text)
-					   : json_new_null ());
-		    break;
-
-		  case BE_LUA:
-		    err = json_object_set (obj, "function",
-					   json_new_string (be->v.lua.func));
-		    break;
-		  }
+		err = backend_specific_serialize (be, obj);
 	      if (enable_backend_stats && be->be_type != BE_MATRIX)
 		err |= json_object_set (obj, "stats", backend_stats_serialize (be));
 	    }

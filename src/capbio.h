@@ -45,3 +45,6 @@ static inline BIO *BIO_capture_unwrap(BIO *b) {
   BIO_free (b);
   return mem;
 }
+
+const BIO_METHOD *BIO_f_sink (void);
+BIO *bio_new_sink (void);

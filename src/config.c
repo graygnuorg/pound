@@ -2639,6 +2639,18 @@ parse_error_backend (void *call_data, void *section_data)
 }
 
 static int
+parse_success_backend (void *call_data, void *section_data)
+{
+  BALANCER_LIST *bml = call_data;
+  BACKEND *be;
+
+  be = xbackend_create (BE_SUCCESS, 1, last_token_locus_range ());
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return 0;
+}
+
+static int
 parse_errorfile (void *call_data, void *section_data)
 {
   struct token *tok;
@@ -3639,6 +3651,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
   {
     .name = "SendFile",
     .parser = parse_sendfile_backend,
+    .off = offsetof (SERVICE, balancers)
+  },
+  {
+    .name = "Success",
+    .parser = parse_success_backend,
     .off = offsetof (SERVICE, balancers)
   },
   {

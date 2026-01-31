@@ -6344,6 +6344,23 @@ the name argument specifies a globally-defined backend, the
 to handle the response, but instead are served by @command{pound}
 itself.
 
+@deffn {Service directive} Control
+Defines a special backend that serves @dfn{pound management
+interface}.  @xref{Service Control}, for a detailed discussion of this
+feature.
+@end deffn
+
+@anchor{Emergency}
+@deffn {Service directive} Emergency ... End
+Defines an @dfn{emergency backend}, which will be used only if all
+other backends become unavailable.  @xref{Backend}, for a discussion
+of directives that can be used within @code{Emergency} section.
+
+If multiple @code{Emergency} sections are defined, an emergency
+backend to use will be selected using the usual balancing technique
+(@pxref{Balancer}).
+@end deffn
+
 @anchor{Error backend}
 @deffn {Service directive} Error @var{status} [@var{file}]
 Return a particular HTTP status.
@@ -6375,6 +6392,40 @@ request accessor interpretation, as discussed in @ref{Request modifications}.
 
 This statement is available only if @command{pound} was built with Lua
 support.  @xref{LuaBackend}, for a detailed discussion.
+@end deffn
+
+@anchor{Metrics}
+@deffn {Service directive} Metrics
+This directive defines a special backend that generates Openmetric
+telemetry output on the given URL.  Example usage:
+
+@example
+@group
+Service
+    URL "/metrics"
+    Metrics
+End
+@end group
+@end example
+
+To control access to the telemetry endpoint, use the @code{ACL}
+statement (@pxref{ACL}).
+
+The @code{LogSuppress} directive (@pxref{LogSuppress}) is often used
+in openmetric services to suppress logging of served HTTP requests:
+
+@example
+@group
+Service
+    URL "/metrics"
+    Metrics
+    ACL "secure"
+    LogSuppress success
+End
+@end group
+@end example
+
+The metrics output is discussed in @ref{Metric Families}.
 @end deffn
 
 @deffn {Service directive} Redirect [@var{code}] "@var{url}"
@@ -6427,55 +6478,24 @@ If @var{dir} is not an absolute file name, it is resolved relative to
 @command{pound} include directory (@pxref{include directory}).
 @end deffn
 
-@deffn {Service directive} Control
-Defines a special backend that serves @dfn{pound management
-interface}.  @xref{Service Control}, for a detailed discussion of this
-feature.
-@end deffn
-
-@anchor{Metrics}
-@deffn {Service directive} Metrics
-This directive defines a special backend that generates Openmetric
-telemetry output on the given URL.  Example usage:
+@deffn {Service directive} Success
+A @dfn{Success} backend always returns 200 response code.  It can be used
+for debugging or for side effects, e.g. to answer @code{OPTIONS}
+requests by supplying response headers using @code{SetHeader}.
 
 @example
 @group
 Service
-    URL "/metrics"
-    Metrics
+    Match "OPTIONS"
+    Rewrite response
+        SetHeader "Access-Control-Allow-Origin: example.com"
+        SetHeader "Access-Control-Allow-Methods: GET,POST,PUT"
+        SetHeader "Access-Control-Max-Age: 1800"
+    End
+    Success
 End
 @end group
 @end example
-
-To control access to the telemetry endpoint, use the @code{ACL}
-statement (@pxref{ACL}).
-
-The @code{LogSuppress} directive (@pxref{LogSuppress}) is often used
-in openmetric services to suppress logging of served HTTP requests:
-
-@example
-@group
-Service
-    URL "/metrics"
-    Metrics
-    ACL "secure"
-    LogSuppress success
-End
-@end group
-@end example
-
-The metrics output is discussed in @ref{Metric Families}.
-@end deffn
-
-@anchor{Emergency}
-@deffn {Service directive} Emergency ... End
-Defines an @dfn{emergency backend}, which will be used only if all
-other backends become unavailable.  @xref{Backend}, for a discussion
-of directives that can be used within @code{Emergency} section.
-
-If multiple @code{Emergency} sections are defined, an emergency
-backend to use will be selected using the usual balancing technique
-(@pxref{Balancer}).
 @end deffn
 
 @node Session

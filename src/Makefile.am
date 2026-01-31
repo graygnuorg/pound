@@ -74,6 +74,7 @@ libpound_a_SOURCES = \
  json.h\
  mem.c\
  mem.h\
+ nullsink.c\
  progname.c
 
 pkgdata_DATA = poundctl.tmpl mvh.inc
