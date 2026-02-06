@@ -6486,7 +6486,7 @@ requests by supplying response headers using @code{SetHeader}.
 @example
 @group
 Service
-    Match "OPTIONS"
+    Method "OPTIONS"
     Rewrite response
         SetHeader "Access-Control-Allow-Origin: example.com"
         SetHeader "Access-Control-Allow-Methods: GET,POST,PUT"
