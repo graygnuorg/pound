@@ -1032,8 +1032,8 @@ access to that URL is limited to these IP addresses.
 configuration, it could be wise to rewrite it as a @dfn{detached
 condition}.  Detached condition is an abstract conditional
 statement, not connected with any service or listener.  It is assigned
-a unique name that serves as its identifier.  Syntactivally, such
-conditonal is defined using @code{Condition} section in global
+a unique name that serves as its identifier.  Syntactically, such
+conditional is defined using @code{Condition} section in global
 scope of the configuration file:
 
 @example
@@ -3007,6 +3007,21 @@ For functions invoked from @code{LuaBackend} or Lua directives used
 in @code{Rewrite response} context, the @code{http}
 module provides methods for examining and updating the response.
 
+@deftypecv {Field} req table headers resend
+This field is available only for functions invoked from @code{Rewrite
+response}. Setting it to @code{true} instructs @command{pound} to
+resend current request to the backend. Obviously, prior to setting it
+to @code{true}, the program is supposed to modify the request in some
+way.
+
+This approach can be used, for example, to react on 401 response from
+the backend, by re-sending it the request with properly constructed
+@samp{Authorization} header.
+
+Notice, that resending @code{POST} requests requires request content
+capturing (@pxref{ContentCapture}).
+@end deftypecv
+
 @deftypecv Field http table resp
 A table describing the response.  It is a read-write table.
 Assigning to its fields modifies the response that will be sent out by
@@ -4172,7 +4187,7 @@ the module being loaded.  The path is scanned from left to right.
 
 Multiple @code{Path} statements are allowed.  After parsing, the
 values from all @code{Path} statements are joined into a single
-prefix, which is then prepended to the defaulut value of
+prefix, which is then prepended to the default value of
 @code{package.path}.
 @end deffn
 
@@ -7705,7 +7720,7 @@ Standard deviation of the above.
 @cindex Emacs
 @findex pound-mode.el
 @anchor{pound-mode}
-@command{Pound} is distributed with @file{pound-mode.el}, an elisp
+@command{Pound} is distributed with @file{pound-mode.el}, an Elisp
 source which provides a major mode for editing @command{pound}
 configuration files in GNU Emacs.  The file is located in @file{src}
 directory of the distribution.  To install it, follow the instructions

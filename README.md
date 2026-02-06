@@ -68,9 +68,6 @@ A copy of the documentation is [available online](https://www.gnu.org.ua/softwar
 To build, __pound__ needs [OpenSSL](https://www.openssl.org/) version
 1.1.x or 3.0.x.
 
-As of current release, __pound__ still supports OpenSSL 1.0, but
-this support will soon be discontinued.
-
 If you compile it on a Debian-based system, you need to install the
 `libssl-dev` package prior to building __pound__.
 

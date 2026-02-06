@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.19.91 (git)
+Version 4.20, 2026-02-06
 
 * New selection statement: Method
 
@@ -49,6 +49,12 @@ is enabled by the following new configuration statement:
 where SIZE sets the upper limit on the captured content size.  If the
 actual content length is greater than this value, saved material is
 discarded and http.req.body is set to nil.
+
+** http.req.resend
+
+Lua functions invoked in "Rewrite response" can set this variable to
+'true' to have pound resend the modified request to backend. To avoid
+dead loops, pound limits the number of such resends to 4 per request.
 
 Version 4.19, 2025-12-11
 
