@@ -147,7 +147,7 @@ configuration options:
 
   Enable or disable use of [Lua](https://www.lua.org) extension modules.
   By default, it is enabled if the Lua library and header files are
-  installed and are of suitable version. You will need Lua version 5.3
+  installed and are of suitable version. You will need Lua version 5.3.5
   or 5.4 for this to work. Use `--disable-lua`, if you are don't need this
   feature or want to get a smaller binary without extra dependencies.
 
