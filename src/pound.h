@@ -85,14 +85,8 @@
 # include <openssl/lhash.h>
 # include <openssl/err.h>
 # include <openssl/rand.h>
-# if OPENSSL_VERSION_NUMBER >= 0x00907000L
-#  ifndef OPENSSL_THREADS
-#   error "Pound requires OpenSSL with thread support"
-#  endif
-# else
-#  ifndef THREADS
-#   error "Pound requires OpenSSL with thread support"
-#  endif
+# ifndef OPENSSL_THREADS
+#  error "Pound requires OpenSSL with thread support"
 # endif
 #else
 # error "Pound needs openssl/ssl.h"

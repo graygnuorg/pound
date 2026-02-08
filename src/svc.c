@@ -20,11 +20,6 @@
 #include "pound.h"
 #include "extern.h"
 
-#if ! SET_DH_AUTO
-static void init_rsa (void);
-static void do_RSAgen (enum job_ctl, void *, const struct timespec *);
-#endif
-
 /* Periodic jobs */
 typedef struct job
 {
@@ -209,12 +204,6 @@ thr_job_runner (void *arg)
 void *
 thr_timer (void *arg)
 {
-  /* Seed the job queue */
-#if ! SET_DH_AUTO
-  init_rsa ();
-  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
-#endif
-
   pthread_mutex_lock (job_mutex ());
   pthread_cleanup_push (timer_cleanup, NULL);
 
@@ -1644,171 +1633,11 @@ touch_be (enum job_ctl ctl, void *data, const struct timespec *ts)
   backend_unref (be);
 }
 
-#if ! SET_DH_AUTO
-static pthread_mutex_t RSA_mut;	/* mutex for RSA keygen */
-static RSA *RSA512_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
-static RSA *RSA1024_keys[N_RSA_KEYS];	/* ephemeral RSA keys */
-
-/*
- * return a pre-generated RSA key
- */
-static RSA *
-RSA_tmp_callback ( /* not used */ SSL * ssl, /* not used */ int is_export,
-		  int keylength)
-{
-  RSA *res;
-  int ret_val;
-
-  if ((ret_val = pthread_mutex_lock (&RSA_mut)) != 0)
-    logmsg (LOG_WARNING, "RSA_tmp_callback() lock: %s", strerror (ret_val));
-  res = (keylength <= 512) ? RSA512_keys[rand () % N_RSA_KEYS]
-			   : RSA1024_keys[rand () % N_RSA_KEYS];
-  if ((ret_val = pthread_mutex_unlock (&RSA_mut)) != 0)
-    logmsg (LOG_WARNING, "RSA_tmp_callback() unlock: %s", strerror (ret_val));
-  return res;
-}
-
-static int
-generate_key (RSA ** ret_rsa, unsigned long bits)
-{
-  int rc = 0;
-  RSA *rsa;
-
-  rsa = RSA_new ();
-  if (rsa)
-    {
-      BIGNUM *bne = BN_new ();
-      if (BN_set_word (bne, RSA_F4))
-	rc = RSA_generate_key_ex (rsa, bits, bne, NULL);
-      BN_free (bne);
-      if (rc)
-	*ret_rsa = rsa;
-      else
-	RSA_free (rsa);
-    }
-  return rc;
-}
-
-/*
- * Periodically regenerate ephemeral RSA keys
- * runs every T_RSA_KEYS seconds
- */
-static void
-do_RSAgen (enum job_ctl ctl, void *unused1, const struct timespec *unused2)
-{
-  int n, ret_val;
-  RSA *t_RSA512_keys[N_RSA_KEYS];
-  RSA *t_RSA1024_keys[N_RSA_KEYS];
-
-  if (ctl != job_ctl_run)
-    return;
-
-  /* Re-arm the job */
-  job_enqueue_after (T_RSA_KEYS, do_RSAgen, NULL);
-
-  for (n = 0; n < N_RSA_KEYS; n++)
-    {
-      /* FIXME: Error handling */
-      generate_key (&t_RSA512_keys[n], 512);
-      generate_key (&t_RSA1024_keys[n], 1024);
-    }
-  if ((ret_val = pthread_mutex_lock (&RSA_mut)) != 0)
-    logmsg (LOG_WARNING, "thr_RSAgen() lock: %s", strerror (ret_val));
-  for (n = 0; n < N_RSA_KEYS; n++)
-    {
-      RSA_free (RSA512_keys[n]);
-      RSA512_keys[n] = t_RSA512_keys[n];
-      RSA_free (RSA1024_keys[n]);
-      RSA1024_keys[n] = t_RSA1024_keys[n];
-    }
-  if ((ret_val = pthread_mutex_unlock (&RSA_mut)) != 0)
-    logmsg (LOG_WARNING, "thr_RSAgen() unlock: %s", strerror (ret_val));
-}
-
-#include    "dh.h"
-static DH *DH512_params, *DHALT_params;
-
-static DH *
-DH_tmp_callback ( /* not used */ SSL * s, /* not used */ int is_export,
-		 int keylength)
-{
-  return keylength == 512 ? DH512_params : DHALT_params;
-}
-
-/*
- * initialise RSA_mut and keys
- */
-void
-init_rsa (void)
-{
-  int n;
-
-  /*
-   * Pre-generate ephemeral RSA keys
-   */
-  for (n = 0; n < N_RSA_KEYS; n++)
-    {
-      if (!generate_key (&RSA512_keys[n], 512))
-	{
-	  logmsg (LOG_WARNING, "RSA_generate(%d, 512) failed", n);
-	  return;
-	}
-      if (!generate_key (&RSA1024_keys[n], 1024))
-	{
-	  logmsg (LOG_WARNING, "RSA_generate(%d, 1024) failed", n);
-	  return;
-	}
-    }
-  /* pthread_mutex_init() always returns 0 */
-  pthread_mutex_init (&RSA_mut, NULL);
-
-  DH512_params = get_dh512 ();
-#if DH_LEN == 1024
-  DHALT_params = get_dh1024 ();
-#else
-  DHALT_params = get_dh2048 ();
-#endif
-  return;
-}
-
-#ifndef OPENSSL_NO_ECDH
-static int EC_nid = NID_X9_62_prime256v1;
-#endif
-
-int
-set_ECDHCurve (char *name)
-{
-  int n;
-
-  if ((n = OBJ_sn2nid (name)) == 0)
-    return -1;
-  EC_nid = n;
-  return 0;
-}
-
-void
-POUND_SSL_CTX_init (SSL_CTX *ctx)
-{
-  SSL_CTX_set_tmp_rsa_callback (ctx, RSA_tmp_callback);
-  SSL_CTX_set_tmp_dh_callback (ctx, DH_tmp_callback);
-#ifndef OPENSSL_NO_ECDH
-  /* This generates a EC_KEY structure with no key, but a group defined */
-  EC_KEY *ecdh;
-  if ((ecdh = EC_KEY_new_by_curve_name (EC_nid)) == NULL)
-    abend (NULL, "Unable to generate temp ECDH key");
-
-  SSL_CTX_set_tmp_ecdh (ctx, ecdh);
-  SSL_CTX_set_options (ctx, SSL_OP_SINGLE_ECDH_USE);
-  EC_KEY_free (ecdh);
-#endif
-}
-#else /* SET_DH_AUTO == 1 */
 void
 POUND_SSL_CTX_init (SSL_CTX *ctx)
 {
   SSL_CTX_set_dh_auto (ctx, 1);
 }
-#endif
 
 static char *
 get_param (char const *url, char const *param, size_t *ret_len)

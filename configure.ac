@@ -118,26 +118,6 @@ AC_CHECK_MEMBERS([struct stat.st_mtim],[],[],
 #include <sys/stat.h>
 ])
 
-AC_ARG_WITH([t_rsa],
- [AS_HELP_STRING([--with-t_rsa=nnn],[Timeout for RSA ephemeral keys generation])],
- [T_RSA_KEYS=${withval}],
- [T_RSA_KEYS=7200])
-
-AC_DEFINE_UNQUOTED([T_RSA_KEYS],[$T_RSA_KEYS],
- [Timeout for RSA ephemeral keys generation])
-
-AC_ARG_WITH([dh],
- [AS_HELP_STRING([--with-dh=nnn],[DH key length parameter (default: 2048, can set to 1024)])],
- [case ${withval} in
-  1024|2048) DH_LEN=${withval};;
-  *) AC_MSG_FAILURE([invalid value for DH key length])
-  esac],
- [DH_LEN=2048])
-
-AC_SUBST(DH_LEN)
-AC_DEFINE_UNQUOTED([DH_LEN],[$DH_LEN],
- [DH key length])
-
 AC_ARG_WITH([maxbuf],
  [AS_HELP_STRING([--with-maxbuf=nnn],[Value of the MAXBUF parameter (default: 4096)])],
  [MAXBUF=${withval}],
@@ -195,16 +175,6 @@ AC_CHECK_LIB([crypto],[BIO_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lcrypto) - aborted],[1])])
 AC_CHECK_LIB([ssl],[SSL_CTX_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lssl) - aborted])])
-
-AC_LINK_IFELSE([AC_LANG_PROGRAM([#include <openssl/ssl.h>],
-[SSL_CTX *ctx = NULL;
-SSL_CTX_set_dh_auto (ctx, 1);
-])],
-[SET_DH_AUTO=1],[SET_DH_AUTO=0])
-
-AM_CONDITIONAL([SET_DH_AUTO],[test "$SET_DH_AUTO" = 1])
-AC_DEFINE_UNQUOTED([SET_DH_AUTO],[$SET_DH_AUTO],
-  [Define to 1 of *set_dh_auto macros are available])
 
 PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])

@@ -80,11 +80,7 @@
 #define cat2(a,b) __cat2__(a,b)
 #define cat3(a,b,c) cat2(a, cat2(b,c))
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define HT_DECLARE(type) DEFINE_LHASH_OF (type)
-#else
-# define HT_DECLARE(type) DECLARE_LHASH_OF (type)
-#endif
+#define HT_DECLARE(type) DEFINE_LHASH_OF(type)
 HT_DECLARE(HT_TYPE);
 #undef HT_DECLARE
 
@@ -116,55 +112,31 @@ HT_TYPE_CMP_FN (const HT_TYPE *a, const HT_TYPE *b)
 }
 #endif
 
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-#define HT_IMPL_FN(type) \
-  static IMPLEMENT_LHASH_HASH_FN (type, type) \
-  static IMPLEMENT_LHASH_COMP_FN (type, type)
-HT_IMPL_FN(HT_TYPE)
-#undef HT_IMPL_FN
-#endif
-
 static inline HT_TYPE_HASH_T *
 cat2(HT_TYPE,_HASH_NEW) (void)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   return cat3(lh_, HT_TYPE, _new) (HT_TYPE_HASH_FN, HT_TYPE_CMP_FN);
-#else
-  return LHM_lh_new (HT_TYPE, HT_TYPE);
-#endif
 }
 
 #ifndef HT_NO_HASH_FREE
 static inline void
 cat2(HT_TYPE,_HASH_FREE) (HT_TYPE_HASH_T *tab)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   cat3(lh_, HT_TYPE, _free) (tab);
-#else
-  LHM_lh_free (HT_TYPE, tab);
-#endif
 }
 #endif /* HT_NO_HASH_FREE */
 
 static inline HT_TYPE *
 cat2(HT_TYPE, _INSERT) (HT_TYPE_HASH_T *tab, HT_TYPE *node)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   return cat3(lh_, HT_TYPE, _insert) (tab, node);
-#else
-  return LHM_lh_insert (HT_TYPE, tab, node);
-#endif
 }
 
 #ifndef HT_NO_RETRIEVE
 static inline HT_TYPE *
 cat2(HT_TYPE, _RETRIEVE) (HT_TYPE_HASH_T *tab, HT_TYPE *node)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   return cat3(lh_, HT_TYPE, _retrieve) (tab, node);
-#else
-  return LHM_lh_retrieve (HT_TYPE, tab, node);
-#endif
 }
 #endif /* HT_NO_RETRIEVE */
 
@@ -172,48 +144,30 @@ cat2(HT_TYPE, _RETRIEVE) (HT_TYPE_HASH_T *tab, HT_TYPE *node)
 static inline HT_TYPE *
 cat2(HT_TYPE, _DELETE) (HT_TYPE_HASH_T *tab, HT_TYPE *node)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   return cat3(lh_, HT_TYPE, _delete) (tab, node);
-#else
-  return LHM_lh_delete (HT_TYPE, tab, node);
-#endif
 }
 #endif /* HT_NO_DELETE */
 
 #ifndef HT_NO_FOREACH
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
 IMPLEMENT_LHASH_DOALL_ARG (HT_TYPE, void);
-#endif
 
 static inline void
 cat2(HT_TYPE, _FOREACH) (HT_TYPE_HASH_T *tab,
 			 void (*fun) (HT_TYPE *, void *), void *data)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   cat3 (lh_, HT_TYPE, _doall_void) (tab, fun, data);
-#else
-  LHM_lh_doall_arg (HT_TYPE, tab, (void (*)(void *, void *)) fun, void *, data);
-#endif
 }
 
 static inline unsigned long
 cat2(HT_TYPE, _get_down_load) (HT_TYPE_HASH_T *tab)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   return cat3 (lh_, HT_TYPE, _get_down_load) (tab);
-#else
-  return CHECKED_LHASH_OF (HT_TYPE, tab)->down_load;
-#endif
 }
 
 static inline void
 cat2(HT_TYPE, _set_down_load) (HT_TYPE_HASH_T *tab, unsigned long dl)
 {
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
   cat3 (lh_, HT_TYPE, _set_down_load) (tab, dl);
-#else
-  CHECKED_LHASH_OF (HT_TYPE, tab)->down_load = dl;
-#endif
 }
 
 #ifndef HT_NO_FOREACH_SAFE

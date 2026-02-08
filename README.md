@@ -184,24 +184,11 @@ configuration options:
   used internally by __pound__ for various needs.  The default is 4096.
   You will probably not want to change it.
 
-* `--with-dh=`*n*
-
-  Default DH parameter length.  Allowed values for *n* are 2048 (the
-  default) and 1024.
-
-  This option has no effect when compiling with OpenSSL 1.1 or later.
-
 * `--with-ssl=`*directory*
 
   Directory under which OpenSSL is installed.  You will seldom need this
   option.  Most of the time `configure` is able to detect that location
   automatically.
-
-* `--with-t_rsa=`*n*
-
-  Sets default time interval for regeneration of RSA ephemeral keys.
-
-  This option has no effect when compiling with OpenSSL 1.1 or later.
 
 When configuration is finished, run
 

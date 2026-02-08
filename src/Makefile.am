@@ -83,26 +83,6 @@ EXTRA_DIST = $(pkgdata_DATA) pound-mode.el
 
 noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h watcher.h
 
-if SET_DH_AUTO
-DHSRC =
-nodist_pound_SOURCES =
-else
-nodist_pound_SOURCES = dh.h
-DHSRC = dh512.h dh@DH_LEN@.h
-
-dh512.h:
-	openssl dhparam -5 -C -noout 512 > dh512.h
-
-dh@DH_LEN@.h:
-	openssl dhparam -5 -C -noout @DH_LEN@ > dh@DH_LEN@.h
-
-dh.h: $(DHSRC)
-	cat $(DHSRC) > dh.h
-
-BUILT_SOURCES=dh.h $(DHSRC)
-DISTCLEANFILES=dh.h dh512.h dh1024.h dh2048.h
-endif
-
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c tmpl.c
 poundctl_LDFLAGS=-lm

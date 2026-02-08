@@ -141,11 +141,7 @@ apr_md5_encode (const char *pw, const char *salt, char *result, size_t nbytes)
 
    for (i = 0; i < 1000; i++)
      {
-#if OPENSSL_VERSION_NUMBER > 0x10100000L
        EVP_MD_CTX_reset (ctx1);
-#else
-       EVP_MD_CTX_cleanup (ctx1);
-#endif
        EVP_DigestInit (ctx1, EVP_md5 ());
        if (i & 1)
 	 EVP_DigestUpdate (ctx1, pw, plen);

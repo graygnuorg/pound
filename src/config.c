@@ -919,15 +919,7 @@ parse_ECDHCurve (void *call_data, void *section_data)
   struct token *tok = gettkn_expect (T_STRING);
   if (!tok)
     return CFGPARSER_FAIL;
-#if SET_DH_AUTO == 0 && !defined OPENSSL_NO_ECDH
-  if (set_ECDHCurve (tok->str) == 0)
-    {
-      conf_error ("%s", "ECDHCurve: invalid curve name");
-      return CFGPARSER_FAIL;
-    }
-#else
   conf_error ("%s", "statement ignored");
-#endif
   return CFGPARSER_OK;
 }
 
@@ -4559,15 +4551,9 @@ parse_listen_http (void *call_data, void *section_data)
   return CFGPARSER_OK;
 }
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-# define general_name_string(n) \
+#define general_name_string(n) \
 	xstrndup ((char*)ASN1_STRING_get0_data (n->d.dNSName),	\
 		 ASN1_STRING_length (n->d.dNSName) + 1)
-#else
-# define general_name_string(n) \
-	xstrndup ((char*)ASN1_STRING_data(n->d.dNSName),	\
-		 ASN1_STRING_length (n->d.dNSName) + 1)
-#endif
 
 static void
 get_subjectaltnames (X509 *x509, POUND_CTX *pc, size_t san_max)
@@ -5727,7 +5713,9 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
   },
   {
     .name = "ECDHCurve",
-    .parser = parse_ECDHCurve
+    .parser = parse_ECDHCurve,
+    .deprecated = 1,
+    .message = "this setting is no longer used"
   },
   {
     .name = "SSLEngine",
@@ -6372,10 +6360,6 @@ struct string_value pound_settings[] = {
 #endif
     }
   },
-#if ! SET_DH_AUTO
-  { "DH bits",         STRING_INT, { .s_int = DH_LEN } },
-  { "RSA regeneration interval", STRING_INT, { .s_int = T_RSA_KEYS } },
-#endif
   { NULL }
 };
 

@@ -4042,10 +4042,6 @@ Use an OpenSSL hardware acceleration card called @var{name}.  Available
 only if OpenSSL-engine is installed on your system.
 @end deffn
 
-@deffn {Global directive} ECDHcurve "@var{name}"
-Use the named curve for elliptical curve encryption.
-@end deffn
-
 @node Regexp Settings
 @subsection Regular Expression Settings
 

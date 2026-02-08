@@ -4556,13 +4556,6 @@ rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what)
  * for bugs in some implementations
  */
 
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-#  define clear_error(ssl)
-#else /* OPENSSL_VERSION_NUMBER >= 0x10000000L */
-#  define clear_error(ssl) \
-	if(ssl != NULL) { ERR_clear_error(); ERR_remove_thread_state(NULL); }
-#endif
-
 static void
 socket_setup (int sock)
 {
@@ -6318,7 +6311,6 @@ thr_http (void *dummy)
   while ((phttp = pound_http_dequeue ()) != NULL)
     {
       do_http (phttp);
-      clear_error (phttp->ssl);
       pound_http_destroy (phttp);
       active_threads_decr ();
     }
