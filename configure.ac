@@ -188,12 +188,15 @@ AC_ARG_ENABLE([lua],
 
 if test $status_lua != no; then
   PKG_PROG_PKG_CONFIG
-  PKG_CHECK_MODULES([LUA], [lua >= 5.3.5],
-      [status_lua=yes
-       AC_DEFINE([ENABLE_LUA], [1],
-		 [Define if Lua extension language is supported])],
-      [status_lua=no])
-  AC_MSG_CHECKING([For liblua 5.3.5 or newer])
+  status_lua=no
+  lua_min_version=5.3.5
+  PKG_CHECK_MODULES([LUA], [lua >= $lua_min_version], [status_lua=yes],
+     [PKG_CHECK_MODULES([LUA], [lua54], [status_lua=yes],
+         [PKG_CHECK_MODULES([LUA], [lua53 >= $lua_min_version], [status_lua=yes])])])
+  AS_IF([test $status_lua = yes],
+    [AC_DEFINE([ENABLE_LUA], [1],
+               [Define if Lua extension language is supported])])
+  AC_MSG_CHECKING([For liblua $lua_min_version or newer])
   AC_MSG_RESULT([$status_lua])
 fi
 
