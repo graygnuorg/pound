@@ -192,7 +192,8 @@ if test $status_lua != no; then
   lua_min_version=5.3.5
   PKG_CHECK_MODULES([LUA], [lua >= $lua_min_version], [status_lua=yes],
      [PKG_CHECK_MODULES([LUA], [lua54], [status_lua=yes],
-         [PKG_CHECK_MODULES([LUA], [lua53 >= $lua_min_version], [status_lua=yes])])])
+         [PKG_CHECK_MODULES([LUA], [lua53 >= $lua_min_version],
+	     [status_lua=yes], [status_lua=no])])])
   AS_IF([test $status_lua = yes],
     [AC_DEFINE([ENABLE_LUA], [1],
                [Define if Lua extension language is supported])])
