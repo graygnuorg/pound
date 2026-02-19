@@ -2229,8 +2229,6 @@ copy_chunks (BIO *cl, BIO *be, char *buf, unsigned bufsize,
   return HTTP_STATUS_OK;
 }
 
-static int err_to = -1;
-
 typedef struct
 {
   int timeout;
@@ -2340,14 +2338,14 @@ bio_callback
 	  /*
 	   * timeout - mark the BIO as unusable for the future
 	   */
-	  bio_arg->timeout = err_to;
+	  bio_arg->timeout = -1;
 #ifdef  EBUG
 	  logmsg (LOG_WARNING,
 		  "(%"PRItid") CALLBACK timeout poll after %d secs: %s",
 		  POUND_TID (), to / 1000, strerror (p_err));
 #endif
 	  errno = ETIMEDOUT;
-	  return 0;
+	  return -1;
 
 	default:
 	  /*
