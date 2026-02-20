@@ -1112,6 +1112,22 @@ typedef enum
   }
   RENEG_STATE;
 
+enum resend_mode
+  {
+    RESEND_NONE,           /* No resending. */
+    RESEND_SAME,           /* Resend to the same service/backend. */
+    RESEND_SERVICE,        /* Resend to another service. */
+    RESEND_BACKEND         /* Resend to another backend (for future use). */
+  };
+
+enum capture_state         /* State of request content capturing. */
+  {
+    CAPTURE_NONE,          /* No capturing. */
+    CAPTURE_PROCESS,       /* Content capturing in process. */
+    CAPTURE_READY          /* Content is captured and available in
+			      request.body */
+  };
+
 typedef struct _pound_http
 {
   /* Input parameters */
@@ -1148,11 +1164,14 @@ typedef struct _pound_http
 
   CONTENT_LENGTH res_bytes;
 
-  int capturing;
+  enum capture_state capturing;
 
 #if ENABLE_LUA
-  char stash_init[2];
-  int resend;
+  char stash_init[2];        /* State of global and per-thread stash
+				(0 - not initialized, 1 - initialized. */
+  enum resend_mode resend;   /* Resend mode. */
+  SERVICE *resend_svc;       /* Selected service, for RESEND_SERVICE. */
+  int resend_count;          /* Number of resends done so far. */
 #endif
 
   SLIST_ENTRY(_pound_http) next;
@@ -1448,7 +1467,9 @@ int tbf_eval (TBF *env, char const *keyid);
 static inline void phttp_lua_stash_reset (POUND_HTTP *p)
 {
   p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
-  p->resend = 0;
+  p->resend = RESEND_NONE;
+  p->resend_svc = NULL;
+  p->resend_count = 0;
 }
 
 static inline int phttp_resending (POUND_HTTP *p)
@@ -1458,7 +1479,20 @@ static inline int phttp_resending (POUND_HTTP *p)
 
 static inline void phttp_clear_resend (POUND_HTTP *p)
 {
-  p->resend = 0;
+  p->resend = RESEND_NONE;
+}
+
+static inline SERVICE *phttp_resend_service (POUND_HTTP *p)
+{
+  return p->resend_svc;
+}
+
+static inline int phttp_resend_next (POUND_HTTP *p)
+{
+  if (p->resend_count == MAX_REQUEST_RESEND)
+    return -1;
+  p->resend_count++;
+  return 0;
 }
 
 int pndlua_init (void);
@@ -1472,8 +1506,10 @@ int pndlua_parse_config (void *call_data, void *section_data);
 int pndlua_parse_closure (struct pndlua_closure *cond);
 #else
 # define phttp_lua_stash_reset(p)
-# define phttp_resending(p) 0
+# define phttp_resending(p) RESEND_NONE
 # define phttp_clear_resend(p)
+# define phttp_resend_service(p) NULL
+# define phttp_resend_next(p) -1
 # define pndlua_init() 0
 static inline int
 cfg_no_lua (void)

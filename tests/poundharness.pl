@@ -42,6 +42,7 @@ my $statistics;
 my $fakedns;
 my $valgrind;
 my @source_addr;
+my $userfile = 'userlist';
 
 use constant {
     EX_SUCCESS => 0,
@@ -205,7 +206,8 @@ GetOptions('config|f=s' => \$config,
 	   },
 	   'test-threads' => sub {
 	       exit(PoundSub->using_threads == 0);
-	   }
+	   },
+	   'userfile=s' => \$userfile
     )
     or exit(EX_USAGE);
 
@@ -251,6 +253,22 @@ if ($config =~ m{(?<src>.+):(?<dst>.+)}) {
     my $ofile = 'pound.cfg';
     preproc($config, $ofile, 1);
     $config = $ofile;
+}
+
+if (-e $userfile) {
+    open(my $fh, '<', $userfile) or die "can't open $userfile: $!";
+    my %usertab;
+    while (<$fh>) {
+	chomp;
+	next if /^\s*(?:#.*)?$/;
+	my @v = split /:/, $_, 2;
+	if (@v != 2) {
+	    usage_error("$userfile:$.: malformed line");
+	}
+	$usertab{$v[0]} = $v[1];
+    }
+    close($fh);
+    $backends->set_usertab(\%usertab);
 }
 
 if ($include_dir) {
@@ -375,7 +393,7 @@ EOT
     my $be_loc;
     while (<$in>) {
 	chomp;
-	if (/^\s*(?:#.)?$/) {
+	if (/^\s*(?:#.*)?$/) {
 	    ;
 	} elsif (/^\s*(Daemon|LogFacility)/i) {
 	    $_ = "# Commented out: $_";
@@ -1579,13 +1597,18 @@ use strict;
 use warnings;
 use Carp;
 use Socket;
+use MIME::Base64 qw(decode_base64);
 
 sub new {
     my ($class, $keepopen) = @_;
-    return bless { listeners => [], keepopen => $keepopen };
+    return bless { listeners => [], keepopen => $keepopen, usertab => {} };
 }
 sub keepopen { shift->{keepopen} }
 sub count { scalar @{shift->{listeners}} }
+sub set_usertab {
+    my ($self, $tab) = @_;
+    $self->{usertab} = $tab;
+}
 sub create {
     my ($self, $ident, $proto, $ip) = @_;
     if (defined($proto) && lc($proto) eq 'HTTPS') {
@@ -1659,7 +1682,7 @@ sub read_and_process {
 	    while (1) {
 		my $fh;
 		accept($fh, $lst->socket_handle) or PoundSub->exit();
-		process_http_request($fh, $lst)
+		$self->process_http_request($fh, $lst)
 	    }
 	}, $lst);
     }
@@ -1713,13 +1736,31 @@ EOT
 		 body => $text);
 }
 
+sub http_bauth {
+    my ($http, $rest, $usertab) = @_;
+    if (my $auth = $http->header('authorization')) {
+	if ($auth =~ /^\s*Basic\s+(.+)$/) {
+	    my ($u, $p) = split /:/, decode_base64($1), 2;
+	    if ($usertab->{$u} eq $p) {
+		$http->reply(200, 'OK');
+		return;
+	    }
+	}
+    }
+    $http->reply(401, 'Unauthorized',
+		 headers => {
+		     'www-authenticate' => 'Basic Realm="poundharness"'
+		 });
+}
+
 sub process_http_request {
-    my ($sock, $backend) = @_;
+    my ($self, $sock, $backend) = @_;
 
     my %endpoints = (
 	'echo' => \&http_echo,
 	'redirect' => \&http_redirect,
-	'status' => \&http_status
+	'status' => \&http_status,
+	'bauth' => sub { http_bauth(@_, $self->{usertab}) }
     );
 
     local $| = 1;
@@ -1967,6 +2008,7 @@ B<poundharness>
 [B<--statistics>]
 [B<--test-threads>]
 [B<--transcript=>I<FILE>]
+[B<--userfile=>I<FILE>]
 [B<--verbose>]
 I<SCRIPT>
 
@@ -2114,6 +2156,15 @@ if you wish to get a textual response.
 =item B<-t>, B<--startup-timeout=> I<N>
 
 Timeout for B<pound> startup, in seconds.  Default is 2.
+
+=item B<--userfile=>I<FILE>
+
+Read the list of usernames and passwords from I<FILE>, instead of the default
+F<userlist>. Each line in I<FILE> contains a username and password, separated
+by a colon. Empty lines and passwords are ignored.
+
+The user list is used by the basic authentication backend (see B</bauth>,
+below).
 
 =item B<-v>, B<--verbose>
 
@@ -2389,7 +2440,20 @@ B<end> on a line by itself.  Zone file syntax is defined by RFC1035.
 =head1 BACKENDS
 
 Each B<Backend> statement in the configuration file causes creation of
-a HTTP server behind it.  These built-in servers currently two endpoints:
+a HTTP server behind it.  These built-in servers currently provide the
+following endpoints:
+
+=head2 /bauth
+
+Requires basic authentication.  The list of usernames and passwords is
+read from the file F<userlist>, located in the current working directory.
+It is OK if this file does not exist.
+
+Alternative location can be specified using the B<--userfile=I<FILE>> option.
+In thise case, it is an error if I<FILE> does not exist.
+
+Each line in the user list file contains a username and password, separated
+by a colon. Empty lines and passwords are ignored.
 
 =head2 /echo
 

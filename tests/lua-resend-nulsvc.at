@@ -1,0 +1,55 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([Resend and reset service])
+AT_KEYWORDS([cond lua lua-resend lua-resend-nulsvc])
+
+AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
+AT_DATA([resend.lua],
+[function resend()
+  if http.resp.code == 401 then
+    http.req.path = '/echo/foo/bar'
+    http.service.name = nil
+  end
+end
+])
+
+PT_CHECK([Lua
+	Load "resend.lua"
+End
+ListenHTTP
+	Service "echo"
+		Path -beg "/echo/"
+		Backend
+		End
+	End
+	Service "auth"
+		Rewrite response
+			LuaModify "resend"
+		End
+		Backend
+		End
+	End
+End
+],
+[GET /bauth/foo/bar
+end
+
+200
+x-orig-uri: /echo/foo/bar
+end
+])
+
+AT_CLEANUP

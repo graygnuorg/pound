@@ -1462,6 +1462,171 @@ pndlua_dcl_resp (lua_State *L)
   lua_pop (L, 1);
 }
 
+static inline SERVICE *
+extract_service (struct http_ud *ud)
+{
+  return ud->phttp->resend == RESEND_SERVICE
+	   ? ud->phttp->resend_svc : ud->phttp->svc;
+}
+
+static int
+service_get_index (lua_State *L)
+{
+  struct http_ud *http = pndlua_get_userdata (L, 1);
+  SERVICE *svc = extract_service (http);
+
+  if (svc == NULL)
+    lua_pushnil (L);
+  else
+    {
+      int i = 0;
+      SERVICE *s;
+      SERVICE_HEAD *head = &http->phttp->lstn->services;
+      SLIST_FOREACH (s, head, next)
+	{
+	  if (s == svc)
+	    break;
+	  i++;
+	}
+      lua_pushinteger (L, 1);
+    }
+  return 1;
+}
+
+static int
+service_set_index (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  SERVICE *s = NULL;
+
+  if (!lua_isnil (L, 3))
+    {
+      int i = 0;
+      SERVICE_HEAD *head = &ud->phttp->lstn->services;
+      int ok;
+      int n = lua_tointegerx (L, 3, &ok);
+      if (!ok || n < 0)
+	return luaL_error (L, "argument must be a non-negative integer");
+      SLIST_FOREACH (s, head, next)
+	{
+	  if (i == n)
+	    break;
+	  i++;
+	}
+      if (!s)
+	return luaL_error (L, "no service at index %d", n);
+    }
+  ud->phttp->resend_svc = s;
+  ud->phttp->resend = RESEND_SERVICE;
+  return 0;
+}
+
+static int
+service_get_name (lua_State *L)
+{
+  struct http_ud *http = pndlua_get_userdata (L, 1);
+  SERVICE *svc = extract_service (http);
+
+  if (svc == NULL)
+    lua_pushnil (L);
+  else
+    lua_pushstring (L, svc->name);
+  return 1;
+}
+
+static int
+service_set_name (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  SERVICE *s = NULL;
+
+  if (!lua_isnil (L, 3))
+    {
+      SERVICE_HEAD *head = &ud->phttp->lstn->services;
+      char const *name = lua_tostring (L, 3);
+      SLIST_FOREACH (s, head, next)
+	{
+	  if (s->name && strcmp(s->name, name) == 0)
+	    break;
+	}
+      if (!s)
+	return luaL_error (L, "no service with name %s", name);
+    }
+  ud->phttp->resend_svc = s;
+  ud->phttp->resend = RESEND_SERVICE;
+  return 0;
+}
+
+static int
+service_get_locus (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  if (ud->phttp->svc == NULL)
+    lua_pushnil (L);
+  else
+    {
+	struct stringbuf sb;
+	char *s;
+
+	stringbuf_init_log (&sb);
+	stringbuf_format_locus_range (&sb, &ud->phttp->svc->locus);
+	if ((s = stringbuf_finish (&sb)) == NULL)
+	  lua_pushstring (L, s);
+	stringbuf_free (&sb);
+	if (!s)
+	  return luaL_error (L, "%s", "out of memory");
+    }
+  return 1;
+}
+
+static int
+pndlua_service_index (lua_State *L)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "iln";
+  static struct luaL_Reg reg[] = {
+    { "index", service_get_index },
+    { "locus", service_get_locus },
+    { "name", service_get_name },
+  };
+
+  field = lua_tostring (L, 2);
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
+    luaL_error (L, "%s: no such field", field);
+  return fun (L);
+}
+
+static int
+pndlua_service_newindex (lua_State *L)
+{
+  char const *field;
+  lua_CFunction fun;
+
+  static char letidx[] = "in";
+  static struct luaL_Reg reg[] = {
+    { "index", service_set_index },
+    { "name", service_set_name },
+  };
+
+  field = lua_tostring (L, 2);
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
+    luaL_error (L, "%s: no such field", field);
+  return fun (L);
+}
+
+static char const pndlua_service_class[] = "service";
+
+static void
+pndlua_dcl_service (lua_State *L)
+{
+  pndlua_new_metatable (L, pndlua_service_class);
+  pndlua_dcl_function (L, "__index", pndlua_service_index);
+  pndlua_dcl_function (L, "__newindex", pndlua_service_newindex);
+  lua_pop (L, 1);
+}
+
 static int
 http_req (lua_State *L)
 {
@@ -1499,7 +1664,22 @@ static int
 http_resend (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushboolean (L, ud->phttp->resend);
+  lua_pushinteger (L, ud->phttp->resend);
+  return 1;
+}
+
+static int
+http_service (lua_State *L)
+{
+  /* Create the object */
+  lua_newtable (L);
+  /* t[0] = ud */
+  lua_rawgeti (L, 1, 0);
+  lua_rawseti (L, -2, 0);
+
+  lua_getfield (L, LUA_REGISTRYINDEX, pndlua_service_class);
+  lua_setmetatable (L, -2);
+
   return 1;
 }
 
@@ -1512,11 +1692,12 @@ pndlua_http_index (lua_State *L)
 
   int rw = http->modresp != 0;
 
-  static char *letidx[] = { "r", "rrr" };
+  static char *letidx[] = { "r", "rrrs" };
   static struct luaL_Reg reg[] = {
     { "req", http_req },
     { "resp", http_resp },
     { "resend", http_resend },
+    { "service", http_service },
   };
 
   field = lua_tostring (L, 2);
@@ -1533,7 +1714,7 @@ pndlua_http_newindex (lua_State *L)
 
   if (strcmp(field, "resend"))
     luaL_error (L, "attempt to modify read-only data");
-  ud->phttp->resend = lua_toboolean (L, 3);
+  ud->phttp->resend = lua_toboolean (L, 3) ? RESEND_SAME : RESEND_NONE;
   return 0;
 }
 
@@ -1792,6 +1973,7 @@ pndlua_new_state (void)
 
   pndlua_dcl_req (state);
   pndlua_dcl_resp (state);
+  pndlua_dcl_service (state);
 
   return state;
 }

@@ -120,6 +120,10 @@ TESTSUITE_AT = \
  lua-modreq.at\
  lua-http.at\
  lua-path.at\
+ lua-resend-loop.at\
+ lua-resend-nulsvc.at\
+ lua-resend-same.at\
+ lua-resend-service.at\
  maxrequest.at\
  maxuri.at\
  method.at\

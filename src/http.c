@@ -4937,24 +4937,47 @@ copy_response (POUND_HTTP *phttp, int chunked,
 static void
 capture_start (POUND_HTTP *phttp)
 {
-  if (!phttp_resending (phttp) && phttp->svc->capture_size > 0)
+  switch (phttp->capturing)
     {
-      BIO *cap = bio_new_capture (phttp->svc->capture_size);
-      phttp->be = BIO_push (cap, phttp->be);
-      phttp->capturing = 1;
+    case CAPTURE_NONE:
+      if (phttp->svc->capture_size > 0)
+	{
+	  BIO *cap = bio_new_capture (phttp->svc->capture_size);
+	  phttp->be = BIO_push (cap, phttp->be);
+	  phttp->capturing = CAPTURE_PROCESS;
+	}
+      break;
+
+    case CAPTURE_READY:
+      if (phttp->request.body)
+	{
+	  BIO_set_flags (phttp->request.body, BIO_FLAGS_NONCLEAR_RST);
+	  BIO_reset (phttp->request.body);
+	}
+      else
+	phttp->request.body = BIO_new (BIO_s_null ());
+      phttp->cl = BIO_push (phttp->request.body, phttp->cl);
+      break;
+
+    default:
+      abort ();
     }
-  else
-    phttp->capturing = 0;
 }
 
 static void
 capture_end (POUND_HTTP *phttp)
 {
-  if (phttp->capturing)
+  BIO *cap;
+
+  switch (phttp->capturing)
     {
-      BIO *cap = phttp->be;
+    case CAPTURE_NONE:
+      break;
+
+    case CAPTURE_PROCESS:
+      cap = phttp->be;
       phttp->be = BIO_pop (phttp->be);
-      phttp->capturing = 0;
+      phttp->capturing = CAPTURE_READY;
       if (!BIO_capture_is_truncated (cap))
 	{
 	  phttp_log (phttp, PHTTP_LOG_BACKEND, -1, 0,
@@ -4964,7 +4987,12 @@ capture_end (POUND_HTTP *phttp)
       else
 	{
 	  phttp->request.body = BIO_capture_unwrap (cap);
+	  BIO_set_flags (phttp->request.body, BIO_FLAGS_NONCLEAR_RST);
 	}
+      break;
+
+    case CAPTURE_READY:
+      phttp->cl = BIO_pop (phttp->cl);
     }
 }
 
@@ -5670,7 +5698,7 @@ backend_response (POUND_HTTP *phttp)
 	{
 	case RESP_OK:
 	  res = copy_response (phttp, chunked, content_length, &be_11,
-			     &phttp->res_bytes);
+			       &phttp->res_bytes);
 	  break;
 
 	case RESP_DRAIN:
@@ -5700,7 +5728,7 @@ backend_response (POUND_HTTP *phttp)
     }
   while (resp_mode == RESP_SKIP);
 
-  if (!be_11)
+  if (!be_11 || phttp->conn_closed)
     close_backend (phttp);
 
   return res;
@@ -5710,56 +5738,41 @@ static int
 regular_response (POUND_HTTP *phttp, int chunked,
 		  CONTENT_LENGTH content_length)
 {
-  int resend_count = 0;
   int res;
-  do
+
+  /* Send the request. */
+  res = send_to_backend (phttp, chunked, content_length);
+  if (phttp_resending (phttp))
     {
-      /* Send the request. */
-      res = send_to_backend (phttp, chunked, content_length);
-      if (phttp_resending (phttp))
-	{
-	  phttp->cl = BIO_pop (phttp->cl);
-	  phttp_clear_resend (phttp);
-	}
+      phttp->cl = BIO_pop (phttp->cl);
+      phttp_clear_resend (phttp);
+    }
 
-      if (res == 0)
+  if (res == 0)
+    {
+      enum resend_mode rmode;
+      /* Process the response. */
+      res = backend_response (phttp);
+      if ((rmode = phttp_resending (phttp)) != RESEND_NONE)
 	{
-	  /* Process the response. */
-	  res = backend_response (phttp);
-	  if (phttp_resending (phttp))
+	  res = 0;
+
+	  switch (rmode)
 	    {
-	      if (resend_count == MAX_REQUEST_RESEND)
-		{
-		  res = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-		  phttp_log (phttp, PHTTP_LOG_BACKEND,
-			     HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
-			     "refusing to do more than %d resends",
-			     MAX_REQUEST_RESEND);
-		  break;
-		}
-	      resend_count++;
+	    case RESEND_SERVICE:
+	      close_backend (phttp);
+	      phttp->svc = phttp_resend_service (phttp);
+	      return 0;
 
-	      if (!phttp->be)
-		{
-		  if ((res = select_backend (phttp)) != 0)
-		    break;
-		}
+	    case RESEND_BACKEND:
+	      close_backend (phttp);
+	      break;
 
-	      http_request_free (&phttp->response);
-	      if (phttp->request.body)
-		{
-		  BIO_set_flags (phttp->request.body,
-				 BIO_FLAGS_NONCLEAR_RST);
-		  BIO_reset (phttp->request.body);
-		}
-	      else
-		phttp->request.body = BIO_new (BIO_s_null ());
-
-	      phttp->cl = BIO_push (phttp->request.body, phttp->cl);
+	    default:
+	      break;
 	    }
 	}
     }
-  while (res == 0 && phttp_resending (phttp));
   return res;
 }
 
@@ -6155,14 +6168,58 @@ http_process_request (POUND_HTTP *phttp)
   if (force_http_10 (phttp))
     phttp->conn_closed = 1;
 
-  phttp->res_bytes = 0;
-  http_request_free (&phttp->response);
+  do
+    {
+      phttp->res_bytes = 0;
+      http_request_free (&phttp->response);
+      phttp_clear_resend (phttp);
 
-  clock_gettime (CLOCK_REALTIME, &phttp->be_start);
-  return backend_driver (phttp,
-			 !is_http10 (phttp) &&
-			 (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
-			 content_length);
+      clock_gettime (CLOCK_REALTIME, &phttp->be_start);//FIXME
+      res = backend_driver (phttp,
+			    !is_http10 (phttp) &&
+			      (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
+			    content_length);
+      if (res == HTTP_STATUS_OK)
+	{
+	  if (phttp_resending (phttp))
+	    {
+	      if (phttp_resend_next (phttp))
+		{
+		  res = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+		  phttp_log (phttp, PHTTP_LOG_BACKEND,
+			     HTTP_STATUS_INTERNAL_SERVER_ERROR, 0,
+			     "refusing to do more than %d resends",
+			     MAX_REQUEST_RESEND);
+		  break;
+		}
+
+	      if (phttp->capturing == CAPTURE_NONE)
+		{
+		  phttp->request.body = BIO_new (BIO_s_null ());
+		  phttp->capturing = CAPTURE_READY;
+		}
+
+	      if (!phttp->be)
+		{
+		  if (!phttp->svc &&
+		      (phttp->svc = get_service (phttp)) == NULL)
+		    {
+		      phttp_log (phttp, PHTTP_LOG_DFL,
+				 HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
+				 "no suitable service found");
+		      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+		    }
+
+		  if ((res = select_backend (phttp)) != 0)
+		    return res;
+		}
+	    }
+	}
+    }
+  while (phttp_resending (phttp));
+  phttp_clear_resend (phttp);
+
+  return res;
 }
 
 /*
