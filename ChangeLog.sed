@@ -20,6 +20,7 @@
 /^5f586916af6d4cabadcec48d34108978c15b836f#/,/^[[:xdigit:]]{40}#/s/Assing/Assign/
 /^b9bca1ba5ae0cec6d42fc31609a981fb2263e261#/,/^[[:xdigit:]]{40}#/s/dunamic/dynamic/
 /^bf925f135a21055c207d2f7ec10f189f2361951a#/,/^[[:xdigit:]]{40}#/s/coconfiguration/configuration/
+/^299e60576fec0fe019b9d5f1bf41ccb27623128c#/,/^[[:xdigit:]]{40}#/s/etrypoint/entrypoint/
 
 # Remove commit hashes.  The file must end with this rule.
 s/^[[:xdigit:]]{40}#//
