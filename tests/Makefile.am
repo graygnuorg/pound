@@ -124,6 +124,7 @@ TESTSUITE_AT = \
  lua-resend-nulsvc.at\
  lua-resend-same.at\
  lua-resend-service.at\
+ lua-service.at\
  maxrequest.at\
  maxuri.at\
  method.at\

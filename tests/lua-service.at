@@ -1,0 +1,82 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([service field])
+AT_KEYWORDS([cond lua lua-service])
+
+AT_SKIP_IF([test "$LUA_AVAILABLE" != 1])
+
+AT_DATA([srv.lua],
+[[function reveal_service()
+  http.resp.headers['x-service-name'] = http.service.name
+  http.resp.headers['x-service-locus'] = http.service.locus
+  http.resp.headers['x-service-string'] = tostring(http.service)
+  for k,v in pairs(http.service) do
+    http.resp.headers['x-service-pairs-' .. k] = v
+  end
+end
+]])
+
+PT_CHECK([Lua
+	Load "srv.lua"
+End
+Service "fallback"
+	Rewrite response
+		LuaModify "reveal_service"
+	End
+	Backend
+		Address
+		Port
+	End
+End
+ListenHTTP
+	Service "first"
+		Host "foo.bar"
+		Rewrite response
+			LuaModify "reveal_service"
+		End
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/test1
+Host: foo.bar
+end
+
+200
+x-service-name: first
+x-service-locus: pound.cfg:22.17-33.11
+x-service-string: service first @ pound.cfg:22.17-33.11
+x-service-pairs-name: first
+x-service-pairs-locus: pound.cfg:22.17-33.11
+end
+
+GET /echo/test2
+end
+
+200
+x-service-name: /fallback
+x-service-locus: pound.cfg:9.9-18.3
+x-service-string: service /fallback @ pound.cfg:9.9-18.3
+x-service-pairs-name: /fallback
+x-service-pairs-locus: pound.cfg:9.9-18.3
+end
+
+])
+
+AT_CLEANUP

@@ -1469,56 +1469,17 @@ extract_service (struct http_ud *ud)
 	   ? ud->phttp->resend_svc : ud->phttp->svc;
 }
 
-static int
-service_get_index (lua_State *L)
+static SERVICE *
+find_service (SERVICE_HEAD *head, char const *name)
 {
-  struct http_ud *http = pndlua_get_userdata (L, 1);
-  SERVICE *svc = extract_service (http);
+  SERVICE *s;
 
-  if (svc == NULL)
-    lua_pushnil (L);
-  else
+  SLIST_FOREACH (s, head, next)
     {
-      int i = 0;
-      SERVICE *s;
-      SERVICE_HEAD *head = &http->phttp->lstn->services;
-      SLIST_FOREACH (s, head, next)
-	{
-	  if (s == svc)
-	    break;
-	  i++;
-	}
-      lua_pushinteger (L, 1);
+      if (s->name && strcmp (s->name, name) == 0)
+	return s;
     }
-  return 1;
-}
-
-static int
-service_set_index (lua_State *L)
-{
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  SERVICE *s = NULL;
-
-  if (!lua_isnil (L, 3))
-    {
-      int i = 0;
-      SERVICE_HEAD *head = &ud->phttp->lstn->services;
-      int ok;
-      int n = lua_tointegerx (L, 3, &ok);
-      if (!ok || n < 0)
-	return luaL_error (L, "argument must be a non-negative integer");
-      SLIST_FOREACH (s, head, next)
-	{
-	  if (i == n)
-	    break;
-	  i++;
-	}
-      if (!s)
-	return luaL_error (L, "no service at index %d", n);
-    }
-  ud->phttp->resend_svc = s;
-  ud->phttp->resend = RESEND_SERVICE;
-  return 0;
+  return NULL;
 }
 
 static int
@@ -1529,8 +1490,16 @@ service_get_name (lua_State *L)
 
   if (svc == NULL)
     lua_pushnil (L);
-  else
+  else if (svc->name == NULL)
+    lua_pushstring (L, "");
+  else if (find_service (&http->phttp->lstn->services, svc->name))
     lua_pushstring (L, svc->name);
+  else
+    {
+      lua_pushstring (L, "/");
+      lua_pushstring (L, svc->name);
+      lua_concat (L, 2);
+    }
   return 1;
 }
 
@@ -1542,15 +1511,25 @@ service_set_name (lua_State *L)
 
   if (!lua_isnil (L, 3))
     {
-      SERVICE_HEAD *head = &ud->phttp->lstn->services;
       char const *name = lua_tostring (L, 3);
-      SLIST_FOREACH (s, head, next)
+      SERVICE_HEAD *head;
+      char const *loc;
+      if (name[0] == '/')
 	{
-	  if (s->name && strcmp(s->name, name) == 0)
-	    break;
+	  loc = "global";
+	  head = &services;
+	  name++;
 	}
+      else
+	{
+	  loc = "listener";
+	  head = &ud->phttp->lstn->services;
+	}
+
+      s = find_service (head, name);
+
       if (!s)
-	return luaL_error (L, "no service with name %s", name);
+	return luaL_error (L, "no %s service with name %s", loc, name);
     }
   ud->phttp->resend_svc = s;
   ud->phttp->resend = RESEND_SERVICE;
@@ -1561,7 +1540,8 @@ static int
 service_get_locus (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  if (ud->phttp->svc == NULL)
+  SERVICE *svc = extract_service (ud);
+  if (svc == NULL)
     lua_pushnil (L);
   else
     {
@@ -1569,8 +1549,8 @@ service_get_locus (lua_State *L)
 	char *s;
 
 	stringbuf_init_log (&sb);
-	stringbuf_format_locus_range (&sb, &ud->phttp->svc->locus);
-	if ((s = stringbuf_finish (&sb)) == NULL)
+	stringbuf_format_locus_range (&sb, &svc->locus);
+	if ((s = stringbuf_finish (&sb)) != NULL)
 	  lua_pushstring (L, s);
 	stringbuf_free (&sb);
 	if (!s)
@@ -1585,9 +1565,8 @@ pndlua_service_index (lua_State *L)
   char const *field;
   lua_CFunction fun;
 
-  static char letidx[] = "iln";
+  static char letidx[] = "ln";
   static struct luaL_Reg reg[] = {
-    { "index", service_get_index },
     { "locus", service_get_locus },
     { "name", service_get_name },
   };
@@ -1604,9 +1583,8 @@ pndlua_service_newindex (lua_State *L)
   char const *field;
   lua_CFunction fun;
 
-  static char letidx[] = "in";
+  static char letidx[] = "n";
   static struct luaL_Reg reg[] = {
-    { "index", service_set_index },
     { "name", service_set_name },
   };
 
@@ -1616,14 +1594,73 @@ pndlua_service_newindex (lua_State *L)
   return fun (L);
 }
 
+static int
+pndlua_service_string (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  SERVICE *svc = extract_service (ud);
+
+  if (!svc)
+    lua_pushnil (L);
+  else
+    {
+      lua_pushstring (L, "service ");
+      service_get_name (L);
+      lua_pushstring (L, " @ ");
+      service_get_locus (L);
+      lua_concat (L, 4);
+    }
+  return 1;
+}
+
+static int
+service_next (lua_State *L)
+{
+  if (lua_isnil (L, 2))
+    {
+      lua_pushstring (L, "locus");
+      service_get_locus (L);
+    }
+  else if (strcmp (lua_tostring (L, 2), "locus") == 0)
+    {
+      lua_pushstring (L, "name");
+      service_get_name (L);
+    }
+  else
+    return 0;
+  return 2;
+}
+
+static int
+pndlua_service_pairs (lua_State *L)
+{
+  lua_pushcfunction (L, service_next);
+  /* Object */
+  lua_pushvalue (L, 1);
+  /* First key */
+  lua_pushnil (L);
+
+  return 3;
+}
+
+static int
+pndlua_service_len (lua_State *L)
+{
+  lua_pushinteger (L, 2);
+  return 1;
+}
+
 static char const pndlua_service_class[] = "service";
 
 static void
 pndlua_dcl_service (lua_State *L)
 {
   pndlua_new_metatable (L, pndlua_service_class);
+  pndlua_dcl_function (L, "__tostring", pndlua_service_string);
   pndlua_dcl_function (L, "__index", pndlua_service_index);
   pndlua_dcl_function (L, "__newindex", pndlua_service_newindex);
+  pndlua_dcl_function (L, "__pairs", pndlua_service_pairs);
+  pndlua_dcl_function (L, "__len", pndlua_service_len);
   lua_pop (L, 1);
 }
 
