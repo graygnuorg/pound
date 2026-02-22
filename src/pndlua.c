@@ -1583,7 +1583,7 @@ pndlua_service_newindex (lua_State *L)
   char const *field;
   lua_CFunction fun;
 
-  static char letidx[] = "n";
+  static char letidx[] = "ln";
   static struct luaL_Reg reg[] = {
     { "locus", ro_newindex },
     { "name", service_set_name },
