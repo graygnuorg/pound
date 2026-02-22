@@ -1,0 +1,25 @@
+local _M = @{@}
+
+local function dequote(s)   
+   local m = s:match('^"(.*)"$')
+   if m then
+      return m
+   else
+      return s
+   end
+end
+
+function _M.parse(h)
+   local i, j = h:find('%s+')
+   if i == nil then
+      return nil
+   end
+   local scheme = h:sub(1, i-1)
+   local params = @{@}
+   for k, v in (h .. ','):gmatch("(%w+)=(.-),") do
+      params[k:lower()] = dequote(v)
+   end
+   return scheme, params
+end
+
+return _M

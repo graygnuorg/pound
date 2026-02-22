@@ -1585,6 +1585,7 @@ pndlua_service_newindex (lua_State *L)
 
   static char letidx[] = "n";
   static struct luaL_Reg reg[] = {
+    { "locus", ro_newindex },
     { "name", service_set_name },
   };
 
@@ -1706,6 +1707,14 @@ http_resend (lua_State *L)
 }
 
 static int
+http_resend_count (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  lua_pushinteger (L, ud->phttp->resend_count);
+  return 1;
+}
+
+static int
 http_service (lua_State *L)
 {
   /* Create the object */
@@ -1729,11 +1738,12 @@ pndlua_http_index (lua_State *L)
 
   int rw = http->modresp != 0;
 
-  static char *letidx[] = { "r", "rrrs" };
+  static char *letidx[] = { "r", "rrrrs" };
   static struct luaL_Reg reg[] = {
     { "req", http_req },
     { "resp", http_resp },
     { "resend", http_resend },
+    { "resendcount", http_resend_count },
     { "service", http_service },
   };
 

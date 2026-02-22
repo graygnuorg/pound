@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-02-06
+Pound -- history of user-visible changes. 2026-02-22
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,25 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.90.90 (git)
+
+* Changes in Lua API
+
+** http.resendcount
+
+Keeps number of resending attempts underwent by the current request.
+
+** http.service.name
+
+Name of the currently selected service.  Assigning to this variable
+instructs pound to send the current request to the named service.
+Assigning a nil also implies to rerun service selection from the
+beginning.
+
+** http.service.locus
+
+Location of the currently selected service in the configuration file.
 
 Version 4.20, 2026-02-06
 
@@ -50,7 +69,7 @@ where SIZE sets the upper limit on the captured content size.  If the
 actual content length is greater than this value, saved material is
 discarded and http.req.body is set to nil.
 
-** http.req.resend
+** http.resend
 
 Lua functions invoked in "Rewrite response" can set this variable to
 'true' to have pound resend the modified request to backend. To avoid

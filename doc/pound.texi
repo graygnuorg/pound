@@ -143,6 +143,7 @@ Extending @command{pound} functionality with Lua
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
 * LuaModify::  Changing requests and responses in Lua.
+* Resend::     Resending requests with Lua.
 * Stash::      Sharing data between Lua functions.
 * LuaBackend:: Lua backends.
 * Lua API::
@@ -256,6 +257,7 @@ Example Lua modules
 
 * jwt.lua::
 * cookie.lua::
+* wwwauth.lua::
 
 @end detailmenu
 @end menu
@@ -2356,6 +2358,7 @@ results to the Lua backend.
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
 * LuaModify::  Changing requests and responses in Lua.
+* Resend::     Resending requests with Lua.
 * Stash::      Sharing data between Lua invocations.
 * LuaBackend:: Lua backends.
 * Lua API::
@@ -2677,6 +2680,207 @@ End
 @noindent
 Notice, that @var{ttl} argument to @code{mksess.inject} matches that
 in the @code{Session} section.
+
+@node Resend
+@section Resending requests with Lua
+@cindex resending requests
+@cindex request resending
+  As of version @value{VERSION}, @command{pound} makes it possible to
+resubmit a request if the selected backend wasn't able to process it.
+There are two major cases: resending within the same service and
+sending the request to another service within the same listener.
+
+  Both cases are handled by a Lua function called via @code{LuaModify}
+statement in a @code{Rewrite response} section.
+
+@subheading Resending to the Same Service
+
+The usual scenario for the first case is as follows.  @command{Pound}
+receives a request, selects the service and backend, and passes the
+request to that backend.  The backend responds with a temporary error
+status, meaning that the request doesn't satisfy some prerequisites
+for processing.  Then @command{pound} calls a Lua function that
+analyzes the response, modifies the request so as to satisfy those
+prerequisites and marks the request for resending.  The processing
+occurs within the same service, so normally the request will be sent
+to the same backend as previously, unless the backend has closed the
+connection after responding, in which case a new backend will be
+selected as described in @ref{Balancer, Request balancing}.
+
+  As an example of such a scenario, suppose that the backend responds
+with status 401 (@samp{Unauthorized}).  In this case, the Lua function
+could look up the credentials, add the appropriate @code{WWW-Authenticate}
+header and then mark the request for resending.  To do that, the
+function should assign a @code{true} value to the variable
+@code{http.resend}.
+
+  Below is an example implementation (module @file{auth.lua}).  It
+uses three modules: @code{base64}, @code{wwwauth}, and @code{creds}.
+The first is available from @uref{https://luarocks.org/modules/iskolbin/base64}.
+
+The @code{wwwauth} module, described in detail in @ref{wwwauth.lua},
+provides a function for parsing the value of @code{WWW-Authenticate}
+HTTP header.
+
+Finally, the @code{creds} module should provide the following
+function:
+
+@defmethod {creds} find host realm
+Look up credentials for the given @var{host} and @var{realm}.  On
+success, return a pair: @var{username}, @var{password}.  If not
+found, return nil.
+@end defmethod
+
+Writing this module is left as an exercise for the reader.
+
+Given these, the @file{auth.lua} module can be written as follows:
+
+@example
+local M = @{@}
+
+local b64 = require 'base64'
+local wwwauth = require 'wwwauth'
+local creds = require 'creds'
+
+function M.inject()
+   if http.resp.code == 401 then
+      # Authorization is required. First, check if we have already
+      # processed this request.
+      if http.resendcount > 0 then
+         return
+      end
+      # Parse the header:
+      scheme, params = wwwauth.parse(http.resp.headers['WWW-Authenticate'])
+      if scheme == 'Basic' then
+         # Only Basic scheme is supported.  Look up for credentials:
+         user, pass = creds.find(http.req.headers.host, params.realm)
+         if user ~= nil then
+            # Credentials found. Pack them into the @code{Authorization}
+            # header.
+            http.req.headers['Authorization'] = scheme .. " " ..
+               b64.encode(user .. ':' .. pass)
+            # Instruct @command{pound} to resend the request:
+            http.resend = true
+         end
+      else
+         pound.log(pound.INFO, "Unsupported authorization scheme: "..scheme)
+      end
+   end
+end
+
+return M
+@end example
+
+Notice the condition in line 11.  The @code{http.resendcount} variable
+contains the number of resends the request has already underwent.
+Using it allows us to avoid retrying the already failed authentication
+attempt.  However, even in absence of such check, @command{pound} will
+not allow to do more than 4 resends of the same request.  This is a
+safety measure to avoid dead loops.
+
+To use this module, add the following fragment to the @code{Service}
+section:
+
+@example
+@group
+Rewrite response
+    LuaModify "auth.inject"
+End
+@end group
+@end example
+
+@cindex content capturing
+@cindex capturing the request content
+@kwindex ContentCapture
+This will work for requests that don't have a body, such as
+@code{GET}, @code{HEAD}, and the like.  For requests that do,
+such as @code{POST} or @code{PUT}, you will have to configure
+@dfn{request content capturing} as well.  You do so using the
+@code{ContentCapture} statement.  The statement takes a single numeric
+argument specifying maximum size of the request content.  E.g.:
+
+@example
+ContentCapture 65536
+@end example
+
+@anchor{send to service}
+@subheading Resending to Another Service
+  Now let's examine the second case: sending request to another
+service.  This can be useful, for example, if the current service got
+a response from the backend indicating that it was unable to handle the
+request, and something in the response indicates that you have another
+service that should be able to handle the request properly.  This too
+is done by defining a Lua function and calling it from @code{Rewrite
+response} section.  However, instead of @code{http.resend}, one will
+use the @code{http.service} field.
+
+  This field is a table containing two keys: @code{http.service.name}
+contains the name of the currently selected service, and
+@code{http.service.locus} gives its location in the configuration
+file.  The latter field is read-only, while the former can be set to
+indicate the service to resend the request to.
+
+  Initializing @code{http.service.name} to @code{nil} clears the currently
+selected service and instructs @command{pound} to select another
+service using the standard algorithm, described in @ref{Service
+selection}.  You can control this process by adding or modifying
+request headers so as to trigger the desired condition.
+
+  Otherwise, you can initialize @code{http.service.name} with the
+symbolic name of the service you want to resend it to
+(@pxref{Service}).  For example, suppose there is a service whose
+definition within the listener starts with:
+
+@example
+Service "default"
+@end example
+
+  To have @command{pound} resend the request to that service, you
+would do the following in your Lua function:
+
+@example
+http.service.name = "default"
+@end example
+
+  If the service is defined in the global scope, use its name prefixed
+with a slash, i.e.:
+
+@example
+http.service.name = "/default"
+@end example
+
+  Notice, that the two variables @code{http.service.name} and
+@code{http.resend} are mutually exclusive.  In other words, setting
+@code{http.resend} after assigning to @code{http.service.name} will
+clear the latter assignment and vice-versa.
+
+  To illustrate this, the following function instructs @command{Pound}
+to attempt a service named @samp{fallback} in case the backend returns
+421 status code (@samp{Misdirected Request}):
+
+@example
+@group
+function resend_421()
+  if http.resp.code == 421 and http.service.name ~= "fallback" then
+    http.service.name = "fallback"
+  end
+end
+@end group
+@end example
+
+  Example usage:
+
+@example
+@group
+Service
+    ContentCapture 65536
+    Rewrite response
+        LuaModify "resend421"
+    End
+    ...
+End
+@end group
+@end example
 
 @node Stash
 @section Sharing data between Lua invocations
@@ -3007,7 +3211,7 @@ For functions invoked from @code{LuaBackend} or Lua directives used
 in @code{Rewrite response} context, the @code{http}
 module provides methods for examining and updating the response.
 
-@deftypecv {Field} req table headers resend
+@deftypecv {Field} http boolean resend
 This field is available only for functions invoked from @code{Rewrite
 response}. Setting it to @code{true} instructs @command{pound} to
 resend current request to the backend. Obviously, prior to setting it
@@ -3016,10 +3220,20 @@ way.
 
 This approach can be used, for example, to react on 401 response from
 the backend, by re-sending it the request with properly constructed
-@samp{Authorization} header.
+@samp{Authorization} header.  @xref{Resend}, for a detailed discussion.
+
+To avoid dead loops, @command{pound} limits the number of resending
+attempts to 4 per request.  The actual number of times the request has
+been resent is kept in the @code{http.resendcount} variable (see below).
 
 Notice, that resending @code{POST} requests requires request content
 capturing (@pxref{ContentCapture}).
+@end deftypecv
+
+@deftypecv {Field} http integer resendcount
+This read-only field is available only for functions invoked from
+@code{Rewrite response}.  It contains the number of times the current
+request was resent.  @xref{Resend}, for a detailed discussion.
 @end deftypecv
 
 @deftypecv Field http table resp
@@ -3055,6 +3269,41 @@ http.resp.headers['Host'] = "example.org"
 @anchor{http.resp.body}
 @deftypecv Field resp string body
 The request body.
+@end deftypecv
+
+@deftypecv Field http table service
+This field contains information about the currently selected service.
+It is available only in functions called from the @code{Rewrite
+response} section.  It contains the following fields:
+
+@deftypecv Field service string name
+The service name (@pxref{Service}), or empty string, if the service is
+defined without a symbolic name.  Names of global services are
+prefixed with @samp{/}.
+
+Assigning a string value to this field instructs @command{pound} to
+redirect the request to the service with the given name.  If there is
+no service with such name, a runtime error will be signalled.  Setting
+this field to @code{nil} instructs @command{pound} to redirect the
+request to a service selected using the standard procedure
+(@pxref{Service selection}).  @xref{send to service}, for a detailed
+discussuion of this feature.
+@end deftypecv
+
+@deftypecv Field service string locus
+Returns the location of the service in the configuration file.  The
+location is formatted as follows:
+
+@example
+@var{file}:@var{L1}.@var{C1}-@var{L2}.@var{C2}
+@end example
+
+@noindent
+where @var{file} is the configuration file name, @var{L1} and @var{L2}
+are line numbers of the beginning and end of the @code{Service}
+section, and @var{C1} and @var{C2} are the corresponding column
+numbers.
+@end deftypecv
 @end deftypecv
 
 @subheading The @code{stash} table
@@ -7821,6 +8070,7 @@ this manual.
 @menu
 * jwt.lua::
 * cookie.lua::
+* wwwauth.lua::
 @end menu
 
 @node jwt.lua
@@ -7898,6 +8148,34 @@ Full text of @file{cookie.lua} follows:
 
 @example
 @include cookielua.texi
+@end example
+
+@node wwwauth.lua
+@appendixsec wwwauth.lua
+This module, used in @ref{Resend}, defines the following function:
+
+@defmethod {wwwauth} parse h
+Parse the value of @code{WWW-Authentication} HTTP header @var{h}.  On
+success, return two values: authentication scheme and a table of
+authentication parameters.  On error, return nil.
+
+For example, given the following value of @code{WWW-Authentication}
+header: @samp{Basic Realm="Restricted access"}, the following call:
+
+@example
+scheme, params = wwwauth.parse(http.req.headers['WWW-Authentication'])
+@end example
+
+will return:
+
+@example
+scheme @result{} "Basic"
+params @result{} @{["realm"] = "Restricted access"@}
+@end example
+@end defmethod
+
+@example
+@include wwwauthlua.texi
 @end example
 
 @node GNU Free Documentation License

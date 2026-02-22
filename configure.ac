@@ -15,14 +15,15 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.20],[gray@gnu.org],
+AC_INIT([pound],[4.20.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
 AC_CONFIG_HEADERS([config.h])
 AC_CONFIG_MACRO_DIR([m4])
-AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar subdir-objects])
+AM_INIT_AUTOMAKE([1.16.5 gnu tar-ustar subdir-objects silent-rules])
 AC_CANONICAL_HOST
+AM_SILENT_RULES([yes])
 
 # Checks for programs.
 AC_PROG_CC
