@@ -2725,7 +2725,7 @@ HTTP header.
 Finally, the @code{creds} module should provide the following
 function:
 
-@defmethod {creds} find host realm
+@defmethod {creds} find (@var{host}, @var{realm})
 Look up credentials for the given @var{host} and @var{realm}.  On
 success, return a pair: @var{username}, @var{password}.  If not
 found, return nil.
@@ -2861,7 +2861,7 @@ to attempt a service named @samp{fallback} in case the backend returns
 @example
 @group
 function resend_421()
-  if http.resp.code == 421 and http.service.name ~= "fallback" then
+  if http.resp.code == 421
     http.service.name = "fallback"
   end
 end
@@ -2875,7 +2875,7 @@ end
 Service
     ContentCapture 65536
     Rewrite response
-        LuaModify "resend421"
+        LuaModify "resend_421"
     End
     ...
 End

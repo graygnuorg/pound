@@ -1169,9 +1169,12 @@ typedef struct _pound_http
 #if ENABLE_LUA
   char stash_init[2];        /* State of global and per-thread stash
 				(0 - not initialized, 1 - initialized. */
-  enum resend_mode resend;   /* Resend mode. */
-  SERVICE *resend_svc;       /* Selected service, for RESEND_SERVICE. */
-  int resend_count;          /* Number of resends done so far. */
+  struct
+  {
+    enum resend_mode mode;   /* Resend mode. */
+    SERVICE *svc;            /* Selected service, for RESEND_SERVICE. */
+    int count;               /* Number of resends done so far. */
+  } resend;
 #endif
 
   SLIST_ENTRY(_pound_http) next;
@@ -1467,31 +1470,31 @@ int tbf_eval (TBF *env, char const *keyid);
 static inline void phttp_lua_stash_reset (POUND_HTTP *p)
 {
   p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
-  p->resend = RESEND_NONE;
-  p->resend_svc = NULL;
-  p->resend_count = 0;
+  p->resend.mode = RESEND_NONE;
+  p->resend.svc = NULL;
+  p->resend.count = 0;
 }
 
 static inline int phttp_resending (POUND_HTTP *p)
 {
-  return p->resend;
+  return p->resend.mode;
 }
 
 static inline void phttp_clear_resend (POUND_HTTP *p)
 {
-  p->resend = RESEND_NONE;
+  p->resend.mode = RESEND_NONE;
 }
 
 static inline SERVICE *phttp_resend_service (POUND_HTTP *p)
 {
-  return p->resend_svc;
+  return p->resend.svc;
 }
 
 static inline int phttp_resend_next (POUND_HTTP *p)
 {
-  if (p->resend_count == MAX_REQUEST_RESEND)
+  if (p->resend.count == MAX_REQUEST_RESEND)
     return -1;
-  p->resend_count++;
+  p->resend.count++;
   return 0;
 }
 

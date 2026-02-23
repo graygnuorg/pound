@@ -1465,8 +1465,8 @@ pndlua_dcl_resp (lua_State *L)
 static inline SERVICE *
 extract_service (struct http_ud *ud)
 {
-  return ud->phttp->resend == RESEND_SERVICE
-	   ? ud->phttp->resend_svc : ud->phttp->svc;
+  return ud->phttp->resend.mode == RESEND_SERVICE
+	   ? ud->phttp->resend.svc : ud->phttp->svc;
 }
 
 static SERVICE *
@@ -1531,8 +1531,8 @@ service_set_name (lua_State *L)
       if (!s)
 	return luaL_error (L, "no %s service with name %s", loc, name);
     }
-  ud->phttp->resend_svc = s;
-  ud->phttp->resend = RESEND_SERVICE;
+  ud->phttp->resend.svc = s;
+  ud->phttp->resend.mode = RESEND_SERVICE;
   return 0;
 }
 
@@ -1702,7 +1702,7 @@ static int
 http_resend (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushinteger (L, ud->phttp->resend);
+  lua_pushinteger (L, ud->phttp->resend.mode);
   return 1;
 }
 
@@ -1710,7 +1710,7 @@ static int
 http_resend_count (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  lua_pushinteger (L, ud->phttp->resend_count);
+  lua_pushinteger (L, ud->phttp->resend.count);
   return 1;
 }
 
@@ -1761,7 +1761,7 @@ pndlua_http_newindex (lua_State *L)
 
   if (strcmp(field, "resend"))
     luaL_error (L, "attempt to modify read-only data");
-  ud->phttp->resend = lua_toboolean (L, 3) ? RESEND_SAME : RESEND_NONE;
+  ud->phttp->resend.mode = lua_toboolean (L, 3) ? RESEND_SAME : RESEND_NONE;
   return 0;
 }
 
