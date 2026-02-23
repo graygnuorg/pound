@@ -1376,7 +1376,7 @@ sub parse_expect_body {
 	    return;
 	}
 
-        push @{$self->{EXP}{BODY}}, $_;
+	push @{$self->{EXP}{BODY}}, $_;
     }
     $self->{eof} = 1;
     $self->syntax_error("unexpected end of file");
@@ -1693,11 +1693,8 @@ sub http_echo {
     my %headers = (
 	'x-backend-ident' => $http->header('x-backend-ident'),
 	'x-backend-number' => $http->backend->number,
-	'x-orig-uri' => $http->uri,
-	);
-    while (my ($k, $v) = each %{$http->header}) {
-	$headers{'x-orig-header-' . $k} = $v;
-    }
+	$http->orig_headers
+    );
     my @argv = (200, "OK", headers => \%headers);
 
     if (my $body = $http->body) {
@@ -1766,16 +1763,16 @@ sub process_http_request {
     local $| = 1;
     my $http = HTTPServ->new($sock, $backend);
     $http->parse();
-    if ($http->uri =~ m{^/([^/]+)(/.*)?}) {
+    if (my $c = $http->header->{'x-pound-force-status'}) {
+	$http->reply($c, "Forced response",
+		     headers => { $http->orig_headers });
+    } elsif ($http->uri =~ m{^/([^/]+)(/.*)?}) {
 	my ($dir, $rest) = ($1, $2);
 	if (my $ep = $endpoints{$dir}) {
 	    &{$ep}($http, $2);
 	} else {
 	    $http->reply(404, "Not found",
-			 headers => {
-			     'x-orig-uri' => $http->uri,
-			     map { ('x-orig-header-' . $_) => $http->header->{$_} } keys %{$http->header}
-			 });
+			 headers => { $http->orig_headers });
 	}
     } else {
 	$http->reply(500, "Malformed URI: ".$http->uri);
@@ -1809,6 +1806,16 @@ sub header {
 	return $http->{HEADERS}{lc($name)};
     }
     return $http->{HEADERS}
+}
+
+sub orig_headers {
+    my ($http) = @_;
+    return (
+	'x-orig-uri' => $http->uri,
+	map {
+	    ('x-orig-header-' . $_) => $http->header->{$_}
+	} keys %{$http->header}
+    )
 }
 
 sub close {
@@ -2194,6 +2201,9 @@ by arbitrary number of HTTP headers, newline and request body.  The request
 is terminated with the word B<end> or B<endnonl> on a line alone.  If
 terminated with B<endnonl>, last newline will not be included in the request
 body.
+
+The C<X-Pound-Force-Status: B<NNN>> header can be used to have the program
+reply with the B<NNN> HTTP status code, no matter what the request.
 
 The sequence B<@@> has a special meaning when used in the body.  These
 characters instruct B<poundharness> to send the body using B<chunked> transfer

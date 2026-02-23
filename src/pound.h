@@ -1117,7 +1117,7 @@ enum resend_mode
     RESEND_NONE,           /* No resending. */
     RESEND_SAME,           /* Resend to the same service/backend. */
     RESEND_SERVICE,        /* Resend to another service. */
-    RESEND_BACKEND         /* Resend to another backend (for future use). */
+    RESEND_BACKEND         /* Resend to another backend. */
   };
 
 enum capture_state         /* State of request content capturing. */
@@ -1168,11 +1168,12 @@ typedef struct _pound_http
 
 #if ENABLE_LUA
   char stash_init[2];        /* State of global and per-thread stash
-				(0 - not initialized, 1 - initialized. */
+				(0 - not initialized, 1 - initialized). */
   struct
   {
     enum resend_mode mode;   /* Resend mode. */
     SERVICE *svc;            /* Selected service, for RESEND_SERVICE. */
+    int min_weight;          /* Minimal balancer weight. */
     int count;               /* Number of resends done so far. */
   } resend;
 #endif
@@ -1472,6 +1473,7 @@ static inline void phttp_lua_stash_reset (POUND_HTTP *p)
   p->stash_init[PNDLUA_CTX_GLOBAL] = p->stash_init[PNDLUA_CTX_THREAD] = 0;
   p->resend.mode = RESEND_NONE;
   p->resend.svc = NULL;
+  p->resend.min_weight = 0;
   p->resend.count = 0;
 }
 
@@ -1488,6 +1490,11 @@ static inline void phttp_clear_resend (POUND_HTTP *p)
 static inline SERVICE *phttp_resend_service (POUND_HTTP *p)
 {
   return p->resend.svc;
+}
+
+static inline int phttp_resend_min_weight (POUND_HTTP *p)
+{
+  return p->resend.min_weight;
 }
 
 static inline int phttp_resend_next (POUND_HTTP *p)
@@ -1512,6 +1519,7 @@ int pndlua_parse_closure (struct pndlua_closure *cond);
 # define phttp_resending(p) RESEND_NONE
 # define phttp_clear_resend(p)
 # define phttp_resend_service(p) NULL
+# define phttp_resend_min_weight(p) 0
 # define phttp_resend_next(p) -1
 # define pndlua_init() 0
 static inline int

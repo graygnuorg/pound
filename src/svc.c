@@ -749,14 +749,17 @@ balancer_pri_update (BALANCER *balancer, BACKEND *be)
 }
 
 BACKEND *
-service_lb_select_backend (SERVICE *svc)
+service_lb_select_backend (SERVICE *svc, int min_weight)
 {
   BALANCER *balancer;
   DLIST_FOREACH (balancer, &svc->balancers, link)
     {
-      BACKEND *be = balancer_select_backend (balancer);
-      if (be)
-	return be;
+      if (balancer->weight >= min_weight)
+	{
+	  BACKEND *be = balancer_select_backend (balancer);
+	  if (be)
+	    return be;
+	}
     }
   return NULL;
 }
@@ -786,7 +789,7 @@ service_lb_reset (SERVICE *svc, BACKEND *be)
  * create one and associate it with a randomly selected backend.
  */
 static BACKEND *
-find_backend_by_key (SERVICE *svc, char const *key)
+find_backend_by_key (SERVICE *svc, char const *key, int min_weight)
 {
   BACKEND *res;
   char keybuf[KEY_SIZE + 1];
@@ -800,7 +803,7 @@ find_backend_by_key (SERVICE *svc, char const *key)
   if ((res = service_session_find (svc, keybuf)) == NULL)
     {
       /* no session yet - create one */
-      if ((res = service_lb_select_backend (svc)) != NULL)
+      if ((res = service_lb_select_backend (svc, min_weight)) != NULL)
 	service_session_add (svc, keybuf, res);
     }
 
@@ -855,13 +858,14 @@ static BACKEND *
 find_backend_by_header (SERVICE *svc,
 			struct http_request *req, char const *hname,
 			int (*keyfun) (char const *, char const *, char *),
-			char const *id)
+			char const *id,
+			int min_weight)
 {
   char key[KEY_SIZE + 1];
 
   if (find_key_by_header (&req->headers, hname, keyfun, id, key) == 0)
     {
-      return find_backend_by_key (svc, key);
+      return find_backend_by_key (svc, key, min_weight);
     }
 
   return NULL;
@@ -943,6 +947,7 @@ get_backend (POUND_HTTP *phttp)
   BACKEND *res = NULL;
   char keybuf[KEY_SIZE + 1];
   char const *key;
+  int min_weight = phttp_resend_min_weight (phttp);
 
   pthread_mutex_lock (&svc->mut);
 
@@ -956,18 +961,19 @@ get_backend (POUND_HTTP *phttp)
 
 	case SESS_COOKIE:
 	  res = find_backend_by_header (svc, &phttp->request,
-					"Cookie", key_cookie, svc->sess_id);
+					"Cookie", key_cookie, svc->sess_id,
+					min_weight);
 	  break;
 
 	case SESS_IP:
 	  addr2str (keybuf, sizeof (keybuf), &phttp->from_host, 1);
-	  res = find_backend_by_key (svc, keybuf);
+	  res = find_backend_by_key (svc, keybuf, min_weight);
 	  break;
 
 	case SESS_URL:
 	  if (http_request_get_query_param_value (&phttp->request,
 						  svc->sess_id, &key) == RETRIEVE_OK)
-	    res = find_backend_by_key (svc, key);
+	    res = find_backend_by_key (svc, key, min_weight);
 	  break;
 
 	case SESS_PARM:
@@ -975,22 +981,23 @@ get_backend (POUND_HTTP *phttp)
 	    {
 	      char *p = strrchr (key, ';');
 	      if (p)
-		res = find_backend_by_key (svc, p + 1);
+		res = find_backend_by_key (svc, p + 1, min_weight);
 	    }
 	  break;
 
 	case SESS_HEADER:
 	  res = find_backend_by_header (svc, &phttp->request,
-					svc->sess_id, NULL, NULL);
+					svc->sess_id, NULL, NULL, min_weight);
 	  break;
 
 	case SESS_BASIC:
 	  res = find_backend_by_header (svc, &phttp->request,
-					"Authorization", key_authbasic, NULL);
+					"Authorization", key_authbasic, NULL,
+					min_weight);
 	}
 
       if (!res)
-	res = service_lb_select_backend (svc);
+	res = service_lb_select_backend (svc, min_weight);
       backend_ref (res);
     }
 

@@ -105,6 +105,7 @@ m4_include([lua-resend-loop.at])
 m4_include([lua-resend-same.at])
 m4_include([lua-resend-service.at])
 m4_include([lua-resend-nulsvc.at])
+m4_include([lua-resend-be.at])
 
 AT_BANNER([Dynamically updated conditions])
 m4_include([dynacl.at])

@@ -1715,6 +1715,32 @@ http_resend_count (lua_State *L)
 }
 
 static int
+http_get_balancer (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  int w;
+  if (ud->phttp->resend.mode != RESEND_NONE)
+    w = ud->phttp->resend.min_weight;
+  else if (ud->phttp->backend)
+    w = ud->phttp->backend->balancer->weight;
+  else
+    w = 0;
+  lua_pushinteger (L, w);
+  return 1;
+}
+
+static int
+http_set_balancer (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  ud->phttp->resend.min_weight = lua_tointeger (L, 3);
+  if (ud->phttp->resend.mode == RESEND_NONE)
+    ud->phttp->resend.mode = RESEND_BACKEND;
+  // FIXME: clear session?
+  return 0;
+}
+
+static int
 http_service (lua_State *L)
 {
   /* Create the object */
@@ -1730,6 +1756,14 @@ http_service (lua_State *L)
 }
 
 static int
+http_set_resend (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  ud->phttp->resend.mode = lua_toboolean (L, 3) ? RESEND_SAME : RESEND_NONE;
+  return 0;
+}
+
+static int
 pndlua_http_index (lua_State *L)
 {
   struct http_ud *http = pndlua_get_userdata (L, 1);
@@ -1738,8 +1772,9 @@ pndlua_http_index (lua_State *L)
 
   int rw = http->modresp != 0;
 
-  static char *letidx[] = { "r", "rrrrs" };
+  static char *letidx[] = { "br", "brrrrs" };
   static struct luaL_Reg reg[] = {
+    { "balancer", http_get_balancer },
     { "req", http_req },
     { "resp", http_resp },
     { "resend", http_resend },
@@ -1756,13 +1791,23 @@ pndlua_http_index (lua_State *L)
 static int
 pndlua_http_newindex (lua_State *L)
 {
-  struct http_ud *ud = pndlua_get_userdata (L, 1);
-  char const *field = lua_tostring (L, 2);
+  char const *field;
+  lua_CFunction fun;
 
-  if (strcmp(field, "resend"))
-    luaL_error (L, "attempt to modify read-only data");
-  ud->phttp->resend.mode = lua_toboolean (L, 3) ? RESEND_SAME : RESEND_NONE;
-  return 0;
+  static char letidx[] = "brrrrs";
+  static struct luaL_Reg reg[] = {
+    { "balancer", http_set_balancer },
+    { "req", ro_newindex },
+    { "resp", ro_newindex },
+    { "resend", http_set_resend },
+    { "resendcount", ro_newindex },
+    { "service", ro_newindex },
+  };
+
+  field = lua_tostring (L, 2);
+  if ((fun = pndlua_reg_locate (letidx, reg, field)) == NULL)
+    luaL_error (L, "%s: no such field", field);
+  return fun (L);
 }
 
 /*

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-02-22
+Pound -- history of user-visible changes. 2026-02-23
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -10,6 +10,13 @@ Please send pound bug reports to <gray@gnu.org>
 Version 4.90.90 (git)
 
 * Changes in Lua API
+
+** http.balancer
+
+Balancer group of the currently selected backend.  Setting this field
+to a numeric value instructs pound to re-send the request to a backend
+from the balancer group with the weight greater than or equal to the
+value supplied.
 
 ** http.resendcount
 

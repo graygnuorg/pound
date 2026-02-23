@@ -2065,6 +2065,7 @@ tried.  The process continues until either a backend is chosen or
 the list of balancer groups is exhausted.
 
 @cindex high availability
+@anchor{emergency backends}
   By default, backends declared using the @code{Backend} keyword are
 assigned to the balancer group 0.  These are backends used during
 normal operation.  Backends declared using the @code{Emergency} keyword
@@ -2803,6 +2804,70 @@ argument specifying maximum size of the request content.  E.g.:
 ContentCapture 65536
 @end example
 
+@anchor{send to backend}
+@subheading Selecting backend balancer weight
+As noted above, the backend to serve the request is determined by
+@command{pound}.  You can, however, affect its decision by defining
+the preferred @dfn{balancing weight} for the backend.  Recall, that
+backends are grouped into balancer groups, each of which is assigned
+a unique numeric weight (@pxref{Balancer groups}).  When selecting the
+backend to use, each group is visited in turn, in order of increasing
+weight, until a suitable backend is found.  You can instruct
+@command{pound} to start this process at a particular weight, instead
+of the default 0, by setting the @code{http.balancer} variable to the
+desired weight value.  The most obvious use is to redirect the request
+to @dfn{emergency} backends (@pxref{emergency backends}), which are
+assigned to the balancer group 65535.  For example, if the selected
+backend responds with 421 (@samp{Misdirected Request}) status code,
+you can send it to your high availablility backend using the following
+approach.
+
+First, define a Lua function that will select the emergency balancer
+group, if the backend returned 421:
+
+@example
+@group
+function fallback()
+  if http.resp.code == 421
+    http.balancer = 65535
+  end
+end
+@end group
+@end example
+
+Notice, that you need not set the @code{http.resend} variable: it is
+implied when you set @code{http.balancer}.
+
+Then, construct your service section as follows:
+
+@example
+@group
+Service
+    Rewrite response
+        LuaModify "fallback"
+    End
+    ContentCapture 16384
+    Backend
+        Address 10.1.0.1
+        Port 80
+    End
+    Emergency
+        Address 10.11.0.123
+        Port 80
+    End
+End
+@end group
+@end example
+
+Now, should the backend @samp{10.1.0.1:80} return 421, the request
+will be sent to @samp{10.11.0.123:80} for processing.
+
+Notice, that it is only for the sake of an example that the above
+service definition contains one backend in each balancer group. It
+can, of course, contain any number of these, in which case
+@command{pound} will select one of them using @code{http.balancer}
+as a hint.
+
 @anchor{send to service}
 @subheading Resending to Another Service
   Now let's examine the second case: sending request to another
@@ -2881,6 +2946,17 @@ Service
 End
 @end group
 @end example
+
+  A final note: you can select both the service to use and balancer
+group within it:
+
+@example
+@group
+http.service.name = "fallback"
+http.balancer = 65535
+@end group
+@end example
+
 
 @node Stash
 @section Sharing data between Lua invocations
@@ -3126,10 +3202,9 @@ It is equivalent to calling @code{@var{func}(...)}.
 This built-in module contains variables and methods describing the
 HTTP request being handled.
 
-@deftypemethod http table req
+@deftypecv {Field} http table req
 Returns a table describing the request.  This is a read-only table,
 whose fields and methods are described below.
-@end deftypemethod
 
 @deftypecv {Field} req string body
 Request body, in the raw form (as sent by the remote party).  This
@@ -3206,41 +3281,14 @@ http.req.headers['Host'] @result{} "example.net"
 @end group
 @end example
 @end deftypecv
-
-For functions invoked from @code{LuaBackend} or Lua directives used
-in @code{Rewrite response} context, the @code{http}
-module provides methods for examining and updating the response.
-
-@deftypecv {Field} http boolean resend
-This field is available only for functions invoked from @code{Rewrite
-response}. Setting it to @code{true} instructs @command{pound} to
-resend current request to the backend. Obviously, prior to setting it
-to @code{true}, the program is supposed to modify the request in some
-way.
-
-This approach can be used, for example, to react on 401 response from
-the backend, by re-sending it the request with properly constructed
-@samp{Authorization} header.  @xref{Resend}, for a detailed discussion.
-
-To avoid dead loops, @command{pound} limits the number of resending
-attempts to 4 per request.  The actual number of times the request has
-been resent is kept in the @code{http.resendcount} variable (see below).
-
-Notice, that resending @code{POST} requests requires request content
-capturing (@pxref{ContentCapture}).
-@end deftypecv
-
-@deftypecv {Field} http integer resendcount
-This read-only field is available only for functions invoked from
-@code{Rewrite response}.  It contains the number of times the current
-request was resent.  @xref{Resend}, for a detailed discussion.
 @end deftypecv
 
 @deftypecv Field http table resp
-A table describing the response.  It is a read-write table.
+A table describing the response.  It is meaningful only for functions
+invoked from @code{LuaBackend} or Lua directives used in @code{Rewrite
+response} context.  It is a read-write table.
 Assigning to its fields modifies the response that will be sent out by
 @code{pound} when the @code{LuaBackend} function returns.
-@end deftypecv
 
 @anchor{http.resp.code}
 @deftypecv Field resp integer code
@@ -3269,6 +3317,44 @@ http.resp.headers['Host'] = "example.org"
 @anchor{http.resp.body}
 @deftypecv Field resp string body
 The request body.
+@end deftypecv
+@end deftypecv
+
+@deftypecv {Field} http integer balancer
+Available for use in functions called from @code{Rewrite response}
+section (@pxref{Resend}).  It contains the weight of the balancer
+group from which the current backend was selected (@pxref{Balancer
+groups}).
+
+When assigned a value, instructs @command{pound} to resend current
+request to another backend, selecting it from the balancer group
+with the weight greater than or equal to the assigned value.
+@xref{send to backend}, for a detailed discussion.
+@end deftypecv
+
+@deftypecv {Field} http boolean resend
+This field is available only for functions invoked from @code{Rewrite
+response}. Setting it to @code{true} instructs @command{pound} to
+resend current request to the backend. Obviously, prior to setting it
+to @code{true}, the program is supposed to modify the request in some
+way.
+
+This approach can be used, for example, to react on 401 response from
+the backend, by re-sending it the request with properly constructed
+@samp{Authorization} header.  @xref{Resend}, for a detailed discussion.
+
+To avoid dead loops, @command{pound} limits the number of resending
+attempts to 4 per request.  The actual number of times the request has
+been resent is kept in the @code{http.resendcount} variable (see below).
+
+Notice, that resending @code{POST} requests requires request content
+capturing (@pxref{ContentCapture}).
+@end deftypecv
+
+@deftypecv {Field} http integer resendcount
+This read-only field is available only for functions invoked from
+@code{Rewrite response}.  It contains the number of times the current
+request was resent.  @xref{Resend}, for a detailed discussion.
 @end deftypecv
 
 @deftypecv Field http table service
