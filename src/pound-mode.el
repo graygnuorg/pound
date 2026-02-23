@@ -79,6 +79,7 @@
 
 (defvar pound-section-keywords
   '("ACL"
+    "Emergency"
     "ConfigText"
     "Control"
     "CombineHeaders"
@@ -156,7 +157,6 @@
     "Disable"
     "Disabled"
     "ECDHCurve"
-    "Emergency"
     "Error"
     "ErrorFile"
     "Family"
@@ -409,6 +409,7 @@
 
 (defvar pound-true-sections
   '("Backend"
+    "Emergency"
     "Service"
     "Condition"
     "CombineHeaders"
