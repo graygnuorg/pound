@@ -326,7 +326,8 @@ stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int forwarded)
   char caddr[MAX_ADDR_BUFSIZE];
   res = get_remote_ip (phttp, forwarded, &tmp);
   stringbuf_add_string (sb, anon_addr2str (caddr, sizeof (caddr), res));
-  freeaddrinfo (tmp);
+  if (tmp)
+    freeaddrinfo (tmp);
 }
 
 static void
