@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "February 8, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "March 11, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1450,12 +1450,25 @@ disabling a single protocol. For example,
 .B Disable TLSv1
 would disable SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1 and TLSv1_2.
 .TP
-\fBCiphers\fR "\fIcipher_list\fR"
-This is the list of ciphers that will be accepted by the SSL
-connection; it is a string in the same format as in OpenSSL
-.BR ciphers (1)
-and
-.BR SSL_CTX_set_cipher_list (3).
+\fBCiphers\fR [\fItypeopt\fR] "\fIciphers\fR" ...
+Defines the list of ciphers (for TLSv2 and below) or ciphersuites (for
+TLSv3) that will be accepted by the SSL connection.  The \fItypeopt\fR
+option defines how to interpret the \fIciphers\fR argument that
+follows it:
+.RS
+.TP
+.B \-cipherlist
+Sets the list of ciphers that affects only TLSv2 and prior protocols.
+This is the default.
+.TP
+.B \-ciphersuites
+Sets the list of TLSv3 ciphersuites.  It will be combined
+with any TLSv1.2 and below cipher lists that may have been configured.
+.RE
+.IP
+Refer to
+.BR ciphers (1),
+for a discussion of the \fIciphers\fR argument.
 .TP
 \fBSSLHonorCipherOrder\fR \fIbool\fR
 If set to \fItrue\fR, the server will broadcast a preference to use
@@ -2297,12 +2310,26 @@ This directive may appear only after the
 .B HTTPS
 directive.
 .TP
-\fBCiphers\fR "\fIcipherlist\fR"
-This is the list of ciphers that will be accepted by the SSL
-connection; it is a string in the same format as in OpenSSL
-.BR ciphers (1)
-and
-.BR SSL_CTX_set_cipher_list (3).
+\fBCiphers\fR [\fItypeopt\fR] "\fIciphers\fR" ...
+Defines the list of ciphers (for TLSv2 and below) or ciphersuites (for
+TLSv3) to negotiate with the backend.  The \fItypeopt\fR
+option defines how to interpret the \fIciphers\fR argument that
+follows it:
+.RS
+.TP
+.B \-cipherlist
+Sets the list of ciphers that affects only TLSv2 and prior protocols.
+This is the default.
+.TP
+.B \-ciphersuites
+Sets the list of TLSv3 ciphersuites.  It will be combined
+with any TLSv1.2 and below cipher lists that may have been configured.
+.RE
+.IP
+Refer to
+.BR ciphers (1),
+for a discussion of the \fIciphers\fR argument.
+.IP
 This directive may appear only after the
 .B HTTPS
 directive.

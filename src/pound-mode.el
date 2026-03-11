@@ -242,7 +242,12 @@
     "-posix"
     "-pcre"
     "-perl"
-    "-tag"))
+    "-tag"
+    "-decode"))
+
+(defvar pound-cipher-flags
+  '("-ciphersuites"
+    "-cipherlist"))
 
 (defconst pound-boolean
   '("yes"
@@ -371,6 +376,10 @@
    (list "\\<LogFacility\\>"
 	 (regexp-opt pound-log-facilities 'words)
 	 nil nil '(0 font-lock-constant-face))
+
+   (list "\\<Ciphers\\>"
+	 (regexp-opt pound-cipher-flags)
+	 nil nil '(0 font-lock-builtin-face))
 
    ;; Reqular keywords
    (list (concat "^[ \t]*"

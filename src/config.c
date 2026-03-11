@@ -141,7 +141,7 @@ gettok_option (struct config_option const *optab, int *opt, char const **arg)
 	return CFGPARSER_FAIL;
       *arg = tok->str;
     }
-  else
+  else if (arg)
     *arg = NULL;
   return CFGPARSER_OK;
 }
@@ -1039,11 +1039,48 @@ backend_parse_cert (void *call_data, void *section_data)
   return CFGPARSER_OK;
 }
 
+enum {
+  CIPHER_LIST,
+  CIPHER_SUITES
+};
+
+static char const *cipherset_str[] = { "cipher list", "ciphersuites" };
+
+static int
+set_ciphers (SSL_CTX *ctx, int opt, char const *str)
+{
+  switch (opt)
+    {
+    case CIPHER_LIST:
+      return SSL_CTX_set_cipher_list (ctx, str);
+
+    case CIPHER_SUITES:
+      return SSL_CTX_set_ciphersuites (ctx, str);
+    }
+  abort ();
+}
+
+static int
+getopt_cipher (int *opt)
+{
+  static struct config_option optab[] = {
+    { "ciphersuites", CIPHER_SUITES },
+    { "cipherlist", CIPHER_LIST },
+    { NULL }
+  };
+  int res, n;
+
+  while ((res = gettok_option (optab, &n, NULL)) == CFGPARSER_OK && n != -1)
+    *opt = n;
+  return res;
+}
+
 static int
 backend_assign_ciphers (void *call_data, void *section_data)
 {
   BACKEND *be = call_data;
   struct token *tok;
+  int copt = CIPHER_LIST;
 
   if (be->v.mtx.ctx == NULL)
     {
@@ -1051,11 +1088,32 @@ backend_assign_ciphers (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  SSL_CTX_set_cipher_list (be->v.mtx.ctx, tok->str);
-  return CFGPARSER_OK;
+  for (;;)
+    {
+      if (getopt_cipher (&copt) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      if ((tok = gettkn_any ()) == NULL)
+	return CFGPARSER_FAIL;
+      if (tok->type == T_STRING)
+	{
+	  if (set_ciphers (be->v.mtx.ctx, copt, tok->str) == 0)
+	    {
+	      conf_error ("failed to set %s %s",
+			  cipherset_str[copt], tok->str);
+	      return CFGPARSER_FAIL;
+	    }
+	}
+      else if (tok->type == '\n')
+	break;
+      else
+	{
+	  conf_error ("expected cipher list, ciphersuites or newline,"
+		      " but found %s",
+		      token_type_str (tok->type));
+	  return CFGPARSER_FAIL;
+	}
+    }
+  return CFGPARSER_OK_NONL;
 }
 
 static int
@@ -4898,7 +4956,7 @@ https_parse_ciphers (void *call_data, void *section_data)
 {
   LISTENER *lst = call_data;
   struct token *tok;
-  POUND_CTX *pc;
+  int copt = CIPHER_LIST;
 
   if (SLIST_EMPTY (&lst->ctx_head))
     {
@@ -4906,13 +4964,36 @@ https_parse_ciphers (void *call_data, void *section_data)
       return CFGPARSER_FAIL;
     }
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  SLIST_FOREACH (pc, &lst->ctx_head, next)
-    SSL_CTX_set_cipher_list (pc->ctx, tok->str);
-
-  return CFGPARSER_OK;
+  for (;;)
+    {
+      if (getopt_cipher (&copt) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      if ((tok = gettkn_any ()) == NULL)
+	return CFGPARSER_FAIL;
+      if (tok->type == T_STRING)
+	{
+	  POUND_CTX *pc;
+	  SLIST_FOREACH (pc, &lst->ctx_head, next)
+	    {
+	      if (set_ciphers (pc->ctx, copt, tok->str) == 0)
+		{
+		  conf_error ("failed to set %s %s",
+			      cipherset_str[copt], tok->str);
+		  return CFGPARSER_FAIL;
+		}
+	    }
+	}
+      else if (tok->type == '\n')
+	break;
+      else
+	{
+	  conf_error ("expected cipher list, ciphersuites or newline,"
+		      " but found %s",
+		      token_type_str (tok->type));
+	  return CFGPARSER_FAIL;
+	}
+    }
+  return CFGPARSER_OK_NONL;
 }
 
 static int

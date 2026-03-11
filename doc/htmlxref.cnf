@@ -1,2 +1,3 @@
 inotify(7)      mono    https://man.gnu.org.ua/7/inotify
 kqueue(2)       mono    https://www.freebsd.org/cgi/man.cgi?query=kqueue&sektion=2
+ciphers(1)	mono	https://man.gnu.org.ua/1/ciphers

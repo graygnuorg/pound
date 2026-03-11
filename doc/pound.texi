@@ -1701,9 +1701,9 @@ the @code{Disable} statement in the example above disables @samp{TLSv1},
 @samp{SSLv3}, and @samp{SSLv2}.
 
  To further tune the strength of your encryption use the @code{Ciphers}
-directive.  Its argument is a colon-delimited list of OpenSSL ciphers,
-as described in @xref{ciphers,,,ciphers(1)}.  The cipher selection
-shown in the example above provides for excellent encryption strength.
+directive.  It defins the list of ciphers (for TLSv2 and below) or
+ciphersuites (for TLSv3) that will be accepted by the SSL connection.
+@xref{Ciphers}.
 
 @menu
 * ACME::
@@ -5984,10 +5984,48 @@ This disables SSLv2, SSLv3 and TLSv1, thus allowing only TLSv1_1
 and TLSv1_2.
 @end deffn
 
-@deffn {ListenHTTPS} Ciphers "@var{cipher_list}"
-This is the list of ciphers that will be accepted by the SSL
-connection; it is a string in the same format as in @command{OpenSSL}
-@code{ciphers} and @code{SSL_CTX_set_cipher_list} functions.
+@anchor{Ciphers}
+@deffn {ListenHTTPS} Ciphers [@var{typeopt}] "@var{ciphers}" ...
+Defines the list of ciphers (for TLSv2 and below) or ciphersuites (for
+TLSv3) that will be accepted by the SSL connection.  The @var{typeopt}
+option defines how to interpret the @var{ciphers} argument that
+follows it:
+
+@table @code
+@kwindex -cipherlist
+@item -cipherlist
+Sets the list of ciphers that affects only TLSv2 and prior protocols.
+The syntax is the same as in @command{OpenSSL} @code{ciphers} and
+@code{SSL_CTX_set_cipher_list} functions. @xref{ciphers,,,ciphers(1)},
+for a detailed discussion.
+
+@kwindex -ciphersuites
+@item -ciphersuites
+Sets the list of TLSv3 @dfn{ciphersuites}. This list will be combined
+with any TLSv1.2 and below cipher lists that may have been configured.
+
+The format for @var{ciphers} is a simple colon separated list of
+TLSv1.3 ciphersuite names from the list below:
+
+@itemize @bullet
+@item @code{TLS_AES_128_CCM_8_SHA256}
+@item @code{TLS_AES_128_CCM_SHA256}
+@item @code{TLS_AES_128_GCM_SHA256}
+@item @code{TLS_AES_256_GCM_SHA384}
+@item @code{TLS_CHACHA20_POLY1305_SHA256}
+@end itemize
+@end table
+
+If @var{typeopt} is not supplied, @code{-cipherlist} is assumed.
+
+Notice, that a single @code{Ciphers} statement can set both TLSv2 and
+TLSv3 ciphersuites, e.g.:
+
+@example
+@group
+Ciphers "HIGH:@@STRENGTH:!RSA" -ciphersuites "TLS_AES_256_GCM_SHA384"
+@end group
+@end example
 @end deffn
 
 @deffn {ListenHTTPS} SSLHonorCipherOrder @var{bool}
@@ -6630,10 +6668,11 @@ client. The @var{filename} is the name of a file containing the
 certificate, possibly a certificate chain and the signature.
 @end deffn
 
-@deffn {Backend directive} Ciphers "@var{cipherlist}"
-This is the list of ciphers that will be accepted by the SSL
-connection with the backend (for HTTPS backends); it is a string in the same format as used by the OpenSSL
-functions @code{ciphers} and @code{SSL_CTX_set_cipher_list}.
+@deffn {Backend directive} Ciphers [@var{typeopt}] "@var{ciphers}" ...
+This is the list of ciphers (for TLSv2 and below) or ciphersuites (for
+TLSv3) that will be accepted by the SSL connection with the backend
+(for HTTPS backends).  @xref{Ciphers}, for a detailed discussion of
+its arguments.
 @end deffn
 
 @deffn {Backend directive} Disable @var{proto}

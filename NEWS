@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-02-23
+Pound -- history of user-visible changes. 2026-03-11
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -32,6 +32,31 @@ beginning.
 ** http.service.locus
 
 Location of the currently selected service in the configuration file.
+
+* Setting ciphersuites for TLSv3
+
+The syntax of the "Ciphers" statement (ListenHTTPs and Backend
+sections) has been extended to allow for specifying ciphersuites for
+TLSv3 protocol.  The new syntax is:
+
+  Ciphers [typeopt] "cipherlist" ...
+
+where optional typeopt option defines how to interpret the cipherlist
+argument that follows it. Its possible values are:
+
+  -cipherlist
+	Sets the list of ciphers that affects only TLSv2 and prior protocols.
+	This is the default.
+
+  -ciphersuites
+	Sets the list of TLSv3 ciphersuites.  It will be combined
+	with any TLSv1.2 and below cipher lists that may have been configured.
+
+Notice, that a single "Ciphers" statement can set both TLSv2 and TLSv3
+ciphersuites:
+
+   Ciphers "HIGH:@STRENGTH:!RSA" -ciphersuites "TLS_AES_256_GCM_SHA384"
+
 
 Version 4.20, 2026-02-06
 
