@@ -174,54 +174,6 @@ pound_uptime (void)
 }
 
 /*
- * OpenSSL thread support stuff
- */
-#if OPENSSL_VERSION_NUMBER >= 0x10100000L
-#define l_init()
-#else
-static pthread_mutex_t *l_array;
-
-static void
-l_init (void)
-{
-  int i, n_locks;
-
-  n_locks = CRYPTO_num_locks ();
-  l_array = xcalloc (n_locks, sizeof (pthread_mutex_t));
-
-  for (i = 0; i < n_locks; i++)
-    /* pthread_mutex_init() always returns 0 */
-    pthread_mutex_init (&l_array[i], NULL);
-  return;
-}
-
-static void
-l_lock (const int mode, const int n, /* unused */ const char *file,
-	/* unused */ int line)
-{
-  int ret_val;
-
-  if (mode & CRYPTO_LOCK)
-    {
-      if ((ret_val = pthread_mutex_lock (&l_array[n])) != 0)
-	logmsg (LOG_ERR, "l_lock lock(): %s", strerror (ret_val));
-    }
-  else
-    {
-      if ((ret_val = pthread_mutex_unlock (&l_array[n])) != 0)
-	logmsg (LOG_ERR, "l_lock unlock(): %s", strerror (ret_val));
-    }
-  return;
-}
-
-static unsigned long
-l_id (void)
-{
-  return (unsigned long) pthread_self ();
-}
-#endif
-
-/*
  * work queue stuff
  */
 static POUND_HTTP_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
@@ -1163,7 +1115,6 @@ main (const int argc, char **argv)
   SSL_load_error_strings ();
   SSL_library_init ();
   OpenSSL_add_all_algorithms ();
-  l_init ();
   CRYPTO_set_id_callback (l_id);
   CRYPTO_set_locking_callback (l_lock);
 

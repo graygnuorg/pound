@@ -2947,7 +2947,7 @@ End
 @end group
 @end example
 
-  A final note: you can select both the service to use and balancer
+  A final note: you can select both the service to use and the balancer
 group within it:
 
 @example
