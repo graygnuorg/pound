@@ -3113,6 +3113,14 @@ http_request_rebuild_line (struct http_request *req)
   struct stringbuf sb;
   char *str;
 
+  if (req->url[0] == 0)
+    {
+      logmsg (LOG_NOTICE,
+	      "(%"PRItid") request rewriting results in empty URL",
+	      POUND_TID ());
+      return -1;
+    }
+
   stringbuf_init_log (&sb);
   stringbuf_add_string (&sb, methods[req->method].name);
   stringbuf_add_char (&sb, ' ');
@@ -3141,6 +3149,14 @@ http_request_rebuild_url (struct http_request *req)
 {
   struct stringbuf sb;
   char *str;
+
+  if (req->path[0] == 0)
+    {
+      logmsg (LOG_NOTICE,
+	      "(%"PRItid") request rewriting results in empty path",
+	      POUND_TID ());
+      return -1;
+    }
 
   stringbuf_init_log (&sb);
   stringbuf_add_string (&sb, req->path);
