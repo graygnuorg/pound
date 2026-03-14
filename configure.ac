@@ -98,21 +98,6 @@ AC_ARG_WITH([ssl],
   C_SSL="${withval}"],
  [C_SSL=""])
 
-saved_CPPFLAGS=$CFLAGS
-CPPFLAGS=$SSL_CPPFLAGS
-saved_LDFLAGS=$LDFLAGS
-LDFLAGS=$SSL_LDFLAGS
-AC_MSG_CHECKING([for OpenSSL version 3])
-AC_COMPILE_IFELSE([AC_LANG_PROGRAM([#include <openssl/opensslv.h>],
- [#if OPENSSL_VERSION_MAJOR >= 3
-#error "OpenSSL v3"
-#endif
-])],[openssl_v3=no],[openssl_v3=yes])
-AC_MSG_RESULT([$openssl_v3])
-CPPFLAGS=$saved_CPPFLAGS
-LDFLAGS=$saved_LDFLAGS
-AM_CONDITIONAL([OPENSSL_V3],[test "$openssl_v3" = "yes"])
-
 # Check for structures
 AC_CHECK_MEMBERS([struct stat.st_mtim],[],[],
  [#include <sys/types.h>
@@ -181,27 +166,33 @@ PND_PCRE
 AM_CONDITIONAL([COND_PCRE], [test $status_pcre = 1])
 AM_CONDITIONAL([COND_PCRE2], [test $status_pcre = 2])
 
+m4_define([POUND_LUA_REQ],5.3.5)
+
+unset version_lua
 AC_ARG_ENABLE([lua],
  [AS_HELP_STRING([--enable-lua],
 		 [enable Lua extensions])],
- [status_lua=${enableval}],
+ [case $enableval in
+  yes|no) status_lua=$enableval;;
+  *)  version_lua=[$(echo $enableval | sed -n '/^[0-9][0-9]*\(\.[0-9][0-9]*\)*$/p')]
+      if test -n "$version_lua"; then
+	AS_VERSION_COMPARE($version_lua, POUND_LUA_REQ,
+	   [AC_MSG_ERROR([requested Lua version is less than the minimum supported (POUND_LUA_REQ)])])
+	status_lua=probe
+      else
+	AC_MSG_ERROR([invalid version string: $enableval])
+      fi
+      ;;
+  esac],
  [status_lua=probe])
 
+AH_TEMPLATE([ENABLE_LUA],[Define if Lua extension language is supported])
 if test $status_lua != no; then
-  PKG_PROG_PKG_CONFIG
-  status_lua=no
-  lua_min_version=5.3.5
-  PKG_CHECK_MODULES([LUA], [lua >= $lua_min_version], [status_lua=yes],
-     [PKG_CHECK_MODULES([LUA], [lua54], [status_lua=yes],
-         [PKG_CHECK_MODULES([LUA], [lua53 >= $lua_min_version],
-	     [status_lua=yes], [status_lua=no])])])
-  AS_IF([test $status_lua = yes],
-    [AC_DEFINE([ENABLE_LUA], [1],
-               [Define if Lua extension language is supported])])
-  AC_MSG_CHECKING([For liblua $lua_min_version or newer])
-  AC_MSG_RESULT([$status_lua])
+  AX_LUA(${version_lua:-POUND_LUA_REQ}, $version_lua,
+   [status_lua=yes
+    AC_DEFINE([ENABLE_LUA], [1])],
+   [status_lua=no])
 fi
-
 AM_CONDITIONAL([COND_LUA], [test $status_lua = yes])
 
 # **********************
