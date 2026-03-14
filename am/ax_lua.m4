@@ -62,7 +62,9 @@ else
 	$1.*) # Give it a chance
 	      ;;
 	*)
-	   m4_if($2,,,[AS_VERSION_COMPARE($2, $version, continue)])
+	   m4_if($2,,,
+              [AS_IF([test -n "$2"],
+                 [AS_VERSION_COMPARE($2, $version, continue)]]))
 	   AS_VERSION_COMPARE($version, $1, break)
       esac
       LUA_CFLAGS="-I/usr/include/lua$version"
