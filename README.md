@@ -145,11 +145,23 @@ configuration options:
 
 * `--enable-lua` or `--disable-lua`
 
-  Enable or disable use of [Lua](https://www.lua.org) extension modules.
+  Enable or disable the use of [Lua](https://www.lua.org) extension.
   By default, it is enabled if the Lua library and header files are
   installed and are of suitable version. You will need Lua version 5.3.5
-  or 5.4 for this to work. Use `--disable-lua`, if you are don't need this
+  or 5.4 for this to work. Use `--disable-lua`, if you don't need this
   feature or want to get a smaller binary without extra dependencies.
+
+  The `--enable-lua` option takes an optional argument, specifying the
+  Lua version to compile with. Use this if you have several Lua versions
+  installed in parallel, and wish to select one of them.
+
+  If `configure` is not able to detect the presense of Lua files (e.g. if
+  those are installed in a non-standard location), use the LUA_CFLAGS and
+  LUA_LIBS variables to indicate their location. E.g.:
+
+  ```
+  ./configure LUA_CFLAGS=-I/usr/local/include LUA_LIBS='-L/usr/local/lib -llua'
+  ```
 
 * `--enable-pcre` or `--disable-pcre`
 
