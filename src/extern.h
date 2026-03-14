@@ -29,6 +29,7 @@ extern char *user,		/* user to run as */
 extern unsigned worker_min_count; /* min. number of worker threads */
 extern unsigned worker_max_count; /* max. number of worker threads */
 extern unsigned worker_idle_timeout;
+extern size_t worker_stack_size;
 
 extern unsigned grace;		/* grace period before shutdown */
 

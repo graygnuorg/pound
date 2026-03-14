@@ -4222,6 +4222,10 @@ Sets idle timeout for a worker thread, in seconds.  Default is 30 seconds.
 @xref{Worker model}.
 @end deffn
 
+@deffn {Global directive} WorkerStackSize @var{n}
+Sets worker stack size, in bytes. The default size is 262144.
+@end deffn
+
 @deffn {Global directive} Threads @var{n}
 This statement, retained for backward compatibility with previous
 versions of pound, is equivalent to:

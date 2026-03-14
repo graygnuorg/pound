@@ -60,6 +60,7 @@ char *syslog_tag;               /* Tag to mark syslog messages with.
 pthread_mutexattr_t mutex_attr_recursive;
 pthread_attr_t thread_attr_detached;
 static pthread_attr_t thread_attr_worker;
+size_t worker_stack_size = DEFAULT_WORKER_THREAD_STACK;
 
 struct timespec start_time;
 
@@ -1107,6 +1108,7 @@ main (const int argc, char **argv)
 #ifndef SOL_TCP
   struct protoent *pe;
 #endif
+  int rc;
 
   umask (077);
   srandom (getpid ());
@@ -1148,14 +1150,16 @@ main (const int argc, char **argv)
 
   pthread_attr_init (&thread_attr_worker);
   pthread_attr_setdetachstate (&thread_attr_worker, PTHREAD_CREATE_DETACHED);
-  /* set new stack size  */
-  if (pthread_attr_setstacksize (&thread_attr_worker, 1 << 18))
-    abend (NULL, "can't set stack size");
 
   json_memabrt = lognomem;
 
   /* read config */
   config_parse (argc, argv);
+
+  /* set new stack size  */
+  rc = pthread_attr_setstacksize (&thread_attr_worker, worker_stack_size);
+  if (rc)
+    abend (NULL, "can't set worker stack size: %s", strerror (rc));
 
   if (log_facility != -1)
     {

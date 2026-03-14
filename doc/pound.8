@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 11, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "March 14, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -503,6 +503,9 @@ Sets maximum number of worker threads.  The default is 128.
 See the section
 .B WORKER MODEL
 above for a detailed discussion.
+.TP
+\fBWorkerStackSize\fR \fIN\fR
+Sets worker stack size, in bytes.  The default size is 262144.
 .SS Privilege selection
 .TP
 \fBUser\fR "\fIuser_name\fR"

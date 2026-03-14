@@ -180,6 +180,10 @@ unsigned long strhash_ci (const char *c, size_t len);
 # define DEFAULT_WORKER_IDLE_TIMEOUT 30
 #endif
 
+#ifndef DEFAULT_WORKER_THREAD_STACK
+# define DEFAULT_WORKER_THREAD_STACK (1<<18)
+#endif
+
 #ifndef DEFAULT_GRACE_TO
 # define DEFAULT_GRACE_TO 30
 #endif

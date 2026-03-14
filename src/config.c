@@ -5734,6 +5734,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .data = &worker_idle_timeout
   },
   {
+    .name = "WorkerStackSize",
+    .parser = cfg_assign_size,
+    .data = &worker_stack_size
+  },
+  {
     .name = "Grace",
     .parser = cfg_assign_timeout,
     .data = &grace

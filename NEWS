@@ -57,6 +57,10 @@ ciphersuites:
 
    Ciphers "HIGH:@STRENGTH:!RSA" -ciphersuites "TLS_AES_256_GCM_SHA384"
 
+* New configuration setting: WorkerStackSize
+
+Sets worker thread stack size, in bytes.
+
 * Lua compile-time check
 
 The compile-time check for Lua no longer depends on pkg-config.
