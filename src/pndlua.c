@@ -268,7 +268,7 @@ pndlua_pound_log (lua_State *L)
 static int
 pndlua_pound_tid (lua_State *L)
 {
-  lua_pushinteger (L, (lua_Integer) pthread_self ());
+  lua_pushinteger (L, (lua_Integer) (intptr_t) pthread_self ());
   return 1;
 }
 
@@ -1882,11 +1882,11 @@ stash_assert (lua_State *L)
 {
   if (!pndlua_stash_init (L))
     {
-      lua_pushinteger (L, (lua_Integer) pthread_self ());
+      lua_pushinteger (L, (lua_Integer) (intptr_t) pthread_self ());
       lua_newtable (L);
       lua_rawset (L, 1);   /* stash = stash[thread_id] */
     }
-  lua_pushinteger (L, (lua_Integer) pthread_self ());
+  lua_pushinteger (L, (lua_Integer) (intptr_t) pthread_self ());
   lua_rawget (L, 1);
 }
 

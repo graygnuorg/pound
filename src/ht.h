@@ -80,7 +80,12 @@
 #define cat2(a,b) __cat2__(a,b)
 #define cat3(a,b,c) cat2(a, cat2(b,c))
 
-#define HT_DECLARE(type) DEFINE_LHASH_OF(type)
+#ifdef DEFINE_LHASH_OF_EX
+# define HT_DECLARE(type) DEFINE_LHASH_OF_EX(type)
+#else
+# define HT_DECLARE(type) DEFINE_LHASH_OF(type)
+#endif
+
 HT_DECLARE(HT_TYPE);
 #undef HT_DECLARE
 
