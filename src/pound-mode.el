@@ -225,6 +225,7 @@
     "WorkerIdleTimeout"
     "WorkerMaxCount"
     "WorkerMinCount"
+    "WorkerStackSize"
     "xHTTP"
 ))
 
