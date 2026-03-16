@@ -6336,7 +6336,6 @@ do_http (POUND_HTTP *phttp)
 	break;
       else
 	{
-	  clock_gettime (CLOCK_REALTIME, &phttp->start_req);
 	  res = http_process_request (phttp);
 	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
 	  if (enable_backend_stats && phttp->backend)
