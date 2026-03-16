@@ -460,7 +460,7 @@ i_time_s (struct stringbuf *sb, struct http_log_instr *instr,
 	  POUND_HTTP *phttp)
 {
   struct timespec *ts = phttp_field_ptr (instr, phttp);
-  stringbuf_printf (sb, "%ld", (long) ts->tv_sec);
+  stringbuf_printf (sb, "%"PRIu64, (uint64_t) ts->tv_sec);
 }
 
 static void
@@ -468,8 +468,8 @@ i_time_msec (struct stringbuf *sb, struct http_log_instr *instr,
 	     POUND_HTTP *phttp)
 {
   struct timespec *ts = phttp_field_ptr (instr, phttp);
-  stringbuf_printf (sb, "%.0f",
-		    (double) ts->tv_sec * MILLI + ts->tv_nsec / MICRO);
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) ts->tv_sec * MILLI + ts->tv_nsec / MICRO);
 }
 
 static void
@@ -485,8 +485,8 @@ i_time_usec (struct stringbuf *sb, struct http_log_instr *instr,
 	     POUND_HTTP *phttp)
 {
   struct timespec *ts = phttp_field_ptr (instr, phttp);
-  stringbuf_printf (sb, "%.0f",
-		    (double) ts->tv_sec * MICRO + ts->tv_nsec / MILLI);
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) ts->tv_sec * MICRO + ts->tv_nsec / MILLI);
 }
 
 static void
@@ -575,8 +575,8 @@ i_process_time_ms (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
   struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
-  stringbuf_printf (sb, "%ld",
-		    (unsigned long) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
 }
 
 static void
@@ -584,8 +584,8 @@ i_process_time_us (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
   struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
-  stringbuf_printf (sb, "%ld",
-		    (unsigned long) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
 }
 
 static void
@@ -593,7 +593,7 @@ i_process_time_s (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
   struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
-  stringbuf_printf (sb, "%ld", diff.tv_sec);
+  stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
 }
 
 static void
@@ -601,7 +601,8 @@ i_process_time_f (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
   struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
-  stringbuf_printf (sb, "%ld.%03ld", diff.tv_sec, diff.tv_nsec / MICRO);
+  stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
+		    diff.tv_nsec / MICRO);
 }
 
 static struct argprt proctimeprt[] = {

@@ -325,7 +325,8 @@ log_duration (char *buf, size_t size, struct timespec const *start)
   struct timespec end, diff;
   clock_gettime (CLOCK_REALTIME, &end);
   diff = timespec_sub (&end, start);
-  snprintf (buf, size, "%ld.%03ld", diff.tv_sec, diff.tv_nsec / 1000000);
+  snprintf (buf, size, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
+	    diff.tv_nsec / 1000000);
   return buf;
 }
 
@@ -5280,7 +5281,7 @@ backend_update_stats (BACKEND *be, struct timespec const *start,
 
   pthread_mutex_lock (&be->mut);
   diff = timespec_sub (end, start);
-  t = (double) diff.tv_sec * 1e9 + diff.tv_nsec;
+  t = (double) diff.tv_sec * NANOSECOND + diff.tv_nsec;
   be->avgtime = (be->numreq * be->avgtime + t) / (be->numreq + 1);
   be->avgsqtime = (be->numreq * be->avgsqtime + t*t) / (be->numreq + 1);
   be->numreq++;
