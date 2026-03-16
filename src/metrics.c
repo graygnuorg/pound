@@ -901,6 +901,7 @@ send_reply (POUND_HTTP *phttp, char const *content)
 	      "HTTP/1.%d %d %s\r\n"
 	      "Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8\r\n"
 	      "Content-Length: %"PRICLEN"\r\n"
+	      "Connection: close\r\n"
 	      "\r\n"
 	      "%s",
 	      phttp->request.version,
@@ -940,5 +941,6 @@ metrics_response (POUND_HTTP *phttp,
     }
   exposition_free (&exp);
   json_value_free (obj);
+  phttp->conn_closed = 1;
   return res == 0 ? 0 : HTTP_STATUS_INTERNAL_SERVER_ERROR;
 }
