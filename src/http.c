@@ -3655,15 +3655,9 @@ http_request_read (BIO *in, const LISTENER *lstn, char *buf,
       return HTTP_STATUS_OK;
 
     case COPY_READ_ERR:
-      logmsg (LOG_NOTICE, "(%"PRItid") %s",
-	      POUND_TID (),
-	      copy_status_string (res));
-      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+      return -1;
 
     case COPY_TOO_LONG:
-      logmsg (LOG_NOTICE, "(%"PRItid") %s",
-	      POUND_TID (),
-	      copy_status_string (res));
       return HTTP_STATUS_URI_TOO_LONG;
 
     default:
@@ -5449,6 +5443,8 @@ backend_response (POUND_HTTP *phttp)
 			       &phttp->response);
       if (res != HTTP_STATUS_OK)
 	{
+	  if (res == -1)
+	    res = HTTP_STATUS_SERVICE_UNAVAILABLE;
 	  phttp_log (phttp, PHTTP_LOG_BACKEND | PHTTP_LOG_REVERSE,
 		     res, errno, "response read error");
 	  return res;
@@ -5726,7 +5722,7 @@ backend_response (POUND_HTTP *phttp)
 		phttp_log (phttp, PHTTP_LOG_BACKEND,
 			   -1, errno,
 			   "can't create sink");
-		return -1;
+		return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	      }
 	    phttp->cl = sink;
 	    res = copy_response (phttp, chunked, content_length, &be_11, NULL);
@@ -6332,11 +6328,8 @@ do_http (POUND_HTTP *phttp)
 			       &phttp->request);
       if (res != HTTP_STATUS_OK)
 	{
-	  if (errno)
-	    {
-	      phttp_log (phttp, PHTTP_LOG_DFL,
-			 res, errno, "error reading request");
-	    }
+	  phttp_log (phttp, PHTTP_LOG_DFL, res, errno,
+		     "error reading request");
 	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
 	}
       else if (phttp->request.request == NULL)
@@ -6352,16 +6345,13 @@ do_http (POUND_HTTP *phttp)
 	}
 
       if (res < 0)
-	http_err_reply (phttp, HTTP_STATUS_INTERNAL_SERVER_ERROR);
+	break;
       else if (res != HTTP_STATUS_OK)
 	http_err_reply (phttp, res);
 
       if (phttp->response_code == 0)
 	phttp->response_code = http_status[res].code;
       http_log (phttp);
-
-      if (res < 0)
-	break;
 
       /*
        * Stop processing if:
