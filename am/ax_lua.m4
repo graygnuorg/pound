@@ -83,8 +83,8 @@ else
     LUA_LIBS="-llua"
     _AX_LUA_SUBTEST($1,$2)
   fi
-  AC_MSG_RESULT([$ax_lua_ok])
 fi
+AC_MSG_RESULT([$ax_lua_ok])
 if test "$ax_lua_ok" = no; then
   unset LUA_LIBS
   unset LUA_CFLAGS
