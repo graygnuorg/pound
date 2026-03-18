@@ -4989,7 +4989,7 @@ capture_end (POUND_HTTP *phttp)
       cap = phttp->be;
       phttp->be = BIO_pop (phttp->be);
       phttp->capturing = CAPTURE_READY;
-      if (!BIO_capture_is_truncated (cap))
+      if (BIO_capture_is_truncated (cap))
 	{
 	  phttp_log (phttp, PHTTP_LOG_BACKEND, -1, 0,
 		     "discarding truncated capture");
