@@ -74,5 +74,5 @@ void dns_response_free (struct dns_response *resp);
 void resolver_set_config (struct resolver_config *);
 void get_negative_expire_time (struct timespec *ts, BACKEND *be);
 
-int sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr);
+int sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr, int *family);
 

@@ -456,26 +456,48 @@ cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
 
 /*
  * Split the inet address of SA to address pointer and length, suitable
- * for use with the above functions.  Store pointer in RET_PTR.  Return
- * address length in bytes, or -1 if SA has invalid address family.
+ * for use with the above functions.  Store pointer in RET_PTR.  If
+ * RET_PTR is not NULL, store the effective address family there.
+ * Return address length in bytes, or -1 if SA address family is not
+ * supported.
  */
 int
-sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr)
+sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr, int *ret_family)
 {
+  int len;
+  int fml;
+  struct in6_addr *in6p;
+
   switch (sa->sa_family)
     {
     case AF_INET:
+      fml = AF_INET;
+      len = 4;
       *ret_ptr = (unsigned char *) &(((struct sockaddr_in*)sa)->sin_addr.s_addr);
-      return 4;
+      break;
 
     case AF_INET6:
-      *ret_ptr = (unsigned char *) &(((struct sockaddr_in6*)sa)->sin6_addr);
-      return 16;
+      in6p = &((struct sockaddr_in6*)sa)->sin6_addr;
+      if (IN6_IS_ADDR_V4MAPPED (in6p))
+	{
+	  fml = AF_INET;
+	  len = 4;
+	  *ret_ptr = &in6p->s6_addr[12];
+	}
+      else
+	{
+	  fml = AF_INET6;
+	  len = 16;
+	  *ret_ptr = (unsigned char*) in6p;
+	}
+      break;
 
     default:
-      break;
+      return -1;
     }
-  return -1;
+  if (ret_family)
+    *ret_family = fml;
+  return len;
 }
 
 static int
@@ -508,15 +530,16 @@ acl_match (ACL *acl, struct sockaddr *sa)
   CIDR *cidr;
   unsigned char *ap;
   size_t len;
+  int family;
   int rc = 1;
 
-  if ((len = sockaddr_bytes (sa, &ap)) == -1)
+  if ((len = sockaddr_bytes (sa, &ap, &family)) == -1)
     return -1;
 
   acl_lock (acl);
   SLIST_FOREACH (cidr, &acl->head, next)
     {
-      if (cidr->family == sa->sa_family && cidr_match (cidr, ap, len) == 0)
+      if (cidr->family == family && cidr_match (cidr, ap, len) == 0)
 	{
 	  rc = 0;
 	  break;
@@ -586,14 +609,15 @@ parse_cidr_str (ACL *acl, char const *str, struct locus_range const *loc)
       CIDR *cidr;
       int len, i;
       unsigned char *p;
+      int family;
 
-      if ((len = sockaddr_bytes (res->ai_addr, &p)) == -1)
+      if ((len = sockaddr_bytes (res->ai_addr, &p, &family)) == -1)
 	{
 	  conf_error_at_locus_range (loc, "%s", "unsupported address family");
 	  return CFGPARSER_FAIL;
 	}
       XZALLOC (cidr);
-      cidr->family = res->ai_family;
+      cidr->family = family;
       cidr->len = len;
       memcpy (cidr->addr, p, len);
       if (!mask)

@@ -218,7 +218,7 @@ BACKEND_hash (const BACKEND *b)
   if (b->be_type == BE_REGULAR)
     {
       unsigned char *p;
-      int len = sockaddr_bytes (b->v.reg.addr.ai_addr, &p);
+      int len = sockaddr_bytes (b->v.reg.addr.ai_addr, &p, NULL);
       return djb_hash (p, len);
     }
   else /* if (b->be_type == BE_MATRIX) */
@@ -237,9 +237,10 @@ BACKEND_cmp (const BACKEND *a, const BACKEND *b)
   if (a->be_type == BE_REGULAR)
     {
       unsigned char *ap, *bp;
-      int al = sockaddr_bytes (a->v.reg.addr.ai_addr, &ap);
-      int bl = sockaddr_bytes (b->v.reg.addr.ai_addr, &bp);
-      if (al != bl)
+      int af, bf;
+      int al = sockaddr_bytes (a->v.reg.addr.ai_addr, &ap, &af);
+      int bl = sockaddr_bytes (b->v.reg.addr.ai_addr, &bp, &bf);
+      if (af != bf || al != bl)
 	return 1;
       return memcmp (ap, bp, al);
     }
