@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-03-14
+Pound -- history of user-visible changes. 2026-03-28
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,40 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.21.90
+
+* Remove spurious log messages.
+
+* Metric backend: close connection after response.
+
+* Support IPv4 mapped to IPv6 in ACLs.
+
+It is no longer necessary to use ::ffff:<IP4> notation in ACLs to
+match mapped IPv4 addresses. Using <IP4> is enough.
+
+* Support for split Header and Host conditions is rewritten
+
+A split "Header" condition is
+
+  Header "NAME" [OPTIONS] "PATTERN"
+
+In previous versions, this construct was internally translated to a
+"Header -re ..." statement, and that introduced several inconsistencies.
+In particular, when using the "-re" option, "PATTERN" was treated as
+anchored, i.e. as if it started with a "^".  Besides, -exact and -prefix
+were treated as equivalent.  This is now fixed.  The new implementation
+strictly follows the logic of the statement: it compares each header whose name is "NAME" with "PATTERN" in accordance with the given OPTIONS.
+
+This applies also to "Host" condition, which is equivalent to
+
+  Header "Host" [OPTIONS] "PATTERN"
+
+* Bugfixes
+
+** Fix durations on 32-bit architectures.
+** Fix recognition of truncated request capture.
+
 
 Version 4.21, 2026-03-14
 

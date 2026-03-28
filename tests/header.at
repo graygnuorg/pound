@@ -15,16 +15,11 @@
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AT_SETUP([Header])
 AT_KEYWORDS([cond header])
+
+# Exact comparison
 PT_CHECK([ListenHTTP
 	Service
-		Header -re -icase ["Host:[[:space:]]*example.org"]
-		Backend
-			Address
-			Port
-		End
-	End
-	Service
-		Header -re -icase ["Host:[[:space:]]*example.com"]
+		Header "X-Test" -exact "in"
 		Backend
 			Address
 			Port
@@ -33,19 +28,255 @@ PT_CHECK([ListenHTTP
 End
 ],
 [GET /echo/foo
-Host: example.org
+X-Test: in
 end
 
 200
-x-backend-number: 0
 end
 
 GET /echo/foo
-Host: example.com
+X-Test: IN
 end
 
 200
-x-backend-number: 1
+end
+
+GET /echo/foo
+X-Test: inside
+end
+
+503
 end
 ])
+
+# Regex
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -re "in"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: in
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: strINg
+end
+
+200
+end
+])
+
+# Default (regex)
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" "in"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: in
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: strINg
+end
+
+200
+end
+])
+
+# Regex; case-sensitive
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -re -case "in"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: in
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: IN
+end
+
+503
+end
+
+GET /echo/foo
+X-Test: string
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: strINg
+end
+
+503
+end
+])
+
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -re -case "[in[[:space:]]+(.+)$]"
+		SetPath "/echo/$1"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/file
+X-Test: in test
+end
+
+200
+x-orig-uri: /echo/test
+end
+])
+
+# Anchored patterns
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -re "^in"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: indent
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: string
+end
+
+503
+end
+])
+
+# Prefix match.
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -beg "st"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: string
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: String
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: in string
+end
+
+503
+end
+])
+
+# Suffix match.
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -end "ing"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: testing
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: Testing
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: Testing it
+end
+
+503
+end
+])
+
+# Contain.
+PT_CHECK([ListenHTTP
+	Service
+		Header "X-Test" -contain "cond"
+		Backend
+			Address
+			Port
+		End
+	End
+End
+],
+[GET /echo/foo
+X-Test: testing conditional
+end
+
+200
+end
+
+GET /echo/foo
+X-Test: testing contain
+end
+
+503
+end
+])
+
 AT_CLEANUP

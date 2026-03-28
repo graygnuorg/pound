@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 14, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "March 28, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1671,7 +1671,8 @@ case-insensitive extended regular expression.  This can be changed by
 .TP
 \fBHeader\fR "\fIName\fR" [\fIoptions\fR] "\fIpattern\fR"
 Alternative form of the \fBHeader\fR statement.  In this form,
-\fIpattern\fR is matched against header value.  For example:
+\fIpattern\fR is matched against the value of each header having the
+supplied \fIName\fR.  For example:
 .IP
 .RS
 .EX
@@ -1684,11 +1685,7 @@ The request must contain a \fBHost\fR header whose value matches
 \fIhostname\fR.  In the absence of \fIoptions\fR, case-insensitive
 exact match is assumed, i.e. this construct is equivalent to
 .IP
-\fBHeader\fR "Host:[[:space:]]*\fIqhost\fR"
-.IP
-where \fIqhost\fR is the "\fIhostname\fR" argument in quoted form, i.e. with
-all characters that have special meaning in regular expressions
-escaped.
+\fBHeader "Host" \-exact "\fIhostname\fB"\fR
 .IP
 See below for the discussion of \fIoptions\fR and their effect on
 matching.

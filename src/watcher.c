@@ -205,6 +205,7 @@ filename_split_wd (char const *filename, WORKDIR **wdp)
       name = filename;
       if ((wd = get_include_wd ()) == NULL)
 	return NULL;
+      workdir_ref (wd);
     }
   else if (filename[0] == '/')
     {

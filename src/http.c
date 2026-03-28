@@ -3966,6 +3966,28 @@ match_headers (HTTP_HEADER_LIST *headers, GENPAT re,
   return 0;
 }
 
+static int
+match_named_headers (HTTP_HEADER_LIST *headers, struct string_match const *pat,
+		     struct submatch *sm)
+{
+  struct http_header *hdr;
+
+  for (hdr = http_header_list_locate_name (headers, string_ptr (pat->string),
+					   0);
+       hdr;
+       hdr = http_header_list_next (hdr))
+    {
+      char const *val;
+
+      if ((val = http_header_get_value (hdr)) == NULL)
+	return -1;
+      if (submatch_exec (pat->re, val, sm))
+	return 1;
+    }
+
+  return 0;
+}
+
 /*
  * Match request (or response) REQ obtained from PHTTP against condition COND.
  * Return value:
@@ -4068,48 +4090,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       break;
 
-    case COND_HOST:
-      if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
+    case COND_NAMEHDR:
+      if ((res = match_named_headers (&req->headers, &cond->sm, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (res)
-	{
-	  /*
-	   * On match, adjust subgroup references and subject pointer
-	   * to refer to the Host: header value.
-	   */
-	  struct submatch *sm = submatch_queue_get (&phttp->smq, 0);
-	  int n, i;
-	  char const *s = sm->subject;
-	  POUND_REGMATCH *mv = sm->matchv;
-	  int mc = sm->matchn;
-	  char *p;
-
-	  /* Skip initial whitespace and "host:" */
-	  s += strspn (s, " \t\n") + 5;
-	  /* Skip whitespace after header name. */
-	  s += strspn (s, " \t\n");
-	  /* Compute fix-up offset. */
-	  n = s - sm->subject;
-	  /* Adjust all subgroups. */
-	  /* rm_so of the 0th group is always 0, so adjust only rm_eo: */
-	  mv->rm_eo -= n;
-	  for (i = 1; i < mc; i++)
-	    {
-	      ++mv;
-	      mv->rm_so -= n;
-	      mv->rm_eo -= n;
-	    }
-	  /* Adjust subject. */
-	  if ((p = strdup (s)) != NULL)
-	    {
-	      free (sm->subject);
-	      sm->subject = p;
-	    }
-	  else
-	    {
-	      lognomem ();
-	    }
-	}
       break;
 
     case COND_BASIC_AUTH:
@@ -4205,6 +4188,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  phttp->smq = smq;
 	}
       break;
+
+    case COND_HOST:
+      abort ();
     }
   watcher_unlock (cond->watcher);
 

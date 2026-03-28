@@ -5473,12 +5473,8 @@ Evaluates to @samp{true}, if the @code{Host} header matches
 exact match is assumed, i.e. this construct is equivalent to
 
 @example
-Header "Host:[[:space:]]*@var{qhost}"
+Header "Host" -exact "@var{hostname}"
 @end example
-
-@noindent
-where @var{qhost} is the @var{hostname} argument in quoted form, i.e. with
-all characters that have special meaning in regular expressions escaped.
 
 @xref{conditional-option}, for a detailed discussion of @var{options} and
 their effect on matching.

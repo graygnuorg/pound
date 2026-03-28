@@ -771,6 +771,7 @@ enum service_cond_type
     COND_QUERY, /* Raw query match. */
     COND_QUERY_PARAM, /* Query parameter match */
     COND_HDR,   /* Header match. */
+    COND_NAMEHDR, /* Named header match. */
     COND_HOST,  /* Special case of COND_HDR: matches the value of the
 		   Host: header */
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
@@ -838,7 +839,8 @@ typedef struct _service_cond
     struct bool_service_cond boolean;
     struct dyn_service_cond dyn;
     int ref;                 /* COND_REF */
-    struct string_match sm;  /* COND_QUERY_PARAM and COND_STRING_MATCH */
+    struct string_match sm;  /* COND_QUERY_PARAM, COND_STRING_MATCH,
+				COND_NAMEHDR */
     struct pass_file pwfile; /* COND_BASIC_AUTH */
     X509 *x509;              /* COND_CLIENT_CERT */
     struct pndlua_closure clua; /* COND_LUA */

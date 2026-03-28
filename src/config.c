@@ -1476,6 +1476,7 @@ service_cond_free (SERVICE_COND *sc)
     {
     case COND_QUERY_PARAM:
     case COND_STRING_MATCH:
+    case COND_NAMEHDR:
       string_unref (sc->sm.string);
       genpat_free (sc->sm.re);
       break;
@@ -1484,7 +1485,6 @@ service_cond_free (SERVICE_COND *sc)
     case COND_PATH:
     case COND_QUERY:
     case COND_HDR:
-    case COND_HOST:
       genpat_free (sc->re);
       break;
 
@@ -1507,24 +1507,6 @@ service_cond_append (SERVICE_COND *cond, int type)
   SLIST_PUSH (&cond->boolean.head, sc, next);
 
   return sc;
-}
-
-static void
-stringbuf_escape_regex (struct stringbuf *sb, char const *p)
-{
-  while (*p)
-    {
-      size_t len = strcspn (p, "\\[]{}().*+?");
-      if (len > 0)
-	stringbuf_add (sb, p, len);
-      p += len;
-      if (*p)
-	{
-	  stringbuf_add_char (sb, '\\');
-	  stringbuf_add_char (sb, *p);
-	  p++;
-	}
-    }
 }
 
 struct match_param
@@ -1669,63 +1651,6 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
   return CFGPARSER_OK;
 }
 
-static char *
-header_prefix_regex (struct stringbuf *sb, int *gp_type,
-		     char const *hdr, char const *expr)
-{
-  stringbuf_add_char (sb, '^');
-  stringbuf_add_string (sb, hdr);
-  stringbuf_add_char (sb, ':');
-  switch (*gp_type)
-    {
-    case GENPAT_POSIX:
-      stringbuf_add_string (sb, "[[:space:]]*");
-      if (expr[0] == '^')
-	expr++;
-      stringbuf_add_string (sb, expr);
-      break;
-
-    case GENPAT_PCRE:
-      stringbuf_add_string (sb, "\\s*");
-      if (expr[0] == '^')
-	expr++;
-      stringbuf_add_string (sb, expr);
-      break;
-
-    case GENPAT_EXACT:
-    case GENPAT_PREFIX:
-      stringbuf_add_string (sb, "[[:space:]]*");
-      stringbuf_escape_regex (sb, expr);
-      *gp_type = GENPAT_POSIX;
-      break;
-
-    case GENPAT_SUFFIX:
-      stringbuf_add_string (sb, "[[:space:]]*");
-      stringbuf_add_string (sb, ".*");
-      stringbuf_escape_regex (sb, expr);
-      stringbuf_add_char (sb, '$');
-      *gp_type = GENPAT_POSIX;
-      break;
-
-    case GENPAT_CONTAIN:
-      stringbuf_add_string (sb, "[[:space:]]*");
-      stringbuf_add_string (sb, ".*");
-      stringbuf_escape_regex (sb, expr);
-      *gp_type = GENPAT_POSIX;
-      break;
-
-    default:
-      abort ();
-    }
-  return stringbuf_finish (sb);
-}
-
-static inline char *
-host_prefix_regex (struct stringbuf *sb, int *gp_type, char const *expr)
-{
-  return header_prefix_regex (sb, gp_type, "Host", expr);
-}
-
 static int
 parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
 {
@@ -1777,7 +1702,6 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
       int rc;
       size_t len = strlen (p);
       SERVICE_COND *hc;
-      char *expr;
       int gpt = pat_type;
 
       loc.beg.line++;
@@ -1791,28 +1715,9 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 	continue;
       p[len] = 0;
 
-      switch (cond_type)
-	{
-	case COND_HOST:
-	  stringbuf_reset (&sb);
-	  expr = host_prefix_regex (&sb, &gpt, p);
-	  break;
-
-	case COND_HDR:
-	  if (ref)
-	    {
-	      stringbuf_reset (&sb);
-	      expr = header_prefix_regex (&sb, &gpt, string_ptr (ref), p);
-	      break;
-	    }
-	  /* fall through */
-	default:
-	  expr = p;
-	}
-
       hc = service_cond_alloc (cond_type);
       hc->tag = string_ref (cond->tag);
-      rc = genpat_compile (&hc->re, gpt, expr, flags);
+      rc = genpat_compile (&hc->re, gpt, p, flags);
       if (rc)
 	{
 	  regcomp_error_at_locus_range (&loc, hc->re, NULL);
@@ -1823,6 +1728,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 	{
 	  switch (cond_type)
 	    {
+	    case COND_NAMEHDR:
 	    case COND_QUERY_PARAM:
 	    case COND_STRING_MATCH:
 	      memmove (&hc->sm.re, &hc->re, sizeof (hc->sm.re));
@@ -1924,11 +1830,27 @@ parse_cond_matcher (SERVICE_COND *top_cond,
   if (parse_match_mode (dfl_re_type, &gp_type, &flags, &match_param))
     return CFGPARSER_FAIL;
 
+  switch (type)
+    {
+    case COND_HOST:
+      type = COND_NAMEHDR;
+      string = "Host";
+      break;
+
+    case COND_HDR:
+      if (string)
+	type = COND_NAMEHDR;
+      break;
+
+    default:
+      break;
+    }
+
   if (match_param.from_file)
     {
       switch (type)
 	{
-	case COND_HDR:
+	case COND_NAMEHDR:
 	case COND_QUERY_PARAM:
 	case COND_STRING_MATCH:
 	  ref = string_init (string);
@@ -1968,8 +1890,6 @@ parse_cond_matcher (SERVICE_COND *top_cond,
     }
   else
     {
-      char *expr;
-
       if ((tok = gettkn_expect (T_STRING)) == NULL)
 	return CFGPARSER_FAIL;
 
@@ -1977,23 +1897,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
       cond = service_cond_append (top_cond, type);
       cond->tag = match_param.tag;
       cond->decode = match_param.decode;
-      switch (type)
-	{
-	case COND_HOST:
-	  expr = host_prefix_regex (&sb, &gp_type, tok->str);
-	  break;
-
-	case COND_HDR:
-	  if (string)
-	    {
-	      expr = header_prefix_regex (&sb, &gp_type, string, tok->str);
-	      break;
-	    }
-	  /* fall through */
-	default:
-	  expr = tok->str;
-	}
-      rc = genpat_compile (&cond->re, gp_type, expr, flags);
+      rc = genpat_compile (&cond->re, gp_type, tok->str, flags);
       if (rc)
 	{
 	  conf_regcomp_error (rc, cond->re, NULL);
@@ -2002,6 +1906,7 @@ parse_cond_matcher (SERVICE_COND *top_cond,
 	}
       switch (type)
 	{
+	case COND_NAMEHDR:
 	case COND_QUERY_PARAM:
 	case COND_STRING_MATCH:
 	  memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));

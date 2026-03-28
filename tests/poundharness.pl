@@ -467,7 +467,7 @@ EOT
 	    if (/^\s*(Address|Port|SocketFrom)/i) {
 		    $_ = "# Commented out: $_";
 	    }
-	} elsif ($state[0] == ST_SERVICE) {
+	} elsif ($state[0] == ST_SERVICE || $state[0] == ST_SECTION) {
 	    if (/^(\s*)Host\s+(.+)\s*$/) {
 		if (my $lst = $listeners->last()) {
 		    my $indent = $1;

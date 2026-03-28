@@ -16,8 +16,8 @@
 AT_SETUP([Detached conditions])
 AT_KEYWORDS([cond detcond])
 PT_CHECK([Condition "first" or
-	Host "example.org"
-	Host "example.net"
+	Host -re "^example.org:?"
+	Host -re "^example.net:?"
 End
 
 Condition "second"
