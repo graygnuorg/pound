@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-03-28
+Pound -- history of user-visible changes. 2026-03-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.21.90
+Version 4.22, 2026-03-29
 
 * Remove spurious log messages.
 
