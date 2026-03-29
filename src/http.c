@@ -743,6 +743,19 @@ accessor_remote_ip (POUND_HTTP *phttp, char const *arg, int arglen,
   return RETRIEVE_OK;
 }
 
+int
+accessor_user (POUND_HTTP *phttp, char const *arg, int arglen,
+	       struct stringbuf *sb)
+{
+  char *user;
+  if (http_request_get_basic_auth (&phttp->request, &user, NULL) == 0)
+    {
+      stringbuf_add_string (sb, user);
+      free (user);
+    }
+  return RETRIEVE_OK;
+}
+
 static struct accessor accessors[] = {
   { "url",      accessor_url },
   { "path",     accessor_path },
@@ -752,6 +765,7 @@ static struct accessor accessors[] = {
   { "host",     accessor_host },
   { "port",     accessor_port },
   { "remoteip", accessor_remote_ip, 1 },
+  { "user",     accessor_user },
   { NULL }
 };
 

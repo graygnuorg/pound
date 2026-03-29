@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 28, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "March 29, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1289,6 +1289,19 @@ host]\fR.
 If the value of the \fBHost\fR header includes port number,
 \fB%[port]\fR evaluates to port number with the leading colon
 character. Otherwise, it evaluates to empty string.
+.TP
+.BI remoteip " FWD"
+Expands to the request originator IP address.  If \fIFWD\fR is 0,
+expands to its real IP, otherwise expands to the IP determined from
+the
+.B X\-Forwarded\-For
+(or similar) header.
+.TP
+.B user
+If the request bears the
+.B Authorization: Basic
+header, expands to the user name extracted from its value.  Otherwise,
+its expansion is empty.
 .SS Modification directives
 The following directives modify the incoming request prior to passing
 it to the selected service. These are discussed in detail

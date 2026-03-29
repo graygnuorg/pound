@@ -4093,6 +4093,12 @@ expands to its real IP, otherwise expands to the IP determined from
 the @code{X-Forwarded-For} (or similar) header.  @xref{%a}, for details.
 @end deffn
 
+@deffn {Accessor} user
+If the request bears the @code{Authorization: Basic} header, expands
+to the user name extracted from its value.  Otherwise, its expansion is
+empty.
+@end deffn
+
 @node Global directives
 @section Global directives
  Global directives configure the program operation as a whole.  They
@@ -5410,6 +5416,9 @@ For consistency with other conditions, @code{BasicAuth} accepts the
 following options: @option{-file} and @option{-filewatch}.  The
 latter enables the default behavior and so need not be specified
 explicitly.  The former disables file change monitoring.
+
+Username from the @code{Authorization: Basic} header is available in
+expansions via the @code{user} accessor (@pxref{Request Accessors}).
 @end deffn
 
 @anchor{Eval statement}
