@@ -6195,10 +6195,18 @@ value.  @xref{Detached Conditions}, for a detailed discussion.
 @end deffn
 
 @deffn {Service Conditional} Header [@var{options}] "@var{pattern}"
-Yields @samp{true}, if the request contains at least one header
+Evaluates to @samp{true}, if the request contains at least one header
 matching the given @var{pattern}.  By default, @var{pattern} is treated as
 case-insensitive POSIX extended regular expression.  This can be changed by
 @var{options}, described below.
+@end deffn
+
+@deffn {Request Conditional} Header "@var{field}" [@var{options}] "@var{pattern}"
+A @dfn{split form} of the @code{Header} statement above.  It evaluates to
+@samp{true} if the request contains a header whose field name is equal to
+@var{field} (case-insensitive) and value matches @var{pattern}.  The
+latter is treated as case-insensitive POSIX extended regular
+expression.  Use @var{options} (described below) to modify that.
 @end deffn
 
 @deffn {Service Conditional} Host [@var{options}] "@var{hostname}"
