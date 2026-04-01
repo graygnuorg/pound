@@ -894,21 +894,8 @@ exposition_format (struct stringbuf *sb, EXPOSITION *exp)
   return stringbuf_finish (sb);
 }
 
-static int
-send_reply (POUND_HTTP *phttp, char const *content)
-{
-  BIO_printf (phttp->cl,
-	      "HTTP/1.%d %d %s\r\n"
-	      "Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8\r\n"
-	      "Content-Length: %"PRICLEN"\r\n"
-	      "Connection: close\r\n"
-	      "\r\n"
-	      "%s",
-	      phttp->request.version,
-	      200, "OK", (CONTENT_LENGTH) strlen (content), content);
-  BIO_flush (phttp->cl);
-  return 0;
-}
+static char metrics_response_headers[] =
+  "Content-Type: application/openmetrics-text; version=1.0.0; charset=utf-8\r\n";
 
 int
 metrics_response (POUND_HTTP *phttp,
@@ -917,6 +904,9 @@ metrics_response (POUND_HTTP *phttp,
   struct json_value *obj;
   EXPOSITION exp;
   int res;
+
+  if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   res = drain_request (phttp, chunked, content_length);
   if (res != HTTP_STATUS_OK)
@@ -936,7 +926,7 @@ metrics_response (POUND_HTTP *phttp,
       if ((content = exposition_format (&sb, &exp)) == NULL)
 	res = -1;
       else
-	res = send_reply (phttp, content);
+	res = http_simple_response (phttp, metrics_response_headers, content);
       stringbuf_free (&sb);
     }
   exposition_free (&exp);

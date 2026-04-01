@@ -316,6 +316,34 @@ http_err_reply (POUND_HTTP *phttp, int err)
   phttp->conn_closed = 1;
   return rc;
 }
+
+int
+http_simple_response (POUND_HTTP *phttp, char const *headers, char const *content)
+{
+  struct http_request resp;
+  size_t len = strlen (content);
+
+  http_request_init (&resp);
+
+  if (http_header_list_parse (&resp.headers, headers, H_REPLACE, NULL) ||
+      rewrite_apply (phttp, &resp, REWRITE_RESPONSE))
+    {
+      http_request_free (&resp);
+      return -1;
+    }
+
+  bio_http_reply_start_list (phttp->cl,
+			     phttp->request.version,
+			     http_status[HTTP_STATUS_OK].code,
+			     http_status[HTTP_STATUS_OK].reason,
+			     &resp.headers,
+			     len);
+
+  BIO_write (phttp->cl, content, len);
+
+  BIO_flush (phttp->cl);
+  return 0;
+}
 
 #define LOG_TIME_SIZE   32
 
@@ -1115,10 +1143,6 @@ pndlua_apply (PNDLUA_FUN plfun, POUND_HTTP *phttp, struct http_request *req,
   return res;
 }
 
-static int rewrite_apply (POUND_HTTP *phttp, struct http_request *request,
-			  int what);
-
-
 enum
   {
     COPY_OK,
@@ -4542,7 +4566,7 @@ rewrite_apply_rules (POUND_HTTP *phttp, int what,
   return res;
 }
 
-static int
+int
 rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what)
 {
   REWRITE_RULE_HEAD *rwhead[2] = {

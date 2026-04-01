@@ -1244,6 +1244,11 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 int drain_request (POUND_HTTP *phttp, int chunked,
 		   CONTENT_LENGTH content_length);
 
+int rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what);
+
+int http_simple_response (POUND_HTTP *phttp, char const *headers,
+			  char const *content);
+
 #ifdef ENABLE_DYNAMIC_BACKENDS
 void backend_ref (BACKEND *be);
 void backend_unref (BACKEND *be);
