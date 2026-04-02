@@ -3721,8 +3721,20 @@ http_request_read (BIO *in, const LISTENER *lstn, char *buf,
 	{
 	  http_request_free (req);
 	  compose_header_hash_free (chash);
-	  return res == COPY_TOO_LONG ?
-	    HTTP_STATUS_PAYLOAD_TOO_LARGE : HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	  switch (res)
+	    {
+	    case COPY_EOF:
+	      return HTTP_STATUS_OK;
+
+	    case COPY_READ_ERR:
+	      return -1;
+
+	    case COPY_TOO_LONG:
+	      return HTTP_STATUS_PAYLOAD_TOO_LARGE;
+
+	    default:
+	      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	    }
 	}
 
       if (!buf[0])
@@ -6353,8 +6365,9 @@ do_http (POUND_HTTP *phttp)
 			       &phttp->request);
       if (res != HTTP_STATUS_OK)
 	{
-	  phttp_log (phttp, PHTTP_LOG_DFL, res, errno,
-		     "error reading request");
+	  if (res == -1)
+	    phttp_log (phttp, PHTTP_LOG_DFL, res, errno,
+		       "request dropped");
 	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
 	}
       else if (phttp->request.request == NULL)
