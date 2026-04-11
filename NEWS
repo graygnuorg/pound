@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-03-29
+Pound -- history of user-visible changes. 2026-04-11
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,28 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.22.90 (git)
+
+* Tunnels
+
+A tunnel passes an opaque stream of bytes between the client and backend.
+It is defined as follows:
+
+  Tunnel [ "ID" ]
+      Address IPADDR
+      Port PORT
+      Backend
+	  Address IPADDR
+	  Port PORT
+      End
+  End
+
+Naturally, only one backend is allowed.  Similarly to other listeners,
+the Address/Port pair in the Tunnel section can be replaced with a
+single SocketFrom statement.  The following statements are allowed in
+Backend subsection: Timeout, ConnTO, Disabled.
+
 
 Version 4.22, 2026-03-29
 
@@ -98,7 +120,6 @@ Sets worker thread stack size, in bytes.
 * Lua compile-time check
 
 The compile-time check for Lua no longer depends on pkg-config.
-
 
 Version 4.20, 2026-02-06
 

@@ -4116,7 +4116,7 @@ parse_header_options (void *call_data, void *section_data)
   return CFGPARSER_OK_NONL;
 }
 
-static CFGPARSER_TABLE http_common[] = {
+static CFGPARSER_TABLE listener_address_common[] = {
   {
     .name = "Address",
     .parser = assign_address_string,
@@ -4130,6 +4130,15 @@ static CFGPARSER_TABLE http_common[] = {
   {
     .name = "SocketFrom",
     .parser = listener_parse_socket_from
+  },
+  { NULL }
+};
+
+static CFGPARSER_TABLE http_common[] = {
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = listener_address_common
   },
   {
     .name = "xHTTP",
@@ -4496,6 +4505,14 @@ resolve_listener_address (LISTENER *lst, char *defsrv)
   return CFGPARSER_OK;
 }
 
+static void
+listener_service_backlink (LISTENER *lstn)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, &lstn->services, next)
+    svc->lstn = lstn;
+}
+
 static int
 parse_listen_http (void *call_data, void *section_data)
 {
@@ -4526,6 +4543,8 @@ parse_listen_http (void *call_data, void *section_data)
 
   if (resolve_listener_address (lst, PORT_HTTP_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
+
+  listener_service_backlink (lst);
 
   if (forbid_ssl_usage (&lst->services,
 			"use of SSL features in ListenHTTP sections"
@@ -5226,6 +5245,8 @@ parse_listen_https (void *call_data, void *section_data)
   if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
     return CFGPARSER_FAIL;
 
+  listener_service_backlink (lst);
+
   if (lst->max_uri_length > lst->linebufsize)
     lst->max_uri_length = lst->linebufsize;
 
@@ -5268,6 +5289,129 @@ parse_listen_https (void *call_data, void *section_data)
       SSL_CTX_set_info_callback (pc->ctx, SSLINFO_callback);
     }
   stringbuf_free (&sb);
+
+  SLIST_PUSH (list_head, lst, next);
+  return CFGPARSER_OK;
+}
+
+static CFGPARSER_TABLE tunnel_backend_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "Address",
+    .parser = assign_address_string,
+    .off = offsetof (BACKEND, v.mtx.hostname)
+  },
+  {
+    .name = "Port",
+    .parser = assign_port_int,
+    .off = offsetof (BACKEND, v.mtx.port)
+  },
+  {
+    .name = "TimeOut",
+    .parser = cfg_assign_timeout,
+    .off = offsetof (BACKEND, v.mtx.to)
+  },
+  {
+    .name = "ConnTO",
+    .parser = cfg_assign_timeout,
+    .off = offsetof (BACKEND, v.mtx.conn_to)
+  },
+  {
+    .name = "Disabled",
+    .parser = cfg_assign_bool,
+    .off = offsetof (BACKEND, disabled)
+  },
+  { NULL }
+};
+
+static int
+parse_tunnel_backend (void *call_data, void *section_data)
+{
+  LISTENER *lst = call_data;
+  BACKEND *be;
+  SERVICE *svc;
+
+  if (!SLIST_EMPTY (&lst->services))
+    {
+      conf_error ("%s", "only one backend is allowed in Tunnel");
+      return CFGPARSER_FAIL;
+    }
+
+  /* Create service and backend */
+  svc = new_service (BALANCER_ALGO_RANDOM);
+  locus_range_copy (&svc->locus, &lst->locus);
+
+  be = parse_backend_internal (tunnel_backend_parsetab, section_data);
+  if (!be)
+    return CFGPARSER_FAIL;
+  be->service = svc;
+  be->priority = 1;
+
+  /* Register backend in service */
+  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
+  service_recompute_pri_unlocked (svc, NULL, NULL);
+
+  /* Register service in the listener */
+  SLIST_PUSH (&lst->services, svc, next);
+  return CFGPARSER_OK;
+}
+
+static CFGPARSER_TABLE tunnel_parsetab[] = {
+  {
+    .name = "End",
+    .parser = cfg_parse_end
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = listener_address_common
+  },
+  { "Backend", parse_tunnel_backend },
+  { NULL }
+};
+
+static int
+parse_tunnel (void *call_data, void *section_data)
+{
+  LISTENER *lst;
+  LISTENER_HEAD *list_head = call_data;
+  POUND_DEFAULTS *dfl = section_data;
+  struct token *tok;
+
+  if ((lst = listener_alloc (dfl)) == NULL)
+    return CFGPARSER_FAIL;
+
+  if ((tok = gettkn_any ()) == NULL)
+    return CFGPARSER_FAIL;
+  else if (tok->type == T_STRING)
+    {
+      if (find_listener_ident (list_head, tok->str))
+	{
+	  conf_error ("%s", "listener name is not unique");
+	  return CFGPARSER_FAIL;
+	}
+      lst->name = xstrdup (tok->str);
+    }
+  else
+    putback_tkn (tok);
+  lst->tunnel = 1;
+
+  if (parser_loop (tunnel_parsetab, lst, section_data, &lst->locus))
+    return CFGPARSER_FAIL;
+
+  if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
+    return CFGPARSER_FAIL;
+
+  if (SLIST_EMPTY (&lst->services))
+    { // FIXME
+      conf_error_at_locus_range (&lst->locus, "no backend defined");
+      return CFGPARSER_FAIL;
+    }
+
+  listener_service_backlink (lst);
 
   SLIST_PUSH (list_head, lst, next);
   return CFGPARSER_OK;
@@ -5395,6 +5539,7 @@ parse_control_listener (void *call_data, void *section_data)
   /* Create service; there'll be only one backend so the balancing algorithm
      doesn't really matter. */
   svc = new_service (BALANCER_ALGO_RANDOM);
+  svc->lstn = lst;
   locus_range_copy (&svc->locus, &lst->locus);
 
   /* Register service in the listener */
@@ -5771,6 +5916,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
   {
     .name = "ListenHTTPS",
     .parser = parse_listen_https,
+    .data = &listeners
+  },
+  {
+    .name = "Tunnel",
+    .parser = parse_tunnel,
     .data = &listeners
   },
   {

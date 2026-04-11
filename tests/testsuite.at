@@ -53,6 +53,7 @@ m4_shift2($@))])
 AT_INIT
 m4_include([config.at])
 m4_include([loglevcomp.at])
+m4_include([tunnel.at])
 m4_include([echo.at])
 m4_include([loglevrun.at])
 m4_include([logfmt.at])

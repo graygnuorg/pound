@@ -423,6 +423,9 @@ service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
   SESSION_TABLE *tab = svc->sessions;
   SESSION *sess, *tmp;
 
+  if (!tab)
+    return;
+
   DLIST_FOREACH_SAFE (sess, tmp, &tab->head, link)
     {
       if (sess->backend == be)
@@ -1978,11 +1981,13 @@ service_serialize (SERVICE *svc)
 
       typename = sess_type_to_str (svc->sess_type);
       if (json_object_set (obj, "name",
-			   svc->name ? json_new_string (svc->name) : json_new_null ())
+			   svc->name ? json_new_string (svc->name)
+				     : json_new_null ())
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
-	  || json_object_set (obj, "backends", backends_serialize (&svc->balancers)))
+	  || json_object_set (obj, "backends",
+			      backends_serialize (&svc->balancers)))
 	{
 	  json_value_free (obj);
 	  obj = NULL;
@@ -1997,7 +2002,6 @@ static struct json_value *
 listener_serialize (LISTENER *lstn)
 {
   struct json_value *obj = new_typed_object ("listener"), *p;
-  int is_https;
   SERVICE *svc;
 
   if (obj)
@@ -2005,15 +2009,23 @@ listener_serialize (LISTENER *lstn)
       int err = 0;
 
       err |= json_object_set (obj, "name",
-			      lstn->name ? json_new_string (lstn->name) : json_new_null ());
+			      lstn->name ? json_new_string (lstn->name)
+					 : json_new_null ());
       err |= json_object_set (obj, "address", addrinfo_serialize (&lstn->addr));
-
-      is_https = !SLIST_EMPTY (&lstn->ctx_head);
-      err |= json_object_set (obj, "protocol",
-			      json_new_string (is_https ? "https" : "http"));
-      if (is_https)
-	err |= json_object_set (obj, "nohttps11", json_new_integer (lstn->noHTTPS11));
       err |= json_object_set (obj, "enabled", json_new_bool (!lstn->disabled));
+
+      if (lstn->tunnel)
+	err |= json_object_set (obj, "protocol", json_new_string ("tunnel"));
+      else
+	{
+	  int is_https = !SLIST_EMPTY (&lstn->ctx_head);
+	  err |= json_object_set (obj, "protocol",
+				  json_new_string (is_https ? "https"
+							    : "http"));
+	  if (is_https)
+	    err |= json_object_set (obj, "nohttps11",
+				    json_new_integer (lstn->noHTTPS11));
+	}
 
       if ((p = json_new_array ()) == NULL)
 	err = 1;

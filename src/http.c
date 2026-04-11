@@ -5190,6 +5190,45 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 }
 
 static int
+backend_socket (POUND_HTTP *phttp, BACKEND *backend, int istunnel)
+{
+  int sock_proto;
+  int sock;
+  char caddr[MAX_ADDR_BUFSIZE];
+
+  switch (backend->v.reg.addr.ai_family)
+    {
+    case AF_INET:
+      sock_proto = PF_INET;
+      break;
+
+    case AF_INET6:
+      sock_proto = PF_INET6;
+      break;
+
+    case AF_UNIX:
+      sock_proto = PF_UNIX;
+      break;
+
+    default:
+      phttp_log (phttp, PHTTP_LOG_DFL,
+		 istunnel ? -1 : HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
+		 "backend: unsupported family %d",
+		 backend->v.reg.addr.ai_family);
+      return -1;
+    }
+
+  if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
+    {
+      phttp_log (phttp, PHTTP_LOG_DFL,
+		 istunnel ? -1 : HTTP_STATUS_SERVICE_UNAVAILABLE, errno,
+		 "backend %s: socket create",
+		 str_be (caddr, sizeof (caddr), backend));
+    }
+  return sock;
+}
+
+static int
 select_backend (POUND_HTTP *phttp)
 {
   BACKEND *backend;
@@ -5214,40 +5253,9 @@ select_backend (POUND_HTTP *phttp)
 	{
 	  if (backend->be_type == BE_REGULAR)
 	    {
-	      /*
-	       * Try to open connection to this backend.
-	       */
-	      int sock_proto;
-
-	      switch (backend->v.reg.addr.ai_family)
+	      sock = backend_socket (phttp, backend, 0);
+	      if (sock == -1)
 		{
-		case AF_INET:
-		  sock_proto = PF_INET;
-		  break;
-
-		case AF_INET6:
-		  sock_proto = PF_INET6;
-		  break;
-
-		case AF_UNIX:
-		  sock_proto = PF_UNIX;
-		  break;
-
-		default:
-		  phttp_log (phttp, PHTTP_LOG_DFL,
-			     HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
-			     "backend: unknown family %d",
-			     backend->v.reg.addr.ai_family);
-		  backend_unref (backend);
-		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
-		}
-
-	      if ((sock = socket (sock_proto, SOCK_STREAM, 0)) < 0)
-		{
-		  phttp_log (phttp, PHTTP_LOG_DFL,
-			     HTTP_STATUS_SERVICE_UNAVAILABLE, errno,
-			     "backend %s: socket create",
-			     str_be (caddr, sizeof (caddr), backend));
 		  backend_unref (backend);
 		  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 		}
@@ -5260,10 +5268,12 @@ select_backend (POUND_HTTP *phttp)
 		  /*
 		   * Connected successfully.  Open the backend connection.
 		   */
-		  if (sock_proto == PF_INET || sock_proto == PF_INET6)
+		  if (backend->v.reg.addr.ai_family == AF_INET ||
+		      backend->v.reg.addr.ai_family == AF_INET6)
 		    socket_setup (sock);
 		  if ((res = open_backend (phttp, backend, sock)) != 0)
 		    {
+		      backend_unref (backend);
 		      close_backend (phttp);
 		      return res;
 		    }
@@ -5835,18 +5845,26 @@ regular_format (BACKEND *be, char *buf, size_t size)
 static int
 regular_serialize (BACKEND *be, struct json_value *obj)
 {
-  return json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
-    || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
-    || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
-    || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
-    || json_object_set (obj, "protocol",
-			json_new_string (backend_is_https (be)
-					  ? "https" : "http"))
-    || json_object_set (obj, "servername",
-			be->v.reg.servername
-			   ? json_new_string (be->v.reg.servername)
-			   : json_new_null ())
-    || backend_serialize_dyninfo (obj, be);
+  int rc =
+    json_object_set (obj, "address", addrinfo_serialize (&be->v.reg.addr))
+      || json_object_set (obj, "io_to", json_new_integer (be->v.reg.to))
+      || json_object_set (obj, "conn_to", json_new_integer (be->v.reg.conn_to))
+      || json_object_set (obj, "ws_to", json_new_integer (be->v.reg.ws_to))
+      || json_object_set (obj, "servername",
+			  be->v.reg.servername
+			     ? json_new_string (be->v.reg.servername)
+			     : json_new_null ())
+      || backend_serialize_dyninfo (obj, be);
+  if (rc == 0)
+    {
+      char const *prot;
+      if (be->service->lstn && be->service->lstn->tunnel)
+	prot = "tunnel";
+      else
+	prot = backend_is_https (be) ? "https" : "http";
+      rc |= json_object_set (obj, "protocol", json_new_string (prot));
+    }
+  return rc;
 }
 
 struct backend_driver_def
@@ -5957,6 +5975,219 @@ backend_specific_serialize (BACKEND *be, struct json_value *obj)
   if (backend_driver_tab[type].serialize == NULL)
     return 0;
   return backend_driver_tab[type].serialize (be, obj);
+}
+
+/*
+ * Tunnel implementation.
+ */
+struct tunnel
+{
+  int avail;          /* Number of bytes available in base. */
+  int written;        /* Number of bytes already written. */
+  char base[MAXBUF];
+};
+
+#define TUNNEL_INITIALIZER { 0, 0, }
+
+static inline int
+tunnel_free_space (struct tunnel *buf)
+{
+  return MAXBUF - buf->avail;
+}
+
+static inline int
+tunnel_used_space (struct tunnel *buf)
+{
+  return buf->avail - buf->written;
+}
+
+static int
+tunnel_read (int fd, struct tunnel *buf)
+{
+  int nread;
+
+  if (buf->avail == buf->written)
+    buf->avail = buf->written = 0;
+  nread = read (fd, buf->base + buf->avail, tunnel_free_space (buf));
+  if (nread > 0)
+    buf->avail += nread;
+  return nread;
+}
+
+static int
+tunnel_write (int fd, struct tunnel *buf)
+{
+  int nwr;
+
+  nwr = write (fd, buf->base + buf->written, tunnel_used_space (buf));
+  if (nwr > 0)
+    {
+      buf->written += nwr;
+      if (buf->written == buf->avail)
+	buf->written = buf->avail = 0;
+    }
+  return nwr;
+}
+
+enum { P_CL, P_BE, P_NUM };
+
+static char const *sidename[] = { "client", "backend" };
+
+static void
+tunnel_in (struct pollfd *p, struct tunnel *buf, int i)
+{
+  ssize_t n;
+
+  if ((n = tunnel_read (p[i].fd, &buf[i])) < 0)
+    {
+      logmsg (LOG_NOTICE, "%s shutdown (read failed)", sidename[i]);
+      shutdown (p[i].fd, SHUT_RDWR);
+      p[i].fd = -1;
+    }
+  else if (n == 0)
+    {
+      shutdown (p[i].fd, SHUT_RD);
+      p[i].events &= ~POLLIN;
+      if (tunnel_used_space (&buf[i]) == 0)
+	{
+	  int peer = !i;
+	  shutdown (p[peer].fd, SHUT_WR);
+	  p[peer].events &= ~POLLOUT;
+	  if ((p[peer].events & POLLIN) == 0)
+	    {
+	      close (p[peer].fd);
+	      p[peer].fd = -1;
+	    }
+	}
+    }
+  else
+    {
+      if (tunnel_free_space (&buf[i]) == 0)
+	{
+	  p[i].events &= ~POLLIN;
+	}
+      p[!i].events |= POLLOUT;
+    }
+}
+
+static void
+tunnel_out (struct pollfd *p, struct tunnel *buf, int i)
+{
+  int peer = !i;
+  if (tunnel_write (p[i].fd, &buf[peer]) > 0)
+    {
+      if (p[peer].fd != -1)
+	p[peer].events |= POLLIN;
+      if (tunnel_used_space (&buf[peer]) == 0)
+	p[i].events &= ~POLLOUT;
+    }
+  else
+    {
+      logmsg (LOG_NOTICE, "%s shutdown (write failed)", sidename[i]);
+      close (p[i].fd);
+      p[i].fd = -1;
+      close (p[peer].fd);
+      p[peer].fd = -1;
+    }
+}
+
+static void
+tunnel_hup (struct pollfd *p, struct tunnel *buf, int i)
+{
+  close (p[i].fd);
+  p[i].fd = -1;
+  if (tunnel_used_space (&buf[i]) == 0)
+    {
+      int peer = !i;
+      close (p[peer].fd);
+      p[peer].fd = -1;
+    }
+}
+
+static int
+tunnel_backend_connect (POUND_HTTP *phttp)
+{
+  int sock;
+  phttp->svc = SLIST_FIRST (&phttp->lstn->services);
+  phttp->backend = get_backend (phttp);
+  sock = backend_socket (phttp, phttp->backend, 1);
+  if (sock != -1 &&
+      connect_nb (sock, &phttp->backend->v.reg.addr,
+		  phttp->backend->v.reg.conn_to))
+    {
+      char caddr[MAX_ADDR_BUFSIZE];
+      phttp_log (phttp, PHTTP_LOG_DFL,
+		 -1, errno, "can't connect to backend %s",
+		 str_be (caddr, sizeof (caddr), phttp->backend));
+      close (sock);
+      sock = -1;
+    }
+  return sock;
+}
+
+static void
+do_tunnel (POUND_HTTP *phttp)
+{
+  struct pollfd p[P_NUM];
+  struct tunnel buf[2] = { TUNNEL_INITIALIZER, TUNNEL_INITIALIZER };
+  int to;
+
+  memset (&p, 0, sizeof p);
+  p[P_CL].fd = phttp->sock;
+  p[P_CL].events = POLLIN;
+
+  if ((p[P_BE].fd = tunnel_backend_connect (phttp)) == -1)
+    return;
+  p[P_BE].events = POLLIN;
+
+  to = phttp->backend->v.reg.to * 1000;
+
+  clock_gettime (CLOCK_REALTIME, &phttp->start_req);
+  phttp->be_start = phttp->start_req;
+
+  while (p[P_CL].fd != -1 || p[P_BE].fd != -1)
+    {
+      ssize_t n;
+
+      n = poll (p, 2, to);
+      if (n == -1)
+	{
+	  if (errno != EINTR)
+	    {
+	      logmsg (LOG_ERR, "poll: %s", strerror (errno));
+	      break;
+	    }
+	  continue;
+	}
+      else if (n == 0)
+	{
+	  logmsg (LOG_ERR, "(%"PRItid") I/O time out in tunnel", POUND_TID ());
+	  break;
+	}
+
+      if (p[P_CL].revents & POLLIN)
+	tunnel_in (p, buf, P_CL);
+      else if (p[P_CL].revents & POLLHUP)
+	tunnel_hup (p, buf, P_CL);
+
+      if (p[P_BE].revents & POLLIN)
+	tunnel_in (p, buf, P_BE);
+      else if (p[P_BE].revents & POLLHUP)
+	tunnel_hup (p, buf, P_BE);
+
+      if (p[P_CL].revents & POLLOUT)
+	tunnel_out (p, buf, P_CL);
+
+      if (p[P_BE].revents & POLLOUT)
+	tunnel_out (p, buf, P_BE);
+    }
+  if (p[P_BE].fd >= 0)
+    close (p[P_BE].fd);
+  if (p[P_CL].fd >= 0)
+    close (p[P_CL].fd);
+  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
+  if (enable_backend_stats && phttp->backend)
+    backend_update_stats (phttp->backend, &phttp->be_start, &phttp->end_req);
 }
 
 enum transfer_encoding
@@ -6408,7 +6639,7 @@ thr_http (void *dummy)
 
   while ((phttp = pound_http_dequeue ()) != NULL)
     {
-      do_http (phttp);
+      (phttp->lstn->tunnel ? do_tunnel : do_http) (phttp);
       pound_http_destroy (phttp);
       active_threads_decr ();
     }

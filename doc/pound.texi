@@ -89,6 +89,7 @@ This edition of the @cite{Pound Manual}, last updated
 * Balancer::
 * Worker model::
 * Lua::
+* Tunnels::
 * Logging::
 * Configuration::
 * poundctl::
@@ -3410,6 +3411,43 @@ per-thread ones, and vice versa.  @xref{gcall}, for a ways to
 interface between local and global contexts.
 @end deftypevr
 
+@node Tunnels
+@chapter Tunnels
+@cindex Tunnel
+  A @dfn{tunnel} is a transparent, protocol-agnostic communication
+channel between two sockets.  When operating a tunnel, @command{pound}
+sends packets received from one end (client) to its peer (backend) and
+vice-versa without analysing their content.  Thus, tunnels can be used
+to proxy any protocol based on TCP/IP.
+
+  Syntactically, a tunnel declaration is similar to @code{ListenHTTP},
+except that @code{Tunnel} keyword is used instead, and only a limited
+subset of statements is allowed within it:
+
+@example
+@group
+Tunnel ["@var{name}"]
+    Address @var{addr}
+    Port @var{n}
+    Backend
+        Address @var{addr}
+        Port @var{n}
+    End
+End
+@end group
+@end example
+
+  Just as with @code{ListenHTTP}, @var{addr} can be any of: IPv4
+address, IPv6 address, or a UNIX socket name in double quotes.  If an
+IP address is used, @code{Port} must be specified.  The
+@code{SocketFrom} statement can be used in lieu of @code{Address} and
+@code{Pair} in the @code{Tunnel} section.  Conversely, both
+@code{Address} and @code{Port} in @code{Backend} section are
+mandatory.
+
+@xref{Tunnel}, for a detailed discussion of the syntax of the
+@code{Tunnel} statement.
+
 @node Logging
 @chapter Logging
 @cindex Logging
@@ -4895,7 +4933,7 @@ If neither @code{Address} or @code{SocketFrom} are supplied,
 
 @deffn {ListenHTTP directive} Port @var{n}
 @findex /etc/services
-The port number or service name (as per @file{/etc/services} that
+The port number or service name (as per @file{/etc/services}) that
 this listener will listen on.
 
 If this directive is not given, the default port number is assumed (80
@@ -6082,6 +6120,71 @@ Behave like an @code{HTTP/1.0} server for HTTPS clients.  If @var{mode} is
 0, always conform to HTTPS/1.1.  If it is 1, do not allow multiple
 requests on SSL connections.  If the value is 2 (default), disable multiple
 requests on SSL connections only for MSIE clients.
+@end deffn
+
+@node Tunnel
+@section Tunnel
+@kwindex Tunnel
+  The @code{Tunnel} statement defines a direct communication channel
+between two network sockets.  This is described in detail in
+@ref{Tunnel}.
+
+@deffn {Tunnel} Address @var{address}
+The IP address that @command{pound} will listen on.  This can be a
+numeric IPv4 or IPv6 address, or a full pathname of a UNIX socket.  To
+listen on all available interfaces, use @samp{0.0.0.0} (for IPv4), or
+@samp{::0} (for both IPv4 and IPv6).
+
+If neither @code{Address} or @code{SocketFrom} are supplied,
+@samp{::0} is assumed.
+@end deffn
+
+@deffn {Tunnel} Port @var{n}
+The port number or service name (as per @file{/etc/services}) that
+this listener will listen on.
+@end deffn
+
+@deffn {Tunnel} SocketFrom "@var{pathname}"
+Read the socket to listen on from the UNIX socket supplied by
+@var{pathname}.  If this parameter is supplied, neither @code{Address}
+nor @code{Port} may be used.  This parameter is intended for use
+in @command{pound} testsuite.
+@end deffn
+
+@deffn {Tunnel} Backend ... End
+Defines a @dfn{backend}, i.e. the network socket to connect to the
+tunnel listener.  Exactly one @code{Backend} statement must be present
+in the @code{Tunnel} section.
+
+This is a simplified version of the statement described in
+@ref{Backend}.  The following statements can be used in it:
+
+@deffn {Tunnel backend} Address @var{IP}
+  IP address or host name of the backend server.  If the name cannot
+be resolved to a valid address, @command{pound} will assume that it
+represents a path to a Unix-domain socket.
+
+  This statement is mandatory.
+@end deffn
+
+@deffn {Tunnel backend} Port @var{n}
+  Port number to connect to.
+@end deffn
+
+@deffn {Tunnel backend} TimeOut
+Sets the @dfn{response timeout}, i.e. time to wait for a response from
+the backend (in seconds).  Default is 15.
+@end deffn
+
+@deffn {Tunnel backend} ConnTO
+Sets @dfn{connection timeout}, i.e. time to wait for establishing
+connection with the backend (in seconds).
+@end deffn
+
+@deffn {Tunnel backend} Disabled
+Mark the backend as disabled.
+@end deffn
+
 @end deffn
 
 @node Service

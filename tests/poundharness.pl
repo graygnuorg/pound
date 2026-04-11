@@ -399,7 +399,7 @@ EOT
 	    $_ = "# Commented out: $_";
 	} elsif ($log_level >= 0 && /^\s*LogLevel/i) {
 	    $_ = "# Commented out: $_";
-	} elsif (/^(\s*)Listen(HTTPS?)/i) {
+	} elsif (/^(\s*)(?:Listen(HTTPS?)|Tunnel)/i) {
 	    unshift @state, ST_LISTENER;
 	    print $out "$_\n";
 	    my $lst = $listeners->create("$infile:$.", $2);
@@ -1760,22 +1760,22 @@ sub process_http_request {
 	'bauth' => sub { http_bauth(@_, $self->{usertab}) }
     );
 
-    local $| = 1;
     my $http = HTTPServ->new($sock, $backend);
-    $http->parse();
-    if (my $c = $http->header->{'x-pound-force-status'}) {
-	$http->reply($c, "Forced response",
-		     headers => { $http->orig_headers });
-    } elsif ($http->uri =~ m{^/([^/]+)(/.*)?}) {
-	my ($dir, $rest) = ($1, $2);
-	if (my $ep = $endpoints{$dir}) {
-	    &{$ep}($http, $2);
-	} else {
-	    $http->reply(404, "Not found",
+    if ($http->parse()) {
+	if (my $c = $http->header->{'x-pound-force-status'}) {
+	    $http->reply($c, "Forced response",
 			 headers => { $http->orig_headers });
+	} elsif ($http->uri =~ m{^/([^/]+)(/.*)?}) {
+	    my ($dir, $rest) = ($1, $2);
+	    if (my $ep = $endpoints{$dir}) {
+		&{$ep}($http, $2);
+	    } else {
+		$http->reply(404, "Not found",
+			     headers => { $http->orig_headers });
+	    }
+	} else {
+	    $http->reply(500, "Malformed URI: ".$http->uri);
 	}
-    } else {
-	$http->reply(500, "Malformed URI: ".$http->uri);
     }
     $http->close;
 }
@@ -1835,14 +1835,14 @@ sub getline {
 sub ParseRequest {
     my $http = shift;
 
-    my $input = $http->getline() or PoundSub->exit();
-    #    print "GOT $input\n";
+    my $input = $http->getline();
+    return undef unless defined($input);
     my @res = split " ", $input;
     if (@res != 3) {
 	croak "Invalid input: $input";
     }
 
-    ($http->{METHOD}, $http->{URI}, $http->{VERSION}) = @res;
+    return ($http->{METHOD}, $http->{URI}, $http->{VERSION}) = @res;
 }
 
 sub ParseHeader {
@@ -1880,9 +1880,12 @@ sub GetBody {
 
 sub parse {
     my $http = shift;
-    $http->ParseRequest;
-    $http->ParseHeader;
-    $http->GetBody;
+    if ($http->ParseRequest) {
+	$http->ParseHeader;
+	$http->GetBody;
+	return 1;
+    }
+    return 0;
 }
 
 sub reply {

@@ -73,7 +73,8 @@ Listener address.  For INET family, it is formatted as
 the socket.
 
 @item protocol
-Either @samp{http} or @samp{https}.
+Protocol served by the listener: @samp{http}, @samp{https}, or
+@samp{tunnel}.
 @end table
 
 The value of this metrics is always @samp{1}.

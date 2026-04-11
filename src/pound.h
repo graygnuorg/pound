@@ -957,6 +957,7 @@ typedef struct _service
 {
   char *name;			/* symbolic name */
   struct locus_range locus;     /* Location in the config file. */
+  struct _listener *lstn;
   SERVICE_COND cond;
   REWRITE_RULE_HEAD rewrite[2];
   BALANCER_LIST balancers;
@@ -1022,6 +1023,7 @@ typedef struct _listener
   char *name;			/* symbolic name */
   struct locus_range locus;     /* Location in the config file. */
   struct addrinfo addr;		/* Socket address */
+  int tunnel;                   /* Is this a tunnel? */
   int mode;                     /* File mode for AF_UNIX */
   int chowner;                  /* Change to effective owner, for AF_UNIX */
   int sock;			/* listening socket */

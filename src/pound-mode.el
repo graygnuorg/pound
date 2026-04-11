@@ -75,7 +75,8 @@
     "Condition"
     "Service"
     "ListenHTTP"
-    "ListenHTTPS"))
+    "ListenHTTPS"
+    "Tunnel"))
 
 (defvar pound-section-keywords
   '("ACL"
@@ -485,7 +486,7 @@ a Service, as opposed to the top-level Control (whether block or directive)"
 (defun pound-top-level-form ()
   "Move point to the beginning of the nearest top-level block statement.
 Return t if such was found, nil otherwise."
-  (if (re-search-backward "^[ \t]*\\(ListenHTTPS?\\(?:[ \t]\".*\"\\)?\\|\\(Condition[ \t]+\".*\"\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
+  (if (re-search-backward "^[ \t]*\\(\\(ListenHTTPS?\\|Tunnel\\)\\(?:[ \t]\".*\"\\)?\\|\\(Condition[ \t]+\".*\"\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
       (cond
        ((and (pound-streq (match-string 1) "Control")
 	     (pound-at-control-backend))

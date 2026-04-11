@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "March 29, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "April 11, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1530,7 +1530,27 @@ requests on SSL connections only for clients whose
 .B User-Agent
 header contains substring
 .BR MSIE .
-This may be required as a work-around for a bug in certain versions of IE.
+This may be required as a work-around for a bug in certain versions of
+IE.
+.SH Tunnel
+Tunnel is a special listener that defines a transparent,
+protocol-agnostic communication channel between two sockets.  Anything
+sent to one end of the tunnel appears at its other end and vice-versa.
+.PP
+Tunnels can be thought of as a software equivalent of port forwarding.
+.PP
+Syntactically a tunnel is declared using the following construct:
+.PP
+.EX
+\fBTunnel\fR [ "\fIID\fR" ]
+    \fBAddress \fIIPADDR\fR
+    \fBPort \fIPORT\fR
+    \fBBackend\fR
+        \fBAddress \fIIPADDR\fR
+        \fBPort \fIPORT\fR
+    \fBEnd\fR
+\fBEnd\fR
+.EE
 .SH "Service"
 A service is a definition of which backend servers
 .B pound

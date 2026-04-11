@@ -165,6 +165,7 @@ TESTSUITE_AT = \
  success.at\
  tbf.at\
  template.at\
+ tunnel.at\
  url.at\
  virthost.at\
  warndep.at\
