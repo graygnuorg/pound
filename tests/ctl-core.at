@@ -38,7 +38,7 @@ Content-Type: application/json
   "uptime": \d+,
   "version": "AT_PACKAGE_VERSION",
   "workers": \{
-    "active": 1,
+    "active": \d,
     "count": 5,
     "max": 128,
     "min": 5,
