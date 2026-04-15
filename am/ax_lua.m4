@@ -58,8 +58,8 @@ else
     sort -t . -n -r -k1,2 |
     while read version
     do
-      case $version in
-	$1.*) # Give it a chance
+      case $1 in
+	$version.*) # Give it a chance
 	      ;;
 	*)
 	   m4_if($2,,,
