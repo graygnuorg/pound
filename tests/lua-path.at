@@ -32,7 +32,16 @@ ListenHTTP
 		End
 	End
 End
-])
+],
+[# The expect part here serves only to ensure that the startup has finished
+# and pound is fully set up. Whithout it, the SIGHUP sent by poundharness
+# could have arrived before signal handling is set up and thus cause an
+# abnormal termination.
+GET /echo/1
+end
+
+200
+end])
 
 AT_CHECK([sed -n -e '/^pound: PATH=/{' -e 's///p' -e 'q' -e '}' pound.log],
 [0],
@@ -52,7 +61,12 @@ ListenHTTP
 		End
 	End
 End
-])
+],
+[GET /echo/1
+end
+
+200
+end])
 
 AT_CHECK([sed -n -e '/^pound: PATH=/{' -e 's///' \
                  -e 's/^PATH_PREPEND_Q;//' \
