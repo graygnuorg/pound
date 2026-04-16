@@ -125,6 +125,9 @@ backends 1 0
 }]
 end
 
-]])
+]],
+[0],
+[],
+[ignore])
 m4_popdef([HARNESS_OPTIONS])
 AT_CLEANUP
