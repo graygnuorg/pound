@@ -2056,6 +2056,14 @@ pndlua_new_state (void)
   pndlua_dcl_function (state, "tid", pndlua_pound_tid);
   pndlua_dcl_function_chunk (state, "dump", pndlua_pound_dump);
   pndlua_dcl_function (state, "gcall", pndlua_pound_gcall);
+
+  /* Prepare metatable */
+  lua_newtable (state);
+  lua_pushcfunction (state, ro_newindex);
+  lua_setfield (state, -2, "__newindex");
+  /* Set metatable. */
+  lua_setmetatable (state, -2);
+
   lua_setglobal (state, "pound");
 
   pndlua_mkstash (state);
