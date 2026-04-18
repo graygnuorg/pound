@@ -1222,6 +1222,8 @@ void abend (struct locus_range const *range, char const *fmt, ...)
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);
 
+int ipv4mapped (char const *ipstr, char **ipv4);
+
 char const *backend_type_str (BACKEND_TYPE t);
 int backend_to_string (BACKEND *be, char *buf, size_t size);
 

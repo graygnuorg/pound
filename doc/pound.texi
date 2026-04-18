@@ -3203,6 +3203,17 @@ It is equivalent to calling @code{@var{func}(...)}.
 This built-in module contains variables and methods describing the
 HTTP request being handled.
 
+@deftypecv {Field} http string rmt_ip
+Request originator IP address.
+@end deftypecv
+
+@deftypecv {Field} http string fwd_ip
+Request originator IP address determined from @code{X-Forwarded-For}
+(or similar) header, as described in @ref{%a}. If no @code{TrustedIP}
+ACL is defined or if the request does not bear the
+@code{X-Forwarded-For} (or similar) header, this is equivalent to @code{http.rmt_ip}.
+@end deftypecv
+
 @deftypecv {Field} http table req
 Returns a table describing the request.  This is a read-only table,
 whose fields and methods are described below.
@@ -3877,6 +3888,7 @@ statements can be overridden from the command line.
 * Timeouts::
 * ListenHTTP::
 * ListenHTTPS::
+* Tunnel::
 * Service::
 * resolver::
 @end menu

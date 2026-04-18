@@ -1764,6 +1764,33 @@ http_set_resend (lua_State *L)
 }
 
 static int
+http_rmt_ip (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  char buf[MAX_ADDR_BUFSIZE];
+  addr2str (buf, sizeof (buf), &ud->phttp->from_host, 1);
+  lua_pushstring (L, buf);
+  return 1;
+}
+
+static int
+http_fwd_ip (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  struct stringbuf sb;
+  char *s;
+
+  stringbuf_init_log (&sb);
+  stringbuf_store_ip (&sb, ud->phttp, 1);
+  if ((s = stringbuf_finish (&sb)) != NULL)
+    lua_pushstring (L, s);
+  stringbuf_free (&sb);
+  if (!s)
+    return luaL_error (L, "%s", "out of memory");
+  return 1;
+}
+
+static int
 pndlua_http_index (lua_State *L)
 {
   struct http_ud *http = pndlua_get_userdata (L, 1);
@@ -1772,9 +1799,11 @@ pndlua_http_index (lua_State *L)
 
   int rw = http->modresp != 0;
 
-  static char *letidx[] = { "br", "brrrrs" };
+  static char *letidx[] = { "bfrr", "bfrrrrrs" };
   static struct luaL_Reg reg[] = {
     { "balancer", http_get_balancer },
+    { "fwd_ip", http_fwd_ip },
+    { "rmt_ip", http_rmt_ip },
     { "req", http_req },
     { "resp", http_resp },
     { "resend", http_resend },

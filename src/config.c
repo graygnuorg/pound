@@ -6062,6 +6062,26 @@ str_is_ip (const char *addr)
   return 0;
 }
 
+/*
+ * If ipstr is an IPv4-mapped IPv6 address, return 1 and store pointer
+ * to the beginning of plain IPv4 part in memory location pointed to by
+ * ipv4. Otherwise, return 0 and store there ipstr itself.
+ */
+int
+ipv4mapped (char const *ipstr, char **ipv4)
+{
+  static char pfx[] = "::ffff:";
+  static size_t npfx = sizeof(pfx) - 1;
+  if (ipstr && strncmp (pfx, ipstr, npfx) == 0 && str_is_ipv4 (ipstr + npfx))
+    {
+      *ipv4 = (char *)ipstr + npfx;
+      return 1;
+    }
+  else
+    *ipv4 = (char *)ipstr;
+  return 0;
+}
+
 void
 backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
 			   struct be_regular *reg)

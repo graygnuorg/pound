@@ -438,7 +438,15 @@ service_session_remove_by_backend (SERVICE *svc, BACKEND *be)
 }
 
 /*
- * Translate inet/inet6 address/port into a string
+ * Format ADDR to RES, truncating it to RES_LEN (including terminating 0),
+ * if necessary. For INET and INET6 addresses, textual representation includes
+ * port number, unless NO_PORT is 1.
+ *
+ * IPv4-mapped IPv6 addresses are translated to corresponding plain IPv4.
+ * Textual representation with port is:
+ *
+ *          IP:PORT      for IPv4 or IPv4-mapped addresses.
+ *          [IP]:PORT    for IPv6 addresses.
  */
 char *
 addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
@@ -479,7 +487,10 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 	}
       else
 	{
-	  if (addr->ai_family == AF_INET6)
+	  char *hp;
+	  if (ipv4mapped (hostbuf, &hp))
+	    strncpy (ptr, hp, res_len);
+	  else if (addr->ai_family == AF_INET6 && !no_port)
 	    snprintf (ptr, res_len+1, "[%s]", hostbuf);
 	  else
 	    strncpy (ptr, hostbuf, res_len);
