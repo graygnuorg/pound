@@ -81,8 +81,6 @@ struct tbf
 
 static void tbf_expire_job (enum job_ctl, void *, const struct timespec *);
 
-unsigned tbf_cleanup_interval;
-
 static inline void
 tbf_arm_expiration (TBF *tbf)
 {
