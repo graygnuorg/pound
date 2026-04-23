@@ -3694,7 +3694,7 @@ http_request_read (BIO *in, const LISTENER *lstn, char *buf,
       return HTTP_STATUS_OK;
 
     case COPY_READ_ERR:
-      return -1;
+      return errno == ETIMEDOUT ? HTTP_STATUS_OK : -1;
 
     case COPY_TOO_LONG:
       return HTTP_STATUS_URI_TOO_LONG;
