@@ -926,6 +926,14 @@ find_spec (int c)
 static struct http_log_prog http_log_tab[MAX_HTTP_LOG_FORMATS];
 static int http_log_next;
 
+char const *
+http_log_name (int n)
+{
+  if (n >= 0 && n < MAX_HTTP_LOG_FORMATS)
+    return http_log_tab[n].name;
+  return NULL;
+}
+
 static int
 find_log_prog (char const *name, int *alloc)
 {
@@ -1078,6 +1086,12 @@ http_log_format_compile (char const *name, char const *fmt,
   return i;
 }
 
+static int
+phttp_log_level (POUND_HTTP *phttp)
+{
+  return phttp->lstn->log_level == -1 ? log_level : phttp->lstn->log_level;
+}
+
 void
 http_log (POUND_HTTP *phttp)
 {
@@ -1085,13 +1099,14 @@ http_log (POUND_HTTP *phttp)
   struct http_log_prog *prog;
   struct http_log_instr *ip;
   char *msg;
+  int lev = phttp_log_level (phttp);
 
-  if (http_log_format_check (phttp->lstn->log_level))
+  if (http_log_format_check (lev))
     return;
   if (phttp->svc &&
       (STATUS_MASK (phttp->response_code) & phttp->svc->log_suppress_mask))
     return;
-  prog = http_log_tab + phttp->lstn->log_level;
+  prog = http_log_tab + lev;
   if (SLIST_EMPTY (&prog->head))
     return;
 

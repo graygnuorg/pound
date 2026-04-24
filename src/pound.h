@@ -216,6 +216,10 @@ unsigned long strhash_ci (const char *c, size_t len);
 # define POUND_PID  LOCALSTATEDIR "/run/pound.pid"
 #endif
 
+#ifndef DEFAULT_LOG_LEVEL
+# define DEFAULT_LOG_LEVEL 1
+#endif
+
 #define ATTR_PRINTFLIKE(fmt,narg)                               \
     __attribute__ ((__format__ (__printf__, fmt, narg)))
 
@@ -1011,6 +1015,7 @@ int http_log_format_compile (char const *name, char const *fmt,
 			     void *logdata);
 int http_log_format_find (char const *name);
 int http_log_format_check (int n);
+char const *http_log_name (int n);
 
 /* Additional listener options */
 #define HDROPT_NONE              0   /* Nothing special */
@@ -1213,6 +1218,8 @@ void active_threads_decr (void);
 /* handle HTTP requests */
 void *thr_http (void *);
 
+void pound_set_log_level (LISTENER *lstn, int lev);
+
 /* Log an error to the syslog or to stderr */
 void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
@@ -1223,6 +1230,8 @@ void abend (struct locus_range const *range, char const *fmt, ...)
 char *addr2str (char *, int, const struct addrinfo *, int);
 
 int ipv4mapped (char const *ipstr, char **ipv4);
+
+char *urlndecode (char const *input, size_t len);
 
 char const *backend_type_str (BACKEND_TYPE t);
 int backend_to_string (BACKEND *be, char *buf, size_t size);

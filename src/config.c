@@ -3991,7 +3991,7 @@ compile_canned_formats (void)
 static int
 parse_log_level (void *call_data, void *section_data)
 {
-  int log_level;
+  int level;
   int *log_level_ptr = call_data;
   struct token *tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_NUMBER));
   if (!tok)
@@ -3999,8 +3999,8 @@ parse_log_level (void *call_data, void *section_data)
 
   if (tok->type == T_STRING)
     {
-      log_level = http_log_format_find (tok->str);
-      if (log_level == -1)
+      level = http_log_format_find (tok->str);
+      if (level == -1)
 	{
 	  conf_error ("undefined format: %s", tok->str);
 	  return CFGPARSER_FAIL;
@@ -4023,9 +4023,9 @@ parse_log_level (void *call_data, void *section_data)
 	  conf_error ("%s", "undefined log level");
 	  return CFGPARSER_FAIL;
 	}
-      log_level = n;
+      level = n;
     }
-  *log_level_ptr = log_level;
+  *log_level_ptr = level;
   return CFGPARSER_OK;
 }
 
@@ -4392,7 +4392,7 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->sock = -1;
   lst->to = dfl->clnt_to;
   lst->rewr_loc = 1;
-  lst->log_level = dfl->log_level;
+  lst->log_level = -1;
   lst->rewrite_errors = -1;
   lst->verb = 0;
   lst->header_options = dfl->header_options;
@@ -6347,7 +6347,7 @@ parse_config_file (char const *file, int nosyslog)
 {
   int res = -1;
   POUND_DEFAULTS pound_defaults = {
-    .log_level = 1,
+    .log_level = DEFAULT_LOG_LEVEL,
     .facility = LOG_DAEMON,
     .clnt_to = 10,
     .be_to = 15,
@@ -6394,6 +6394,7 @@ parse_config_file (char const *file, int nosyslog)
 	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
       if (!nosyslog)
 	log_facility = pound_defaults.facility;
+      log_level = pound_defaults.log_level;
     }
   named_backend_table_free (&pound_defaults.named_backend_table);
   cfgparser_finish (root_jail || daemonize);

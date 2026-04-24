@@ -88,6 +88,7 @@ struct json_value *json_new_bool (int b);
 struct json_value *json_new_number (double n);
 struct json_value *json_new_integer (long n);
 struct json_value *json_new_string (char const *str);
+struct json_value *json_new_string_len (char const *str, size_t len);
 
 struct json_value *json_new_object (void);
 int json_object_set (struct json_value *obj, char const *name,

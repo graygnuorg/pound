@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "October 28, 2025" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "April 24, 2026" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -111,6 +111,26 @@ Show core status: daemon PID, uptime, worker statistics, etc.
 \fBlist\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
 List status of the given object and its subordinates.  Without
 argument, shows all listeners and underlying objects.
+.TP
+\fBlog\fR [\fB/\fR]
+Show global log level
+.TP
+\fBlog\fR \fB/\fIL\fR
+Show log level configured for listener \fIL\fR.
+.TP
+\fBlog\fR \fB/\fR[\fIL\fR] \fIF\fR
+Set log level \fIF\fR globally (if first argument is \fB/\fR) or for
+the listener \fIL\fR.
+.IP
+\fIF\fR must be a symbolic name of a built-in format or a format
+defined with the \fBLogFormat\fR configuration keyword.
+.TP
+\fBlog\fR -d [\fB/\fR\fIL\fR]
+Delete (clear) log level settings.  Without arguments, or with \fB/\fR
+as an argument, clears global log level.  This is equivalent to
+setting it to \fBnull\fR. If the argument is \fB/\fIL\fR, log level
+setting of the listener \fIL\fR is cleared, resulting in global log
+level being applied to it.
 .TP
 \fBenable\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR
 Enable listener, service, or backend.

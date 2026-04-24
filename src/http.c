@@ -450,65 +450,20 @@ phttp_log (POUND_HTTP *phttp, int flags, int status, int en,
   stringbuf_free (&sb);
 }
 
-static char xdig[] = "0123456789ABCDEF";
-
-static inline int
-xtod (int c)
+char *
+urlndecode (char const *input, size_t len)
 {
-  char *p = strchr (xdig, c_toupper (c));
-  return p ? p - xdig : -1;
-}
-
-static char *
-urlencode (char const *input, char const *exc)
-{
-  int c;
   struct stringbuf sb;
   stringbuf_init_log (&sb);
-  while ((c = *input++) != 0)
-    {
-      if (c_is_class (c, CCTYPE_UNRSRV) || (exc && strchr (exc, c)))
-	stringbuf_add_char (&sb, c);
-      else
-	{
-	  stringbuf_add_char (&sb, '%');
-	  stringbuf_add_char (&sb, xdig[c >> 4]);
-	  stringbuf_add_char (&sb, xdig[c & 0xf]);
-	}
-    }
+  stringbuf_urldecode (&sb, input, len);
   stringbuf_add_char (&sb, 0);
   return stringbuf_finish (&sb);
 }
 
 static char *
-urldecode (char const *input, char **end)
+urldecode (char const *input)
 {
-  int c;
-  struct stringbuf sb;
-  stringbuf_init_log (&sb);
-  while ((c = *input++) != 0)
-    {
-      if (c == '%')
-	{
-	  int n;
-	  c = xtod (*input++);
-	  if (c == -1)
-	    break;
-	  n = c << 4;
-	  c = xtod (*input++);
-	  if (c == -1)
-	    break;
-	  n += c;
-	  stringbuf_add_char (&sb, n);
-	}
-      else
-	stringbuf_add_char (&sb, c);
-    }
-  if (c == -1)
-    --input;
-  if (end)
-    *end = (char*)input;
-  return stringbuf_finish (&sb);
+  return urlndecode (input, strlen (input));
 }
 
 static int
@@ -615,7 +570,7 @@ submatch_exec_decode (GENPAT re, char const *subject, int decode,
   char *decoded = NULL;
   if (decode)
     {
-      if ((decoded = urldecode (subject, NULL)) == NULL)
+      if ((decoded = urldecode (subject)) == NULL)
 	return -1;
       subject = decoded;
     }
@@ -1069,8 +1024,35 @@ expand_string_encode (char const *str, int encode, char const *exc,
   char *s = expand_string (str, phttp, req, what);
   if (s && encode)
     {
-      char *enc = urlencode (s, exc);
+      struct stringbuf sb;
+      char *enc;
+      stringbuf_init_log (&sb);
+      if (exc)
+	{
+	  char *p = s;
+	  while (*p)
+	    {
+	      char *q = strstr (p, exc);
+	      if (q)
+		{
+		  if (q > p)
+		    stringbuf_urlencode (&sb, p, q - p);
+		  stringbuf_add_char (&sb, *q);
+		  p = q + 1;
+		}
+	      else
+		{
+		  stringbuf_urlencode_string (&sb, p);
+		  break;
+		}
+	    }
+	}
+      else
+	stringbuf_urlencode_string (&sb, s);
+      enc = stringbuf_finish (&sb);
       free (s);
+      if (!enc)
+	stringbuf_free (&sb);
       s = enc;
     }
   return s;

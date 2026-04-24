@@ -987,19 +987,53 @@ send_request (BIO *bio, char const *method, char const *fmt, ...)
   BIO_flush (bio);
 }
 
-int
-command_gen (char const *path, BIO *bio, int argc, char **argv)
-{
-  char *uri = "/";
-  struct json_value *val;
+enum
+  {
+    SUBDIR_DEFAULT = 0,
+    SUBDIR_ENCODE
+  };
 
-  if (argc == 1)
-    uri = argv[0];
-  else if (argc > 1)
+int
+command_gen (BIO *bio, char const *method, char const *path,
+	     char const *subdir, int flag, int argc, char **argv)
+{
+  struct stringbuf sb;
+  struct json_value *val;
+  char *uri;
+
+  xstringbuf_init (&sb);
+  stringbuf_add_char (&sb, '/');
+  if (subdir)
     {
-      errormsg (1, 0, "too many arguments");
+      if (subdir[0] == '/')
+	++subdir;
+      if (flag == SUBDIR_ENCODE)
+	stringbuf_urlencode_string (&sb, subdir);
+      else
+	stringbuf_add_string (&sb, subdir);
     }
-  send_request (bio, "GET", "%s%s", path, uri);
+  if (argc > 1)
+    {
+      int i;
+      char delim = '?';
+
+      for (i = 0; i < argc; i++)
+	{
+	  stringbuf_add_char (&sb, delim);
+	  delim = '&';
+	  stringbuf_add_string (&sb, argv[i]);
+	  if (++i == argc)
+	    break;
+	  stringbuf_add_char (&sb, '=');
+	  stringbuf_urlencode_string (&sb, argv[i]);
+	}
+    }
+
+  uri = stringbuf_finish (&sb);
+
+  send_request (bio, method, "%s%s", path, uri);
+  stringbuf_free (&sb);
+
   val = read_response (bio);
   if (json_option)
     print_json (val, stdout);
@@ -1021,13 +1055,25 @@ command_gen (char const *path, BIO *bio, int argc, char **argv)
 int
 command_core (BIO *bio, int argc, char **argv)
 {
-  return command_gen ("core", bio, argc, argv);
+  char const *uri = NULL;
+
+  if (argc == 2)
+    uri = argv[1];
+  else if (argc > 2)
+    errormsg (1, 0, "too many arguments");
+  return command_gen (bio, "GET", "core", uri, SUBDIR_DEFAULT, 0, NULL);
 }
 
 int
 command_list (BIO *bio, int argc, char **argv)
 {
-  return command_gen ("listener", bio, argc, argv);
+  char const *uri = NULL;
+
+  if (argc == 2)
+    uri = argv[1];
+  else if (argc > 2)
+    errormsg (1, 0, "too many arguments");
+  return command_gen (bio, "GET", "listener", uri, SUBDIR_DEFAULT, 0, NULL);
 }
 
 int
@@ -1036,15 +1082,11 @@ command_on_off (BIO *bio, int argc, char **argv, char const *verb)
   char *uri;
   struct json_value *val;
 
-  if (argc == 0)
-    {
-      errormsg (1, 0, "required argument missing");
-    }
-  else if (argc > 1)
-    {
-      errormsg (1, 0, "too many arguments");
-    }
-  uri = argv[0];
+  if (argc == 1)
+    errormsg (1, 0, "required argument missing");
+  else if (argc > 2)
+    errormsg (1, 0, "too many arguments");
+  uri = argv[1];
   send_request (bio, verb, "listener%s", uri);
   val = read_response (bio);
   if (json_option)
@@ -1077,21 +1119,21 @@ command_enable (BIO *bio, int argc, char **argv)
 int
 command_delete_session (BIO *bio, int argc, char **argv)
 {
-  char *uri, *key;
-  struct json_value *val;
+  char *uri;
+  char *param[2];
   OBJID objid;
 
-  if (argc < 2)
+  if (argc < 3)
     {
       errormsg (0, 0, "required argument missing");
       return 1;
     }
-  else if (argc > 2)
+  else if (argc > 3)
     {
       errormsg (0, 0, "too many arguments");
       return 1;
     }
-  uri = argv[0];
+  uri = argv[1];
   check_uri (uri, objid);
   if (objid[OI_LAST] < OI_SERVICE)
     {
@@ -1104,44 +1146,30 @@ command_delete_session (BIO *bio, int argc, char **argv)
       return 1;
     }
 
-  key = argv[1];
-  send_request (bio, "DELETE", "session%s?key=%s", uri, key);
-  val = read_response (bio);
-  if (json_option)
-    print_json (val, stdout);
-  else
-    {
-      TEMPLATE tmpl;
-
-      tmpl = template_lookup (tmpl_name);
-      if (!tmpl)
-	{
-	  errormsg (1, 0, "template %s not defined", tmpl_name);
-	}
-      template_run (tmpl, val, stdout);
-    }
-  json_value_free (val);
-  return 0;
+  param[0] = "key";
+  param[1] = argv[2];
+  return command_gen (bio, "DELETE", "session", uri, SUBDIR_DEFAULT,
+		      sizeof (param) / sizeof (param[0]), param);
 }
 
 int
 command_add_session (BIO *bio, int argc, char **argv)
 {
-  char *uri, *key;
-  struct json_value *val;
+  char *uri;
+  char *param[2];
   OBJID objid;
 
-  if (argc < 2)
+  if (argc < 3)
     {
       errormsg (0, 0, "required argument missing");
       return 1;
     }
-  else if (argc > 2)
+  else if (argc > 3)
     {
       errormsg (0, 0, "too many arguments");
       return 1;
     }
-  uri = argv[0];
+  uri = argv[1];
   check_uri (uri, objid);
   if (objid[OI_LAST] != OI_BACKEND)
     {
@@ -1149,26 +1177,67 @@ command_add_session (BIO *bio, int argc, char **argv)
       return 1;
     }
 
-  key = argv[1];
-  send_request (bio, "PUT", "session%s?key=%s", uri, key);
-  val = read_response (bio);
-  if (json_option)
-    print_json (val, stdout);
-  else
-    {
-      TEMPLATE tmpl;
-
-      tmpl = template_lookup (tmpl_name);
-      if (!tmpl)
-	{
-	  errormsg (1, 0, "template %s not defined", tmpl_name);
-	}
-      template_run (tmpl, val, stdout);
-    }
-  json_value_free (val);
-  return 0;
+  param[0] = "key";
+  param[1] = argv[2];
+  return command_gen (bio, "PUT", "session", uri, SUBDIR_DEFAULT,
+		      sizeof (param) / sizeof (param[0]), param);
 }
 
+int
+command_log (BIO *bio, int argc, char **argv)
+{
+  int c;
+  int delete = 0;
+  char *meth = "GET";
+  char *lst = NULL;
+  char *pstore[2], **param = NULL;
+  size_t nparam = 0;
+  struct stringbuf sb;
+
+  xstringbuf_init (&sb);
+
+  optind = 1;
+  while ((c = getopt (argc, argv, "d")) != EOF)
+    {
+      switch (c)
+	{
+	case 'd':
+	  delete = 1;
+	  meth = "DELETE";
+	  break;
+
+	default:
+	  return 1;
+	}
+    }
+
+  switch (argc - optind)
+    {
+    case 0:
+      break;
+
+    case 1:
+      lst = argv[optind];
+      break;
+
+    case 2:
+      if (delete)
+	errormsg (1, 0, "too many arguments");
+      meth = "PUT";
+      lst = argv[optind];
+      pstore[0] = "level";
+      pstore[1] = argv[optind+1];
+      param = pstore;
+      nparam = 2;
+      break;
+
+    default:
+      errormsg (1, 0, "too many arguments");
+    }
+
+  return command_gen (bio, meth, "log", lst, SUBDIR_ENCODE,
+		      nparam, param);
+}
 
 typedef int (*COMMAND) (BIO *, int, char **);
 
@@ -1188,6 +1257,7 @@ static struct dispatch_table dispatch[] = {
   { "delete", command_delete_session },
   { "del", command_delete_session },
   { "add", command_add_session },
+  { "log", command_log },
   { NULL }
 };
 
@@ -1216,6 +1286,10 @@ static char *usage_text[] = {
   "   disable /L/S/B    disable listener, service, or backend.",
   "   delete /L/S KEY   delete session with given key.",
   "   add /L/S/B KEY    add session with given key.",
+  "   log [/L]          show log level.",
+  "   log /[L] [F]      set log level F.",
+  "   log -d /L         use global log level in listener L.",
+  "   log -d            set global log level to \"null\".",
   "",
   "Shortcuts:",
   "   on                same as enable",
@@ -1471,7 +1545,7 @@ main (int argc, char **argv)
   json_memabrt = xnomem;
 
   read_config ();
-  while ((c = getopt (argc, argv, "C:f:i:jK:khS:s:T:t:vV")) != EOF)
+  while ((c = getopt (argc, argv, "+C:f:i:jK:khS:s:T:t:vV")) != EOF)
     {
       switch (c)
 	{
@@ -1560,11 +1634,6 @@ main (int argc, char **argv)
     command = command_list;
   else if ((command = find_command (argv[0])) == NULL)
     usage (1);
-  else
-    {
-      argc--;
-      argv++;
-    }
 
   read_template ();
 

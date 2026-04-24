@@ -56,6 +56,11 @@ struct tm;
 int stringbuf_strftime (struct stringbuf *sb, char const *fmt,
 			const struct tm *tm);
 
+int stringbuf_urlencode (struct stringbuf *sb, char const *str, size_t len);
+int stringbuf_urlencode_string (struct stringbuf *sb, char const *str);
+int stringbuf_urldecode (struct stringbuf *sb, char const *str, size_t len);
+int stringbuf_urldecode_string (struct stringbuf *sb, char const *str);
+
 static inline int
 stringbuf_err (struct stringbuf *sb)
 {

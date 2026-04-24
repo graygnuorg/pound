@@ -305,6 +305,22 @@ json_new_string (char const *str)
   return j;
 }
 
+struct json_value *
+json_new_string_len (char const *str, size_t len)
+{
+  struct json_value *j = json_value_create (json_string);
+  if (j)
+    {
+      j->v.s = strndup (str, len);
+      if (!j->v.s)
+	{
+	  free (j);
+	  j = NULL;
+	}
+    }
+  return j;
+}
+
 static void
 json_free_string (struct json_value *val)
 {

@@ -182,6 +182,63 @@ stringbuf_add_string (struct stringbuf *sb, char const *str)
   return stringbuf_add (sb, str, strlen (str));
 }
 
+static char xdig[] = "0123456789ABCDEF";
+
+static inline int
+xtod (int c)
+{
+  char *p = strchr (xdig, c_toupper (c));
+  return p ? p - xdig : -1;
+}
+
+int
+stringbuf_urlencode (struct stringbuf *sb, char const *str, size_t len)
+{
+  int rc = 0;
+  while (rc == 0 && len--)
+    {
+      int c = *str++;
+      if (c_is_class (c, CCTYPE_UNRSRV))
+	rc = stringbuf_add_char (sb, c);
+      else
+	rc = stringbuf_add_char (sb, '%') ||
+	     stringbuf_add_char (sb, xdig[c >> 4]) ||
+	     stringbuf_add_char (sb, xdig[c & 0xf]);
+    }
+  return rc;
+}
+
+int
+stringbuf_urlencode_string (struct stringbuf *sb, char const *str)
+{
+  return stringbuf_urlencode (sb, str, strlen (str));
+}
+
+int
+stringbuf_urldecode (struct stringbuf *sb, char const *str, size_t len)
+{
+  while (len-- > 0)
+    {
+      int c = *str++, a, b;
+      if (c == '%' && len >= 2 &&
+	  (a = xtod (str[0])) != -1 && (b = xtod (str[1])) != -1)
+	{
+	  c = (a << 4) | b;
+	  len -= 2;
+	  str += 2;
+	}
+      if (stringbuf_add_char (sb, c))
+	return -1;
+    }
+  return 0;
+}
+
+int
+stringbuf_urldecode_string (struct stringbuf *sb, char const *str)
+{
+  return stringbuf_urldecode (sb, str, strlen (str));
+}
+
 char *
 stringbuf_set (struct stringbuf *sb, int c, size_t n)
 {

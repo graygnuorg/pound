@@ -3541,6 +3541,7 @@ request.  These @dfn{access logs} are emitted for each processed
 request @emph{after a response was sent back to the client}, and go to
 the syslog facility @code{info}.
 
+@anchor{log level}
 Such additional logging is configured using two directives:
 @code{LogLevel} and @code{LogFormat}.  The @code{LogLevel} directive
 can appear either in listener scope, in which case it affects only
@@ -3554,6 +3555,7 @@ format name, or to a user-defined format name.
 The built-in formats are:
 
 @table @asis
+@anchor{null built-in format}
 @item 0
 @itemx null
 @kwindex null
@@ -5483,19 +5485,19 @@ value.  @xref{Detached Conditions}, for a detailed discussion.
 @deffnx {Request Conditional} Header "@var{field}" [@var{options}] "@var{pattern}"
 Evaluates to @samp{true}, if the request contains at least one header
 matching the given @var{pattern}.  The directive has two forms.
-In first form, the @var{pattern} is compared against entire header line.
-In second form, the @var{field} argument supplies the header name, and
+In its first form, the @var{pattern} is compared against entire header line.
+In its second form, the @var{field} argument supplies the header name, and
 @var{pattern} the pattern to match against its value (or the name of
 the file to read patterns from, if @var{options} is @code{-file} or
 @code{-filewatch}).
 
-An example of @code{Header} statement in first form:
+An example of @code{Header} statement in the first form:
 
 @example
 Header "^Content-Type:[[:space:]]*text/.+"
 @end example
 
-Here's the corresponding statement in second form:
+Here's the corresponding statement in the second form:
 
 @example
 Header "Content-Type" "text/.+"
@@ -5505,7 +5507,7 @@ In both forms, @var{pattern} is treated as case-insensitive POSIX
 extended regular expression.  This can be changed by @var{options},
 described below.
 
-In first form, pattern modification options, such as @code{-beg} or
+In the first form, pattern modification options, such as @code{-beg} or
 @code{-contain} apply to entire header line.  In second form, they
 apply to header value only.  For example, you can write:
 
@@ -7275,6 +7277,16 @@ poundctl disable /-/1
 @node poundctl commands
 @section @command{poundctl} commands
 
+@menu
+* poundctl list::    Show information about running instance.
+* poundctl enable::  Enabling and disabling @command{pound} entities.
+* poundctl session:: Session management.
+* poundctl log::     Inspect and change log level.
+@end menu
+
+@node poundctl list
+@subsection Show Information About Running Instance
+
 @deffn {poundctl} core
 Display core statistics.  By default, it includes: server time,
 @command{pound} daemon version, uptime, and PID, and worker thread
@@ -7285,11 +7297,14 @@ statistics.
 @deffnx {poundctl} list /@var{L}/@var{S}
 @deffnx {poundctl} list /@var{L}
 @deffnx {poundctl} list
-@anchor{poundctl list}
+@c @anchor{poundctl list}
 Lists status of the given object and its subordinates.  Without
 argument, shows core statistics (see above), all listeners and
 underlying objects, as well as all standalone services.
 @end deffn
+
+@node poundctl enable
+@subsection Enabling and Disabling Various @command{pound} Entities
 
 @deffn {poundctl} enable /@var{L}/@var{S}/@var{B}
 @deffnx {poundctl} enable /@var{L}/@var{S}
@@ -7309,13 +7324,61 @@ Enables listener, service, or backend.
 Disables listener, service, or backend.
 @end deffn
 
+@node poundctl session
+@subsection Session Management with @command{poundctl}
+
+@deffn {poundctl} add /@var{L}/@var{S}/@var{B} @var{key}
+Add a session with the given @var{key}.
+@end deffn
+
 @deffn {poundctl} delete /@var{L}/@var{S} @var{key}
 Delete the session with the given key.  Notice that backend may not
 be specified.
 @end deffn
 
-@deffn {poundctl} add /@var{L}/@var{S}/@var{B} @var{key}
-Add a session with the given @var{key}.
+@node poundctl log
+@subsection Using @command{poundctl} to Inspect and Change Log Levels
+
+The @code{poundctl log} command is used to control log level
+(@pxref{Logging}) of the running instance of @command{pound} or any of
+its listeners.
+
+@deffn {poundctl} log [/]
+@deffnx {poundctl} log [/]@var{L}
+Used without arguments (or with @samp{/} as an argument), this command
+displays global log level. Otherwise, it displays log level for listener
+@var{L}. Notice, that leading slash in the argument is optional.
+
+If the default template is used, the command outputs symbolic name of the
+log level in use (@pxref{log level}).  In the second form, if the
+listener @var{L} has no specific log level configured (i.e. it uses the
+log level from the global settings), the name of the log level is
+followed by the word @samp{global} in parentheses.
+@end deffn
+
+@deffn {poundctl} log / @var{F}
+@deffnx {poundctl} log [/]@var{L} @var{F}
+The first form sets global log level @var{F}.  The second form, configures
+log level @var{F} for listener @var{L}.
+
+In both forms, @var{F} must be a symbolic name of an existing format
+(either built-in or user-defined), as described in @ref{log level}.
+
+On success, the command outputs the name of the configured format
+(@var{F}).
+@end deffn
+
+@deffn {poundctl} log -d [/]
+@deffnx {poundctl} log -d [/]@var{L}
+Deletes current log level setting.
+
+In the first form, the global log level is set to @samp{null} (@pxref{null
+built-in format}).
+
+In the second form, it removes the log level setting for the listener
+@var{L}, resulting in global log level being used for it.
+
+The output is as described above.
 @end deffn
 
 @node poundctl remote
@@ -7975,22 +8038,25 @@ or @dfn{backend}.  Each object carries an explicit indication of its
 type in its @code{kind} attribute.  Its possible values are:
 
 @table @samp
-@item core
-Core statistics.
-@item pound
-Full listing.
-@item listener
-Listener statistics.
-@item service
-Service statistics.
 @item backend
 Backend statistics.
+@item core
+Core statistics.
+@item listener
+Listener statistics.
+@item log
+Log level information.
+@item pound
+Full listing.
+@item service
+Service statistics.
 @end table
 
 Structures of each object are discussed in subsections that follow.
 
 @menu
 * Core listing::
+* Log info::
 * Full listing::
 * Listener object::
 * Service object::
@@ -8043,6 +8109,34 @@ microsecond precision, e.g.: @samp{2023-01-05T22:43:18.071559}.
 @item uptime
 Total running time of @command{pound} daemon: number of
 microseconds elapsed since its startup.
+@end table
+
+@node Log info
+@subsubsection Log info
+The @samp{log} object conveys information about log level settings
+(@pxref{poundctl log}.  It contains the following attributes:
+
+@table @code
+@item kind
+Identifies the full listing object.  The value if this attribute is
+@samp{log}.
+
+@item level
+Symbolic name of the configured log level (@pxref{log level}).
+
+@item global
+Symbolic name of the globally configured log level.
+@end table
+
+If the object describes log settings of a listener, one of the
+following attributes is also present:
+
+@table @code
+@item listener_index
+Index of the listener (0-based) in the configuration.
+
+@item listener_name
+Symbolic name of the listener.
 @end table
 
 @node Full listing

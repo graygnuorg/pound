@@ -35,6 +35,8 @@ int anonymise;			/* anonymise client address */
 int daemonize = 1;		/* run as daemon */
 int enable_supervisor = 1;      /* enable supervisor process */
 int log_facility = -1;		/* log facility to use */
+int log_level = DEFAULT_LOG_LEVEL;
+
 int print_log;                  /* print log messages to stdout/stderr during startup */
 int enable_backend_stats;
 
@@ -429,6 +431,17 @@ active_threads_wait (void)
 	     pthread_cond_timedwait (&active_cond, &arg_mut, &ts) == 0)
 	;
     }
+  pthread_mutex_unlock (&arg_mut);
+}
+
+void
+pound_set_log_level (LISTENER *lstn, int lev)
+{
+  pthread_mutex_lock (&arg_mut);
+  if (lstn)
+    lstn->log_level = lev;
+  else
+    log_level = lev;
   pthread_mutex_unlock (&arg_mut);
 }
 

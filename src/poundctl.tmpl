@@ -111,6 +111,10 @@ Global services:
 {{end -}}{{ /* if len .services */ }}
 {{- end}}
 
+{{define "default.log" -}}
+  {{if .level}}{{.level}}{{else}}{{.global}} (global){{end}}
+{{- end}}
+
 {{define "default" -}}
   {{if exists . "kind" -}}
     {{- /* This is for v4.18 and later. */ -}}
@@ -124,6 +128,8 @@ Global services:
       {{block "default.core" . -}}
     {{else if eq .kind "backend" -}}
       {{block "default.print_backend" . -}}
+    {{else if eq .kind "log" -}}
+      {{block "default.log" . -}}
     {{else -}}
       Unsupported kind of object!
     {{end -}}

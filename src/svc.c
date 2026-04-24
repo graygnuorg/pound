@@ -2406,7 +2406,8 @@ typedef struct
 typedef int (*OBJHANDLER) (BIO *, OBJECT *, char const *, void *);
 
 static int
-ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
+ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url,
+	     SERVICE *svc)
 {
   OBJECT obj = { .type = OBJ_BACKEND };
 
@@ -2416,7 +2417,8 @@ ctl_backend (OBJHANDLER func, void *data, BIO *c, char const *url, SERVICE *svc)
 }
 
 static int
-ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url, LISTENER *lstn)
+ctl_service (OBJHANDLER func, void *data, BIO *c, char const *url,
+	     LISTENER *lstn)
 {
   OBJECT obj = { .type = OBJ_SERVICE };
 
@@ -2716,6 +2718,155 @@ control_add_session (BIO *c, char const *url)
   return HTTP_STATUS_NOT_FOUND;
 }
 
+static int
+ident_serialize (struct json_value *obj, IDENT *id)
+{
+  if (id)
+    {
+      switch (id->type)
+	{
+	case IDTYPE_NUM:
+	  return json_object_set (obj, "listener_index",
+				  json_new_integer (id->n));
+	case IDTYPE_STR:
+	  return json_object_set (obj, "listener_name",
+				  json_new_string_len (id->s.name, id->s.len));
+
+	default:
+	  return -1;
+	}
+    }
+  return 0;
+}
+
+static struct json_value *
+log_level_serialize (IDENT *ident, int lev)
+{
+  struct json_value *obj;
+
+  if ((obj = new_typed_object ("log")) != NULL)
+    {
+      int err = 0;
+      char const *name = http_log_name (lev);
+
+      err = ident_serialize (obj, ident) |
+	     json_object_set (obj, "level",
+			      name ? json_new_string (name)
+				   : json_new_null ());
+      name = http_log_name (log_level);
+      err |= json_object_set (obj, "global",
+			      name ? json_new_string (name)
+				   : json_new_null ());
+      if (err)
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
+  return obj;
+}
+
+static int
+control_log_level (BIO *c, char const *url,
+		   int (*handler) (LISTENER *, void *),
+		   void *data)
+{
+  struct json_value *val;
+  int lev;
+  LISTENER *lstn = NULL;
+  IDENT ident, *idptr = NULL;
+  int rc;
+
+  if (!url_is_root (url))
+    {
+      ident = ctl_getident (&url);
+      idptr = &ident;
+
+      if (*url && *url != '?')
+	return HTTP_STATUS_BAD_REQUEST;
+      if ((lstn = locate_listener (ident)) == NULL)
+	return HTTP_STATUS_NOT_FOUND;
+    }
+
+  lev = handler (lstn, data);
+
+  if ((val = log_level_serialize (idptr, lev)) != NULL)
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
+  else
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  return rc;
+}
+
+static int
+ctl_getlev (LISTENER *lstn, void *data)
+{
+  return lstn ? lstn->log_level : log_level;
+}
+
+static int
+control_get_log_level (BIO *c, char const *url)
+{
+  return control_log_level (c, url, ctl_getlev, NULL);
+}
+
+static int
+ctl_putlev (LISTENER *lstn, void *data)
+{
+  int lev = *(int*) data;
+  pound_set_log_level (lstn, lev);
+  return lev;
+}
+
+static int
+control_put_log_level (BIO *c, char const *url)
+{
+  char *new_level;
+  size_t len;
+  char *fmtname;
+  int lev;
+
+  if ((new_level = get_param (url, "level", &len)) == NULL)
+    return HTTP_STATUS_BAD_REQUEST;
+
+  if ((fmtname = urlndecode (new_level, len)) == NULL)
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  lev = http_log_format_find (fmtname);
+  if (lev == -1)
+    {
+      char *p;
+      long n;
+      errno = 0;
+      n = strtol (fmtname, &p, 10);
+      if (errno || *p || n < 0 || n > INT_MAX || http_log_format_check (n))
+	return HTTP_STATUS_BAD_REQUEST;
+      lev = n;
+    }
+  free (fmtname);
+
+  if (lev == -1)
+    return HTTP_STATUS_BAD_REQUEST;
+
+  return control_log_level (c, url, ctl_putlev, &lev);
+}
+
+static int
+ctl_dellev (LISTENER *lstn, void *data)
+{
+  pound_set_log_level (lstn, lstn ? -1 : 0);
+  return -1;
+}
+
+static int
+control_delete_log_level (BIO *c, char const *url)
+{
+  return control_log_level (c, url, ctl_dellev, NULL);
+}
+
 struct endpoint
 {
   char *uri;
@@ -2736,6 +2887,9 @@ static struct endpoint control_endpoint[] = {
   { S("/service"), METH_PUT, control_enable_service },
   { S("/session"), METH_DELETE, control_delete_session },
   { S("/session"), METH_PUT, control_add_session },
+  { S("/log"), METH_GET, control_get_log_level },
+  { S("/log"), METH_PUT, control_put_log_level },
+  { S("/log"), METH_DELETE, control_delete_log_level },
 #undef S
   { NULL }
 };

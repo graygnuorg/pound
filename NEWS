@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-04-18
+Pound -- history of user-visible changes. 2026-04-24
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -27,6 +27,28 @@ Naturally, only one backend is allowed.  Similarly to other listeners,
 the Address/Port pair in the Tunnel section can be replaced with a
 single SocketFrom statement.  The following statements are allowed in
 Backend subsection: Timeout, ConnTO, Disabled.
+
+* Runtime log level control
+
+The "poundctl" command can be used to inspect log level settings or to
+change them without restarting pound.
+
+  - poundctl log [/]
+    Show global log level.
+
+  - poundctl log /L
+    Show log level for the listener L.
+
+  - poundctl log /[L] F
+    Set log level F. If argument is "/", global log level is
+    set. Otherwise, log level for the listener L is set.
+
+  - poundctl log -d /L
+    Clears log level setting for the listener L.  As a result, the
+    listener will use global log level.
+
+  - poundctl log -d [/]
+    Set global log level to "null".
 
 * Lua: access to the originator IP
 
