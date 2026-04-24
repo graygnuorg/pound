@@ -1282,9 +1282,9 @@ redirect_response (POUND_HTTP *phttp,
   struct be_redirect const *redirect = &phttp->backend->v.redirect;
   int code = redirect->status;
   char const *code_msg, *cont, *hdr;
-  char *xurl, *url;
-  struct stringbuf sb_url, sb_cont, sb_loc;
-  int i, rc;
+  char *url;
+  struct stringbuf sb_cont, sb_loc;
+  int rc;
 
   rc = drain_request (phttp, chunked, content_length);
   if (rc != HTTP_STATUS_OK)
@@ -1326,39 +1326,9 @@ redirect_response (POUND_HTTP *phttp,
   if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
-  xurl = expand_url (redirect->url, phttp, redirect->has_uri);
-  if (!xurl)
-    {
-      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-    }
-
-  /*
-   * Make sure to return a safe version of the URL (otherwise CSRF
-   * becomes a possibility)
-   *
-   * FIXME: 1. This should be optional.
-   *        2. Use urlencode or http_request_split/http_request_rebuild to
-   *           do that.
-   */
-  stringbuf_init_log (&sb_url);
-  for (i = 0; xurl[i]; i++)
-    {
-      if (c_isalnum (xurl[i]) || xurl[i] == '_' || xurl[i] == '.'
-	  || xurl[i] == ':' || xurl[i] == '/' || xurl[i] == '?'
-	  || xurl[i] == '&' || xurl[i] == ';' || xurl[i] == '-'
-	  || xurl[i] == '=' || xurl[i] == '+')
-	stringbuf_add_char (&sb_url, xurl[i]);
-      else
-	stringbuf_printf (&sb_url, "%%%02x", xurl[i]);
-    }
-  url = stringbuf_finish (&sb_url);
-  free (xurl);
-
+  url = expand_url (redirect->url, phttp, redirect->has_uri);
   if (!url)
-    {
-      stringbuf_free (&sb_url);
-      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
-    }
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   stringbuf_init_log (&sb_cont);
   stringbuf_printf (&sb_cont,
@@ -1370,7 +1340,7 @@ redirect_response (POUND_HTTP *phttp,
 
   if ((cont = stringbuf_finish (&sb_cont)) == NULL)
     {
-      stringbuf_free (&sb_url);
+      free (url);
       stringbuf_free (&sb_cont);
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
@@ -1378,9 +1348,10 @@ redirect_response (POUND_HTTP *phttp,
   stringbuf_init_log (&sb_loc);
   stringbuf_printf (&sb_loc, "Location: %s\r\n", url);
 
+  free (url);
+
   if ((hdr = stringbuf_finish (&sb_loc)) == NULL)
     {
-      stringbuf_free (&sb_url);
       stringbuf_free (&sb_cont);
       stringbuf_free (&sb_loc);
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -1389,7 +1360,6 @@ redirect_response (POUND_HTTP *phttp,
   bio_http_reply (phttp->cl, phttp->request.version, code, code_msg, hdr,
 		  "text/html", cont);
 
-  stringbuf_free (&sb_url);
   stringbuf_free (&sb_cont);
   stringbuf_free (&sb_loc);
 
