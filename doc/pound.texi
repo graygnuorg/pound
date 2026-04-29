@@ -504,12 +504,6 @@ Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
 features.  As of version @value{VERSION}, the following features are
 implemented:
 
-@defvr Feature warn-deprecated
-When parsing the configuration file, warn if it uses any deprecated
-statements.  This is the default.  To suppress deprecation
-messages, use @option{-W no-warn-deprecated}.
-@end defvr
-
 @anchor{dns}
 @defvr Feature dns
 Resolve host names found in configuration file and returned in the
@@ -540,6 +534,18 @@ disable this, use the @option{-W no-include-dir} option.  This means
 that each relative filename used in arguments to the directives in the
 configuration file will be looked up in the current working directory.
 This is useful mainly in testsuite.
+@end defvr
+
+@defvr Feature warn-deprecated
+When parsing the configuration file, warn if it uses any deprecated
+statements.  This is the default.  To suppress deprecation
+messages, use @option{-W no-warn-deprecated}.
+@end defvr
+
+@defvr Feature close-extra-fds
+At startup, @command{pound} closes all inherited file descriptors
+numerically greater than 2. If this is undesirable for some reason,
+use the @option{-Wno-close-extra-fds} option.
 @end defvr
 @end table
 
@@ -2294,22 +2300,27 @@ globally, in the @code{Resolver} section (@pxref{resolver}).
 @node Worker model
 @chapter Worker model
 @kwindex WorkerMinCount
-Each incoming request is processed by a specific @dfn{worker}, i.e. a
-thread in the running program.  Total number of running workers is
-controlled by three configuration parameters.  @code{WorkerMinCount}
-defines the minimum number of workers that should always be running
-(5, by default).  Another parameter, @code{WorkerMaxCount} sets the
-upper limit on the number of running workers (it defaults to 128).
+Each incoming connection is assigned to a specific @dfn{worker} -- a
+thread in the running program which becomes responsible for processing
+requests that arrive through this connection.  The total number of
+running workers is controlled by three configuration parameters:
+@code{WorkerMinCount}, @code{WorkerMaxCount}, and
+@code{WorkerIdleTimeout}.
+
+The value of @code{WorkerMinCount} defines the minimum number of
+workers that should always be running (5, by default).  Another
+parameter, @code{WorkerMaxCount} sets the upper limit on the number of
+running workers (it defaults to 128).
 
 @kwindex WorkerMaxCount
 At each given moment, a worker can be in one of two states: @dfn{idle}
-or @dfn{active} (processing a request).  If an incoming request
+or @dfn{active} (processing a connection).  If an incoming connection
 arrives when all running workers are active, and total number of
-workers is less than @code{WorkerMaxCount}, a new thread is started and
-the new request is handed to it.  If the number of active workers has
-already reached maximum, the new request is added to the @dfn{request
-queue}, where it will wait for a worker to become available to
-process it.
+workers is less than @code{WorkerMaxCount}, a new worker thread is
+started and the new connection is assigned to it.  If the number of
+active workers has already reached maximum, the connection enters
+the @dfn{connection queue}, where it will wait for a worker to become
+available to process it.
 
 @kwindex WorkerIdleTimeout
 The third parameter, @code{WorkerIdleTimeout}, specifies maximum time
@@ -2317,6 +2328,17 @@ a thread is allowed to spend in the idle state.  If a worker
 remains idle longer than that and total number of workers is greater
 than the allotted minimum (@code{WorkerMinCount}), this idle worker is
 terminated.
+
+@cindex connection queue
+Maximum capacity of the connection queue is computed as a function of
+the system limit on the number of open files and the value of
+@code{WorkerMaxCount}.  You can define it explicitly using the
+@code{ConnectionQueueSize} configuration statememt (@pxref{Worker
+Settings, ConnectionQueueSize}).
+
+If all workers are busy and the connection queue is filled up, the
+program will stop accepting new connections until at least one worker
+becomes available again.
 
 @node Lua
 @chapter Extending @command{pound} functionality with Lua
@@ -4292,6 +4314,50 @@ versions of pound, is equivalent to:
 WorkerMinCount @var{n}
 WorkerMaxCount @var{n}
 @end example
+@end deffn
+
+@deffn {Global directive} ConnectionQueueSize @var{n}
+Sets size of the incoming connection queue (@pxref{Worker model}).
+
+Unless defined explicitly, its value is computed as:
+
+@example
+@math{R - (W@sub{max}*F@sub{wrk} + F@sub{ini} + F@sub{res})}
+@end example
+
+@noindent
+where @math{R} is the system limit on available file descriptors (as
+set, e.g. by @command{ulimit -n}), @math{W@sub{max}} is the value of
+@code{WorkerMaxCount} setting, @math{F@sub{wrk}} is the number of file
+descriptors used per worker, @math{F@sub{ini}} is the number of file
+descriptors in use at program startup, and @math{F@sub{res}} is the
+number of reserved file descriptors.
+
+The value of @math{F@sub{ini}} is computed automatically and comprises
+the three standard I/O descriptors and any descriptors opened by
+@command{pound} for listeners, watchers, etc. Notice, that at startup
+@command{pound} will close all inherited file descriptors above 2. If,
+for some reson, you need to keep them, use the @option{-Wno-close-extra-fds}
+option.
+
+The value of @math{F@sub{wrk}} is normally 2 (two descriptors
+necessary for I/O). Initial value of @math{F@sub{res}} is 3. After
+parsing the configuration file, @command{pound} may increase it (this
+happens, e.g. if watchers are used).
+
+Both values may need a correction in complex configurations, in
+particular if they involve Lua functions that open files or network
+connections (@pxref{Lua}). Such a correction is done using the
+@code{ReserveFD} configuration setting.
+@end deffn
+
+@deffn {Global directive} ReserveFD [@option{-worker}] @var{n}
+Increases default number of @dfn{reserved descriptors} by @var{n}.
+
+Used without options, this statement increases the number of
+descriptors reseved globally (see @math{F@sub{res}} above). If given
+the @option{-worker} option, it increases the number of descriptors
+reserved per worker (@math{F@sub{wrk}}). 
 @end deffn
 
 @node Proxy Tuning
@@ -7289,8 +7355,8 @@ poundctl disable /-/1
 
 @deffn {poundctl} core
 Display core statistics.  By default, it includes: server time,
-@command{pound} daemon version, uptime, and PID, and worker thread
-statistics.
+@command{pound} daemon version, uptime, and PID, worker thread,
+and connection queue statistics.
 @end deffn
 
 @deffn {poundctl} list /@var{L}/@var{S}/@var{B}

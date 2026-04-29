@@ -799,6 +799,7 @@ parse_acl (ACL *acl)
 static int
 get_file_option (int *opt, char const **filename, int fwd)
 {
+  static int watch_seen = 0;
   static struct config_option optab[] = {
     { "forwarded", OPT_FWD },
     { "file", OPT_FILE, 1 },
@@ -819,6 +820,11 @@ get_file_option (int *opt, char const **filename, int fwd)
       if (n == -1)
 	break;
       *opt |= n;
+    }
+  if ((*opt & OPT_WATCH) && !watch_seen)
+    {
+      num_reserved_fds++;
+      watch_seen = 1;
     }
   return CFGPARSER_OK;
 }
@@ -5754,6 +5760,48 @@ parse_resolver (void *call_data, void *section_data)
   locus_range_unref (&range);
   return rc;
 }
+
+static int
+increase_reserved_fds (void *call_data, void *section_data)
+{
+  unsigned n;
+  int rc;
+  int per_watcher;
+  char const *arg;
+
+  static struct config_option optab[] = {
+    { "watcher", 1 },
+    { NULL }
+  };
+
+  if (gettok_option (optab, &per_watcher, &arg) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
+  rc = cfg_assign_unsigned (&n, section_data);
+  if (rc != CFGPARSER_OK)
+    return rc;
+
+  if (per_watcher == 1)
+    {
+      if (INT_MAX - per_worker_fds < n)
+	{
+	  conf_error ("%s", "value out of range");
+	  return CFGPARSER_FAIL;
+	}
+      per_worker_fds += n;
+    }
+  else
+    {
+      if (INT_MAX - num_reserved_fds < n)
+	{
+	  conf_error ("%s", "value out of range");
+	  return CFGPARSER_FAIL;
+	}
+      num_reserved_fds += n;
+    }
+
+  return CFGPARSER_OK;
+}
 
 static CFGPARSER_TABLE top_level_parsetab[] = {
   {
@@ -5811,6 +5859,14 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "WorkerStackSize",
     .parser = cfg_assign_size,
     .data = &worker_stack_size
+  },
+  {
+    .name = "ConnectionQueueSize",
+    .parser = pound_http_set_qsize
+  },
+  {
+    .name = "ReserveFD",
+    .parser = increase_reserved_fds
   },
   {
     .name = "Grace",
@@ -6455,7 +6511,12 @@ static struct pound_feature feature[] = {
   [FEATURE_WARN_DEPRECATED] = {
     .name = "warn-deprecated",
     .descr = "warn if deprecated configuration statements are used (default)",
-    .enabled = F_DFL,
+    .enabled = F_ON,
+  },
+  [FEATURE_CLOSE_EXTRA_FDS] = {
+    .name = "close-extra-fds",
+    .descr = "close file descriptors greater than 2 at startup (default)",
+    .enabled = F_ON
   },
   { NULL }
 };
@@ -6644,6 +6705,9 @@ config_parse (int argc, char **argv)
       logmsg (LOG_ERR, "unknown extra arguments (%s...)", argv[optind]);
       exit (1);
     }
+
+  if (feature_is_set (FEATURE_CLOSE_EXTRA_FDS))
+    close_fds_above (2);
 
   if (parse_config_file (conf_name, stderr_option))
     exit (1);

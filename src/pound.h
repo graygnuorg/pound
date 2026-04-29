@@ -1204,14 +1204,18 @@ struct addrinfo *get_remote_ip (POUND_HTTP *phttp, int forwarded,
 				struct addrinfo **pres);
 struct timespec pound_uptime (void);
 
+int pound_http_set_qsize (void *call_data, void *section_data);
+
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
 /* get a request from the queue */
 POUND_HTTP *pound_http_dequeue (void);
 /* Free the argument */
 void pound_http_destroy (POUND_HTTP *arg);
-/* get the current queue length */
-int get_thr_qlen (void);
+
+/* get the current queue statistrics */
+int pound_http_queue_stat (int *len, int *cap);
+
 /* Decrement number of active threads. */
 void active_threads_decr (void);
 
@@ -1490,7 +1494,7 @@ int is_combinable_header (struct http_header *hdr);
 
 TBF *tbf_alloc (uint64_t rate, unsigned burst);
 int tbf_eval (TBF *env, char const *keyid);
-
+
 #if ENABLE_LUA
 static inline void phttp_lua_stash_reset (POUND_HTTP *p)
 {
@@ -1581,3 +1585,7 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *cond,
   return -1;
 }
 #endif
+
+void close_fds_from (int minfd);
+void close_fds_above (int fd);
+int nopenfd (void);

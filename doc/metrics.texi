@@ -38,8 +38,23 @@ pound_workers@{type="min"@} 5
 @end example
 @end deftypevr
 
-@deftypevr {Metric family} counter pound_queue_len
-Number of connections waiting in the input queue.
+@deftypevr {Metric family} gauge pound_queue
+Connection queue statistics.  Indexed by types:
+
+@table @samp
+@item len
+Current number of connections waiting in the queue.
+
+@item max
+Maximum allowed number of elements (queue capacity).
+@end table
+@end deftypevr
+
+@deftypevr {Metric family} gauge pound_queue_len
+Number of connections waiting in the input queue. This is the same as
+@code{pound_queue@{type="len"@}}, which is recommended to use
+instead. This value is retained for backward compatibility with
+@command{pound} versions 4.19 -- 4.22.
 @end deftypevr
 
 @deftypevr {Metric family} stateset pound_listener_enabled

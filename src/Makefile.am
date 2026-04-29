@@ -68,6 +68,7 @@ libpound_a_SOURCES = \
  capbio.h\
  cctype.c\
  cctype.h\
+ closefrom.c\
  cfgparser.c\
  cfgparser.h\
  json.c\

@@ -252,6 +252,8 @@ static int gen_backend_request_stddev (EXPOSITION *exp, struct metric *metric,
 				 METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_workers (EXPOSITION *exp, struct metric *metric,
 			METRIC_LABELS *pfx, struct json_value *obj);
+static int gen_queue (EXPOSITION *exp, struct metric *metric,
+		      METRIC_LABELS *pfx, struct json_value *obj);
 static int gen_number (EXPOSITION *exp, struct metric *metric,
 		       METRIC_LABELS *pfx, struct json_value *obj);
 
@@ -327,11 +329,22 @@ static struct metric_family uptime_metric_families[] = {
   { NULL }
 };
 
+static struct metric_family queue_metric_families[] = {
+  { "pound_queue",
+    "gauge",
+    NULL,
+    "Connection queue counters.",
+    gen_queue },
+  { NULL }
+};
+
+/* For backward compatibility: */
 static struct metric_family queue_len_metric_families[] = {
   { "pound_queue_len",
-    "counter",
+    "gauge",
     NULL,
-    "Number of connections waiting in queue.",
+    "Number of connections waiting in queue:"
+    " (deprecated, use pound_queue{type=\"len\"}, instead).",
     gen_number },
   { NULL }
 };
@@ -799,6 +812,33 @@ gen_workers (EXPOSITION *exp, struct metric *metric,
 }
 
 static int
+gen_queue (EXPOSITION *exp, struct metric *metric,
+	   METRIC_LABELS *pfx, struct json_value *obj)
+{
+  char *attr[] = { "len", "max", NULL };
+  int i;
+
+  for (i = 0; attr[i]; i++)
+    {
+      struct json_value *val;
+      struct metric_sample *samp;
+
+      if (json_object_get_type (obj, attr[i], json_number, &val))
+	return -1;
+      if ((samp = metric_add_sample (metric, pfx)) == NULL)
+	return -1;
+      if (metric_labels_add (&samp->labels, "type", attr[i]))
+	return -1;
+      samp->number = val->v.n;
+      if (i == 0)
+	/* Backward compatibility with pound 4.19 - 4.22. */
+	exposition_apply_family (exp, NULL, queue_len_metric_families, val);
+    }
+
+  return 0;
+}
+
+static int
 gen_number (EXPOSITION *exp, struct metric *metric,
 	    METRIC_LABELS *pfx, struct json_value *val)
 {
@@ -820,8 +860,8 @@ exposition_fill_core (EXPOSITION *exp, struct json_value *obj)
       exposition_apply_family (exp, NULL, uptime_metric_families, val) ||
       json_object_get_type (core, "workers", json_object, &val) ||
       exposition_apply_family (exp, NULL, workers_metric_families, val) ||
-      json_object_get_type (core, "queue_len", json_number, &val) ||
-      exposition_apply_family (exp, NULL, queue_len_metric_families, val))
+      json_object_get_type (core, "queue", json_object, &val) ||
+      exposition_apply_family (exp, NULL, queue_metric_families, val))
     return -1;
   return 0;
 }

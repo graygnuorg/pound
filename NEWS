@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-04-24
+Pound -- history of user-visible changes. 2026-04-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -8,6 +8,22 @@ on 2022-09-19.  See the README file for details.
 Please send pound bug reports to <gray@gnu.org>
 
 Version 4.22.90 (git)
+
+* File descriptor usage
+
+At startup, pound closes all inherited file descriptors numerically
+greater than 2.  If this is undesirable for some reason, use the
+-Wno-close-extra-fds command line option.
+
+The capacity of the incoming connection queue (used when all workers
+become busy) is computed so as to prevent the program from running out
+of file descriptors.  It can also be set explicitely, using the
+"ConnectionQueueSize" configuration file statement.
+
+* Compilation
+
+The early pthread_cancel probe hack is no longer used.  Consequently, the
+"--disable-pthread-cancel-probe" configure option is gone.
 
 * Tunnels
 

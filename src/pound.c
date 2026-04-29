@@ -21,6 +21,7 @@
 #include "json.h"
 #include "extern.h"
 #include "watcher.h"
+#include <sys/resource.h>
 
 /* common variables */
 char *user;			/* user to run as */
@@ -65,6 +66,15 @@ static pthread_attr_t thread_attr_worker;
 size_t worker_stack_size = DEFAULT_WORKER_THREAD_STACK;
 
 struct timespec start_time;
+
+/*
+ * Number of extra file descriptors that should be available to open.
+ * Two descriptors are needed for controlling pipe. An extra descriptor
+ * is allowed in case openssl needs to open /dev/urandom.
+ */
+int num_reserved_fds = 3;
+/* Number of file descriptors used by a worker. */
+int per_worker_fds = 2;
 
 #ifndef  SOL_TCP
 /* for systems without the definition */
@@ -179,7 +189,46 @@ pound_uptime (void)
 /*
  * work queue stuff
  */
-static POUND_HTTP_HEAD thr_head = SLIST_HEAD_INITIALIZER (thr_head);
+typedef struct
+{
+  POUND_HTTP_HEAD head;
+  int len;
+  int cap;
+} POUND_HTTP_QUEUE;
+
+#define POUND_HTTP_QUEUE_INITIALIZER(q) \
+  { SLIST_HEAD_INITIALIZER ((q).head), 0, 0 }
+
+static int
+pound_http_queue_put (POUND_HTTP_QUEUE *q, POUND_HTTP *h)
+{
+  if (q->len == q->cap)
+    return -1;
+  SLIST_PUSH (&q->head, h, next);
+  q->len++;
+  return 0;
+}
+
+static POUND_HTTP *
+pound_http_queue_get (POUND_HTTP_QUEUE *q)
+{
+  POUND_HTTP *h;
+
+  if (q->len == 0)
+    return NULL;
+  h = SLIST_FIRST (&q->head);
+  SLIST_SHIFT (&q->head, next);
+  q->len--;
+  return h;
+}
+
+static inline int
+pound_http_queue_more (POUND_HTTP_QUEUE *q)
+{
+  return q->len > 0;
+}
+
+static POUND_HTTP_QUEUE inqueue = POUND_HTTP_QUEUE_INITIALIZER (inqueue);
 static pthread_cond_t arg_cond = PTHREAD_COND_INITIALIZER;
 static pthread_cond_t active_cond = PTHREAD_COND_INITIALIZER;
 static pthread_mutex_t arg_mut = PTHREAD_MUTEX_INITIALIZER;
@@ -231,6 +280,41 @@ worker_start (void)
     abend (NULL, "can't create worker thread: %s", strerror (rc));
   worker_count++;
 }
+
+/* Control pipe descriptor is used to unblock accepting new connections. */
+static int ctlfd;
+
+/*
+ * States of the dispatcher thread.
+ */
+enum
+  {
+    DSP_ACCEPT,  /* Accept new connections. */
+    DSP_BLOCK,   /* Disallow new connections. */
+    DSP_STOP     /* Thread is being stopped. */
+  };
+
+/* Instruct dispatcher thread to switch to state C. */
+static void
+dispatch_command (char c)
+{
+  switch (write (ctlfd, &c, 1))
+    {
+    case 0:
+      logmsg (LOG_ERR, "write on control pipe returned 0");
+      break;
+
+    case -1:
+      logmsg (LOG_ERR, "write on control pipe: %s", strerror (errno));
+      break;
+    }
+}
+
+int
+pound_http_set_qsize (void *call_data, void *section_data)
+{
+  return cfg_assign_int_range (&inqueue.cap, 0, INT_MAX);
+}
 
 /*
  * add a request to the queue
@@ -239,6 +323,7 @@ int
 pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen)
 {
   POUND_HTTP *res;
+  int rc;
 
   if ((res = calloc (1, sizeof (res[0]) + lstn->linebufsize)) == NULL)
     {
@@ -269,15 +354,22 @@ pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t sal
    * filled with zeros.  Revise this if submatch_queue stuff changes.
    */
 
+  rc = 0;
   pthread_mutex_lock (&arg_mut);
-  SLIST_PUSH (&thr_head, res, next);
-  if (worker_count < worker_max_count && worker_count == active_threads)
+  if (pound_http_queue_put (&inqueue, res))
     {
-      worker_start ();
+      pound_http_destroy (res);
+      // FIXME: Send 503 response instead?
+      rc = -1;
     }
-  pthread_cond_signal (&arg_cond);
+  else
+    {
+      if (worker_count < worker_max_count && worker_count == active_threads)
+	worker_start ();
+      pthread_cond_signal (&arg_cond);
+    }
   pthread_mutex_unlock (&arg_mut);
-  return 0;
+  return rc;
 }
 
 /*
@@ -298,7 +390,7 @@ pound_http_dequeue (void)
    * Wait until something becomes available in the queue.  Spurious wakeups
    * from pthread_cond_wait can occur, hence the need for a loop.
    */
-  while (SLIST_EMPTY (&thr_head))
+  while ((res = pound_http_queue_get (&inqueue)) == NULL)
     {
       int rc;
 
@@ -331,10 +423,13 @@ pound_http_dequeue (void)
 	}
     }
 
-  /* Dequeue the head element */
-  res = SLIST_FIRST (&thr_head);
-  SLIST_SHIFT (&thr_head, next);
-  if (!SLIST_EMPTY (&thr_head))
+  if (inqueue.len == inqueue.cap - 1)
+    {
+      logmsg (LOG_NOTICE, "incoming connections unblocked");
+      dispatch_command (DSP_ACCEPT);
+    }
+
+  if (pound_http_queue_more (&inqueue))
     /*
      * If there's still more in the queue, signal other threads, so they
      * can have their share.
@@ -349,6 +444,15 @@ pound_http_dequeue (void)
  end:
   pthread_mutex_unlock (&arg_mut);
   return res;
+}
+
+static void
+pound_http_drain_queue (void)
+{
+  pthread_mutex_lock (&arg_mut);
+  while (pound_http_queue_more (&inqueue))
+    pound_http_destroy (pound_http_queue_get (&inqueue));
+  pthread_mutex_unlock (&arg_mut);
 }
 
 void
@@ -390,17 +494,16 @@ pound_http_destroy (POUND_HTTP *arg)
 }
 
 /*
- * get the current queue length
+ * get the current queue statistics
  */
 int
-get_thr_qlen (void)
+pound_http_queue_stat (int *len, int *cap)
 {
   int res = 0;
-  POUND_HTTP *tap;
 
   pthread_mutex_lock (&arg_mut);
-  SLIST_FOREACH (tap, &thr_head, next)
-    res++;
+  *len = inqueue.len;
+  *cap = inqueue.cap;
   pthread_mutex_unlock (&arg_mut);
   return res;
 }
@@ -459,18 +562,44 @@ thr_dispatch (void *unused)
   int i;
   LISTENER *lstn;
   struct pollfd *polls;
+  int p[2];
+  int nfd = n_listeners + 1;
+  int state = DSP_ACCEPT;
+#define TOGGLE_FD()				\
+  do						\
+    {						\
+      int i;					\
+      for (i = 1; i <= n_listeners; i++)	\
+	polls[i].fd = - polls[i].fd;		\
+    }						\
+  while (0)
+#define SET_STATE(c)				\
+  do						\
+    {						\
+      TOGGLE_FD ();				\
+      state = c;				\
+    }						\
+  while (0)
+
+
+  if (pipe (p))
+    abend (NULL, "pipe: %s", strerror (errno));
+
+  ctlfd = p[1];
 
   /* alloc the poll structures */
-  polls = xcalloc (n_listeners, sizeof (struct pollfd));
+  polls = xcalloc (nfd, sizeof (struct pollfd));
+  polls[0].fd = p[0];
+  polls[0].events = POLLIN;
 
-  i = 0;
+  i = 1;
   SLIST_FOREACH (lstn, &listeners, next)
     polls[i++].fd = lstn->sock;
 
   pthread_cleanup_push (listener_cleanup, NULL);
-  for (;;)
+  while (state != DSP_STOP)
     {
-      i = 0;
+      i = 1;
       SLIST_FOREACH (lstn, &listeners, next)
 	{
 	  polls[i].events = POLLIN | POLLPRI;
@@ -478,13 +607,44 @@ thr_dispatch (void *unused)
 	  i++;
 	}
 
-      if (poll (polls, n_listeners, -1) < 0)
+      if (poll (polls, nfd, -1) < 0)
 	{
 	  logmsg (LOG_WARNING, "poll: %s", strerror (errno));
 	}
+      else if (polls[0].revents & POLLIN)
+	{
+	  char c;
+	  switch (read (polls[0].fd, &c, 1))
+	    {
+	    case 0:
+	      logmsg (LOG_ERR, "EOF on control pipe");
+	      break;
+
+	    case -1:
+	      logmsg (LOG_ERR, "control pipe: %s", strerror (errno));
+	      break;
+
+	    case 1:
+	      switch (c)
+		{
+		case DSP_ACCEPT:
+		case DSP_BLOCK:
+		  if (c != state)
+		    TOGGLE_FD ();
+		  break;
+
+		case DSP_STOP:
+		  if (c != state && state != DSP_BLOCK)
+		    TOGGLE_FD ();
+		  pound_http_drain_queue ();
+		}
+	      state = c;
+	      break;
+	    }
+	}
       else
 	{
-	  i = 0;
+	  i = 1;
 	  SLIST_FOREACH (lstn, &listeners, next)
 	    {
 	      if (polls[i].revents & (POLLIN | POLLPRI))
@@ -512,7 +672,17 @@ thr_dispatch (void *unused)
 
 		      if (pound_http_enqueue (clnt, lstn,
 					      (struct sockaddr *) &clnt_addr,
-					      clnt_length))
+					      clnt_length) == 0)
+			{
+			  if (inqueue.len == inqueue.cap)
+			    {
+			      logmsg (LOG_NOTICE,
+				      "connection queue is full;"
+				      " incoming connections blocked");
+			      SET_STATE (DSP_BLOCK);
+			    }
+			}
+		      else
 			close (clnt);
 		    }
 		}
@@ -521,6 +691,7 @@ thr_dispatch (void *unused)
 	}
     }
   pthread_cleanup_pop (1);
+  return NULL;
 }
 
 struct file_location
@@ -654,44 +825,6 @@ cleanup (void)
     }
 }
 
-#if EARLY_PTHREAD_CANCEL_PROBE
-/*
- * In GNU libc, a call to pthread_cancel involves loading the libgcc_s.so.1
- * shared library.  If pound is running in a chroot, this fails with the
- * diagnostics
- *
- *    libgcc_s.so.1 must be installed for pthread_cancel to work
- *
- * after which the program aborts.  That means that normal pound shutdown
- * sequence is not performed properly.  To avoid this, the following kludge
- * is implemented: a dummy thread is created and immediately cancelled before
- * doing chroot.  This should load libgcc_s.so.1 early, so that it remains
- * loaded after chroot.
- *
- * In case other libc flavours exhibit similar behaviour, this hack can
- * be enabled at compile time by giving the --enable-pthread-cancel-probe
- * option to configure.
- */
-static void *
-thr_cancel (void *dummy)
-{
-  pause ();
-  return NULL;
-}
-
-static void
-probe_pthread_cancel (void)
-{
-  pthread_t t;
-  void *p;
-  pthread_create (&t, NULL, thr_cancel, NULL);
-  pthread_cancel (t);
-  pthread_join (t, &p);
-}
-#else
-# define probe_pthread_cancel()
-#endif
-
 struct signal_handler
 {
   int signo;
@@ -731,12 +864,6 @@ server (void)
 
       /* Make sure openssl opens /dev/urandom before the chroot. */
       RAND_bytes (&random, 1);
-
-      /*
-       * Give libc a chance to load any libraries necessary for pthread_cancel
-       * to work.  See the comment above.
-       */
-      probe_pthread_cancel ();
 
       if (chroot (root_jail))
 	abend (NULL, "chroot: %s", strerror (errno));
@@ -794,7 +921,7 @@ server (void)
   logmsg (LOG_NOTICE, "shutting down...");
 
   /* Stop main dispatcher thread */
-  pthread_cancel (thr);
+  dispatch_command (DSP_STOP);
   pthread_join (thr, &res);
 
   switch (i)
@@ -1114,6 +1241,78 @@ listener_init (LISTENER *lst, uid_t user_id, gid_t group_id)
 	   strerror (errno));
 }
 
+/*
+ * Adjust ConnectionQueueSize and, if necessary WorkerMaxCount, to match
+ * the actual limit on the number of open file descriptors.
+ *
+ * Each worker thread requires two fds (cliend and backend). The connection
+ * queue size is thus limited by the number of available free file descriptors
+ * minus twice WorkerMaxCount minus number of fds opened at startup, minus
+ * number of fds to keep available for additional purposes. The latter number,
+ * num_reserved_fds, is initially set to 3, because two descriptors are
+ * needed for the control pipe and one more is reserved for openssl internals.
+ * It is incremented by 1 if any "-filewait" conditions are used (the watcher
+ * thread will need to open the file to process it, if it changes).
+ */
+static void
+fd_adjust_settings (void)
+{
+  struct rlimit rlim;
+  unsigned maxcap;
+  int max_workers;
+
+  num_reserved_fds += nopenfd ();
+
+  if (getrlimit (RLIMIT_NOFILE, &rlim))
+    abend (NULL,
+	   "can't determine maximum number of file descriptors: %s",
+	   strerror (errno));
+
+  if (rlim.rlim_cur <= num_reserved_fds + 1)
+    abend (NULL,
+	   "not enough file descriptors or ReserveFD value is set too high");
+
+  /*
+   * Compute maximum allowed number of worker threads, assuming 1 element
+   * connection queue.
+   */
+  max_workers = (rlim.rlim_cur - num_reserved_fds - 1) / per_worker_fds;
+
+  /* Adjust worker counts if necessary. */
+  if (worker_max_count > max_workers)
+    {
+      if (max_workers == 0)
+	abend (NULL,
+	     "not enough file descriptors or ReserveFD value is set too high");
+
+      worker_max_count = max_workers;
+      logmsg (LOG_NOTICE,
+	      "WorkerMaxCount adjusted to %u", worker_max_count);
+      if (worker_min_count > worker_max_count)
+	{
+	  worker_min_count = (worker_max_count + 1) / 2;
+	  logmsg (LOG_NOTICE,
+		  "WorkerMinCount adjusted to %u", worker_min_count);
+	}
+    }
+
+  /* Compute maximum connection queue capacity. */
+  maxcap = rlim.rlim_cur -
+    (worker_max_count * per_worker_fds + num_reserved_fds);
+
+  /* Adjust actual capacity. */
+  if (inqueue.cap == 0)
+    {
+      inqueue.cap = maxcap;
+    }
+  else if (maxcap < inqueue.cap)
+    {
+      inqueue.cap = maxcap;
+      logmsg (LOG_NOTICE,
+	      "ConnectionQueueSize adjusted to %u", maxcap);
+    }
+}
+
 int
 main (const int argc, char **argv)
 {
@@ -1216,26 +1415,13 @@ main (const int argc, char **argv)
       n_listeners++;
     }
 
+  fd_adjust_settings ();
+
   print_log = 0;
   if (daemonize)
     detach ();
 
   pidfile_create ();
-
-  /* chroot preparations */
-  if (root_jail)
-    {
-      unsigned char random;
-
-      /* Make sure openssl opens /dev/urandom before the chroot. */
-      RAND_bytes (&random, 1);
-
-      /*
-       * Give libc a chance to load any libraries necessary for pthread_cancel
-       * to work.  See the comment above.
-       */
-      probe_pthread_cancel ();
-    }
 
   if (enable_supervisor && daemonize)
     supervisor ();

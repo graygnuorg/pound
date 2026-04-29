@@ -62,11 +62,15 @@ extern SERVICE_HEAD services;	/* global services (if any) */
 extern pthread_mutexattr_t mutex_attr_recursive;
 extern pthread_attr_t thread_attr_detached;
 
+extern int num_reserved_fds;
+extern int per_worker_fds;
+
 enum
   {
     FEATURE_DNS,
     FEATURE_INCLUDE_DIR,
-    FEATURE_WARN_DEPRECATED
+    FEATURE_WARN_DEPRECATED,
+    FEATURE_CLOSE_EXTRA_FDS
   };
 
 int feature_is_set (int f);

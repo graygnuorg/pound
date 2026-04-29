@@ -33,6 +33,10 @@ Content-Type: application/json
 \{
   "kind": "core",
   "pid": \d+,
+  "queue": \{
+    "len": 0,
+    "max": \d+
+  \},
   "queue_len": 0,
   "timestamp": "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}",
   "uptime": \d+,

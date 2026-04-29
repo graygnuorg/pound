@@ -140,23 +140,6 @@ AC_CHECK_LIB([nsl], [gethostbyaddr])
 AC_CHECK_LIB([socket], [socket])
 AC_CHECK_LIB([resolv], [hstrerror])
 
-AC_ARG_ENABLE([pthread-cancel-probe],
- [AS_HELP_STRING([--enable-pthread-cancel-probe],
-		 [enable early probe of the pthread_cancel function])],
-  [case ${enableval} in
-   yes) early_pthread_cancel_probe=1;;
-   no)  early_pthread_cancel_probe=0;;
-   *)   early_pthread_cancel_probe=0;;
-   esac],
-  [case $host_os in
-   *-gnu|*-gnulibc1|*-gnueabi|*-gnueabihf)
-	  early_pthread_cancel_probe=1;;
-   *)     early_pthread_cancel_probe=0;;
-   esac])
-
-AC_DEFINE_UNQUOTED([EARLY_PTHREAD_CANCEL_PROBE],[$early_pthread_cancel_probe],
- [Define to try pthread_cancel before chroot, to force loading necessary libraries])
-
 AC_CHECK_LIB([crypto],[BIO_new],[],
 	     [AC_MSG_FAILURE([Missing OpenSSL (-lcrypto) - aborted],[1])])
 AC_CHECK_LIB([ssl],[SSL_CTX_new],[],
@@ -194,6 +177,9 @@ if test $status_lua != no; then
    [status_lua=no])
 fi
 AM_CONDITIONAL([COND_LUA], [test $status_lua = yes])
+
+# Determine how to mass-close fds equal to or greater than the given one.
+AX_CLOSEFROM
 
 # **********************
 # Event monitoring
@@ -284,7 +270,6 @@ Pound configuration parameters:
 Buffer size ................................... $bufsize
 Regular expressions ........................... POSIX$status_pcre
 Memory allocator .............................. $memory_allocator
-Early pthread_cancel probe .................... $status_pthread_cancel_probe
 Dynamic backends .............................. $status_dynamic_backends
 Test dynamic backends ......................... $status_dns_tests
 Filesystem event monitoring ................... $status_fsevmon

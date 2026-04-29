@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 11, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "April 29, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -211,27 +211,34 @@ of the normal backends fail.
 More backend groups can be added using dynamic backends, discussed
 below.
 .SH WORKER MODEL
-Each incoming request is processed by a specific \fIworker\fR, i.e. a
-thread in the running program.  The number of running workers is
+Each incoming connection is assigned to a specific \fIworker\fR, i.e. a
+thread in the running program.  This worker processes all requests
+that arrive via that connection.  The number of running workers is
 controlled by three configuration parameters.  \fBWorkerMinCount\fR
 defines the minimum number of workers that should always be running
 (5, by default). Another parameter, \fBWorkerMaxCount\fR sets the
 upper limit on the number of running workers (it defaults to 128).
 .PP
 At each given moment, a worker can be in one of two states: \fIidle\fR
-or \fIactive\fR (processing a request).  If an incoming request
+or \fIactive\fR (handling a connection).  If an incoming connection 
 arrives when all running workers are active, and total number of
-workers is less than \fBWorkerMaxCount\fR, a new thread is started and
-the new request is handed to it.  If the number of active workers has
-already reached maximum, the new request is added to the \fIrequest
+workers is less than \fBWorkerMaxCount\fR, a new worker is started and
+the new connection is handed to it.  If the number of active workers has
+already reached maximum, the new connection is added to the \fIconnection
 queue\fR, where it will wait for a worker to become available to
-process it.
+process it. If the queue becomes full as well, the program stops
+accepting new connections until at least one worker becomes available again.
 .PP
 The third parameter, \fBWorkerIdleTimeout\fR, specifies maximum time
 a thread is allowed to spend in the \fIidle\fR state.  If a worker
 remains idle longer than that and total number of workers is greater
 than the allotted minimum (\fBWorkerMinCount\fR), the idle worker is
 terminated.
+.PP
+The capacity of the connection queue is computed so as to allow to
+accept as many connection requests as is permitted by the current
+system limit on the open files.  It can also be set using the
+\fBConnectionQueueSize\fR configuration directive.
 .SH OPTIONS
 The following command line options are available:
 .TP
@@ -395,6 +402,14 @@ The \fBBalancer\fR statement in the global scope applies to all
 \fBService\fR directives that don't contain \fBBalancer\fR
 definitions of their own.
 .TP
+\fBConnectionQueueSize\fR "\fIN\fR"
+Set the capacity of the incoming connection queue.
+.IP
+The default value is computed as a function of \fIWorkerMaxCount\fR
+and the system limit on open file descriptors.  See the description in
+.B "WORKER MODEL" ,
+and that of the \fBReserveFD\fR statement, below.
+.TP
 \fBControl\fR "\fIpathname\fR"
 Set the control socket path.
 See the
@@ -466,6 +481,13 @@ compile-time support.  The selected regular expression type remains in
 effect until next
 .B RegexType
 statement or end of the configuration file, whichever occurs first.
+.TP
+\fBReserveFD\fR [\fB\-worker\fR] \fIN\fR
+Reserve \fIN\fR additional file descriptors for the purpose of
+computing the capacity of the incoming connection queue.  If the
+\fB\-worker\fR option is given, increases number of file descriptors
+per worker thread (default value: 2).  Otherwise, increases number of
+reserved global descriptors (default value: 3).
 .TP
 \fBSupervisor\fR \fIbool\fR
 When running in daemon mode, start a \fIsupervisor\fR process first.

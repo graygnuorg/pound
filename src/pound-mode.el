@@ -227,6 +227,7 @@
     "WorkerMaxCount"
     "WorkerMinCount"
     "WorkerStackSize"
+    "ConnectionQueueSize"
     "xHTTP"
 ))
 

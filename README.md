@@ -174,22 +174,6 @@ configuration options:
   `libpcre`, use `--enable-pcre=1`.  To disable `pcre` support,
   use `--disable-pcre`.
 
-* `--enable-pthread-cancel-probe` or `--disable-pthread-cancel-probe`
-
-  __Pound__ calls the `pthread_cancel` function as part of its shutdown
-  sequence.  In GNU libc, this function tries to load shared library
-  `libgcc_s.so.1`.  It will fail to do so, if the program is running in
-  chroot (the `RootJail` statement is given), unless the library has
-  previously been copied to the chroot directory.  To avoid this, __pound__
-  will do a temptative call to `pthread_cancel` early, before chrooting,
-  so that the necessary library will be loaded and remain available after
-  `chroot`.  To determine whether to do this _pthread_cancel probe_ hack,
-  `configure` checks if the program is going to be linked with GNU libc.
-
-  These two options allow you to forcefully enable or disable this probe.
-  For instance, you may wish to enable it, if another _libc_ implementation
-  exhibits a similar behavior.
-
 * `--with-maxbuf=`*n*
 
   Sets the value of `MAXBUF` parameter - the size of a generic buffer

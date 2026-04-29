@@ -2065,6 +2065,28 @@ listener_serialize (LISTENER *lstn)
 }
 
 static struct json_value *
+pound_queue_serialize (struct json_value *parent)
+{
+  struct json_value *obj;
+  if ((obj = json_new_object ()) != NULL)
+    {
+      int len, cap;
+      pound_http_queue_stat (&len, &cap);
+
+      if (json_object_set (obj, "len", json_new_integer (len))
+	  || json_object_set (obj, "max", json_new_integer (cap))
+	  /* The following is for backward compatibility with pound
+	     versions 4.5 - 4.22 */
+	  || json_object_set (parent, "queue_len", json_new_integer (len)))
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
+  return obj;
+}
+
+static struct json_value *
 pound_core_serialize (void)
 {
   struct json_value *obj;
@@ -2079,7 +2101,7 @@ pound_core_serialize (void)
 	|| json_object_set (obj, "pid", json_new_integer (getpid ()))
 	|| json_object_set (obj, "timestamp", timespec_serialize (&ts))
 	|| json_object_set (obj, "uptime", duration_serialize (&uptime))
-	|| json_object_set (obj, "queue_len", json_new_integer (get_thr_qlen ()))
+	|| json_object_set (obj, "queue", pound_queue_serialize (obj))
 	|| json_object_set (obj, "workers", workers_serialize ());
       if (err)
 	{
