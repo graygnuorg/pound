@@ -40,8 +40,9 @@ local constant = @{@}
 function constant.declare(t)
    return setmetatable(t, @{
 	 __index = function (table, key)
-	    if t[key] then
-	       return t[key]
+            local v = rawget(t, key)
+	    if v ~= nil then
+	       return v
 	    else
 	       error("No such constant: "..tostring(key))
 	    end
