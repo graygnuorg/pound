@@ -405,9 +405,13 @@
    (list "^[ \t]*\\(Rewrite\\)[ \t]+\\(request\\|response\\)\\>"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
-   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)\\([ \t]+\\(and\\|or\\)\\)?\\>"
+   ;; Note: making second subexpression optional doesn't work properly for
+   ;; some reason.
+   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)\\(?:[ \t]+\\(and\\|or\\)\\)"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
+   (list "^[ \t]*\\(\\(?:not[ \t]+\\)*Match\\)"
+	 '(1 font-lock-keyword-face))
 
    ;; Sections
    (list (concat "^[ \t]*"
