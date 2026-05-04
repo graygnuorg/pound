@@ -6380,15 +6380,14 @@ http_process_request (POUND_HTTP *phttp)
    * check that the requested URL still fits the old back-end (if
    * any)
    */
-  if ((phttp->svc = get_service (phttp)) == NULL)
+  if ((res = select_service (phttp)) != HTTP_STATUS_OK)
     {
-      phttp_log (phttp, PHTTP_LOG_DFL,
-		 HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
+      phttp_log (phttp, PHTTP_LOG_DFL, res, 0,
 		 "no suitable service found");
-      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+      return res;
     }
 
-  if ((res = select_backend (phttp)) != 0)
+  if ((res = select_backend (phttp)) != HTTP_STATUS_OK)
     return res;
 
   /*
@@ -6433,15 +6432,16 @@ http_process_request (POUND_HTTP *phttp)
 
 	      if (!phttp->be)
 		{
-		  if (!phttp->svc &&
-		      (phttp->svc = get_service (phttp)) == NULL)
+		  if (!phttp->svc)
 		    {
-		      phttp_log (phttp, PHTTP_LOG_DFL,
-				 HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
-				 "no suitable service found");
-		      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+		      if (select_service (phttp) != HTTP_STATUS_OK)
+			{
+			  phttp_log (phttp, PHTTP_LOG_DFL,
+				     HTTP_STATUS_SERVICE_UNAVAILABLE, 0,
+				     "no suitable service found");
+			  return HTTP_STATUS_SERVICE_UNAVAILABLE;
+			}
 		    }
-
 		  if ((res = select_backend (phttp)) != 0)
 		    return res;
 		}

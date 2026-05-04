@@ -519,6 +519,7 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
  *
  *  0 request doesn't match or an error occurred;
  *  1 request matches.
+ * -1 error
  */
 static int
 match_service (SERVICE *svc, POUND_HTTP *phttp)
@@ -532,36 +533,50 @@ match_service (SERVICE *svc, POUND_HTTP *phttp)
   phttp->svc = svc;
   rc = match_cond (&svc->cond, phttp, &phttp->request);
   phttp->svc = NULL;
-  return rc == 1;
+  return rc;
 }
 
 /*
- * Find the right service for a request
+ * Find the right service for a request and store it in phttp->svc.
+ * Return internal HTTP status code.
  */
-SERVICE *
-get_service (POUND_HTTP *phttp)
+int
+select_service (POUND_HTTP *phttp)
 {
   SERVICE *svc;
+  int rc = 0;
 
   SLIST_FOREACH (svc, &phttp->lstn->services, next)
     {
       if (svc->disabled)
 	continue;
-      if (match_service (svc, phttp))
-	return svc;
+      if ((rc = match_service (svc, phttp)) != 0)
+	break;
     }
-
-  /* try global services */
-  SLIST_FOREACH (svc, &services, next)
+  if (rc == 0)
     {
-      if (svc->disabled)
-	continue;
-      if (match_service (svc, phttp))
-	return svc;
+      /* try global services */
+      SLIST_FOREACH (svc, &services, next)
+	{
+	  if (svc->disabled)
+	    continue;
+	  if ((rc = match_service (svc, phttp)) != 0)
+	    break;
+	}
     }
 
-  /* nothing matched */
-  return NULL;
+  switch (rc)
+    {
+    case -1:
+      return HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+    case 0:
+      return HTTP_STATUS_SERVICE_UNAVAILABLE;
+    }
+
+  phttp->svc = svc;
+
+  return HTTP_STATUS_OK;
 }
 
 /*

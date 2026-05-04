@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-04-29
+Pound -- history of user-visible changes. 2026-05-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -8,6 +8,22 @@ on 2022-09-19.  See the README file for details.
 Please send pound bug reports to <gray@gnu.org>
 
 Version 4.22.90 (git)
+
+* Compilation
+
+The early pthread_cancel probe hack is no longer used.  Consequently, the
+"--disable-pthread-cancel-probe" configure option is gone.
+
+* Handling of errors during service selection
+
+In previous versions, if service selection failed due to an error
+(e.g. because a non-existing backreference was used, a run-time error
+in a Lua function occurred or the like), that service was skipped as
+if its conditions returned false, and the next one were tried. This
+could lead to selecting an improper service in case of error.
+
+Starting from this version, any error occurring during service
+selection causes pound to return internal server error (500).
 
 * File descriptor usage
 
@@ -19,11 +35,6 @@ The capacity of the incoming connection queue (used when all workers
 become busy) is computed so as to prevent the program from running out
 of file descriptors.  It can also be set explicitely, using the
 "ConnectionQueueSize" configuration file statement.
-
-* Compilation
-
-The early pthread_cancel probe hack is no longer used.  Consequently, the
-"--disable-pthread-cancel-probe" configure option is gone.
 
 * Tunnels
 

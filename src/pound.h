@@ -1253,7 +1253,7 @@ int backend_serialize_dyninfo (struct json_value *obj, BACKEND *be);
 struct json_value *addrinfo_serialize (struct addrinfo *addr);
 
 /* Find the right service for a request */
-SERVICE *get_service (POUND_HTTP *);
+int select_service (POUND_HTTP *phttp);
 
 /* Find the right back-end for a request */
 BACKEND *get_backend (POUND_HTTP *phttp);
