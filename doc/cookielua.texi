@@ -5,7 +5,7 @@ function _M.get(name)
    -- Return true if string @var{s} begins with the @var{name}
    -- followed by an equals sign.
    function is_name(s)
-      local i,j = s:find(name..'=')
+      local i,j = s:find(name..'=', 1, true)
       if j ~= nil then
          return s:sub(j+1)
       else
