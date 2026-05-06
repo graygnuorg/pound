@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-05-04
+Pound -- history of user-visible changes. 2026-05-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.22.90 (git)
+Version 4.22.91 (git)
 
 * Compilation
 
@@ -18,9 +18,9 @@ The early pthread_cancel probe hack is no longer used.  Consequently, the
 
 In previous versions, if service selection failed due to an error
 (e.g. because a non-existing backreference was used, a run-time error
-in a Lua function occurred or the like), that service was skipped as
-if its conditions returned false, and the next one were tried. This
-could lead to selecting an improper service in case of error.
+in a Lua function occurred, or the like), that service would be skipped 
+as if its conditions returned false, and the next one would be tried. 
+This could lead to selecting an improper service in case of error.
 
 Starting from this version, any error occurring during service
 selection causes pound to return internal server error (500).
