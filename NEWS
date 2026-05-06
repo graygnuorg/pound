@@ -18,8 +18,8 @@ The early pthread_cancel probe hack is no longer used.  Consequently, the
 
 In previous versions, if service selection failed due to an error
 (e.g. because a non-existing backreference was used, a run-time error
-in a Lua function occurred, or the like), that service would be skipped 
-as if its conditions returned false, and the next one would be tried. 
+in a Lua function occurred, or the like), that service would be skipped
+as if its conditions returned false, and the next one would be tried.
 This could lead to selecting an improper service in case of error.
 
 Starting from this version, any error occurring during service
