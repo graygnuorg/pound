@@ -211,9 +211,9 @@ c_memspn (char const *str, int class, size_t len)
 size_t
 c_memrspn (char const *str, int class, size_t len)
 {
-  size_t i = len;
-  while (i > 0 && c_isascii (str[--i]) &&
-	 (cc_tab[(unsigned)str[i]] & class));
+  size_t i;
+  for (i = len; i > 0 && c_isascii (str[i-1]) &&
+	 (cc_tab[(unsigned)str[i-1]] & class); i--);
   return len-i;
 }
 
@@ -230,9 +230,9 @@ c_memcspn (char const *str, int class, size_t len)
 size_t
 c_memrcspn (char const *str, int class, size_t len)
 {
-  size_t i = len;
-  while (i > 0 && c_isascii (str[--i]) &&
-	 !(cc_tab[(unsigned)str[i]] & class));
+  size_t i;
+  for (i = len; i > 0 && c_isascii (str[i-1]) &&
+	 !(cc_tab[(unsigned)str[i-1]] & class); i--);
   return len-i;
 }
 
@@ -241,7 +241,7 @@ c_trimrws (char const *str, size_t len)
 {
   return (len == 0)
     ? 0
-    : len - c_memrspn (str, CCTYPE_BLANK, len) + 1;
+    : len - c_memrspn (str, CCTYPE_BLANK, len);
 }
 
 char *

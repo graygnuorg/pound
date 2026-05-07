@@ -143,6 +143,7 @@ Extending @command{pound} functionality with Lua
 
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
+* Constants::  Providing constants for Lua code.
 * LuaModify::  Changing requests and responses in Lua.
 * Resend::     Resending requests with Lua.
 * Stash::      Sharing data between Lua functions.
@@ -159,6 +160,7 @@ Configuration
 * Syntax::
 * String Expansions::
 * Global directives::
+* Constant::
 * File inclusion::
 * Logging configuration::
 * Management interface::
@@ -197,6 +199,7 @@ ListenHTTP
 * Request Modification::
 * Response Modification::
 * Error response rewriting::
+* Listener constants::
 * Service definitions::
 
 Request Modification
@@ -2381,6 +2384,7 @@ results to the Lua backend.
 @menu
 * LuaLoad::    Loading Lua sources.
 * LuaMatch::   Lua conditionals.
+* Constants::  Providing constants for Lua code.
 * LuaModify::  Changing requests and responses in Lua.
 * Resend::     Resending requests with Lua.
 * Stash::      Sharing data between Lua invocations.
@@ -2583,6 +2587,106 @@ Service
 End
 @end group
 @end example
+
+@node Constants
+@section Providing constants for Lua code
+  In the previous section we have used the @code{bearer.ok} function
+to verify the signature of a JWT token.  The function was invoked from
+a @code{LuaMath} conditional and the shared secret used to verify
+signatures was given to it as an argument:
+
+@example
+  Not LuaMatch "bearer.ok" "@var{secret}"
+@end example
+
+  Keeping security-sensitive data, such as @var{secret}, in the
+configuration file requires tightening the file permissions.
+Depending on the configuration, it can have other security
+implications as well.  All in all, it is better to separate
+security-sensitive data and configuration.
+
+@kwindex Constant
+  @command{Pound} provides a way of doing so: the @code{Constant}
+statement:
+
+@example
+Constant @var{name} -file @var{file}
+@end example
+
+@kwindex %[const]
+  The content of the file @var{file} is read and assigned to the
+constant @var{name}.  The constant can then be used in string
+expansions, using the @code{const} accessor, or can be retrieved
+directly from the Lua code, using the @code{http.const(name)}
+function.
+
+  Returning to our example from the previous section, to separate the
+shared key value from the configuration text, we first store the value
+of key in the file @file{secret.txt}.  For simplicity, let's suppose
+the file is kept in the @command{pound} include directory
+(@pxref{include directory}).
+
+  Then, let's define the constant @code{key} and assign it the value
+of the shared secret from this file.
+
+  Finally, we pass its value to @code{bearer.ok} using the
+@code{const} accessor:
+
+@example
+@group
+Service
+    Constant "key" -file "secret.txt"
+    Not LuaMatch "bearer.ok" "%[const key]"
+    Rewrite response
+        SetHeader "WWW-Authenticate: Bearer realm=\"Restricted access\""
+    End
+    Error 401
+End
+@end group
+@end example
+
+  Yet another way of achieving the same effect would be to modify the
+@code{bearer.ok} function to take the constant name as its second
+argument and retrieving its value using the @code{http:const} method
+(@pxref{lua-http, const}).  This is left as an exercise for the reader.
+
+  The @code{Constant} statement normally reads the file verbatim and
+treats its content as opaque binary data.  It is common, however, to
+keep textual data there and to maintain it using a text editor.  In
+this case you will need to remove the trailing newline character that
+most editors will add to the end of file.  To do so, use the
+@code{-trim} option, like that:
+
+@example
+    Constant "key" -file "secret.txt" -trim
+@end example
+
+  As with other configuration statements, in lieu of @code{-file}, you
+can use @code{-filewatch}, the difference between the two being that
+the latter will automatically update the value of the constant
+whenever the file contents changes.  @xref{File-based Conditions}, for
+a detailed discussion of that.
+
+  Finally, notice that @code{Constant} can appear in several
+configuration scopes, namely: at the top level, inside a
+@code{ListenHTTP} (or @code{ListenHTTPS}), or inside a @code{Service}
+section.  Defining the same constant name inside a deeper scope
+silently overrides any definitions in upper scopes.  For example, if
+you have
+
+@example
+Constant "key" -file "one.txt"
+ListenHTTP
+    Constant "key" -file "another.txt"
+    Service
+        Constant "key" -file "yetanother.txt"
+        LuaMatch "func" "%[const key]"
+    ...
+@end example
+
+@noindent
+then the function @code{func} in the last line will be called with the
+contents of file @file{yetanother.txt} as its argument.
 
 @node LuaModify
 @section Changing requests and responses in Lua
@@ -3224,6 +3328,17 @@ It is equivalent to calling @code{@var{func}(...)}.
 
 This built-in module contains variables and methods describing the
 HTTP request being handled.
+
+@deftypemethod {http} string const name
+Retrieve the value of the configuration constant @var{name}.
+@xref{Constants}, for a detailed discussion of this feature.
+
+Example:
+
+@example
+local s = http:const("key")
+@end example
+@end deftypemethod
 
 @deftypecv {Field} http string rmt_ip
 Request originator IP address.
@@ -3906,6 +4021,7 @@ statements can be overridden from the command line.
 * Syntax::
 * String Expansions::
 * Global directives::
+* Constant::
 * File inclusion::
 * Logging configuration::
 * Management interface::
@@ -4121,13 +4237,34 @@ To insert a literal dollar or percent sign in the string, use
 @end example
 
 @noindent
-where @var{name} denotes a part of the incoming request to access and
-square brackets are part of the construct.  Accessors are interpreted and
-replaced with the value of the corresponding part of the request.
-Some accessors take an argument, which is specified after accessor
-name and is delimited from it by one or more whitespace characters.
+where @var{name} denotes a part of the incoming request or
+configuration setting to access and square brackets are part of the
+construct.  Accessors are interpreted and replaced with the value of
+the corresponding part of the request.  Some accessors take an
+argument, which is specified after accessor name and is delimited from
+it by one or more whitespace characters.
 
 The following accessors are defined:
+
+@anchor{const accessor}
+@deffn {Accessor} const @var{name} [@var{encode}]
+Configuration constant @var{name} (@pxref{Constants}).  Optional
+@var{encode} defines the encoding in which to represent it.  Its
+possible values are:
+
+@table @code
+@kwindex none
+@item none
+Don't encode it.  This is the default if no @var{encode} argument is
+present.
+
+@item url
+Encode the value using percent-encoding (RFC 3986).
+
+@item base64
+Encode the value using base64 encoding (RFC 3548).
+@end table
+@end deffn
 
 @deffn {Accessor} url
 Request URL.
@@ -4357,7 +4494,7 @@ Increases default number of @dfn{reserved descriptors} by @var{n}.
 Used without options, this statement increases the number of
 descriptors reseved globally (see @math{F@sub{res}} above). If given
 the @option{-worker} option, it increases the number of descriptors
-reserved per worker (@math{F@sub{wrk}}). 
+reserved per worker (@math{F@sub{wrk}}).
 @end deffn
 
 @node Proxy Tuning
@@ -4653,6 +4790,45 @@ prefix, which is then prepended to the default value of
 @deffn {Lua directive} CPath "@var{path}"
 Similar to @code{Path} (see above), but modifies @code{package.cpath},
 a variable that controls where Lua looks for shared libraries.
+@end deffn
+
+@node Constant
+@subsection The @code{Constant} statement
+
+The @code{Constant} statement defines a @dfn{configuration constant}
+for use in string expansions and Lua code.  For a detailed description
+of configuration constants and their use, @ref{Constants}, 
+
+@deffn {Global directive} Constant "@var{name}" "@var{val}"
+Define constant @var{name} to have the value @var{val}.
+@end deffn
+
+@deffn {Global directive} Constant "@var{name}" @var{options}
+Define constant @var{name} and assign its value depending on
+@var{options}, as described in the table below:
+
+@table @option
+@kwindex -file
+@item -file "@var{filename}"
+Read the contents of the file @var{filename}, and assign it to the
+constant.  The contents is treated as an opaque binary string.  The file
+is read exactly once, at program startup.
+
+@kwindex -filewatch
+@item -filewatch "@var{filename}"
+Same as @option{-file}, except that the file is monitored for changes
+during the runtime.  Whenever the file changes, the constant will be
+updated, without the need to restart the program.  @xref{File-based
+Conditions}, for a detailed discussion of this feature.
+
+@kwindex -trim
+@item -trim
+Used with one of the above, instructs @command{pound} to treat
+@var{filename} as a plain text file, and remove from its contents all
+trailing whitespace characters, i.e. horizontal tabulation (ASCII 9),
+newline (ASCII 10), vertical tabulation (ASCII 11), form feed (ASCII
+12), carriage return (ASCII 13), and space (ASCII 32).
+@end table
 @end deffn
 
 @node File inclusion
@@ -4995,6 +5171,7 @@ number (0-based) in the configuration file.
 * Request Modification::
 * Response Modification::
 * Error response rewriting::
+* Listener constants::
 * Service definitions::
 @end menu
 
@@ -5998,6 +6175,16 @@ The same statement is available for use within a service (see below).
 The @code{RewriteErrors} setting of a service overrides that of the
 listener.
 @end deffn
+
+@node Listener constants
+@subsection Listener constants
+@kwindex Constant, per-listener
+
+The @code{Constant} statement, as described in @ref{Constant}, can
+appear in @code{ListenHTTP} as well.  If @code{Constant} in listener
+defines the same @var{name} as was defined previously at the top
+level, the new definition overrides the top-level one for all services
+defined in that listener.
 
 @node Service definitions
 @subsection Service definitions
@@ -7152,6 +7339,15 @@ This directive is mandatory.
 
 @node Other Statements
 @subsection Other Statements
+
+@deffn {Service directive} Constant "@var{name}" [@var{options}] ["@var{val}"]
+Defines a per-service @dfn{configuration constant}.  @xref{Constant},
+for a detailed discussion of this statement and its parts, and
+@ref{Constants}, for examples of its use in configuration.
+
+Constants defined on service level override those defined in the
+enclosing listener and on the top-level.
+@end deffn
 
 @deffn {Service directive} Disabled @var{bool}
 If @code{true}, mark this service as disabled.  Disabled services are

@@ -1,0 +1,189 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2022-2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+
+AT_SETUP([Constant])
+AT_KEYWORDS([const])
+
+PT_CHECK([[
+Constant "a" "constant A"
+Constant "b" "constant B"
+ListenHTTP
+	Service
+		SetHeader "X-Const-A: %[const a]"
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-A-base64: %[const a base64]"
+		SetHeader "X-Const-B: %[const b]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		SetHeader "X-Const-B-base64: %[const b base64]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a: constant A
+x-orig-header-x-const-a-url: constant%20A
+x-orig-header-x-const-a-base64: Y29uc3RhbnQgQQ==
+x-orig-header-x-const-b: constant B
+x-orig-header-x-const-b-url: constant%20B
+x-orig-header-x-const-b-base64: Y29uc3RhbnQgQg==
+end
+])
+
+PT_CHECK([[
+Constant "a" "constant A"
+Constant "b" "constant B"
+ListenHTTP
+	Constant "a" "constant Alpha"
+	Constant "b" "constant Beta"
+	Service
+		SetHeader "X-Const-A: %[const a]"
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-A-base64: %[const a base64]"
+		SetHeader "X-Const-B: %[const b]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		SetHeader "X-Const-B-base64: %[const b base64]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a: constant Alpha
+x-orig-header-x-const-a-url: constant%20Alpha
+x-orig-header-x-const-a-base64: Y29uc3RhbnQgQWxwaGE=
+x-orig-header-x-const-b: constant Beta
+x-orig-header-x-const-b-url: constant%20Beta
+x-orig-header-x-const-b-base64: Y29uc3RhbnQgQmV0YQ==
+end
+])
+
+PT_CHECK([[
+Constant "a" "constant A"
+Constant "b" "constant B"
+ListenHTTP
+	Constant "a" "constant Alpha"
+	Constant "b" "constant Beta"
+	Service
+		Constant "a" "constant Aleph"
+		Constant "b" "constant Beth"
+		SetHeader "X-Const-A: %[const a]"
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-A-base64: %[const a base64]"
+		SetHeader "X-Const-B: %[const b]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		SetHeader "X-Const-B-base64: %[const b base64]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a: constant Aleph
+x-orig-header-x-const-a-url: constant%20Aleph
+x-orig-header-x-const-a-base64: Y29uc3RhbnQgQWxlcGg=
+x-orig-header-x-const-b: constant Beth
+x-orig-header-x-const-b-url: constant%20Beth
+x-orig-header-x-const-b-base64: Y29uc3RhbnQgQmV0aA==
+end
+])
+
+AT_CHECK([AT_DATA([a.txt],
+[first line
+])
+AT_DATA([b.txt],
+[second line
+])])
+
+PT_CHECK([[
+Constant "a" -file "a.txt"
+Constant "b" -file "b.txt"
+ListenHTTP
+	Service
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a-url: first%20line%0A
+x-orig-header-x-const-b-url: second%20line%0A
+end
+])
+
+PT_CHECK([[
+Constant "a" -file "a.txt"
+Constant "b" -file "b.txt"
+ListenHTTP
+	Service
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a-url: first%20line%0A
+x-orig-header-x-const-b-url: second%20line%0A
+end
+])
+
+PT_CHECK([[
+Constant "a" -file "a.txt" -trim
+Constant "b" -file "b.txt" -trim
+ListenHTTP
+	Service
+		SetHeader "X-Const-A-url: %[const a url]"
+		SetHeader "X-Const-B-url: %[const b url]"
+		Backend
+		End
+	End
+End
+]],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-orig-header-x-const-a-url: first%20line
+x-orig-header-x-const-b-url: second%20line
+end
+])
+
+AT_CLEANUP

@@ -149,6 +149,7 @@
     "ConfigFile"
     "ConfigText"
     "ConnTO"
+    "Constant"
     "ContentCapture"
     "Control"
     "Daemon"
@@ -192,6 +193,7 @@
     "Priority"
     "Redirect"
     "RegexType"
+    "ReserveFD"
     "Resolve"
     "RetryInterval"
     "RewriteDestination"
@@ -247,6 +249,11 @@
     "-perl"
     "-tag"
     "-decode"))
+
+(defvar pound-constant-flags
+  '("-file"
+    "-filewatch"
+    "-trim"))
 
 (defvar pound-cipher-flags
   '("-ciphersuites"
@@ -346,6 +353,19 @@
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-keyword-face)
 	 '(3 font-lock-builtin-face))
+
+   ;; Constant definitions
+   (list (concat "^[ \t]*\\(Constant\\)[ \t]+"
+		 "\\(\"[^\"]*\"\\)"
+		 "\\(\\(?:[ \t]+" (regexp-opt pound-constant-flags) "\\)*\\)"
+		 "[ \t]+"
+		 "\\(\"[^\"]*\"\\)"
+		 "\\(\\(?:[ \t]+" (regexp-opt pound-constant-flags) "\\)*\\)")
+	 '(1 font-lock-keyword-face)
+	 '(2 font-lock-string-face)
+	 '(3 font-lock-builtin-face)
+	 '(4 font-lock-string-face)
+	 '(5 font-lock-builtin-face))
 
    ;; Keywords
    '("\\<Family\\>"

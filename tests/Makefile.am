@@ -74,6 +74,7 @@ TESTSUITE_AT = \
  chunked.at\
  chunked2.at\
  config.at\
+ const.at\
  ctl-core.at\
  ctl-listener.at\
  ctl-service.at\
@@ -113,6 +114,7 @@ TESTSUITE_AT = \
  logsup.at\
  lstset.at\
  lua-be.at\
+ lua-const.at\
  lua-gcall.at\
  lua-load.at\
  lua-match.at\

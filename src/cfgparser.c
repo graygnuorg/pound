@@ -145,6 +145,19 @@ token_mask_str (TOKENMASK mask, char *buf, size_t size)
 }
 
 int
+kwn_to_tok (struct kwtab *kwt, char const *name, size_t len,
+	    int ci, int *retval)
+{
+  for (; kwt->name; kwt++)
+    if ((ci ? c_strncasecmp : strncmp) (kwt->name, name, len) == 0)
+      {
+	*retval = kwt->tok;
+	return 0;
+      }
+  return -1;
+}
+
+int
 kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval)
 {
   for (; kwt->name; kwt++)
@@ -438,7 +451,6 @@ filename_resolve (const char *filename)
 	return NULL;
       ret = xmalloc (strlen (wd->name) + strlen (filename) + 2);
       strcat (strcat (strcpy (ret, wd->name), "/"), filename);
-      workdir_unref (wd);
     }
   return ret;
 }
@@ -1316,44 +1328,76 @@ cfg_assign_string (void *call_data, void *section_data)
   return CFGPARSER_OK;
 }
 
-int
-cfg_assign_string_from_file (void *call_data, void *section_data)
+static char *
+fslurp (FILE *fp, char const *filename, struct locus_range const *locus,
+	size_t *plen)
 {
   struct stat st;
   char *s;
-  FILE *fp;
-  struct token *tok = gettkn_expect (T_STRING);
-  if (!tok)
-    return CFGPARSER_FAIL;
-  if ((fp = fopen_include (tok->str)) == NULL)
-    {
-      fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
-      return CFGPARSER_FAIL;
-    }
+
   if (fstat (fileno (fp), &st))
     {
-      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (locus, "can't stat %s: %s", filename,
+				 strerror (errno));
+      return NULL;
     }
   if (!S_ISREG (st.st_mode))
     {
-      conf_error ("%s: not a regular file", tok->str);
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (locus, "%s: not a regular file", filename);
+      return NULL;
     }
   if (st.st_size == 0)
     {
-      conf_error ("%s: empty file", tok->str);
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (locus, "%s: empty file", filename);
+      return NULL;
     }
+  if (st.st_size > (size_t)-1)
+    {
+      conf_error_at_locus_range (locus, "%s: file too big", filename);
+      return NULL;
+    }
+
   // FIXME: Check st_size upper bound?
   s = xmalloc (st.st_size + 1);
   if (fread (s, st.st_size, 1, fp) != 1)
     {
-      conf_error ("%s: read error: %s", tok->str, strerror (errno));
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (locus, "%s: read error: %s",
+				 filename, strerror (errno));
+      free (s);
+      return NULL;
     }
   s[st.st_size] = 0;
+  if (plen)
+    *plen = st.st_size;
+  return s;
+}
+
+char *
+slurp (char const *filename, WORKDIR *wd, struct locus_range const *locus,
+       size_t *plen)
+{
+  FILE *fp;
+  char *s;
+
+  if ((fp = fopen_wd (wd, filename)) == NULL)
+    {
+      fopen_error (LOG_ERR, errno, wd, filename, locus);
+      return NULL;
+    }
+  s = fslurp (fp, filename, locus, plen);
   fclose (fp);
+  return s;
+}
+
+int
+cfg_assign_string_from_file (void *call_data, void *section_data)
+{
+  char *s;
+  struct token *tok = gettkn_expect (T_STRING);
+  if (!tok)
+    return CFGPARSER_FAIL;
+  if ((s = slurp (tok->str, get_include_wd (), &tok->locus, NULL)) == NULL)
+    return CFGPARSER_FAIL;
   *(char**)call_data = s;
   return CFGPARSER_OK;
 }

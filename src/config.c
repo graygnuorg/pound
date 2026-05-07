@@ -92,15 +92,6 @@ struct config_option
   int has_arg;
 };
 
-static char const *
-config_option_name (struct config_option const *optab, int code)
-{
-  for (; optab->name; optab++)
-    if (optab->code == code)
-      return optab->name;
-  return NULL;
-}
-
 static struct config_option const *
 config_option_find (struct config_option const *optab, char const *name)
 {
@@ -113,17 +104,19 @@ config_option_find (struct config_option const *optab, char const *name)
 }
 
 static int
-gettok_option (struct config_option const *optab, int *opt, char const **arg)
+gettok_option (struct config_option const *optab,
+	       struct config_option const ** opt, char const **arg)
 {
   struct token *tok;
 
   if ((tok = gettkn_any ()) == NULL)
     {
-      *opt = -1;
+      *opt = NULL;
+      return CFGPARSER_OK;
     }
   else if (tok->type != T_LITERAL || tok->str[0] != '-')
     {
-      *opt = -1;
+      *opt = NULL;
       putback_tkn (tok);
       return CFGPARSER_OK;
     }
@@ -134,7 +127,7 @@ gettok_option (struct config_option const *optab, int *opt, char const **arg)
       return CFGPARSER_FAIL;
     }
 
-  *opt = optab->code;
+  *opt = optab;
   if (optab->has_arg)
     {
       if ((tok = gettkn_expect (T_STRING)) == NULL)
@@ -403,6 +396,232 @@ assign_cert (void *call_data, void *section_data)
     }
   *x509_ptr = cert;
   return CFGPARSER_OK;
+}
+
+#define OPT_FILE  0x1
+#define OPT_WATCH 0x2
+#define OPT_FWD   0x4
+#define OPT_TRIM  0x8
+
+static int
+get_file_option (int *optflags, char **filename, int allow)
+{
+  static int watch_seen = 0;
+  static struct config_option optab[] = {
+    { "forwarded", OPT_FWD },
+    { "file", OPT_FILE, 1 },
+    { "filewatch", OPT_FILE | OPT_WATCH, 1 },
+    { "trim", OPT_TRIM, 0 },
+    { NULL }
+  };
+
+  *optflags = 0;
+  *filename = NULL;
+
+  for (;;)
+    {
+      const char *arg;
+      struct config_option const *opt;
+
+      if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
+	return CFGPARSER_FAIL;
+      if (opt == NULL)
+	break;
+      if (!(allow & opt->code))
+	{
+	  conf_error ("unsupported option: -%s", opt->name);
+	  return CFGPARSER_FAIL;
+	}
+      *optflags |= opt->code;
+      if (opt->code & OPT_FILE)
+	*filename = xstrdup (arg);
+      if ((opt->code & OPT_WATCH) && !watch_seen)
+	{
+	  num_reserved_fds++;
+	  watch_seen = 1;
+	}
+    }
+  return CFGPARSER_OK;
+}
+
+/* String constants */
+typedef struct string_const
+{
+  char *name;
+  struct locus_range locus;
+  STRING *value;
+  int trim;
+  WATCHER *watcher;
+} STRCONST;
+
+#define HT_TYPE STRCONST
+#define HT_NO_HASH_FREE
+#define HT_NO_DELETE
+#define HT_NO_FOREACH
+#include "ht.h"
+
+static STRCONST_HASH *strconst_tab;
+
+static int
+strconst_read (STRCONST *sc, char const *filename, WORKDIR *wd)
+{
+  char *s;
+  size_t n;
+
+  string_unref (sc->value);
+  s = slurp (filename, wd, &sc->locus, &n);
+  if (s == NULL)
+    {
+      sc->value = NULL;
+      return -1;
+    }
+  if (sc->trim)
+    n -= c_memrspn (s, CCTYPE_SPACE, n);
+  sc->value = string_ninit (s, n);
+  free (s);
+  return 0;
+}
+
+static int
+dynstrconst_read (void *obj, char const *filename, WORKDIR *wd)
+{
+  STRCONST *sc = obj;
+  return strconst_read (sc, filename, wd);
+}
+
+static void
+dynstrconst_clear (void *obj)
+{
+  STRCONST *sc = obj;
+  sc->value = string_unref (sc->value);
+}
+
+static int
+strconst_register (STRCONST *sc, char const *filename,
+		   struct locus_range const *loc)
+{
+  sc->watcher = watcher_register (sc, filename, loc,
+				  dynstrconst_read, dynstrconst_clear);
+  return sc->watcher == NULL;
+}
+
+static STRCONST *
+strconst_new (char const *name, struct locus_range const *loc)
+{
+  STRCONST *sc;
+
+  XZALLOC (sc);
+  sc->name = xstrdup (name);
+  locus_range_init (&sc->locus);
+  locus_range_copy (&sc->locus, loc);
+  return sc;
+}
+
+static void
+strconst_free (STRCONST *sc)
+{
+  free (sc->name);
+  locus_range_unref (&sc->locus);
+  string_unref (sc->value);
+  free (sc);
+}
+
+static int
+cfg_parse_strconst (void *call_data, void *section_data)
+{
+  STRCONST_HASH **hashptr = call_data;
+  STRCONST *sc, *old;
+  struct token *tok;
+  int opt;
+  char *filename;
+
+  if ((tok = gettkn_expect (T_STRING)) == NULL)
+    return CFGPARSER_FAIL;
+
+  sc = strconst_new (tok->str, &tok->locus);
+
+  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH|OPT_TRIM)
+      == CFGPARSER_FAIL)
+    {
+      strconst_free (sc);
+      return CFGPARSER_FAIL;
+    }
+
+  sc->trim = !!(opt & OPT_TRIM);
+
+  if (!filename)
+    {
+      if ((tok = gettkn_expect (T_STRING)) == NULL)
+	{
+	  strconst_free (sc);
+	  return CFGPARSER_FAIL;
+	}
+      sc->value = string_init (tok->str);
+    }
+  else
+    {
+      if (opt & OPT_WATCH)
+	{
+	  if (strconst_register (sc, filename, &tok->locus))
+	    {
+	      free (filename);
+	      strconst_free (sc);
+	      return CFGPARSER_FAIL;
+	    }
+	}
+      else if (strconst_read (sc, filename, get_include_wd ()))
+	{
+	  free (filename);
+	  return CFGPARSER_FAIL;
+	}
+
+      free (filename);
+    }
+
+  if (!*hashptr)
+    {
+      *hashptr = STRCONST_HASH_NEW ();
+    }
+
+  if ((old = STRCONST_INSERT (*hashptr, sc)) != NULL)
+    {
+      conf_error_at_locus_range (&sc->locus, "%s",
+				 "warning: constant redefined");
+      conf_error_at_locus_range (&old->locus, "%s",
+				 "This is the place of the previous"
+				 " definition");
+      strconst_free (old);
+    }
+  return CFGPARSER_OK;
+}
+
+STRING *
+strconst_lookup (STRCONST_HASH *hash, char const *name)
+{
+  STRING *ret = NULL;
+  if (hash)
+    {
+      STRCONST key, *sc = NULL;
+      key.name = (char*)name;
+      sc = STRCONST_RETRIEVE (hash, &key);
+      if (sc)
+	{
+	  watcher_lock (sc->watcher);
+	  ret = string_ref (sc->value);
+	  watcher_unlock (sc->watcher);
+	}
+    }
+  return ret;
+}
+
+STRING *
+pound_http_get_strconst (POUND_HTTP *phttp, char const *name)
+{
+  STRING *s;
+  if ((s = strconst_lookup (phttp->svc->sctab, name)) == NULL)
+    if ((s = strconst_lookup (phttp->lstn->sctab, name)) == NULL)
+      s = strconst_lookup (strconst_tab, name);
+  return s;
 }
 
 /*
@@ -792,43 +1011,6 @@ parse_acl (ACL *acl)
   return CFGPARSER_OK;
 }
 
-#define OPT_FILE  0x1
-#define OPT_WATCH 0x2
-#define OPT_FWD   0x4
-
-static int
-get_file_option (int *opt, char const **filename, int fwd)
-{
-  static int watch_seen = 0;
-  static struct config_option optab[] = {
-    { "forwarded", OPT_FWD },
-    { "file", OPT_FILE, 1 },
-    { "filewatch", OPT_FILE | OPT_WATCH, 1 },
-    { NULL }
-  };
-  struct config_option *opptr = fwd ? optab : optab + 1;
-
-  *opt = 0;
-  *filename = NULL;
-
-  for (;;)
-    {
-      int n;
-
-      if (gettok_option (opptr, &n, filename) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-      if (n == -1)
-	break;
-      *opt |= n;
-    }
-  if ((*opt & OPT_WATCH) && !watch_seen)
-    {
-      num_reserved_fds++;
-      watch_seen = 1;
-    }
-  return CFGPARSER_OK;
-}
-
 /*
  * Parse a named ACL.
  * Input is positioned after the "ACL" keyword.
@@ -839,7 +1021,7 @@ parse_named_acl (void *call_data, void *section_data)
   ACL *acl;
   struct token *tok;
   int opt;
-  char const *filename;
+  char *filename;
 
   if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
@@ -853,19 +1035,23 @@ parse_named_acl (void *call_data, void *section_data)
   acl = new_acl (tok->str);
   SLIST_PUSH (&acl_list, acl, next);
 
-  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)
     {
+      int ret = CFGPARSER_OK;
+
       if (opt & OPT_WATCH)
 	{
 	  if (dynacl_register (acl, filename, &tok->locus))
-	    return CFGPARSER_FAIL;
+	    ret = CFGPARSER_FAIL;
 	}
       else if (parse_acl_file (acl, filename))
-	return CFGPARSER_FAIL;
-      return CFGPARSER_OK;
+	ret = CFGPARSER_FAIL;
+
+      free (filename);
+      return ret;
     }
 
   return parse_acl (acl);
@@ -887,26 +1073,32 @@ parse_acl_ref (ACL **ret_acl, int *pforwarded)
   struct token *tok;
   ACL *acl;
   int opt;
-  char const *filename;
+  char *filename;
+  int optset = OPT_FILE|OPT_WATCH;
 
-  if (get_file_option (&opt, &filename, pforwarded != NULL) == CFGPARSER_FAIL)
+  if (pforwarded != NULL)
+    optset |= OPT_FWD;
+  if (get_file_option (&opt, &filename, optset) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
   if (pforwarded)
     *pforwarded = !!(opt & OPT_FWD);
 
   if (filename)
     {
+      int ret = CFGPARSER_OK;
+
       acl = new_acl (NULL);
       *ret_acl = acl;
 
       if (opt & OPT_WATCH)
 	{
 	  if (dynacl_register (acl, filename, last_token_locus_range ()))
-	    return CFGPARSER_FAIL;
+	    ret = CFGPARSER_FAIL;
 	}
       else if (parse_acl_file (acl, filename))
-	return CFGPARSER_FAIL;
-      return CFGPARSER_OK;
+	ret = CFGPARSER_FAIL;
+      free (filename);
+      return ret;
     }
 
   if ((tok = gettkn_any ()) == NULL)
@@ -1098,10 +1290,11 @@ getopt_cipher (int *opt)
     { "cipherlist", CIPHER_LIST },
     { NULL }
   };
-  int res, n;
+  int res;
+  struct config_option const *p;
 
-  while ((res = gettok_option (optab, &n, NULL)) == CFGPARSER_OK && n != -1)
-    *opt = n;
+  while ((res = gettok_option (optab, &p, NULL)) == CFGPARSER_OK && p)
+    *opt = p->code;
   return res;
 }
 
@@ -1578,22 +1771,22 @@ parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
 
   for (;;)
     {
-      int n;
       char const *arg;
+      struct config_option const *opt;
 
-      if (gettok_option (optab, &n, &arg) == CFGPARSER_FAIL)
+      if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
 	return CFGPARSER_FAIL;
 
-      if (n == -1)
+      if (!opt)
 	break;
 
-      if (MATCH_OPTION_DISABLED (n))
+      if (MATCH_OPTION_DISABLED (opt->code))
 	{
-	  conf_error ("unexpected token: %s", config_option_name (optab, n));
+	  conf_error ("unsupported option: -%s", opt->name);
 	  return CFGPARSER_FAIL;
 	}
 
-      switch (n)
+      switch (opt->code)
 	{
 	case MATCH_CASE:
 	  *sp_flags &= ~GENPAT_ICASE;
@@ -2082,10 +2275,10 @@ parse_cond_basic_auth (void *call_data, void *section_data)
   struct locus_range loc = LOCUS_RANGE_INITIALIZER;
   struct token *tok;
   int opt;
-  char const *filename;
+  char *filename;
   void *wt;
 
-  if (get_file_option (&opt, &filename, 0) == CFGPARSER_FAIL)
+  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
 
   if (filename)
@@ -2095,34 +2288,40 @@ parse_cond_basic_auth (void *call_data, void *section_data)
 	{
 	  char const *basename;
 	  WORKDIR *wd;
-	  int rc;
+	  int ret = CFGPARSER_OK;
 
 	  if ((basename = filename_split_wd (filename, &wd)) == NULL)
-	    return CFGPARSER_FAIL;
-	  rc = basic_auth_read (cond, basename, wd);
-	  workdir_unref (wd);
-	  if (rc == -1)
+	    ret = CFGPARSER_FAIL;
+	  else
 	    {
-	      if (errno == ENOENT)
-		conf_error ("file %s does not exist", filename);
-	      else
-		conf_error ("can't open %s: %s", filename, strerror (errno));
-	      return CFGPARSER_FAIL;
+	      int rc = basic_auth_read (cond, basename, wd);
+	      workdir_unref (wd);
+	      if (rc == -1)
+		{
+		  if (errno == ENOENT)
+		    conf_error ("file %s does not exist", filename);
+		  else
+		    conf_error ("can't open %s: %s", filename,
+				strerror (errno));
+		  ret = CFGPARSER_FAIL;
+		}
 	    }
+	  free (filename);
 	  locus_range_unref (&loc);
-	  return CFGPARSER_OK;
+	  return ret;
 	}
     }
   else if ((tok = gettkn_expect (T_STRING)) == NULL)
     return CFGPARSER_FAIL;
   else
     {
-      filename = tok->str;
+      filename = xstrdup (tok->str);
       locus_range_copy (&loc, &tok->locus);
     }
 
   wt = watcher_register (cond, filename, &loc,
 			 basic_auth_read, basic_auth_clear);
+  free (filename);
   locus_range_unref (&loc);
   if (wt == NULL)
     return CFGPARSER_FAIL;
@@ -3120,12 +3319,14 @@ parse_encode_option (int *p)
     { "encode", 1, 0 },
     { NULL }
   };
-  if (*p == -1)
-    {
-      char const *a;
-      if (gettok_option (optab, p, &a) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-    }
+  struct config_option const *opt;
+
+  if (gettok_option (optab, &opt, NULL) == CFGPARSER_FAIL)
+    return CFGPARSER_FAIL;
+
+  if (*p == -1 && opt)
+    *p = 1;
+
   return CFGPARSER_OK;
 }
 
@@ -3696,6 +3897,11 @@ static CFGPARSER_TABLE service_parsetab[] = {
     .name = "LogSuppress",
     .parser = parse_log_suppress,
     .off = offsetof (SERVICE, log_suppress_mask)
+  },
+  {
+    .name = "Constant",
+    .parser = cfg_parse_strconst,
+    .off = offsetof (SERVICE, sctab)
   },
   /* Backward compatibility */
   {
@@ -4290,6 +4496,11 @@ static CFGPARSER_TABLE http_common[] = {
     .name = "LineBufferSize",
     .parser = assign_bufsize,
     .off = offsetof (LISTENER, linebufsize),
+  },
+  {
+    .name = "Constant",
+    .parser = cfg_parse_strconst,
+    .off = offsetof (LISTENER, sctab)
   },
   { NULL }
 };
@@ -5773,15 +5984,17 @@ increase_reserved_fds (void *call_data, void *section_data)
     { "watcher", 1 },
     { NULL }
   };
+  struct config_option const *opt;
 
-  if (gettok_option (optab, &per_watcher, &arg) == CFGPARSER_FAIL)
+  if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
     return CFGPARSER_FAIL;
+  per_watcher = opt != NULL;
 
   rc = cfg_assign_unsigned (&n, section_data);
   if (rc != CFGPARSER_OK)
     return rc;
 
-  if (per_watcher == 1)
+  if (per_watcher)
     {
       if (INT_MAX - per_worker_fds < n)
 	{
@@ -6029,6 +6242,11 @@ static CFGPARSER_TABLE top_level_parsetab[] = {
     .name = "LineBufferSize",
     .parser = assign_bufsize,
     .off = offsetof (POUND_DEFAULTS, linebufsize),
+  },
+  {
+    .name = "Constant",
+    .parser = cfg_parse_strconst,
+    .data = &strconst_tab
   },
   /* Backward compatibility. */
   {

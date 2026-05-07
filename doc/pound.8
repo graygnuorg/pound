@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "April 29, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "May 7, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -235,9 +235,9 @@ remains idle longer than that and total number of workers is greater
 than the allotted minimum (\fBWorkerMinCount\fR), the idle worker is
 terminated.
 .PP
-The capacity of the connection queue is computed so as to allow to
-accept as many connection requests as is permitted by the current
-system limit on the open files.  It can also be set using the
+The capacity of the connection queue is computed so as to accept as
+many connection requests as is permitted by the current system limit
+on the open files.  It can also be set using the
 \fBConnectionQueueSize\fR configuration directive.
 .SH OPTIONS
 The following command line options are available:
@@ -401,6 +401,36 @@ above, for a detailed discussion of these balancing strategies.
 The \fBBalancer\fR statement in the global scope applies to all
 \fBService\fR directives that don't contain \fBBalancer\fR
 definitions of their own.
+.TP
+\fBConstant\fR "\fINAME\fR" [\fIOPTIONS\fR] ["\fIVALUE\fR"]
+Defines a \fIconfiguration constant\fR for use in string expansions
+and Lua code.  \fINAME\fR gives the name of the constant.  Either
+\fIOPTIONS\fR or \fIVALUE\fR must be given, but not both.
+.IP
+If \fIOPTIONS\fR are not given, \fIVALUE\fR supplies the value for the
+constant.  Otherwise, the value is assigned as described in the table
+below:
+.IP
+.RS
+.TP
+\fB\-file\fR "\fIFILENAME\fR"
+Use contents of the file "\fIFILENAME\fR". The contents is treated as
+an opaque binary string.  The file is read exactly once, at program
+startup.
+.TP
+\fB\-filewatch\fR "\fIFILENAME\fR"
+Same as \fB\-file\fR, except that \fIFILENAME\fR is monitored for changes
+during the runtime.  Whenever the file changes, it will be re-read,
+and the constant will be updated, without the need to restart the
+program.
+.TP
+.B \-trim
+Used with one of the above, instructs \fBpound\fR to treat
+\fIFILENAME\fR as a plain text file, and remove from its contents all
+trailing whitespace characters, i.e. horizontal tabulation (ASCII 9),
+newline (ASCII 10), vertical tabulation (ASCII 11), form feed (ASCII
+12), carriage return (ASCII 13), and space (ASCII 32).
+.RE
 .TP
 \fBConnectionQueueSize\fR "\fIN\fR"
 Set the capacity of the incoming connection queue.
@@ -1022,6 +1052,17 @@ only to the request path -
 .B pound
 will still check that the request is syntactically correct.
 .TP
+\fBConstant\fR "\fINAME\fR" [\fIOPTIONS\fR] ["\fIVALUE\fR"]
+Defines a \fIconfiguration constant\fR for use in string expansions
+and Lua code.  See \fBConstant\fR in section
+.BR "GLOBAL DIRECTIVES" ,
+for a detailed discussion of its arguments and their meaning.
+.IP
+Per-listener constants augment global ones.  If the name of a
+per-listener constant coincides with the name of a globally defined
+one, the former overrides the latter for all services defined in that
+listener.
+.TP
 \fBErrorFile\fR \fINNN\fR "\fIfilename\fR"
 Read the content to be returned along with the HTTP status code
 \fINNN\fR from the file \fIfilename\fR.  The file will be read
@@ -1286,6 +1327,23 @@ from it by one or more whitespace characters.
 .IP
 The following accessors are defined:
 .RS
+.TP
+\fBconst \fINAME\fR [\fIENCODE\fR]
+Configuration constant \fINAME\fR (see \fBConstant\fR in the section
+\fBGLOBAL DIRECTIVES\fR, above).  Optional \fIENCODE\fR defines the
+encoding in which to represent it.  Its possible values are:
+.RS
+.TP
+.B none
+Don't encode it.  This is the default if no \fIENCODE\fR argument is
+specified.
+.TP
+.B url
+Encode the value using percent-encoding (RFC 3986).
+.TP
+.B base64
+Encode the value using \fBBASE64\fR encoding (RFC 3548).
+.RE
 .TP
 .B url
 Request URL.
@@ -2199,6 +2257,17 @@ the following
 directives define a session-tracking mechanism for the current
 service. See below for details.
 .SS Other directives
+.TP
+\fBConstant\fR "\fINAME\fR" [\fIOPTIONS\fR] ["\fIVALUE\fR"]
+Defines a \fIconfiguration constant\fR for use in string expansions
+and Lua code.  See \fBConstant\fR in section
+.BR "GLOBAL DIRECTIVES" ,
+for a detailed discussion of its arguments and their meaning.
+.IP
+Per-service constants augment per-listener and global ones.  If the
+name of a per-service constant coincides with the name of a
+per-listener or a globally defined one, the former overrides the
+latter for this service.
 .TP
 \fBIgnoreCase\fR \fIbool\fR
 Override the global

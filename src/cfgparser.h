@@ -20,6 +20,7 @@
 typedef struct
 {
   unsigned refcnt;
+  size_t len;
   char str[1];
 } STRING;
 
@@ -44,7 +45,9 @@ string_unref (STRING *sp)
 static inline STRING *
 string_alloc (size_t n)
 {
-  return string_ref (xcalloc (1, sizeof (STRING) + n));
+  STRING *s = string_ref (xcalloc (1, sizeof (STRING) + n));
+  s->len = n;
+  return s;
 }
 
 static inline STRING *
@@ -60,6 +63,12 @@ static inline STRING *
 string_init (char const *s)
 {
   return s ? string_ninit (s, strlen (s)) : NULL;
+}
+
+static inline size_t
+string_len (STRING *s)
+{
+  return s ? s->len : 0;
 }
 
 static inline char const *
@@ -194,6 +203,10 @@ static inline WORKDIR *get_include_wd (void)
 {
   return get_include_wd_at_locus_range (last_token_locus_range ());
 }
+
+/* Read in entire file and return its contents as string. */
+char *slurp (char const *filename, WORKDIR *wd,
+	     struct locus_range const *locus, size_t *len);
 
 /* Token types: */
 enum
@@ -247,6 +260,8 @@ struct kwtab
   int tok;
 };
 
+int kwn_to_tok (struct kwtab *kwt, char const *name, size_t len,
+		int ci, int *retval);
 int kw_to_tok (struct kwtab *kwt, char const *name, int ci, int *retval);
 char const *kw_to_str (struct kwtab *kwt, int t);
 

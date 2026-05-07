@@ -739,6 +739,141 @@ accessor_user (POUND_HTTP *phttp, char const *arg, int arglen,
   return RETRIEVE_OK;
 }
 
+static long
+stringbuf_encode_base64 (struct stringbuf *sb, char const *data, size_t len)
+{
+  BIO *b64, *bmem;
+  long rc;
+
+  if ((bmem = BIO_new (BIO_s_mem ())) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") can't alloc BIO_s_mem", POUND_TID ());
+      return -1;
+    }
+
+  if ((b64 = BIO_new (BIO_f_base64 ())) == NULL)
+    {
+      logmsg (LOG_WARNING, "(%"PRItid") can't alloc BIO_f_base64",
+	      POUND_TID ());
+      BIO_free (bmem);
+      return -1;
+    }
+
+  b64 = BIO_push (b64, bmem);
+
+  rc = BIO_write (b64, data, len);
+  BIO_flush (b64);
+
+  if (rc == len)
+    {
+      char *ptr;
+      long len;
+
+      len = BIO_get_mem_data (bmem, &ptr);
+      if (len > 0)
+	{
+	  while (len > 0)
+	    {
+	      char *p = memchr (ptr, '\n', len);
+	      if (p)
+		{
+		  size_t n = p - ptr;
+		  stringbuf_add (sb, ptr, n);
+		  n++;
+		  len -= n;
+		  ptr += n;
+		}
+	      else
+		{
+		  stringbuf_add (sb, ptr, len);
+		  break;
+		}
+	    }
+	  rc = 0;
+	}
+      else
+	rc = -1;
+    }
+  else
+    rc = -1;
+
+  BIO_free_all (b64);
+  return rc;
+}
+
+enum
+  {
+    CONST_ENCODE_NONE,
+    CONST_ENCODE_URLENCODE,
+    CONST_ENCODE_BASE64
+  };
+
+int
+accessor_const (POUND_HTTP *phttp, char const *arg, int arglen,
+		struct stringbuf *sb)
+{
+  int ret;
+  STRING *val;
+  char *name;
+  int encode = CONST_ENCODE_NONE;
+  size_t n;
+
+  n = c_memcspn (arg, CCTYPE_BLANK, arglen);
+
+  if (n < arglen)
+    {
+      static struct kwtab enctab[] = {
+	{ "none",   CONST_ENCODE_NONE },
+	{ "url",    CONST_ENCODE_URLENCODE },
+	{ "base64", CONST_ENCODE_BASE64 },
+	{ NULL }
+      };
+      char const *encarg = arg + n;
+      size_t enclen = arglen - n;
+
+      encarg = c_trimws (encarg, &enclen);
+      if (kwn_to_tok (enctab, encarg, enclen, 1, &encode))
+	{
+	  logmsg (LOG_WARNING, "(%"PRItid") unreconginzed encoding: %*.*s",
+		  POUND_TID (), (int) enclen, (int) enclen, encarg);
+	  return RETRIEVE_ERROR;
+	}
+      arglen = n;
+    }
+
+  name = strndup (arg, arglen);
+  if (name == NULL)
+    return RETRIEVE_ERROR;
+  val = pound_http_get_strconst (phttp, name);
+  free (name);
+  if (val)
+    {
+      ret = RETRIEVE_OK;
+      switch (encode)
+	{
+	case CONST_ENCODE_NONE:
+	  stringbuf_add (sb, string_ptr (val), string_len (val));
+	  break;
+
+	case CONST_ENCODE_URLENCODE:
+	  stringbuf_urlencode (sb, string_ptr (val), string_len (val));
+	  break;
+
+	case CONST_ENCODE_BASE64:
+	  if (stringbuf_encode_base64 (sb, string_ptr (val), string_len (val)))
+	    ret = RETRIEVE_ERROR;
+	  break;
+
+	default:
+	  ret = RETRIEVE_ERROR;
+	}
+      string_unref (val);
+    }
+  else
+    ret = RETRIEVE_NOT_FOUND;
+  return ret;
+}
+
 static struct accessor accessors[] = {
   { "url",      accessor_url },
   { "path",     accessor_path },
@@ -749,6 +884,7 @@ static struct accessor accessors[] = {
   { "port",     accessor_port },
   { "remoteip", accessor_remote_ip, 1 },
   { "user",     accessor_user },
+  { "const",    accessor_const, 1 },
   { NULL }
 };
 

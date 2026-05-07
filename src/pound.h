@@ -973,6 +973,7 @@ typedef struct _service
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
   int rewrite_errors;           /* Rewrite HTTP errors. */
+  void *sctab;                  /* String constant table */
 
   /* Logging */
   char *forwarded_header;       /* "forwarded" header name */
@@ -1052,6 +1053,7 @@ typedef struct _listener
   char *forwarded_header;       /* "forwarded" header name */
   ACL *trusted_ips;             /* Trusted IP addresses */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
+  void *sctab;                  /* String constant table */
   SERVICE_HEAD services;
   SLIST_ENTRY (_listener) next;
 
@@ -1215,6 +1217,9 @@ void pound_http_destroy (POUND_HTTP *arg);
 
 /* get the current queue statistrics */
 int pound_http_queue_stat (int *len, int *cap);
+
+/* Retrieve a string constant. */
+STRING *pound_http_get_strconst (POUND_HTTP *phttp, char const *name);
 
 /* Decrement number of active threads. */
 void active_threads_decr (void);

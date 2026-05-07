@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-05-06
+Pound -- history of user-visible changes. 2026-05-07
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -35,6 +35,36 @@ The capacity of the incoming connection queue (used when all workers
 become busy) is computed so as to prevent the program from running out
 of file descriptors.  It can also be set explicitely, using the
 "ConnectionQueueSize" configuration file statement.
+
+* Configuration constants
+
+The "Constant" statement defines a configuration constant for use in
+string expansions and Lua code.  A constant is a string value
+identified by its name.  The "Constant" statement can appear in
+top-level, listener, and service scopes.  The syntax is:
+
+  Constant "NAME" "VALUE"
+
+or
+
+  Constant "NAME" OPTIONS
+
+where OPTIONS are:
+
+  -file FILE
+    Read constant value from the file FILE at startup.
+
+  -filewatch FILE
+    Read constant value from the file FILE, and monitor it during
+    the runtime for changes.
+
+  -trim
+    Trim off the trailing whitespace from the obtained value.
+
+The constants can be used in string expansions (using the "%[const
+NAME]" accessor), and in Lua code (using the "http:const(NAME)"
+method).  Refer to the documentation, section "Constants", for a
+detailed discussion with examples.
 
 * Tunnels
 

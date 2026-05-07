@@ -1839,6 +1839,26 @@ pndlua_http_newindex (lua_State *L)
   return fun (L);
 }
 
+static int
+http_const (lua_State *L)
+{
+  struct http_ud *ud = pndlua_get_userdata (L, 1);
+  char const *name;
+  STRING *s;
+
+  check_args (L, "const", 2);
+  name = luaL_checkstring (L, 2);
+  s = pound_http_get_strconst (ud->phttp, name);
+  if (s)
+    {
+      lua_pushstring (L, string_ptr (s));
+      string_unref (s);
+    }
+  else
+    lua_pushnil (L);
+  return 1;
+}
+
 /*
  * Prepare and set the "http" global in the Lua state.  If modresp is not 0,
  * the http.resp element will be available and assignments to http.resp.body
@@ -1855,6 +1875,7 @@ pndlua_set_http (lua_State *L, POUND_HTTP *phttp, int modresp)
   lua_rawseti (L, -2, 0);
   ud->phttp = phttp;
   ud->modresp = modresp;
+  pndlua_dcl_function (L, "const", http_const);
 
   pndlua_new_metatable (L, "http");
   /* Create __index entry. */
