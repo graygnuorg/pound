@@ -211,9 +211,10 @@ named_backend_insert (NAMED_BACKEND_TABLE *tab, char const *name, BACKEND *be)
 {
   NAMED_BACKEND *bp, *old;
 
-  bp = xmalloc (sizeof (*bp) + strlen (name) + 1);
+  size_t name_len = strlen (name) + 1;
+  bp = xmalloc (sizeof (*bp) + name_len);
   bp->name = (char*) (bp + 1);
-  strcpy (bp->name, name);
+  memcpy (bp->name, name, name_len);
   locus_range_init (&bp->locus);
   locus_range_copy (&bp->locus, &be->locus);
   bp->priority = be->priority;
@@ -4097,7 +4098,7 @@ listener_parse_socket_from (void *call_data, void *section_data)
   len += offsetof (struct sockaddr_un, sun_path) + 1;
   sun = xmalloc (len);
   sun->sun_family = AF_UNIX;
-  strcpy (sun->sun_path, tok->str);
+  memcpy (sun->sun_path, tok->str, strlen (tok->str) + 1);
 
   lst->addr.ai_socktype = SOCK_STREAM;
   lst->addr.ai_family = AF_UNIX;
@@ -5656,7 +5657,7 @@ parse_control_socket (void *call_data, void *section_data)
   len += offsetof (struct sockaddr_un, sun_path) + 1;
   sun = xmalloc (len);
   sun->sun_family = AF_UNIX;
-  strcpy (sun->sun_path, tok->str);
+  memcpy (sun->sun_path, tok->str, strlen (tok->str) + 1);
   unlink_at_exit (sun->sun_path);
 
   addr->ai_socktype = SOCK_STREAM;
@@ -6389,7 +6390,7 @@ backend_resolve (BACKEND *be)
       len += offsetof (struct sockaddr_un, sun_path) + 1;
       sun = xmalloc (len);
       sun->sun_family = AF_UNIX;
-      strcpy (sun->sun_path, hostname);
+      memcpy (sun->sun_path, hostname, strlen (hostname) + 1);
 
       addr.ai_socktype = SOCK_STREAM;
       addr.ai_family = AF_UNIX;
