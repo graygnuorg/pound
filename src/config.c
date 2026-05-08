@@ -445,15 +445,6 @@ get_file_option (int *optflags, char **filename, int allow)
 }
 
 /* String constants */
-typedef struct string_const
-{
-  char *name;
-  struct locus_range locus;
-  STRING *value;
-  int trim;
-  WATCHER *watcher;
-} STRCONST;
-
 #define HT_TYPE STRCONST
 #define HT_NO_HASH_FREE
 #define HT_NO_DELETE
@@ -595,29 +586,23 @@ cfg_parse_strconst (void *call_data, void *section_data)
   return CFGPARSER_OK;
 }
 
-STRING *
+STRCONST *
 strconst_lookup (STRCONST_HASH *hash, char const *name)
 {
-  STRING *ret = NULL;
+  STRCONST *sc = NULL;
   if (hash)
     {
-      STRCONST key, *sc = NULL;
+      STRCONST key;
       key.name = (char*)name;
       sc = STRCONST_RETRIEVE (hash, &key);
-      if (sc)
-	{
-	  watcher_lock (sc->watcher);
-	  ret = string_ref (sc->value);
-	  watcher_unlock (sc->watcher);
-	}
     }
-  return ret;
+  return sc;
 }
 
-STRING *
+STRCONST *
 pound_http_get_strconst (POUND_HTTP *phttp, char const *name)
 {
-  STRING *s;
+  STRCONST *s;
   if ((s = strconst_lookup (phttp->svc->sctab, name)) == NULL)
     if ((s = strconst_lookup (phttp->lstn->sctab, name)) == NULL)
       s = strconst_lookup (strconst_tab, name);

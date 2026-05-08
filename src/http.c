@@ -813,7 +813,7 @@ accessor_const (POUND_HTTP *phttp, char const *arg, int arglen,
 		struct stringbuf *sb)
 {
   int ret;
-  STRING *val;
+  STRCONST *val;
   char *name;
   int encode = CONST_ENCODE_NONE;
   size_t n;
@@ -849,25 +849,27 @@ accessor_const (POUND_HTTP *phttp, char const *arg, int arglen,
   if (val)
     {
       ret = RETRIEVE_OK;
+      strconst_lock (val);
       switch (encode)
 	{
 	case CONST_ENCODE_NONE:
-	  stringbuf_add (sb, string_ptr (val), string_len (val));
+	  stringbuf_add (sb, strconst_ptr (val), strconst_len (val));
 	  break;
 
 	case CONST_ENCODE_URLENCODE:
-	  stringbuf_urlencode (sb, string_ptr (val), string_len (val));
+	  stringbuf_urlencode (sb, strconst_ptr (val), strconst_len (val));
 	  break;
 
 	case CONST_ENCODE_BASE64:
-	  if (stringbuf_encode_base64 (sb, string_ptr (val), string_len (val)))
+	  if (stringbuf_encode_base64 (sb, strconst_ptr (val),
+				       strconst_len (val)))
 	    ret = RETRIEVE_ERROR;
 	  break;
 
 	default:
 	  ret = RETRIEVE_ERROR;
 	}
-      string_unref (val);
+      strconst_unlock (val);
     }
   else
     ret = RETRIEVE_NOT_FOUND;

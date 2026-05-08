@@ -1217,10 +1217,44 @@ void pound_http_destroy (POUND_HTTP *arg);
 
 /* get the current queue statistrics */
 int pound_http_queue_stat (int *len, int *cap);
+
+/* String constants. */
+typedef struct string_const
+{
+  char *name;
+  struct locus_range locus;
+  STRING *value;
+  int trim;
+  WATCHER *watcher;
+} STRCONST;
+
+static inline void
+strconst_lock (STRCONST *sc)
+{
+  watcher_lock (sc->watcher);
+}
+
+static inline void
+strconst_unlock (STRCONST *sc)
+{
+  watcher_unlock (sc->watcher);
+}
+
+static inline const char *
+strconst_ptr (STRCONST *sc)
+{
+  return string_ptr (sc->value);
+}
+
+static inline size_t
+strconst_len (STRCONST *sc)
+{
+  return string_len (sc->value);
+}
 
 /* Retrieve a string constant. */
-STRING *pound_http_get_strconst (POUND_HTTP *phttp, char const *name);
-
+STRCONST *pound_http_get_strconst (POUND_HTTP *phttp, char const *name);
+
 /* Decrement number of active threads. */
 void active_threads_decr (void);
 

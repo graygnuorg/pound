@@ -1844,15 +1844,16 @@ http_const (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
   char const *name;
-  STRING *s;
+  STRCONST *s;
 
   check_args (L, "const", 2);
   name = luaL_checkstring (L, 2);
   s = pound_http_get_strconst (ud->phttp, name);
   if (s)
     {
-      lua_pushstring (L, string_ptr (s));
-      string_unref (s);
+      strconst_lock (s);
+      lua_pushlstring (L, strconst_ptr (s), strconst_len (s));
+      strconst_unlock (s);
     }
   else
     lua_pushnil (L);
