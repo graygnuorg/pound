@@ -1409,14 +1409,6 @@ void config_parse (int, char **);
 int config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd);
 
 /*
- * RSA ephemeral keys: how many and how often
- */
-#define N_RSA_KEYS  11
-#ifndef T_RSA_KEYS
-# define T_RSA_KEYS  7200
-#endif
-
-/*
  * Renegotiation callback
  */
 void SSLINFO_callback (const SSL * s, int where, int rc);
@@ -1430,7 +1422,6 @@ void SSLINFO_callback (const SSL * s, int where, int rc);
 void *thr_timer (void *);
 
 void POUND_SSL_CTX_init (SSL_CTX *ctx);
-int set_ECDHCurve (char *name);
 
 char const *sess_type_to_str (int type);
 int control_response_basic (POUND_HTTP *arg);
