@@ -627,7 +627,6 @@ open_socket (URL *url)
     {
       SSL_CTX *ctx;
       SSL *ssl;
-      X509 *x509;
       int verify_result;
 
       if ((ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
@@ -666,12 +665,13 @@ open_socket (URL *url)
 	errormsg (1, 0, "BIO_do_handshake failed: %s",
 		  ERR_error_string (ERR_get_error (), NULL));
 
-      if (server->verify &&
-	  (x509 = SSL_get_peer_certificate (ssl)) != NULL &&
-	  (verify_result = SSL_get_verify_result (ssl)) != X509_V_OK)
+      if (server->verify)
 	{
-	  errormsg (1, 0, "certificate verification failed: %s",
-		    X509_verify_cert_error_string (verify_result));
+	  if (!SSL_get_peer_certificate (ssl))
+	    errormsg (1, 0, "no certificate presented");
+	  else if ((verify_result = SSL_get_verify_result (ssl)) != X509_V_OK)
+	    errormsg (1, 0, "certificate verification failed: %s",
+		      X509_verify_cert_error_string (verify_result));
 	}
 
       bio = bb;
