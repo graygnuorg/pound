@@ -587,7 +587,7 @@ url_parse_scheme (char *str, URL *url)
       url->pass = NULL;
       url->addrlen = sizeof (struct sockaddr_un);
       url->addr.un.sun_family = AF_UNIX;
-      if (strlen (str) > sizeof (url->addr.un.sun_path))
+      if (strlen (str) >= sizeof (url->addr.un.sun_path))
 	errormsg (1, 0, "socket name too long");
       strncpy (url->addr.un.sun_path, str, sizeof (url->addr.un.sun_path));
     }
