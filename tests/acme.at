@@ -50,5 +50,11 @@ end
 x-orig-uri: /echo/ABC
 x-backend-ident: pound.cfi:4
 end
+
+GET /.well-known/acme-challenge/../../pound.cfg
+end
+
+404
+end
 ])
 AT_CLEANUP

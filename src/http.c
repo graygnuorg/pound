@@ -1521,6 +1521,21 @@ redirect_serialize (BACKEND *be, struct json_value *obj)
     || json_object_set (obj, "has_uri", json_new_bool (be->v.redirect.has_uri));
 }
 
+/* Returns 1 if pathname P does not start with / and does not contain ../. */
+static int
+safe_pathname_p (char const *p)
+{
+  if (*p == '/')
+    return 0;
+  do
+    {
+      if (p[0] == '.' && p[1] == '.' && (p[2] == '/' || !p[2]))
+	return 0;
+    }
+  while ((p = strchr (p, '/')) != NULL && *++p);
+  return 1;
+}
+
 /*
  * ACME backend definitions.
  */
@@ -1542,7 +1557,10 @@ acme_response (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 
   file_name = expand_url ("$1", phttp, 1);
 
-  if ((fd = openat (phttp->backend->v.acme.wd, file_name, O_RDONLY)) == -1)
+  if (!safe_pathname_p (file_name))
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((fd = openat (phttp->backend->v.acme.wd, file_name,
+			 O_RDONLY|O_NOFOLLOW)) == -1)
     {
       if (errno == ENOENT)
 	{
@@ -1687,10 +1705,11 @@ file_response (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
     }
   if (*file_name == '/')
     file_name++;
-  if (!*file_name)
-    rc = HTTP_STATUS_NOT_FOUND;
 
-  else if ((fd = openat (phttp->backend->v.file.wd, file_name, O_RDONLY)) == -1)
+  if (!safe_pathname_p (file_name))
+    rc = HTTP_STATUS_NOT_FOUND;
+  else if ((fd = openat (phttp->backend->v.file.wd, file_name,
+			 O_RDONLY|O_NOFOLLOW)) == -1)
     {
       if (errno == ENOENT)
 	{

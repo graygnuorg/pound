@@ -60,6 +60,33 @@ ARAR
 end
 ])
 
+# Test if pathnames with ../ are rejected.
+AT_CHECK([mkdir static
+AT_DATA([static/arar.txt],[ARAR
+])])
+
+PT_CHECK([ListenHTTP
+	Service
+		SendFile "static"
+	End
+End
+],
+[GET /arar.txt
+end
+
+200
+Content-Type: text/plain
+
+ARAR
+end
+
+GET ../pound.cfg
+end
+
+404
+end
+])
+
 m4_popdef([ARAR])
 
 AT_CLEANUP
