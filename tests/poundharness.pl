@@ -2463,7 +2463,7 @@ read from the file F<userlist>, located in the current working directory.
 It is OK if this file does not exist.
 
 Alternative location can be specified using the B<--userfile=I<FILE>> option.
-In thise case, it is an error if I<FILE> does not exist.
+In this case, it is an error if I<FILE> does not exist.
 
 Each line in the user list file contains a username and password, separated
 by a colon. Empty lines and passwords are ignored.

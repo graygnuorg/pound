@@ -34,7 +34,7 @@ ListenHTTP
 End
 ],
 [# The expect part here serves only to ensure that the startup has finished
-# and pound is fully set up. Whithout it, the SIGHUP sent by poundharness
+# and pound is fully set up. Without it, the SIGHUP sent by poundharness
 # could have arrived before signal handling is set up and thus cause an
 # abnormal termination.
 GET /echo/1

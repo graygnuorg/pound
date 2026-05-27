@@ -155,7 +155,7 @@ configuration options:
   Lua version to compile with. Use this if you have several Lua versions
   installed in parallel, and wish to select one of them.
 
-  If `configure` is not able to detect the presense of Lua files (e.g. if
+  If `configure` is not able to detect the presence of Lua files (e.g. if
   those are installed in a non-standard location), use the LUA_CFLAGS and
   LUA_LIBS variables to indicate their location. E.g.:
 

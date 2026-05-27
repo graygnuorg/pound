@@ -1711,7 +1711,7 @@ the @code{Disable} statement in the example above disables @samp{TLSv1},
 @samp{SSLv3}, and @samp{SSLv2}.
 
  To further tune the strength of your encryption use the @code{Ciphers}
-directive.  It defins the list of ciphers (for TLSv2 and below) or
+directive.  It defines the list of ciphers (for TLSv2 and below) or
 ciphersuites (for TLSv3) that will be accepted by the SSL connection.
 @xref{Ciphers}.
 
@@ -2336,7 +2336,7 @@ terminated.
 Maximum capacity of the connection queue is computed as a function of
 the system limit on the number of open files and the value of
 @code{WorkerMaxCount}.  You can define it explicitly using the
-@code{ConnectionQueueSize} configuration statememt (@pxref{Worker
+@code{ConnectionQueueSize} configuration statement (@pxref{Worker
 Settings, ConnectionQueueSize}).
 
 If all workers are busy and the connection queue is filled up, the
@@ -2946,7 +2946,7 @@ desired weight value.  The most obvious use is to redirect the request
 to @dfn{emergency} backends (@pxref{emergency backends}), which are
 assigned to the balancer group 65535.  For example, if the selected
 backend responds with 421 (@samp{Misdirected Request}) status code,
-you can send it to your high availablility backend using the following
+you can send it to your high availability backend using the following
 approach.
 
 First, define a Lua function that will select the emergency balancer
@@ -3098,7 +3098,7 @@ side effects.
 
   To avoid this, @command{pound} provides a special built-in variable
 @code{stash}.  Its value is a table whose contents persist only while
-a singe HTTP request is being processed.  Applications can
+a single HTTP request is being processed.  Applications can
 fill it with whatever values they like.
 
   To illustrate its use let's change the @code{bearer} module from
@@ -4474,7 +4474,7 @@ The value of @math{F@sub{ini}} is computed automatically and comprises
 the three standard I/O descriptors and any descriptors opened by
 @command{pound} for listeners, watchers, etc. Notice, that at startup
 @command{pound} will close all inherited file descriptors above 2. If,
-for some reson, you need to keep them, use the @option{-Wno-close-extra-fds}
+for some reason, you need to keep them, use the @option{-Wno-close-extra-fds}
 option.
 
 The value of @math{F@sub{wrk}} is normally 2 (two descriptors
@@ -4492,7 +4492,7 @@ connections (@pxref{Lua}). Such a correction is done using the
 Increases default number of @dfn{reserved descriptors} by @var{n}.
 
 Used without options, this statement increases the number of
-descriptors reseved globally (see @math{F@sub{res}} above). If given
+descriptors reserved globally (see @math{F@sub{res}} above). If given
 the @option{-worker} option, it increases the number of descriptors
 reserved per worker (@math{F@sub{wrk}}).
 @end deffn

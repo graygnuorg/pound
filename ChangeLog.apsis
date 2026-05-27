@@ -147,7 +147,7 @@ Enhancements:
 
 Bug fixes:
     - fixed memory leak in config/AddHeader
-    - removed call to AC_FUNC_MALLOC for AIX compatability
+    - removed call to AC_FUNC_MALLOC for AIX compatibility
     - workaround for AIX getaddrinfo() bug
 
 ------------------------------------------------------------------------
@@ -180,7 +180,7 @@ Enhancements:
     - added parsing for certificate CN
 
 Bug fixes:
-    - fixed problem in task enqueing
+    - fixed problem in task enqueuing
     - fixed small problem in Makefile
 
 ------------------------------------------------------------------------
@@ -310,7 +310,7 @@ Enhancements:
     - kill a BE on connection failure only if it has no HAport defined (thanks to Albert); the request may still fail!
 
 Bug fixes:
-    - fixed parantheses problems in need_rewrite (thanks to SBR)
+    - fixed parentheses problems in need_rewrite (thanks to SBR)
     - added call to free_headers in http.c (thanks to SBR)
     - fixed maximal path length in UNIX domain sockets (thanks to Ricardo Gameiro)
 
@@ -570,7 +570,7 @@ r38 | roseg | 2007-01-03 18:25:30 +0100 (Wed, 03 Jan 2007) | 13 lines
 Release 2.2.1
 
 Enhancements:
-  - allow specific Listeners to override the gloabl LogLevel value
+  - allow specific Listeners to override the global LogLevel value
   - allow a default Client value to be defined at the global level
   - allow a default TimeOut value to be defined at the global level
   - added compile-time flags for file owner and group
@@ -846,7 +846,7 @@ Release 1.7
 
 Fixed bug in X-SSL-CIPHER description
 Changed README to stx format for consistency
-Addedd X-SSL-certificate with full client certificate
+Added X-SSL-certificate with full client certificate
 Improved the response times on HTTP/0.9 (content without Content-length)
 Improved response granularity on above - using unbuffered BIO now
 Fixed problem with IE/SSL (SSL_set_shutdown)
@@ -902,7 +902,7 @@ Release 1.4
 Added 'Server' configuration directive
 Fixed problem with HTTPSHeaders 0 "..." - the desired header is written even if HTTPSHeaders is 0
 Added the ability of loading a certificate chain.
-Added compatability with OpenSSL 0.9.7
+Added compatibility with OpenSSL 0.9.7
 Added user-definable error pages.
 Added compile-time flags to run in foreground and to log to stderr.
 Opens separate pid files per-process.

@@ -41,7 +41,7 @@ AC_SUBST([LUA_CFLAGS])
 AC_SUBST([LUA_LIBS])
 
 # Arguments:
-#   $1     - [madatory] minumum version number to use;
+#   $1     - [mandatory] minimum version number to use;
 #   $2     - [optional] maximum version number;
 #   $3     - [optional] actions to do on success;
 #   $4     - [optional] actions to do on failure;
@@ -104,7 +104,7 @@ fi])
 # sets ax_lua_ok=no.
 #
 # Arguments:
-#   $1     - [madatory] minumum version number to use;
+#   $1     - [mandatory] minimum version number to use;
 #   $2     - [optional] maximum version number;
 AC_DEFUN([_AX_LUA_SUBTEST],
 [saved_CFLAGS="$CFLAGS"
