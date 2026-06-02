@@ -14,6 +14,9 @@
    You should have received a copy of the GNU General Public License
    along with Pound.  If not, see <http://www.gnu.org/licenses/>. */
 
+#ifndef _POUND_CCTYPE_H
+#define _POUND_CCTYPE_H 1
+
 #include <stddef.h>
 
 #define CCTYPE_ALPHA   0x0001
@@ -83,3 +86,5 @@ size_t c_memrcspn (char const *str, int class, size_t len);
 size_t c_trimrws (char const *str, size_t len);
 char *c_trimlws (char const *str, size_t *plen);
 char *c_trimws (char const *str, size_t *plen);
+
+#endif

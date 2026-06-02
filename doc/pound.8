@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "May 7, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "May 30, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -350,6 +350,30 @@ trailing whitespace is ignored. Keywords are case-insensitive. A
 .I Numeric
 A decimal number.
 .TP
+.I Size
+A decimal number, optionally followed by one of the following
+\fIsize suffixes\fR (case-insensitive):
+.BR k ,
+for kilobytes (1024 bytes),
+.BR m ,
+for megabytes (1048576 bytes), or
+.BR g ,
+for gigabytes (1073741824 bytes).
+.TP
+.I Duration
+Represents the length of a time interval. It is a series of numbers
+each of which is followed by a time unit suffix, such as \fB1m20s\fR,
+meaning one minute and twenty seconds. Valid time suffixes are:
+.BR s ,
+.BR m ,
+.BR h ,
+and
+.BR d ,
+standing for seconds, minutes, hours, and days, correspondingly.  The
+upper-case equivalents can be used as well.
+.IP
+The \fBs\dR suffix can be omitted.
+.TP
 .I Boolean
 The words \fByes\fR, \fBtrue\fR, \fBon\fR, or \fB1\fR indicating
 \fItrue\fR, and \fBno\fR, \fBfalse\fR, \fBoff\fR, or \fB0\fR
@@ -464,7 +488,7 @@ instead.  See the discussion of \fIoptions\fR in
 .B Service Matching Directives
 section below.
 .TP
-\fBLineBufferSize\fR \fIN\fR
+\fBLineBufferSize\fR \fISIZE\fR
 Sets the line buffer size.  Line buffer is used when reading request
 line, backend response status line, and header fields in both requests
 and responses.  Thus, this value limits the maximum length allowed for
@@ -537,7 +561,7 @@ WorkerMaxCount \fIN\fR
 .EE
 .RE
 .TP
-\fBWorkerIdleTimeout\fR \fISEC\fR
+\fBWorkerIdleTimeout\fR \fIduration\fR
 Sets idle timeout for a worker thread.  Default is 30 seconds.
 See the section
 .B WORKER MODEL
@@ -556,8 +580,8 @@ See the section
 .B WORKER MODEL
 above for a detailed discussion.
 .TP
-\fBWorkerStackSize\fR \fIN\fR
-Sets worker stack size, in bytes.  The default size is 262144.
+\fBWorkerStackSize\fR \fISIZE\fR
+Sets worker stack size, in bytes.  The default size is \fB256k\fR.
 .SS Privilege selection
 .TP
 \fBUser\fR "\fIuser_name\fR"
@@ -720,7 +744,7 @@ TrustedIP "proxy_addresses"
 .RE
 .SS Timeouts
 .TP
-\fBAlive\fR \fIn\fR
+\fBAlive\fR \fIduration\fR
 Specify how often
 .B pound
 will check for resurrected backend hosts (default: 30 seconds). In
@@ -728,7 +752,7 @@ general, it is a good idea to set this as low as possible - it
 will find resurrected hosts faster. However, if you set it too
 low it will consume resources - so beware.
 .TP
-\fBClient\fR \fIn\fR
+\fBClient\fR \fIduration\fR
 Specify for how long
 .B pound
 will wait for a client request (default: 10 seconds). After this
@@ -739,14 +763,14 @@ time-out on a slow network or over-loaded server, or lower it down if
 you start getting DOS attacks or run into problems with IE clients.
 This value can be overridden for specific listeners.
 .TP
-\fBConnTO\fR \fIn\fR
+\fBConnTO\fR \fIduration\fR
 How long should
 .B pound
-wait for a connection to the backend (in seconds). Default: the
+wait for a connection to the backend. Default: the
 .B TimeOut
 value. This value can be overridden for specific backends.
 .TP
-\fBGrace\fR \fIn\fR
+\fBGrace\fR \fIduration\fR
 How long should
 .B pound
 continue to answer existing connections after a receiving a INT or HUP
@@ -756,20 +780,20 @@ immediately. You can bypass this behaviour by stopping
 with a TERM or QUIT signal, in which case the program exits without any
 delay.
 .TP
-\fBTimeOut\fR \fIn\fR
+\fBTimeOut\fR \fIduration\fR
 How long should
 .B pound
-wait for a response from the backend (in seconds). Default: 15 seconds.
+wait for a response from the backend. Default: 15s.
 This value can be overridden for specific backends.
 .TP
-\fBWSTimeOut\fR \fIn\fR
+\fBWSTimeOut\fR \fIduration\fR
 How long should
 .B pound
 wait for data from either backend or client in a connection upgraded to
 a WebSocket (in seconds). Default: 600 seconds.
 This value can be overridden for specific backends.
 .TP
-\fBWatcherTTL \fIN\fR
+\fBWatcherTTL \fIduration\fR
 If conditions with \fB\-filewatch\fR flag are used, and the underlying
 operating system doesn't provide file system monitoring API
 .RB ( inotify
@@ -1036,7 +1060,7 @@ CHECKOUT, MERGE, REPORT).
 additionally allow MS extensions WebDAV verbs (SUBSCRIBE, UNSUBSCRIBE,
 NOTIFY, BPROPFIND, BPROPPATCH, POLL, BMOVE, BCOPY, BDELETE, CONNECT).
 .TP
-\fBClient\fR \fIn\fR
+\fBClient\fR \fIduration\fR
 Override the global
 .I Client
 time-out value.
@@ -1122,7 +1146,7 @@ Maximum allowed size of incoming request. All requests will be limited
 to these many bytes. If a request contains more data than allowed, an
 error 413 is returned. Default: unlimited.
 .TP
-\fBMaxURI\fR \fIn\fR
+\fBMaxURI\fR \fISIZE\fR
 Maximum allowed length of an URI.  If the URI of a request is longer than
 \fIn\fR bytes, an error 414 is returned. Default: unlimited.
 .TP
@@ -2467,17 +2491,17 @@ above).  Allowed range for priorities is 0 to 65535, inclusive.
 .IP
 Default value is 5.
 .TP
-\fBTimeOut\fR \fIn\fR
+\fBTimeOut\fR \fIduration\fR
 Override the global
 .B TimeOut
 value.
 .TP
-\fBConnTO\fR \fIn\fR
+\fBConnTO\fR \fIduration\fR
 Override the global
 .B ConnTO
 value.
 .TP
-\fBWSTimeOut\fR \fIn\fR
+\fBWSTimeOut\fR \fIduration\fR
 Override the global
 .B WSTimeOut
 value.
@@ -2541,13 +2565,13 @@ the producing backend.
 This directive is valid when used together with
 .BR "Resolve srv" .
 .TP
-.BI OverrideTTL " N"
-Query DNS each \fIN\fR seconds for possible changes in configuration
+.BI OverrideTTL " duration"
+Defines how often to query the DNS for possible changes in configuration
 of the existing dynamic backends.  If this statement is not used, the
 TTL value returned with the DNS response will be used instead.
 .TP
-.BI RetryInterval " N"
-Retry failed DNS queries each \fIN\fR seconds.  Default is 600.
+.BI RetryInterval " duration"
+Interval between two successive retries of a failed DNS query.  Default is 10m.
 .SS Global and per-service backends
 A
 .B Backend
@@ -2590,7 +2614,8 @@ global backend definition for use in a particular service.  To do
 so, use the following syntax:
 .PP
 .EX
-Backend "name"
+Backend
+  Use "name"
   Priority 3
   Disabled no
 End
@@ -2608,22 +2633,8 @@ and
 .BR Disabled .
 They override the settings defined in the global backend "\fIname\fR".
 .PP
-Notice, that in spite of their similarity, the two
-.I named
-forms of the
-.B Backend
-statement serve different purposes: when used in global scope, a named
-.B Backend
-.I defines
-a backend for further use in various services, and when used
-within a service, it
-.I creates a copy
-of the backend defined elsewhere and
-.I attaches
-it to this service.
-.PP
-The actual global definition may appear before as well as after
-service or services it is used in.
+In both cases, the actual global definition may appear before as well
+as after the service or services it is used in.
 .SH "Resolver"
 The \fBResolver\fR section controls DNS lookups for dynamic backend
 generation (see above).  It can contain the following directives:
@@ -2656,8 +2667,8 @@ are used, the last used statement wins.
 .BI debug " bool"
 Whether to enable DNS debugging info.
 .TP
-.BI RetryInterval " N"
-Interval in seconds, after which to retry failed DNS queries or queries that
+.BI RetryInterval " duration"
+Interval after which to retry failed DNS queries or queries that
 returned no RRs.  This value is used unless the backend defines its
 own retry interval value.
 .SH "Emergency"
@@ -2702,8 +2713,8 @@ This is a
 .B mandatory
 parameter.
 .TP
-\fBTTL\fR \fIn\fR
-How long can a session be idle (in seconds). A session that has been idle for
+\fBTTL\fR \fIduration\fR
+How long can a session be idle. A session that has been idle for
 longer than the specified number of seconds will be discarded.
 This is a
 .B mandatory

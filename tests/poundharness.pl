@@ -362,8 +362,9 @@ sub preproc {
 	ST_BACKEND => 3,
 	ST_BACKEND_STAT => 4,
 	ST_BACKEND_DYN => 5,
-	ST_SESSION => 6,
-	ST_SECTION => 7
+	ST_BACKEND_REF => 6,
+	ST_SESSION => 7,
+	ST_SECTION => 8
     };
     my @state;
     unshift @state, $initstate // ST_INIT;
@@ -434,7 +435,7 @@ EOT
 	} elsif (/^\s*((Match)|(Rewrite)|(TrustedIP)|(ACL)|(CombineHeaders)|(Condition)|(Lua))\b/i) {
 	    unshift @state, ST_SECTION
 	} elsif (/^(\s*)End/i) {
-	    if ($state[0] == ST_BACKEND) {
+	    if ($state[0] == ST_BACKEND || $state[0] == ST_BACKEND_STAT) {
 		my $be = $backends->create($be_loc);
 		if ($verbose) {
 		    print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
@@ -448,21 +449,15 @@ EOT
 	    shift @state;
 	    if (/^\s*Resolve/) {
 		unshift @state, ST_BACKEND_DYN;
+	    } elsif (/^\s*Use\s/i) {
+		unshift @state, ST_BACKEND_REF;
 	    } else {
 		unshift @state, ST_BACKEND_STAT;
-		my $be = $backends->create($be_loc);
-		if ($verbose) {
-		    print "$infile:$.: Backend ".$be->ident . ": " . $be->address."\n";
-		}
-		/^(\s*)([\S]+)/;
-		my ($indent, $kw) = ($1, $2);
-		print $out "# Inserted by $0\n";
-		print $out "${indent}Address ".$be->host."\n";
-		print $out "${indent}Port ".$be->port."\n";
-		next if ($kw =~ /^Address/i || $kw =~ /^Port/i);
+		next if (/^\s*(Address|Port)/i);
 	    }
 	} elsif ($state[0] == ST_BACKEND_STAT) {
 	    next if (/^\s*Address/i || /^\s*Port/i);
+	    $state[0] = ST_BACKEND_REF if /^\s*Use\s/;
 	} elsif ($state[0] == ST_LISTENER) {
 	    if (/^\s*(Address|Port|SocketFrom)/i) {
 		    $_ = "# Commented out: $_";

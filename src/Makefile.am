@@ -68,9 +68,11 @@ libpound_a_SOURCES = \
  capbio.h\
  cctype.c\
  cctype.h\
+ cfg-gram.c\
+ cfg-lex.c\
+ cfgdef.c\
+ cfgdef.h\
  closefrom.c\
- cfgparser.c\
- cfgparser.h\
  json.c\
  json.h\
  mem.c\
@@ -80,10 +82,22 @@ libpound_a_SOURCES = \
 
 pkgdata_DATA = poundctl.tmpl mvh.inc
 
-EXTRA_DIST = $(pkgdata_DATA) pound-mode.el
+BUILT_SOURCES = cfg-lex.c cfg-gram.c cfg-gram.h
+EXTRA_DIST = $(pkgdata_DATA) pound-mode.el cfg-lex.l cfg-gram.y
 
-noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h watcher.h
+cfg-gram.h: cfg-gram.c
+cfg-lex.o: cfg-lex.c cfg-gram.h
+
+noinst_HEADERS=pound.h extern.h list.h ht.h resolver.h watcher.h cfg-gram.h
 
 bin_PROGRAMS=poundctl
 poundctl_SOURCES=poundctl.c tmpl.c
 poundctl_LDFLAGS=-lm
+
+AM_YFLAGS=-dtv
+AM_LFLAGS=-d
+
+.l.c:
+	$(FLEX) -o $@ $(AM_LFLAGS) $<
+.y.c:
+	$(BISON) -o $@ $(AM_YFLAGS) $<

@@ -31,7 +31,7 @@ static size_t
 line_no (char *text, size_t n)
 {
   size_t i;
-  
+
   for (i = 1;;i++)
     {
       n = line_start (text, n);
@@ -59,9 +59,9 @@ main (int argc, char **argv)
   char buf[MAXBUF];
   int rc;
   size_t i;
-  
+
   set_progname (argv[0]);
-  
+
   assert (argc >= 2);
   if ((fp = fopen (argv[1], "r")) == NULL)
     {
@@ -86,14 +86,14 @@ main (int argc, char **argv)
       exit (1);
     }
   buf[rc] = 0;
-  
+
   rc = template_parse (buf, &tmpl, &end);
-    
+
   if (rc != TMPL_ERR_OK)
     {
       size_t ls = line_start (buf, end);
       size_t ln = line_no (buf, end);
-      
+
       fprintf (stderr, "%s:%zu:%zu: %s\n", argv[1], ln, end - ls,
 	       template_strerror (rc));
       exit (1);
@@ -103,7 +103,7 @@ main (int argc, char **argv)
     {
       struct json_value *jv;
       char *endp;
-      
+
       rc = json_parse_string (argv[i], &jv, &endp);
       if (rc)
 	{
@@ -116,6 +116,6 @@ main (int argc, char **argv)
     }
 
   template_free (tmpl);
-  
+
   return 0;
 }

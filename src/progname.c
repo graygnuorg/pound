@@ -90,4 +90,3 @@ There is NO WARRANTY, to the extent permitted by law.\n\
       print_string_values (settings, stdout);
     }
 }
-

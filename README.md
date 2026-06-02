@@ -87,6 +87,8 @@ following tools in order to build it:
 * [GNU Autoconf](http://www.gnu.org/software/automake), version 2.71 or later.
 * [GNU Automake](http://www.gnu.org/software/autoconf), version 1.16.5 or later.
 * [GNU Libtool](http://www.gnu.org/software/libtool), version 2.4.2 or later.
+* [GNU Bison](http://www.gnu.org/software/bison), version 3.6 or later.
+* [Flex](https://github.com/westes/flex), version 2.6.4 or later.
 
 First, run
 
@@ -192,29 +194,24 @@ When configuration is finished, run
  make
 ```
 
-When building from a git clone, the first run of this command can take
-considerable time, if you are compiling with `OpenSSL` 1.0.  That's because
-it involves generating DH parameters.
-
 ## Testing
 
 Testing a reverse proxy in general, and __pound__ in particular, is not
-a trivial task.  Testsuite in __pound__ was implemented quite recently
-and is still somewhat experimental.  Notwithstanding that, it has
-already helped to discover several important bugs that lurked in the
-code.
+a trivial task.  It requires additional tools to mimic the real-time
+environment.
 
 To test __pound__ you will need [Perl](https://www.perl.org) version
-5.26.3 or later, with [JSON](https://metacpan.org/pod/JSON) module (it is
-normally part of Perl), and the [IO::FDPass](https://metacpan.org/pod/IO::FDPass) module.  To install the latter on a reasonably recent debian-based system,
-run
+5.26.3 or later, with [JSON](https://metacpan.org/pod/JSON) and
+[IO::FDPass](https://metacpan.org/pod/IO::FDPass) modules.  To install
+these on a reasonably recent debian-based system, run
 
 ```sh
- apt-get install libio-fdpass-perl
+ apt-get install libjson-perl libio-fdpass-perl
 ```
 
-On other systems you may need to install it directly from *cpan* by
-running
+Other distributions provide `JSON` as a part of the `perl` package itself.
+In case `IO::FDPass` is not packaged by the distribution, you can install
+it directly from *cpan* by running
 
 ```sh
  cpan -i IO::FDPass
@@ -246,44 +243,54 @@ from the top-level source directory.  On success, you will see
 something like that (ellipsis indicating output omitted for brevity):
 
 ```
-## -------------------------- ##
-## pound 4.14 test suite.     ##
-## -------------------------- ##
+## ------------------------- ##
+## pound 4.23 test suite.    ##
+## ------------------------- ##
   1: Configuration file syntax                       ok
   2: Traditional log levels (compilation)            ok
-  3: Basic request processing                        ok
-  4: Traditional log levels (output)                 ok
-  5: HTTP log formats                                ok
-  6: Log suppression                                 ok
-  7: xHTTP                                           ok
-  8: CheckURL                                        ok
-  9: Custom Error Response                           ok
- 10: MaxRequest                                      ok
- 11: MaxURI                                          ok
- 12: RewriteLocation                                 ok
- 13: RewriteLocation (https)                         ok
- 14: Named backends                                  ok
- 15: Chunked encoding                                ok
- 16: Invalid Transfer-Encoding headers               ok
+  3: Tunnel                                          ok
+  4: Basic request processing                        ok
+  5: Traditional log levels (output)                 ok
+  6: HTTP log formats                                ok
+  7: Log suppression                                 ok
+  8: xHTTP                                           ok
+  9: CheckURL                                        ok
+ 10: Custom Error Response                           ok
+ 11: MaxRequest                                      ok
+ 12: MaxURI                                          ok
+ 13: RewriteLocation                                 ok
+ 14: RewriteLocation (https)                         ok
+ 15: Named backends                                  ok
+ 16: Chunked encoding                                ok
+ 17: Invalid Transfer-Encoding headers               ok
+ 18: Constant                                        ok
 
 Listener request modification
 
-  8: Basic set directives                            ok
-
+ 19: Basic set directives                            ok
+ 
   ...
 
 ## ------------- ##
 ## Test results. ##
 ## ------------- ##
 
-All 71 tests were successful.
+All 110 tests were successful.
 ```
 
-If a test results in something other than `ok`, it leaves detailed
-diagnostics in directory `tests/testsuite.dir/NN`, where *NN* is the
-ordinal number of the test.  If you encounter such failed tests, please
+If some __pound__ features were disabled, the corresponding tests will
+be skipped.  In that case, the summary lines can look like
+
+```
+95 tests were successful.
+15 tests were skipped.
+```
+
+If any test results in something other than `ok`, it would leave the
+detailed diagnostics in directory `tests/testsuite.dir/NN`, where *NN* is
+its ordinal number.  If you encounter such failed tests, please
 tar the contents of `tests/testsuite.dir` directory and send the resulting
-tarball over to <gray@gnu.org> for investigation.  See also section
+tarball over to <gray@gnu.org> for investigation.  See also the section
 [Bug Reporting](#user-content-bug-reporting) below.
 
 ## Installation
@@ -309,8 +316,8 @@ i.e. the end of the proxy that is responsible for connection with the
 outside world, and `Service` section with one or more `Backend` sections
 within, which declares where the incoming requests should go.  The
 `Service` section can be global or it can be located within the
-`ListenHTTP` block.  Global `Service` sections can be shared between
-two or more `ListenHTTP` sections.  Multiple `Service` sections can
+`ListenHTTP` block.  Global `Service` sections are shared between
+all `ListenHTTP` and `ListenHTTPS` sections.  Multiple `Service` sections can
 be supplied, in which case the `Service` to use when handling a
 particular HTTP request will be selected using the supplied criteria,
 such as source IP address, URL, request header or the like.
@@ -335,7 +342,7 @@ ListenHTTP
 End
 ```
 
-The `Address`, and `Port` statements are present in both `ListenHTTP`
+`Address`, and `Port` statements are present in both `ListenHTTP`
 and `Backend` sections.  For `ListenHTTP` they specify the IP address
 and port to listen on.  Argument to the `Address` statement can be an
 IPv4 or IPv6 address, or a full pathname of a UNIX socket file.  The
@@ -530,6 +537,11 @@ HTTP server functionality.  These are:
 
    Replies with the HTTP status code *status*.  If *file* is given, it
    supplies content of the response.
+
+* `Success`
+   Always returns a 200 response code.  This is intended mainly for
+   handling special cases when the response itself is generated using
+   __pound__ rewrite directives.
 
 * `Redirect` [*status*] "*url*"
 

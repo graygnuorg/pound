@@ -310,10 +310,10 @@ dispatch_command (char c)
     }
 }
 
-int
-pound_http_set_qsize (void *call_data, void *section_data)
+void
+pound_http_set_qsize (int n)
 {
-  return cfg_assign_int_range (&inqueue.cap, 0, INT_MAX);
+  inqueue.cap = n;
 }
 
 /*

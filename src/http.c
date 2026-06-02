@@ -1961,7 +1961,7 @@ drain_eol (BIO *in)
  * Return 0 on success.
  */
 static int
-get_line (BIO *in, char *const buf, int bufsize)
+get_line (BIO *in, char *const buf, size_t bufsize)
 {
   char tmp;
   int i, seen_cr;
@@ -2243,7 +2243,7 @@ get_content_length (char const *arg, int mode)
  * Copy chunked
  */
 static int
-copy_chunks (BIO *cl, BIO *be, char *buf, unsigned bufsize,
+copy_chunks (BIO *cl, BIO *be, char *buf, size_t bufsize,
 	     CONTENT_LENGTH max_size, CONTENT_LENGTH *res_bytes)
 {
   CONTENT_LENGTH cont, tot_size;
@@ -3189,13 +3189,13 @@ http_header_list_remove (HTTP_HEADER_LIST *head, struct http_header *hdr)
 }
 
 static void
-http_header_list_filter (HTTP_HEADER_LIST *head, MATCHER *m)
+http_header_list_filter (HTTP_HEADER_LIST *head, GENPAT pat)
 {
   struct http_header *hdr, *tmp;
 
   DLIST_FOREACH_SAFE (hdr, tmp, head, link)
     {
-      if (genpat_match (m->pat, hdr->header, 0, NULL) == 0)
+      if (genpat_match (pat, hdr->header, 0, NULL) == 0)
 	{
 	  http_header_list_remove (head, hdr);
 	}

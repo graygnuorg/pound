@@ -71,105 +71,142 @@ URL *url;
 
 SERVER_HASH *server_hash;
 
-static CFGPARSER_TABLE server_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
+static CFG_DEFN poundctl_section_defn[] = {
   {
     .name = "URL",
-    .parser = cfg_assign_string,
-    .off = offsetof (struct server_defn, url)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (struct server_defn, url)
+    }
   },
   {
     .name = "CAFile",
-    .parser = cfg_assign_string,
-    .off = offsetof (struct server_defn, ca_file)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (struct server_defn, ca_file)
+    }
   },
   {
     .name = "CAPath",
-    .parser = cfg_assign_string,
-    .off = offsetof (struct server_defn, ca_path)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (struct server_defn, ca_path)
+    }
   },
   {
     .name = "ClientCert",
-    .parser = cfg_assign_string,
-    .off = offsetof (struct server_defn, cert)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (struct server_defn, cert)
+    }
   },
   {
     .name = "Verify",
-    .parser = cfg_assign_bool,
-    .off = offsetof (struct server_defn, verify)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (struct server_defn, verify)
+    }
   },
   { NULL }
 };
 
 static int
-parse_server (void *call_data, void *section_data)
+server_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  struct token *tok;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   SERVER *srv, *old;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
   XZALLOC (srv);
-  srv->name = xstrdup (tok->str);
+  srv->name = xstrdup (string_ptr (arg->v.string));
   if ((old = SERVER_INSERT (server_hash, srv)) != NULL)
     {
-      conf_error ("redefinition of %s", srv->name);
+      conf_error_at_locus_range (&srv->locus, "redefinition of %s", srv->name);
       conf_error_at_locus_range (&old->locus, "previously defined here");
-      return CFGPARSER_FAIL;
+      return -1;
     }
-  return cfgparser_loop (server_parsetab, srv, NULL, DEPREC_OK, &srv->locus);
+  *baseptr = srv;
+  return 0;
 }
 
-static CFGPARSER_TABLE top_level_parsetab[] = {
-  {
-    .type = KWT_TOPLEVEL,
-  },
+static CFG_TYPE cfg_type_server = {
+  .argdef = "s",
+  .prepare = server_prepare
+};
+
+static CFG_DEFN poundctl_top_defn[] = {
   {
     .name = "URL",
-    .parser = cfg_assign_string,
-    .data = &default_server_defn.url
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &default_server_defn.url
+    }
   },
   {
     .name = "CAFile",
-    .parser = cfg_assign_string,
-    .data = &default_server_defn.ca_file
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &default_server_defn.ca_file
+    }
   },
   {
     .name = "CAPath",
-    .parser = cfg_assign_string,
-    .data = &default_server_defn.ca_path
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &default_server_defn.ca_path
+    }
   },
   {
     .name = "ClientCert",
-    .parser = cfg_assign_string,
-    .data = &default_server_defn.cert
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &default_server_defn.cert
+    }
   },
   {
     .name = "Verify",
-    .parser = cfg_assign_bool,
-    .data = &default_server_defn.verify
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .data = &default_server_defn.verify
+    }
   },
   {
     .name = "TemplateFile",
-    .parser = cfg_assign_string,
-    .data = &tmpl_file,
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &tmpl_file,
+    }
   },
   {
     .name = "TemplatePath",
-    .parser = cfg_assign_string,
-    .data = &tmpl_path
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &tmpl_path
+    },
   },
   {
     .name = "TemplateName",
-    .parser = cfg_assign_string,
-    .data = &tmpl_name
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &tmpl_name
+    }
   },
   {
     .name = "Server",
-    .parser = parse_server
+    .token = T_SECTION,
+    .vtype = &cfg_type_server,
+    .ref = poundctl_section_defn
   },
   { NULL }
 };
@@ -180,7 +217,10 @@ static void
 read_config (void)
 {
   char *poundctl_conf;
-  char *homedir = getenv ("HOME");
+  char *homedir;
+  CFG_AST *ast;
+
+  homedir = getenv ("HOME");
   if (!homedir)
     {
       struct passwd *pwd = getpwuid (getuid ());
@@ -194,251 +234,277 @@ read_config (void)
 
   if ((poundctl_conf = getenv ("POUNDCTL_CONF")) != NULL)
     {
-      if (poundctl_conf[0])
-	{
-	  if (cfgparser_parse (poundctl_conf, homedir, top_level_parsetab, NULL,
-			       DEPREC_OK, 0))
-	    exit (1);
-	}
+      if (!poundctl_conf[0])
+	poundctl_conf = NULL;
     }
   else
     {
       char *buf = xmalloc (strlen (homedir) + 1 + sizeof (DOT_POUNDCTL_NAME));
       strcat (strcat (strcpy (buf, homedir), "/"), DOT_POUNDCTL_NAME);
-      if (access (buf, F_OK) == 0)
-	{
-	  if (cfgparser_parse (".poundctl", homedir, top_level_parsetab, NULL,
-			       DEPREC_OK, 0))
-	    exit (1);
-	}
+      int exists = access (buf, F_OK) == 0;
       free (buf);
+      if (exists)
+	poundctl_conf = DOT_POUNDCTL_NAME;
     }
+
+  if (!poundctl_conf)
+    return;
+
+  ast = cfg_parse_tree (poundctl_conf, homedir, poundctl_top_defn);
+  if (!ast)
+    exit (1);
+
+  if (cfg_ast_finalize (ast, NULL, NULL))
+    exit (1);
+  cfg_ast_free (ast);
 }
 
-static int skip_section (void *call_data, void *section_data);
-static int skip_acl_def (void *call_data, void *section_data);
-static int skip_acl_ref (void *call_data, void *section_data);
-static int skip_directive (void *call_data, void *section_data);
+static CFG_FLAG allflagdef[] = {
+  { "beg",          1 },
+  { "case",         1 },
+  { "cipherlist",   1, 1 },
+  { "ciphersuites", 1, 1 },
+  { "contain",      1 },
+  { "decode",       1 },
+  { "encode",       1 },
+  { "end",          1 },
+  { "exact",        1 },
+  { "file",         1, 1 },
+  { "filewatch",    1, 1 },
+  { "forwarded",    1 },
+  { "icase",        1 },
+  { "pcre",         1 },
+  { "perl",         1 },
+  { "posix",        1 },
+  { "re",           1 },
+  { "tag",          1, 1 },
+  { "trim",         1 },
+  { "watcher",      1 },
+  { NULL }
+};
 
+static CFG_TYPE any_type = {
+  .argdef = ".*",
+  .flagdef = allflagdef
+};
 
-static CFGPARSER_TABLE section_parsetab[] = {
+static CFG_DEFN any_defn[] = {
   {
-    .name = "End",
-    .parser = cfg_parse_end
+    .name = "*",
+    .token = T_DIRECTIVE,
+    .vtype = &any_type,
   },
-  {
-    .name = "Service",
-    .parser = skip_section
-  },
-  {
-    .name = "Backend",
-    .parser = skip_section
-  },
-  {
-    .name = "Emergency",
-    .parser = skip_section
-  },
-  {
-    .name = "Session",
-    .parser = skip_section
-  },
+  { NULL }
+};
+
+static CFG_DEFN rw_defn[] = {
   {
     .name = "Match",
-    .parser = skip_section
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
   },
   {
-    .name = "Rewrite",
-    .parser = skip_section
-  },
-  {
-    .name = "ACL",
-    .parser = skip_acl_ref,
-  },
-  {
-    .name = "TrustedIP",
-    .parser = skip_acl_ref
-  },
-  {
-    .name = "",
-    .type = KWT_WILDCARD,
-    .parser = skip_directive
-  },
-  { NULL }
-};
-
-static int
-skip_section (void *call_data, void *section_data)
-{
-  if (skip_directive (call_data, section_data) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-  return cfgparser_loop (section_parsetab, call_data, section_data,
-			 DEPREC_OK, NULL);
-}
-
-static int
-skip_to_end (void)
-{
-  struct token *tok;
-  while ((tok = gettkn_any ()) != NULL)
-    {
-      if (tok->type == T_IDENT && c_strcasecmp (tok->str, "end") == 0)
-	return CFGPARSER_OK;
-      while ((tok = gettkn_any ()) != NULL && tok->type != '\n')
-	;
-    }
-  conf_error ("%s", "unexpected end of file");
-  return CFGPARSER_FAIL;
-}
-
-static int
-skip_acl_def (void *call_data, void *section_data)
-{
-  if (skip_directive (call_data, section_data) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-  return skip_to_end ();
-}
-
-static int
-skip_acl_ref (void *call_data, void *section_data)
-{
-  struct token *tok;
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == '\n')
-    return skip_to_end ();
-  return skip_directive (call_data, section_data);
-}
-
-static int
-skip_stringlist (void *call_data, void *section_data)
-{
-  return skip_to_end ();
-}
-
-static int
-skip_directive (void *call_data, void *section_data)
-{
-  struct token *tok;
-  while ((tok = gettkn_any ()) != NULL)
-    {
-      if (tok->type == '\n')
-	return CFGPARSER_OK_NONL;
-    }
-  return CFGPARSER_FAIL;
-}
-
-static CFGPARSER_TABLE resolver_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "ConfigText",
-    .parser = skip_stringlist
-  },
-  {
-    .name = "",
-    .type = KWT_WILDCARD,
-    .parser = skip_directive
-  },
-  { NULL }
-};
-
-static int
-skip_resolver (void *call_data, void *section_data)
-{
-  return cfgparser_loop (resolver_parsetab, call_data, section_data,
-			 DEPREC_OK, NULL);
-}
-
-static CFGPARSER_TABLE control_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Socket",
-    .parser = cfg_assign_string
-  },
-  {
-    .name = "",
-    .type = KWT_WILDCARD,
-    .parser = skip_directive
-  },
-  { NULL }
-};
-
-static int
-parse_control (void *call_data, void *section_data)
-{
-  struct token *tok;
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  switch (tok->type)
-    {
-    case '\n':
-      return cfgparser_loop (control_parsetab, call_data, section_data,
-			     DEPREC_OK, NULL);
-    case T_STRING:
-      *(char **) call_data = xstrdup (tok->str);
-      break;
-    default:
-      conf_error ("expected string or newline, but found %s",
-		  token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-  return CFGPARSER_OK;
-}
-
-static CFGPARSER_TABLE pound_top_level_parsetab[] = {
-  {
-    .type = KWT_TOPLEVEL
-  },
-  {
-    .name = "IncludeDir",
-    .parser = cfg_parse_includedir
-  },
-  {
-    .name = "Control",
-    .parser = parse_control,
-  },
-  {
-    .name = "ListenHTTP",
-    .parser = skip_section
-  },
-  {
-    .name = "ListenHTTPS",
-    .parser = skip_section
-  },
-  {
-    .name = "Service",
-    .parser = skip_section
+    .name = "NOT",
+    .token = T_NOT,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
   },
   {
     .name = "ACL",
-    .parser = skip_acl_def,
-  },
-  {
-    .name = "TrustedIP",
-    .parser = skip_acl_def,
-  },
-  {
-    .name = "CombineHeaders",
-    .parser = skip_stringlist
-  },
-  {
-    .name = "Resolver",
-    .parser = skip_resolver
+    .token = T_ACL,
+    .vtype = &any_type,
   },
   {
     .name = "",
     .type = KWT_TABREF,
-    .ref = cfg_global_parsetab
+    .ref = any_defn
+  },
+  { NULL }
+};
+
+static CFG_DEFN svc_defn[] = {
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "Emergency",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "Session",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = &any_type
+  },
+  {
+    .name = "TrustedIP",
+    .token = T_TRUSTEDIP,
+    .vtype = &any_type,
+  },
+  {
+    .name = "Rewrite",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
   },
   {
     .name = "",
-    .type = KWT_WILDCARD,
-    .parser = skip_directive
+    .type = KWT_TABREF,
+    .ref = rw_defn
+  },
+  { NULL }
+};
+
+static CFG_DEFN lst_defn[] = {
+  {
+    .name = "Service",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = svc_defn
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = any_defn
+  },
+  { NULL }
+};
+
+static CFG_DEFN resolver_defn[] = {
+  {
+    .name = "ConfigText",
+    .token = T_TEXT,
+    .vtype = CFG_TYPE_ANY,
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = any_defn
+  },
+  { NULL }
+};
+
+static CFG_DEFN control_defn[] = {
+  {
+    .name = "Socket",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = any_defn
+  },
+  { NULL }
+};
+
+static int
+control_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  if (!cfg_arglist_empty (&node->arglist))
+    {
+      CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+      *(char**)baseptr = xstrdup (string_ptr (arg->v.string));
+    }
+  return 0;
+}
+
+static CFG_TYPE cfg_type_control = {
+  .argdef = "s?",
+  .commit = control_commit
+};
+
+static CFG_DEFN pound_top_defn[] = {
+  {
+    .name = "IncludeDir",
+    .token = T_INCLUDEDIR,
+    .vtype = CFG_TYPE_STRING,
+    /* This one is handled in the grammar directly. The node will never be
+       committed directly. */
+  },
+  {
+    .name = "Control",
+    .token = T_CONTROL,
+    .vtype = &cfg_type_control,
+    .ref = control_defn
+  },
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "CombineHeaders",
+    .token = T_COMHEADERS,
+    .vtype = CFG_TYPE_ANY,
+  },
+  {
+    .name = "Resolver",
+    .token = T_SECTION,
+    .ref = resolver_defn
+  },
+  {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = &any_type
+  },
+  {
+    .name = "TrustedIP",
+    .token = T_TRUSTEDIP,
+    .vtype = &any_type,
+  },
+  {
+    .name = "Condition",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
+  },
+  {
+    .name = "Lua",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "Service",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = svc_defn
+  },
+  {
+    .name = "ListenHTTP",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = lst_defn
+  },
+  {
+    .name = "ListenHTTPS",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = lst_defn
+  },
+  {
+    .name = "Tunnel",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = lst_defn
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = any_defn
   },
   { NULL }
 };
@@ -447,13 +513,20 @@ char *
 scan_pound_cfg (void)
 {
   char *control_socket = NULL;
+
   if (access (conf_name, F_OK) == 0)
     {
+      CFG_AST *ast;
+
       if (verbose_option)
 	errormsg (0, 0, "scanning file %s", conf_name);
-      if (cfgparser_parse (conf_name, NULL, pound_top_level_parsetab,
-			   &control_socket, DEPREC_OK, 0))
-	return NULL;
+
+      ast = cfg_parse_tree (conf_name, NULL, pound_top_defn);
+      if (ast)
+	{
+	  cfg_ast_commit (ast, &control_socket, NULL);
+	  cfg_ast_free (ast);
+	}
     }
   return control_socket;
 }
@@ -1533,6 +1606,16 @@ static struct string_value poundctl_settings[] = {
   { NULL }
 };
 
+static struct pound_feature feature[] = {
+  {
+    .name = "debug",
+    .descr = "enable additional debugging",
+    .enabled = F_OFF,
+    .setfn = set_debug_feature
+  },
+  { NULL }
+};
+
 int
 main (int argc, char **argv)
 {
@@ -1543,9 +1626,10 @@ main (int argc, char **argv)
 
   set_progname (argv[0]);
   json_memabrt = xnomem;
+  feature_init (feature);
 
   read_config ();
-  while ((c = getopt (argc, argv, "+C:f:i:jK:khS:s:T:t:vV")) != EOF)
+  while ((c = getopt (argc, argv, "+C:f:i:jK:khS:s:T:t:vVW:")) != EOF)
     {
       switch (c)
 	{
@@ -1610,6 +1694,14 @@ main (int argc, char **argv)
 
 	case 'v':
 	  verbose_option++;
+	  break;
+
+	case 'W':
+	  if (feature_set (optarg))
+	    {
+	      errormsg (1, 0, "invalid feature name: %s", optarg);
+	      exit (1);
+	    }
 	  break;
 
 	default:

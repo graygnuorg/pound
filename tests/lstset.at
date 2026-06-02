@@ -131,7 +131,7 @@ end
 PT_CHECK([ListenHTTP
 	Service
 		Rewrite
-			SetQueryParam -encode "quux" "foo & bar"
+			SetQueryParam "quux" -encode "foo & bar"
 			SetQueryParam "foo" -encode "q?"
 		End
 		Backend

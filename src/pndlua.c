@@ -17,6 +17,7 @@
  */
 #include "pound.h"
 #include "extern.h"
+#include "cfgdef.h"
 #include "lua.h"
 #include "lauxlib.h"
 #include "lualib.h"
@@ -2025,10 +2026,11 @@ static PATH_HEAD path_head[2] = {
 
 /* Adds a single name to the path list. */
 static void
-path_list_add (PATH_HEAD *head, char const *name)
+path_list_add (PATH_HEAD *head, char const *name, size_t len)
 {
-  struct path_dir *dir = xmalloc (sizeof (*dir) + strlen (name));
-  strcpy (dir->name, name);
+  struct path_dir *dir = xmalloc (sizeof (*dir) + len);
+  memcpy (dir->name, name, len);
+  dir->name[len] = 0;
   SLIST_INSERT_TAIL (head, dir, next);
 }
 
@@ -2474,154 +2476,153 @@ pndlua_init (void)
 /*
  * Configuration parser.
  */
-
 static int
-parse_lua_path (int n)
+parse_lua_path (int idx, char const *path, struct locus_range const *pathloc)
 {
-  char *path, *s, *p;
-  int rc = cfg_assign_string (&path, NULL);
-  if (rc != CFGPARSER_OK)
-    return rc;
-  for (s = strtok_r (path, ";", &p); s; s = strtok_r (NULL, ";", &p))
+  int rc = 0;
+  struct locus_range loc;
+
+  locus_range_init (&loc);
+  locus_point_copy (&loc.beg, &pathloc->beg);
+  locus_point_copy (&loc.end, &loc.beg);
+  while (*path)
     {
-      if (!strchr (s, '?'))
+      char *p = strchr (path, ';');
+      size_t n = p ? p - path : strlen (path);
+      loc.end.col += n;
+      if (!memchr (path, '?', n))
 	{
-	  conf_error ("%s: this doesn't look like a Lua path component", s);
-	  rc = CFGPARSER_FAIL;
+	  conf_error_at_locus_range (&loc,
+				     "this doesn't look like"
+				     " a Lua path component");
+	  rc = -1;
 	}
-      else
-	path_list_add (&path_head[n], s);
+      path_list_add (&path_head[idx], path, n);
+      loc.beg.col = loc.end.col;
+      path += n;
+      if (*path)
+	{
+	  path++;
+	  loc.end.col++;
+	}
     }
+  locus_range_unref (&loc);
   return rc;
 }
 
 static int
-pndlua_parse_lua_path (void *call_data, void *section_data)
+pndlua_path_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  return parse_lua_path (PNDLUA_PATH);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return parse_lua_path (PNDLUA_PATH, string_ptr (arg->v.string), &arg->locus);
 }
 
 static int
-pndlua_parse_lua_cpath (void *call_data, void *section_data)
+pndlua_cpath_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  return parse_lua_path (PNDLUA_CPATH);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return parse_lua_path (PNDLUA_CPATH, string_ptr (arg->v.string),
+			 &arg->locus);
 }
 
 static int
-parse_lua_load (struct pndlua_source_head *head)
+pndlua_load_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  struct token *tok;
-  char *filename;
+  struct pndlua_source_head *head = baseptr;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   struct pndlua_source *src;
+  char *filename;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((filename = filename_resolve (tok->str)) == NULL)
-    return CFGPARSER_FAIL;
+  if ((filename = filename_resolve (string_ptr (arg->v.string))) == NULL)
+    return -1;
 
   XZALLOC (src);
   src->filename = filename;
   locus_range_init (&src->locus);
-  locus_range_copy (&src->locus, &tok->locus);
+  locus_range_copy (&src->locus, &node->locus);
   SLIST_INSERT_TAIL (head, src, next);
 
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
+  arg = cfg_arg_next (arg);
 
-  if (tok->type == T_STRING)
+  if (arg)
     {
-      if (!is_lua_var_name (tok->str))
+      char const *modname = string_ptr (arg->v.string);
+      if (!is_lua_var_name (modname))
 	{
-	  conf_error ("%s", "not a valid Lua variable name");
-	  return CFGPARSER_FAIL;
+	  conf_error_at_locus_range (&arg->locus,
+				     "not a valid Lua variable name");
+	  return -1;
 	}
 
-      src->modname = xstrdup (tok->str);
+      src->modname = xstrdup (modname);
     }
-  else if (tok->type != '\n')
-    return CFGPARSER_FAIL;
 
-  return CFGPARSER_OK_NONL;
+  return 0;
 }
 
-static int
-pndlua_parse_lua_load (void *call_data, void *section_data)
-{
-  return parse_lua_load (&thread_sources);
-}
+static CFG_TYPE pndlua_load_cfgtype = {
+  .argdef = "ss?",
+  .commit = pndlua_load_commit
+};
 
-static int
-pndlua_parse_lua_load_global (void *call_data, void *section_data)
-{
-  return parse_lua_load (&global_sources);
-}
-
-int
-pndlua_parse_closure (struct pndlua_closure *cls)
-{
-  struct token *tok;
-  size_t argmax = 0;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  locus_range_init (&cls->locus);
-  locus_range_copy (&cls->locus, &tok->locus);
-
-  cls->func = xstrdup (tok->str);
-  while (1)
-    {
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == T_STRING)
-	{
-	  if (cls->argc == argmax)
-	    {
-	      cls->argv = x2nrealloc (cls->argv, &argmax,
-				       sizeof cls->argv[0]);
-	    }
-	  cls->argv[cls->argc++] = xstrdup (tok->str);
-	}
-      else if (tok->type == '\n')
-	break;
-      else
-	{
-	  conf_error ("expected string or newline, but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-    }
-  closure_head_add (cls);
-  return CFGPARSER_OK_NONL;
-}
-
-static CFGPARSER_TABLE lua_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
+CFG_DEFN pndlua_defn[] = {
   {
     .name = "Path",
-    .parser = pndlua_parse_lua_path
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = pndlua_path_commit,
   },
   {
     .name = "CPath",
-    .parser = pndlua_parse_lua_cpath
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = pndlua_cpath_commit,
   },
   {
     .name = "Load",
-    .parser = pndlua_parse_lua_load
+    .token = T_DIRECTIVE,
+    .vtype = &pndlua_load_cfgtype,
+    .rcvr = {
+      .data = &thread_sources
+    }
   },
   {
     .name = "LoadGlobal",
-    .parser = pndlua_parse_lua_load_global
+    .token = T_DIRECTIVE,
+    .vtype = &pndlua_load_cfgtype,
+    .rcvr = {
+      .data = &global_sources
+    }
   },
   { NULL }
 };
 
 int
-pndlua_parse_config (void *call_data, void *section_data)
+pndlua_parse_closure (CFG_NODE *node, struct pndlua_closure *cls)
 {
-  return parser_loop (lua_parsetab, NULL, NULL, NULL);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  size_t argmax = 0;
+
+  locus_range_init (&cls->locus);
+  locus_range_copy (&cls->locus, &node->locus);
+
+  cls->func = xstrdup (string_ptr (arg->v.string));
+  while ((arg = cfg_arg_next (arg)) != NULL)
+    {
+      if (cls->argc == argmax)
+	cls->argv = x2nrealloc (cls->argv, &argmax, sizeof cls->argv[0]);
+      cls->argv[cls->argc++] = xstrdup (string_ptr (arg->v.string));
+    }
+  closure_head_add (cls);
+  return 0;
+}
+
+void
+pndlua_closure_free (struct pndlua_closure *cls)
+{
+  int i;
+  free (cls->func);
+  for (i = 0; i < cls->argc; i++)
+    free (cls->argv[i]);
+  locus_range_unref (&cls->locus);
 }

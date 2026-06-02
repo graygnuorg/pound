@@ -323,7 +323,7 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 /* List definitions. */
 #include "list.h"
 /* Configuration parser */
-#include "cfgparser.h"
+#include "cfgdef.h"
 #include "cctype.h"
 
 char *locus_point_str (struct locus_point const *loc);
@@ -498,8 +498,8 @@ typedef struct acl
 {
   char *name;                 /* ACL name (optional) */
   SLIST_HEAD (,cidr) head;    /* List of CIDRs */
-  SLIST_ENTRY (acl) next;
   WATCHER *watcher;
+  SLIST_ENTRY (acl) next;
 } ACL;
 
 typedef SLIST_HEAD (,acl) ACL_HEAD;
@@ -547,15 +547,6 @@ struct pndlua_closure
   struct locus_range locus;
 };
 
-/* matcher chain */
-typedef struct _matcher
-{
-  GENPAT pat;		/* pattern to match the request/header against */
-  SLIST_ENTRY (_matcher) next;
-} MATCHER;
-
-typedef SLIST_HEAD(,_matcher) MATCHER_HEAD;
-
 /* back-end types */
 typedef enum
   {
@@ -895,7 +886,7 @@ typedef struct rewrite_op
   union
   {
     struct rewrite_rule *rule;   /* type == REWRITE_REWRITE_RULE */
-    MATCHER *hdrdel;             /* type == REWRITE_HDR_DEL */
+    GENPAT hdrdel;               /* type == REWRITE_HDR_DEL */
     struct
     {
       char *name;
@@ -1043,9 +1034,9 @@ typedef struct _listener
   unsigned to;			/* client time-out */
   GENPAT url_pat;	/* pattern to match the request URL against */
   struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
-  unsigned linebufsize;         /* Line buffer size */
+  size_t linebufsize;           /* Line buffer size */
   CONTENT_LENGTH max_req_size;	/* max. request size */
-  unsigned max_uri_length;      /* max. URI length */
+  size_t max_uri_length;        /* max. URI length */
   int rewr_loc;			/* rewrite location response */
   int rewr_dest;		/* rewrite destination header */
   int disabled;			/* true if the listener is disabled */
@@ -1206,7 +1197,7 @@ struct addrinfo *get_remote_ip (POUND_HTTP *phttp, int forwarded,
 				struct addrinfo **pres);
 struct timespec pound_uptime (void);
 
-int pound_http_set_qsize (void *call_data, void *section_data);
+void pound_http_set_qsize (int n);
 
 /* add a request to the queue */
 int pound_http_enqueue (int sock, LISTENER *lstn, struct sockaddr *sa, socklen_t salen);
@@ -1406,7 +1397,6 @@ int connect_nb (const int, const struct addrinfo *, const int);
  * Parse arguments/config file
  */
 void config_parse (int, char **);
-int config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd);
 
 /*
  * Renegotiation callback
@@ -1570,8 +1560,8 @@ int pndlua_modify (POUND_HTTP *phttp, struct pndlua_closure const *cond,
 		   char **argv, void *data);
 int pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *cond,
 		    char **argv, void *data);
-int pndlua_parse_config (void *call_data, void *section_data);
-int pndlua_parse_closure (struct pndlua_closure *cond);
+int pndlua_parse_closure (struct cfg_node *node, struct pndlua_closure *cond);
+void pndlua_closure_free (struct pndlua_closure *cls);
 #else
 # define phttp_lua_stash_reset(p)
 # define phttp_resending(p) RESEND_NONE
@@ -1584,17 +1574,16 @@ static inline int
 cfg_no_lua (void)
 {
   conf_error ("%s", "this pound is compiled without support for Lua");
-  return CFGPARSER_FAIL;
+  return -1;
 }
 static inline int
-pndlua_parse_config (void *call_data, void *section_data)
+pndlua_parse_closure (struct cfg_node *node, struct pndlua_closure *cond)
 {
   return cfg_no_lua ();
 }
-static inline int
-pndlua_parse_closure (struct pndlua_closure *cond)
+static inline void
+pndlua_closure_free (struct pndlua_closure *cls)
 {
-  return cfg_no_lua ();
 }
 static inline int
 pndlua_match (POUND_HTTP *phttp, struct pndlua_closure const *cond,

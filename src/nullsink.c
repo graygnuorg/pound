@@ -50,7 +50,7 @@ sink_ctrl (BIO *b, int cmd, long lval, void *pval)
     }
   return ret;
 }
-      
+
 const BIO_METHOD *
 BIO_f_sink (void)
 {
@@ -78,5 +78,3 @@ bio_new_sink (void)
 {
   return BIO_new (BIO_f_sink ());
 }
-
-

@@ -417,9 +417,9 @@ longest_suffix_length (unsigned char *str, int len, int pos)
  * The Good suffix rule applies if a substring in subject string matches
  * a suffix of pattern P[i,patlen-1] and this substring is the largest
  * such substring for the given alignment.
- * 
+ *
  * There are two cases:
- * 
+ *
  * 1. The substring occurs elsewhere in pattern.  In this case the algorithm
  * selects the rightmost occurrence of the substring such that it does not
  * form the suffix of the pattern and the character to the left of it is not

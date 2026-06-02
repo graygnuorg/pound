@@ -56,7 +56,7 @@ dir_restore_files (FSEVMON *evmon, struct watchpoint *sentinel)
   WORKDIR *wd = sentinel->wdir.wd;
   struct watchpoint *wp;
   struct stat st;
-  
+
   DLIST_FOREACH (wp, &watch_head, link)
     {
       if (wp->type == WATCH_FILE && wp->watcher->wd == wd)
@@ -117,16 +117,16 @@ fsevmon_init (void)
   struct fsevmon *emp;
   size_t n = watchpoint_count ();
   int fd;
-  
+
   if (n == 0)
     {
       errno = 0;
       return NULL;
     }
-  
+
   if ((fd = kqueue ()) == -1)
     return NULL;
-  
+
   XZALLOC (emp);
   emp->kq = fd;
   emp->evtab = xcalloc (n, sizeof (emp->evtab[0]));
@@ -197,7 +197,7 @@ fsevmon_watchpoint_install (struct fsevmon *evmon, struct watchpoint *wp)
   WORKDIR *wd = NULL;
   int flags = O_RDONLY | O_NONBLOCK;
   int mask = NOTE_DELETE;
-  
+
   switch (wp->type)
     {
     case WATCH_FILE:
@@ -207,7 +207,7 @@ fsevmon_watchpoint_install (struct fsevmon *evmon, struct watchpoint *wp)
       mask |= NOTE_CLOSE_WRITE;
 #else
       mask |= NOTE_CLOSE | NOTE_WRITE;
-#endif	
+#endif
       break;
 
     case WATCH_DIR:
@@ -254,7 +254,7 @@ thr_watcher (void *arg)
     fsevmon_select (evmon);
   pthread_cleanup_pop (1);
   return NULL;
-}  
+}
 
 void
 watchpoint_set_mode (struct watchpoint *wp, enum watcher_mode mode)
@@ -266,7 +266,7 @@ int
 watcher_setup (void)
 {
   struct fsevmon *evmon;
-  
+
   struct watchpoint *wp;
   pthread_t tid;
 

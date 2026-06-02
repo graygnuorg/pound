@@ -60,10 +60,10 @@ end
 
 200
 x-service-name: first
-x-service-locus: pound.cfg:22.17-33.11
-x-service-string: service first @ pound.cfg:22.17-33.11
+x-service-locus: pound.cfg:22.9-33.11
+x-service-string: service first @ pound.cfg:22.9-33.11
 x-service-pairs-name: first
-x-service-pairs-locus: pound.cfg:22.17-33.11
+x-service-pairs-locus: pound.cfg:22.9-33.11
 end
 
 GET /echo/test2
@@ -71,10 +71,10 @@ end
 
 200
 x-service-name: /fallback
-x-service-locus: pound.cfg:9.9-18.3
-x-service-string: service /fallback @ pound.cfg:9.9-18.3
+x-service-locus: pound.cfg:9.1-18.3
+x-service-string: service /fallback @ pound.cfg:9.1-18.3
 x-service-pairs-name: /fallback
-x-service-pairs-locus: pound.cfg:9.9-18.3
+x-service-pairs-locus: pound.cfg:9.1-18.3
 end
 
 ])

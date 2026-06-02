@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-05-26
+Pound -- history of user-visible changes. 2026-06-02
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,81 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+Version 4.23.90 (git)
+
+* Changes in the configuration.
+
+** Sizes
+
+Arguments to the following keywords can be suffixed with usual size
+suffixes "k", "m", and "g" or their upper-case equivalents:
+
+   ContentCapture
+   LineBufferSize
+   MaxURI
+   WorkerStackSize
+
+** Durations
+
+The following keywords take a duration value as their arguments. A
+duration is a sequence of numbers, each of which is followed by a
+time unit suffix, "s", "m", "h" or "d", standing for seconds, minutes,
+hours, or days, correspondingly:
+
+   Alive
+   Client
+   ConnTO
+   Grace
+   OverrideTTL
+   RetryInterval
+   TTL (in the "Session" section)
+   TimeOut
+   WSTimeOut
+   WatcherTTL
+   WorkerIdleTimeout
+
+* Cert and ACME statements take into account include directory
+
+Arguments to Cert or ACME are taken relative to the current include
+directory.
+
+* Wildcards are allowed in Cert statement
+
+The argument to the Cert directive in ListenHTTPS can contain glob(7)
+patterns, e.g.:
+
+  Cert "ssl/*.pem"
+
+* Placement of Cert directive within ListenHTTPS
+
+In previous versions, the Cert directive was required to precede any
+other SSL-specific statement (such as ClientCert, etc.) in the
+ListenHTTPS section. This is no longer the case. The Cert directive
+can be placed anywhere whithin ListenHTTPS, it will always be
+processed first.
+
+* The "Use" statement in Backend sections
+
+The "Use" statement inherits settings from a named backend referred to
+by its argument.  The "Priority" and "Disables" directives can be used
+together with it, e.g.:
+
+   Service
+       Backend
+           Use "nb"
+	   Priority 3
+       End
+   End
+
+* HTTPS statement in Backend sections
+
+In previous versions, the HTTPS statement was required to be used
+prior to any of the following statements in a Backend section:
+Cert, Ciphers, Disable. This requirement was lifted. Moreover, any
+of these statements already imply that the backend is HTTPS capable,
+which means that the HTTPS statement is superfluous if any of these
+is used.
 
 Version 4.23, 2026-05-26
 
@@ -240,9 +315,9 @@ below replies to the OPTIONS requests:
    Service
       Method "OPTIONS"
       Rewrite response
-         SetHeader "Access-Control-Allow-Origin: example.com"
-         SetHeader "Access-Control-Allow-Methods: GET,POST,PUT"
-         SetHeader "Access-Control-Max-Age: 1800"
+	 SetHeader "Access-Control-Allow-Origin: example.com"
+	 SetHeader "Access-Control-Allow-Methods: GET,POST,PUT"
+	 SetHeader "Access-Control-Max-Age: 1800"
       End
       Success
    End

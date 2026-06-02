@@ -21,13 +21,280 @@
 #include "extern.h"
 #include "resolver.h"
 #include <openssl/x509v3.h>
-#include <assert.h>
 #include <dirent.h>
-#include <sys/stat.h>
+#include <assert.h>
+
+/*
+ * Special features.
+ */
+static void
+set_include_dir (int enabled, char const *val)
+{
+  if (enabled)
+    {
+      struct stat st;
+      if (val && (*val == 0 || strcmp (val, ".") == 0))
+	val = NULL;
+      else if (stat (val, &st))
+	{
+	  logmsg (LOG_ERR, "include-dir: can't stat %s: %s", val, strerror (errno));
+	  exit (1);
+	}
+      else if (!S_ISDIR (st.st_mode))
+	{
+	  logmsg (LOG_ERR, "include-dir: %s is not a directory", val);
+	  exit (1);
+	}
+      include_dir = val;
+    }
+  else
+    include_dir = NULL;
+}
 
 static void
-regcomp_error_at_locus_range (struct locus_range const *loc, GENPAT rx,
-			      char const *expr)
+set_deprec (int enabled, char const *val)
+{
+  if (enabled)
+    {
+      char *v;
+      static char *depopt[] = { "ok", "warn", "err", NULL };
+      char *valstr = xstrdup (val);
+      char *valptr = valstr;
+      int n = getsubopt (&valptr, depopt, &v);
+      if (n != -1)
+	cfg_deprecation_mode = n;
+      else
+	abend (NULL, "bad deprecation token: %s", v);
+    }
+  else
+    cfg_deprecation_mode = DEPREC_ERR;
+}
+
+static void
+set_deprec_warn (int enabled, char const *val)
+{
+  if (val)
+    abend (NULL, "unexpected value (%s)", val);
+  cfg_deprecation_mode = enabled ? DEPREC_WARN : DEPREC_OK;
+}
+
+static struct pound_feature feature[] = {
+  [FEATURE_DNS] = {
+    .name = "dns",
+    .descr = "resolve host names found in configuration file (default)",
+    .enabled = F_ON
+  },
+  [FEATURE_INCLUDE_DIR] = {
+    .name = "include-dir",
+    .descr = "include file directory",
+    .enabled = F_DFL,
+    .setfn = set_include_dir
+  },
+  [FEATURE_WARN_DEPRECATED] = {
+    .name = "warn-deprecated",
+    .descr = "same as -Wdeprecated=warn",
+    .enabled = F_ON,
+    .setfn = set_deprec_warn
+  },
+  [FEATURE_DEPRECATED] = {
+    .name = "deprecated",
+    .descr = "deprecated features: ok, warn (default), error",
+    .enabled = F_DFL,
+    .setfn = set_deprec
+  },
+  [FEATURE_CLOSE_EXTRA_FDS] = {
+    .name = "close-extra-fds",
+    .descr = "close file descriptors greater than 2 at startup (default)",
+    .enabled = F_ON
+  },
+  [FEATURE_DEBUG] = {
+    .name = "debug",
+    .descr = "enable additional debugging",
+    .enabled = F_OFF,
+    .setfn = set_debug_feature
+  },
+  { NULL }
+};
+
+/*
+ * Additional help output.
+ */
+struct string_value pound_settings[] = {
+  { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
+  { "Include directory",   STRING_CONSTANT, { .s_const = SYSCONFDIR } },
+  { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
+  { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
+  { "Regex types", STRING_CONSTANT, { .s_const = "POSIX"
+#if HAVE_LIBPCRE == 1
+				       ", PCRE"
+#elif HAVE_LIBPCRE == 2
+				       ", PCRE2"
+#endif
+    }
+  },
+  { "Dynamic backends", STRING_CONSTANT, { .s_const =
+#if ENABLE_DYNAMIC_BACKENDS
+					  "enabled"
+#else
+					  "disabled"
+#endif
+    }
+  },
+  { "FS event monitoring", STRING_CONSTANT, { .s_const =
+#if WITH_INOTIFY
+				 "inotify"
+#elif WITH_KQUEUE
+				 "kqueue"
+#else
+				 "periodic"
+#endif
+    }
+  },
+  { "Lua support", STRING_CONSTANT, { .s_const =
+#if ENABLE_LUA
+				     "enabled"
+#else
+				     "disabled"
+#endif
+    }
+  },
+  { NULL }
+};
+
+void
+print_help (void)
+{
+  printf ("usage: %s [-FVcehv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
+  printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
+  printf ("\nOptions are:\n\n");
+  printf ("   -c               check configuration file syntax and exit\n");
+  printf ("   -e               print errors on stderr (implies -F)\n");
+  printf ("   -F               remain in foreground after startup\n");
+  printf ("   -f FILE          read configuration from FILE\n");
+  printf ("                    (default: %s)\n", POUND_CONF);
+  printf ("   -p FILE          write PID to FILE\n");
+  printf ("                    (default: %s)\n", POUND_PID);
+  printf ("   -V               print program version, compilation settings, and exit\n");
+  printf ("   -v               print log messages to stdout/stderr during startup\n");
+  printf ("   -W [no-]FEATURE  enable or disable optional feature\n");
+  printf ("\n");
+  printf ("FEATUREs are:\n");
+  features_print (stdout);
+  printf ("\n");
+  printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
+#ifdef PACKAGE_URL
+  printf ("%s home page: <%s>\n", PACKAGE_NAME, PACKAGE_URL);
+#endif
+}
+
+/*
+ * Parse comman line options and configuration file.
+ */
+static int parse_config_file (char const *file, int nosyslog);
+
+void
+config_parse (int argc, char **argv)
+{
+  int c;
+  int check_only = 0;
+  char *conf_name = POUND_CONF;
+  char *pid_file_option = NULL;
+  int foreground_option = 0;
+  int stderr_option = 0;
+
+  set_progname (argv[0]);
+  feature_init (feature);
+
+  while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
+    switch (c)
+      {
+      case 'c':
+	check_only = 1;
+	break;
+
+      case 'e':
+	stderr_option = foreground_option = 1;
+	setlinebuf (stderr);
+	setlinebuf (stdout);
+	break;
+
+      case 'F':
+	foreground_option = 1;
+	break;
+
+      case 'f':
+	conf_name = optarg;
+	break;
+
+      case 'h':
+	print_help ();
+	exit (0);
+
+      case 'p':
+	pid_file_option = optarg;
+	break;
+
+      case 'V':
+	print_version (pound_settings);
+	exit (0);
+
+      case 'v':
+	print_log = 1;
+	break;
+
+      case 'W':
+	if (feature_set (optarg))
+	  {
+	    logmsg (LOG_ERR, "invalid feature name: %s", optarg);
+	    exit (1);
+	  }
+	break;
+
+      default:
+	exit (1);
+      }
+
+  if (optind < argc)
+    {
+      logmsg (LOG_ERR, "unknown extra arguments (%s...)", argv[optind]);
+      exit (1);
+    }
+
+  if (feature_is_set (FEATURE_CLOSE_EXTRA_FDS))
+    close_fds_above (2);
+
+  if (parse_config_file (conf_name, stderr_option))
+    exit (1);
+
+  if (check_only)
+    {
+      logmsg (LOG_INFO, "Config file %s is OK", conf_name);
+      exit (0);
+    }
+
+  if (SLIST_EMPTY (&listeners))
+    abend (NULL, "no listeners defined");
+
+  if (pid_file_option)
+    pid_name = pid_file_option;
+  if (strcmp (pid_name, "-") == 0)
+    pid_name = NULL;
+
+  if (foreground_option)
+    daemonize = 0;
+
+  if (daemonize)
+    {
+      if (log_facility == -1)
+	log_facility = LOG_DAEMON;
+    }
+}
+
+/*
+ * Additional diagnostic functions.
+ */
+static void
+conf_regcomp_error (struct locus_range const *loc, GENPAT rx, char const *expr)
 {
   size_t off;
   char const *errmsg = genpat_error (rx, &off);
@@ -41,8 +308,8 @@ regcomp_error_at_locus_range (struct locus_range const *loc, GENPAT rx,
 }
 
 static void
-openssl_error_at_locus_range (struct locus_range const *loc,
-			      char const *filename, char const *msg)
+conf_openssl_error (struct locus_range const *loc,
+		    char const *filename, char const *msg)
 {
   unsigned long n = ERR_get_error ();
   if (filename)
@@ -60,113 +327,9 @@ openssl_error_at_locus_range (struct locus_range const *loc,
       while ((n = ERR_get_error ()) != 0);
     }
 }
-
-#define conf_regcomp_error(rc, rx, expr)				\
-  regcomp_error_at_locus_range (last_token_locus_range (), rx, expr)
-
-#define conf_openssl_error(file, msg)				\
-  openssl_error_at_locus_range (last_token_locus_range (), file, msg)
-
-char *
-locus_point_str (struct locus_point const *loc)
-{
-  struct stringbuf sb;
-  stringbuf_init_log (&sb);
-  stringbuf_format_locus_point (&sb, loc);
-  return stringbuf_value (&sb);
-}
-
-char *
-locus_range_str (struct locus_range const *loc)
-{
-  struct stringbuf sb;
-  stringbuf_init_log (&sb);
-  stringbuf_format_locus_range (&sb, loc);
-  return stringbuf_value (&sb);
-}
-
-struct config_option
-{
-  char *name;
-  int code;
-  int has_arg;
-};
-
-static struct config_option const *
-config_option_find (struct config_option const *optab, char const *name)
-{
-  for (; optab->name; optab++)
-    {
-      if (strcmp (optab->name, name) == 0)
-	return optab;
-    }
-  return NULL;
-}
-
-static int
-gettok_option (struct config_option const *optab,
-	       struct config_option const ** opt, char const **arg)
-{
-  struct token *tok;
-
-  if ((tok = gettkn_any ()) == NULL)
-    {
-      *opt = NULL;
-      return CFGPARSER_OK;
-    }
-  else if (tok->type != T_LITERAL || tok->str[0] != '-')
-    {
-      *opt = NULL;
-      putback_tkn (tok);
-      return CFGPARSER_OK;
-    }
-
-  if ((optab = config_option_find (optab, tok->str + 1)) == NULL)
-    {
-      conf_error ("unexpected token: %s", tok->str);
-      return CFGPARSER_FAIL;
-    }
-
-  *opt = optab;
-  if (optab->has_arg)
-    {
-      if ((tok = gettkn_expect (T_STRING)) == NULL)
-	return CFGPARSER_FAIL;
-      *arg = tok->str;
-    }
-  else if (arg)
-    *arg = NULL;
-  return CFGPARSER_OK;
-}
-
-BACKEND *
-backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
-{
-  BACKEND *be = calloc (1, sizeof (*be));
-  if (be)
-    {
-      be->be_type = type;
-      be->priority = prio;
-      pthread_mutex_init (&be->mut, &mutex_attr_recursive);
-      locus_range_init (&be->locus);
-      if (loc)
-	locus_range_copy (&be->locus, loc);
-      backend_refcount_init (be);
-    }
-  return be;
-}
-
-static BACKEND *
-xbackend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
-{
-  BACKEND *be = backend_create (type, prio, loc);
-  if (!be)
-    xnomem ();
-  return be;
-}
 
 /*
- * Named backends
+ * Named backend table.
  */
 typedef struct named_backend
 {
@@ -237,6 +400,7 @@ named_backend_retrieve (NAMED_BACKEND_TABLE *tab, char const *name)
   return NAMED_BACKEND_RETRIEVE (tab->hash, &key);
 }
 
+/* Pound defaults structure. */
 typedef struct
 {
   int log_level;
@@ -251,43 +415,519 @@ typedef struct
   BALANCER_ALGO balancer_algo;
   NAMED_BACKEND_TABLE named_backend_table;
   struct resolver_config resolver;
-  unsigned linebufsize;
+  size_t linebufsize;
 } POUND_DEFAULTS;
 
+/* Codes for the most often used flags. */
+enum
+  {
+    FLG_WATCHER = 1,
+    FLG_FWD,
+    FLG_FILE,
+    FLG_FILEWATCH,
+    FLG_TRIM
+  };
+
+/*
+ * Node verification functions.
+ */
+
+/* Check if first argument is in range [0..INT_MAX] */
 static int
-assign_bufsize (void *call_data, void *section_data)
+verify_range_nonnegative_int (CFG_NODE *node)
 {
-  return cfg_assign_unsigned_min (call_data, MAXBUF, 0);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return cfg_assert_range (arg, 0, INT_MAX);
 }
 
+/* Check if first argument is in range [1..INT_MAX] */
 static int
-assign_address_string (void *call_data, void *section_data)
+verify_range_positive_int (CFG_NODE *node)
 {
-  struct token *tok = gettkn_expect_mask (T_BIT (T_IDENT) |
-					  T_BIT (T_STRING) |
-					  T_BIT (T_LITERAL));
-  if (!tok)
-    return CFGPARSER_FAIL;
-  *(char**)call_data = xstrdup (tok->str);
-  return CFGPARSER_OK;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return cfg_assert_range (arg, 1, INT_MAX);
+}
+
+/* Threads statement (deprecated). */
+static int
+cfg_threads_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  if (cfg_assert_range (arg, 1, UINT_MAX))
+    return -1;
+
+  worker_min_count = worker_max_count = arg->v.number;
+  return 0;
 }
 
+/* ConnectionQueueSize N */
 static int
-assign_port_string (void *call_data, void *section_data)
+cfg_connqsize_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  struct token *tok = gettkn_expect_mask (T_BIT (T_IDENT) |
-					  T_BIT (T_STRING) |
-					  T_BIT (T_LITERAL) |
-					  T_BIT (T_NUMBER));
-  if (!tok)
-    return CFGPARSER_FAIL;
-  *(char**)call_data = xstrdup (tok->str);
-  return CFGPARSER_OK;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  pound_http_set_qsize (arg->v.number);
+  return 0;
 }
 
+/* ReserveFD [-watcher] N */
 static int
-assign_address_family (void *call_data, void *section_data)
+commit_reserve_fd (CFG_NODE *node, void *unused, void *baseptr)
 {
+  int per_watcher;
+  CFG_ARG *arg;
+
+  per_watcher = cfg_arglist_getflag (cfg_arglist_first (&node->arglist),
+				     NULL, &arg);
+  if (per_watcher == -1)
+    return -1;
+  if (cfg_assert_range (arg, 0, UINT_MAX))
+    return -1;
+
+  if (per_watcher)
+    {
+      if (cfg_assert_range (arg, 0, INT_MAX - per_worker_fds))
+	return -1;
+      per_worker_fds += arg->v.number;
+    }
+  else
+    {
+      if (cfg_assert_range (arg, 0, INT_MAX - num_reserved_fds))
+	return -1;
+      num_reserved_fds += arg->v.number;
+    }
+  return 0;
+}
+
+static CFG_FLAG reserve_fd_flagdef[] = {
+    { "watcher", FLG_WATCHER },
+    { NULL }
+};
+
+struct cfg_type cfg_type_reserve_fd = {
+  .argdef = "f?n",
+  .flagdef = reserve_fd_flagdef,
+  .commit = commit_reserve_fd
+};
+
+/* Syslog facilities. */
+static struct kwtab facility_table[] = {
+  { "auth", LOG_AUTH },
+#ifdef  LOG_AUTHPRIV
+  { "authpriv", LOG_AUTHPRIV },
+#endif
+  { "cron", LOG_CRON },
+  { "daemon", LOG_DAEMON },
+#ifdef  LOG_FTP
+  { "ftp", LOG_FTP },
+#endif
+  { "kern", LOG_KERN },
+  { "lpr", LOG_LPR },
+  { "mail", LOG_MAIL },
+  { "news", LOG_NEWS },
+  { "syslog", LOG_SYSLOG },
+  { "user", LOG_USER },
+  { "uucp", LOG_UUCP },
+  { "local0", LOG_LOCAL0 },
+  { "local1", LOG_LOCAL1 },
+  { "local2", LOG_LOCAL2 },
+  { "local3", LOG_LOCAL3 },
+  { "local4", LOG_LOCAL4 },
+  { "local5", LOG_LOCAL5 },
+  { "local6", LOG_LOCAL6 },
+  { "local7", LOG_LOCAL7 },
+  { NULL }
+};
+
+/* LogFacility NAME */
+static int
+commit_logfacility (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+
+  if (arg->type == T_NUMBER)
+    {
+      if (cfg_assert_range (arg, 0, INT_MAX))
+	return -1;
+      *ptr = arg->v.number;
+    }
+  else /* string or literal */
+    {
+      char const *str = string_ptr (arg->v.string);
+      int n;
+
+      if (strcmp (str, "-") == 0)
+	n = -1;
+      else if (kw_to_tok (facility_table, str, 1, &n) != 0)
+	{
+	  conf_error_at_locus_range (&arg->locus, "unknown log facility name");
+	  return -1;
+	}
+      *ptr = n;
+    }
+  return 0;
+}
+
+struct cfg_type cfg_type_logfacility = {
+  .argdef = "[lsn]",
+  .commit = commit_logfacility
+};
+
+/*
+ * LogLevel N
+ * LogLevel STR
+ */
+static int
+commit_loglevel (CFG_NODE *node, void *unused,  void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  int level;
+
+  if (arg->type == T_STRING)
+    {
+      level = http_log_format_find (string_ptr (arg->v.string));
+      if (level == -1)
+	{
+	  conf_error_at_locus_range (&arg->locus, "undefined format");
+	  return -1;
+	}
+    }
+  else
+    {
+      level = arg->v.number;
+      if (arg->v.number > INT_MAX || http_log_format_check (level))
+	{
+	  conf_error_at_locus_range (&arg->locus, "undefined log level");
+	  return -1;
+	}
+    }
+  *ptr = level;
+  return 0;
+}
+
+struct cfg_type cfg_type_loglevel = {
+  .argdef = "[sn]",
+  .commit = commit_loglevel
+};
+
+/* Canned (i.e. predefined) log formats. */
+
+struct canned_log_format
+{
+  char *name;  /* Format name. */
+  char *fmt;   /* Format specification. */
+  int line;    /* Source line to prepare a locus structure for diagnostics. */
+};
+
+static struct canned_log_format canned_log_format[] = {
+  /* 0 - not used */
+  { "null", "", __LINE__ },
+  /* 1 - regular logging */
+  {
+    "regular",
+    "%a %r - %>s",
+    __LINE__
+  },
+  /* 2 - extended logging (show chosen backend server as well) */
+  {
+    "extended",
+    "%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec",
+    __LINE__
+  },
+  /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
+  {
+    "vhost_combined",
+    "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"",
+    __LINE__
+  },
+  /* 4 - same as 3 but without the virtual host information */
+  { "combined",
+    "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"",
+    __LINE__
+  },
+  /* 5 - same as 3 but with information about the Service and Backend used */
+  { "detailed",
+    "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\""
+    " (%{service}N -> %{backend}N) %{f}T sec",
+    __LINE__
+  }
+};
+static int max_canned_log_format =
+  sizeof (canned_log_format) / sizeof (canned_log_format[0]);
+
+struct log_format_data
+{
+  struct locus_range locus;
+  int fn;
+  int fatal;
+};
+
+static void
+log_format_diag (void *data, int fatal, char const *msg, int off)
+{
+  struct log_format_data *ld = data;
+  if (ld->fn == -1)
+    {
+      struct locus_range loc = ld->locus;
+      loc.beg.col += off;
+      loc.end = loc.beg;
+      conf_error_at_locus_range (&loc, "%s", msg);
+    }
+  else
+    {
+      conf_error_at_locus_range (&ld->locus,
+				 "INTERNAL ERROR: error compiling built-in format %d", ld->fn);
+      conf_error_at_locus_range (&ld->locus, "%s: near %s", msg,
+				 canned_log_format[ld->fn].fmt + off);
+      conf_error_at_locus_range (&ld->locus, "please report");
+    }
+  ld->fatal = fatal;
+}
+
+static void
+compile_canned_formats (void)
+{
+  struct log_format_data ld;
+  int i;
+
+  ld.locus.beg.filename = string_init (__FILE__);
+  ld.locus.end.filename = ld.locus.beg.filename;
+  ld.fatal = 0;
+
+  for (i = 0; i < max_canned_log_format; i++)
+    {
+      ld.fn = i;
+      ld.locus.beg.line = ld.locus.end.line = canned_log_format[i].line;
+      ld.locus.beg.col = 5;
+      ld.locus.end.col = ld.locus.beg.col + strlen (canned_log_format[i].fmt);
+      if (http_log_format_compile (canned_log_format[i].name,
+				   canned_log_format[i].fmt,
+				   log_format_diag, &ld) == -1 || ld.fatal)
+	exit (1);
+    }
+  string_unref (ld.locus.beg.filename);
+}
+
+/* LogFormat "NAME" "DEFN" */
+static int
+commit_logformat (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *name, *format;
+  struct log_format_data ld;
+
+  name = string_ptr (arg->v.string);
+  arg = cfg_arg_next (arg);
+  format = string_ptr (arg->v.string);
+
+  ld.locus = arg->locus;
+  ld.locus.beg.col++;
+  ld.locus.end.col--;
+  ld.fn = -1;
+  ld.fatal = 0;
+
+  if (http_log_format_compile (name, format, log_format_diag, &ld) == -1 ||
+      ld.fatal)
+    return -1;
+
+  return 0;
+}
+
+struct cfg_type cfg_type_logformat = {
+  .argdef = "[sl]s",
+  .commit = commit_logformat
+};
+
+/* HeaderOption OPT... */
+static int
+commit_headeroptions (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg;
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  int opt = *ptr;
+
+  static struct kwtab options[] = {
+    { "forwarded", HDROPT_FORWARDED_HEADERS },
+    { "ssl",       HDROPT_SSL_HEADERS },
+    { "all",       HDROPT_FORWARDED_HEADERS|HDROPT_SSL_HEADERS },
+    { NULL }
+  };
+
+  CFG_ARG_FOREACH (arg, &node->arglist)
+    {
+      char const *name = string_ptr (arg->v.string);
+
+      if (c_strcasecmp (name, "none") == 0)
+	opt = 0;
+      else
+	{
+	  int neg, n;
+
+	  if (c_strncasecmp (name, "no-", 3) == 0)
+	    {
+	      neg = 1;
+	      name += 3;
+	    }
+	  else
+	    neg = 0;
+
+	  if (kw_to_tok (options, name, 1, &n))
+	    {
+	      conf_error_at_locus_range (&arg->locus, "unknown option");
+	      return -1;
+	    }
+
+	  if (neg)
+	    opt &= ~n;
+	  else
+	    opt |= n;
+	}
+    }
+  *ptr = opt;
+  return 0;
+}
+
+struct cfg_type cfg_type_headeroptions = {
+  .argdef = "[sl]+",
+  .commit = commit_headeroptions
+};
+
+/* Balancer ALGO */
+static int
+commit_balancer (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  static struct kwtab btab[] = {
+    { "random", BALANCER_ALGO_RANDOM },
+    { "iwrr", BALANCER_ALGO_IWRR },
+    { NULL }
+  };
+  int n;
+  BALANCER_ALGO *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+
+  if (kw_to_tok (btab, string_ptr (arg->v.string), 1, &n))
+    {
+      conf_error_at_locus_range (&arg->locus,
+				 "unsupported balancing strategy");
+      return -1;
+    }
+  *ptr = n;
+  return 0;
+}
+
+struct cfg_type cfg_type_balancer = {
+  .argdef = "[sl]",
+  .commit = commit_balancer
+};
+
+/* (ListenHTTPS) Cert "NAME" */
+static int
+cfg_cert_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  X509 **x509_ptr = baseptr, *cert;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *filename = string_ptr (arg->v.string);
+  FILE *fp;
+
+  if ((fp = fopen_include (filename)) == NULL)
+    {
+      fopen_error (LOG_ERR, errno, include_wd, filename, &arg->locus);
+      return -1;
+    }
+  cert = PEM_read_X509 (fp, NULL, NULL, NULL);
+  fclose (fp);
+  if (cert == NULL)
+    {
+      conf_openssl_error (&arg->locus, filename, "can't load certificate");
+      return -1;
+    }
+  *x509_ptr = cert;
+
+  return 0;
+}
+
+struct cfg_type cfg_type_cert = {
+  .argdef = "s",
+  .commit = cfg_cert_commit
+};
+
+/* SSLEngine "NAME" */
+static int
+commit_sslengine (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *str = string_ptr (arg->v.string);
+#if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
+  ENGINE *e;
+
+  if (!(e = ENGINE_by_id (str)))
+    {
+      conf_error_at_locus_range (&arg->locus, "unrecognized engine");
+      return -1;
+    }
+
+  if (!ENGINE_init (e))
+    {
+      ENGINE_free (e);
+      conf_error_at_locus_range (&arg->locus, "could not init engine");
+      return -1;
+    }
+
+  if (!ENGINE_set_default (e, ENGINE_METHOD_ALL))
+    {
+      ENGINE_free (e);
+      conf_error_at_locus_range (&arg->locus, "could not set all defaults");
+    }
+
+  ENGINE_finish (e);
+  ENGINE_free (e);
+#else
+  conf_error_at_locus_range (&arg->locus, "statement ignored");
+#endif
+
+  return -1;
+}
+
+/* RegexType TYPE */
+static int
+commit_regex_type (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  int n;
+
+  static struct kwtab regex_type_table[] = {
+    { "posix", GENPAT_POSIX },
+#ifdef HAVE_LIBPCRE
+    { "pcre",  GENPAT_PCRE },
+    { "perl",  GENPAT_PCRE },
+#endif
+    { NULL }
+  };
+
+  if (kw_to_tok (regex_type_table, string_ptr (arg->v.string), 1, &n))
+    {
+      conf_error_at_locus_range (&arg->locus, "unrecognized regex type");
+      return -1;
+    }
+  *ptr = n;
+  return 0;
+}
+
+/*
+ * Backends
+ */
+
+/* Family NAME */
+static int
+commit_address_family (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  int n;
+
   static struct kwtab kwtab[] = {
     { "any",  AF_UNSPEC },
     { "unix", AF_UNIX },
@@ -295,888 +935,442 @@ assign_address_family (void *call_data, void *section_data)
     { "inet6", AF_INET6 },
     { NULL }
   };
-  return cfg_assign_int_enum (call_data, gettkn_expect (T_IDENT), kwtab,
-			      "address family name");
+
+  if (kw_to_tok (kwtab, string_ptr (arg->v.string), 1, &n))
+    {
+      conf_error_at_locus_range (&arg->locus, "unsupported address family");
+      return -1;
+    }
+  *ptr = n;
+  return 0;
 }
 
-static int
-assign_port_generic (struct token *tok, int family, int *port)
+static struct kwtab resolve_mode_kwtab[] = {
+  { "immediate", bres_immediate },
+  { "first", bres_first },
+  { "all", bres_all },
+  { "srv", bres_srv },
+  { NULL }
+};
+
+char const *
+resolve_mode_str (int mode)
 {
-  struct addrinfo hints, *res;
-  int rc;
-
-  if (!tok)
-    return CFGPARSER_FAIL;
-
-  if (tok->type != T_IDENT && tok->type != T_NUMBER)
-    {
-      conf_error_at_locus_range (&tok->locus,
-				 "expected port number or service name, but found %s",
-				 token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  memset (&hints, 0, sizeof(hints));
-  hints.ai_flags = 0;
-  hints.ai_family = family;
-  hints.ai_socktype = SOCK_STREAM;
-  rc = getaddrinfo (NULL, tok->str, &hints, &res);
-  if (rc != 0)
-    {
-      conf_error_at_locus_range (&tok->locus,
-				 "bad port number: %s", gai_strerror (rc));
-      return CFGPARSER_FAIL;
-    }
-
-  switch (res->ai_family)
-    {
-    case AF_INET:
-      *port = ((struct sockaddr_in *)res->ai_addr)->sin_port;
-      break;
-
-    case AF_INET6:
-      *port = ((struct sockaddr_in6 *)res->ai_addr)->sin6_port;
-      break;
-
-    default:
-      conf_error_at_locus_range (&tok->locus, "%s",
-				 "Port is supported only for INET/INET6 back-ends");
-      return CFGPARSER_FAIL;
-    }
-  freeaddrinfo (res);
-  return CFGPARSER_OK;
+  char const *ret = kw_to_str (resolve_mode_kwtab, mode);
+  return ret ? ret : "UNKNOWN";
 }
 
+/* Resolve TYPE */
 static int
-assign_port_int (void *call_data, void *section_data)
+commit_resolve_mode (CFG_NODE *node, void *unused, void *baseptr)
 {
-  return assign_port_generic (gettkn_any (), AF_UNSPEC, call_data);
-}
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  int n;
 
-static int
-assign_CONTENT_LENGTH (void *call_data, void *section_data)
-{
-  CONTENT_LENGTH n;
-  char *p;
-  struct token *tok = gettkn_expect (T_NUMBER);
-
-  if (!tok)
-    return CFGPARSER_FAIL;
-
-  if (strtoclen (tok->str, 10, &n, &p) || *p)
+  if (kw_to_tok (resolve_mode_kwtab, string_ptr (arg->v.string), 1, &n))
     {
-      conf_error ("%s", "bad long number");
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (&arg->locus, "unsupported resolve mode");
+      return -1;
     }
-  *(CONTENT_LENGTH *)call_data = n;
+
+#ifndef ENABLE_DYNAMIC_BACKENDS
+  if (res != bres_immediate)
+
+    {
+      conf_error_at_locus_range (&arg->locus,
+				 "value not supported;"
+				 " pound compiled without support"
+				 " for dynamic backends");
+      return -1;
+    }
+#endif
+  *ptr = n;
   return 0;
 }
 
 static int
-assign_cert (void *call_data, void *section_data)
+cfg_commit_null (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  X509 **x509_ptr = call_data, *cert;
-  struct token *tok;
-  FILE *fp;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((fp = fopen_include (tok->str)) == NULL)
-    {
-      fopen_error (LOG_ERR, errno, include_wd, tok->str, &tok->locus);
-      return CFGPARSER_FAIL;
-    }
-  cert = PEM_read_X509 (fp, NULL, NULL, NULL);
-  fclose (fp);
-  if (cert == NULL)
-    {
-      conf_openssl_error (tok->str, "can't load certificate");
-      return CFGPARSER_FAIL;
-    }
-  *x509_ptr = cert;
-  return CFGPARSER_OK;
+  return 0;
 }
 
-#define OPT_FILE  0x1
-#define OPT_WATCH 0x2
-#define OPT_FWD   0x4
-#define OPT_TRIM  0x8
+BACKEND *
+backend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
+{
+  BACKEND *be = calloc (1, sizeof (*be));
+  if (be)
+    {
+      be->be_type = type;
+      be->priority = prio;
+      pthread_mutex_init (&be->mut, &mutex_attr_recursive);
+      locus_range_init (&be->locus);
+      if (loc)
+	locus_range_copy (&be->locus, loc);
+      backend_refcount_init (be);
+    }
+  return be;
+}
+
+static BACKEND *
+xbackend_create (BACKEND_TYPE type, int prio, struct locus_range const *loc)
+{
+  BACKEND *be = backend_create (type, prio, loc);
+  if (!be)
+    xnomem ();
+  return be;
+}
+
+/* (Backend) Cert "FILE" */
+static int
+commit_backend_cert (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  BACKEND *be = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  char *filename;
+
+  if ((filename = filename_resolve (string_ptr (arg->v.string))) == NULL)
+    return -1;
+
+  if (SSL_CTX_use_certificate_chain_file (be->v.mtx.ctx, filename) != 1)
+    {
+      conf_openssl_error (&arg->locus, filename,
+			  "SSL_CTX_use_certificate_chain_file");
+      return -1;
+    }
+
+  if (SSL_CTX_use_PrivateKey_file (be->v.mtx.ctx, filename, SSL_FILETYPE_PEM)
+      != 1)
+    {
+      conf_openssl_error (&arg->locus, filename,
+			  "SSL_CTX_use_PrivateKey_file");
+      return -1;
+    }
+
+  if (SSL_CTX_check_private_key (be->v.mtx.ctx) != 1)
+    {
+      conf_openssl_error (&arg->locus, filename,
+			  "SSL_CTX_check_private_key failed");
+      return -1;
+    }
+  free (filename);
+
+  return 0;
+}
+
+/*
+ * Ciphers [TYPEOPT] "CIPHERS"
+ *
+ * Used in: ListenHTTPS, Backend
+ */
+enum {
+  CIPHER_LIST = 1,
+  CIPHER_SUITES
+};
+
+static char const *cipherset_str[] = { NULL, "cipher list", "ciphersuites" };
 
 static int
-get_file_option (int *optflags, char **filename, int allow)
+set_ciphers (SSL_CTX *ctx, int opt, char const *str)
 {
-  static int watch_seen = 0;
-  static struct config_option optab[] = {
-    { "forwarded", OPT_FWD },
-    { "file", OPT_FILE, 1 },
-    { "filewatch", OPT_FILE | OPT_WATCH, 1 },
-    { "trim", OPT_TRIM, 0 },
+  switch (opt)
+    {
+    case CIPHER_LIST:
+      return SSL_CTX_set_cipher_list (ctx, str);
+
+    case CIPHER_SUITES:
+      return SSL_CTX_set_ciphersuites (ctx, str);
+    }
+  abort ();
+}
+
+static CFG_FLAG cipherflagdef[] = {
+  { "ciphersuites", CIPHER_SUITES, 1 },
+  { "cipherlist", CIPHER_LIST, 1 },
+  { NULL }
+};
+
+static int
+gen_ciphers_commit (CFG_ARG *arg, int (*setc)(void *, int, char const *),
+		    void *data)
+{
+  int copt = CIPHER_LIST;
+
+  while (arg)
+    {
+      char const *str;
+      CFG_ARG *ap;
+      int n = cfg_arglist_getflag (arg, &ap, &arg);
+      if (n > 0)
+	{
+	  copt = n;
+	  if (!(ap->type == T_STRING || ap->type == T_LITERAL))
+	    {
+	      conf_error_at_locus_range (&ap->locus, "bad argument");
+	      return -1;
+	    }
+	  str = string_ptr (ap->v.string);
+	}
+      else if (arg)
+	{
+	  ap = arg;
+	  str = string_ptr (ap->v.string);
+	  arg = cfg_arg_next (arg);
+	}
+
+      if (setc (data, copt, str) == 0)
+	{
+	  conf_error_at_locus_range (&ap->locus,
+				     "failed to set %s %s",
+				     cipherset_str[copt], str);
+	  return -1;
+	}
+    }
+  return 0;
+}
+
+static int
+be_set_ciphers (void *ptr, int opt, char const *str)
+{
+  BACKEND *be = ptr;
+  return set_ciphers (be->v.mtx.ctx, opt, str);
+}
+
+/* (Backend) Ciphers [TYPEOPT] "CIPHERS" ... */
+static int
+backend_ciphers_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  BACKEND *be = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return gen_ciphers_commit (arg, be_set_ciphers, be);
+}
+
+static CFG_TYPE cfg_type_backend_ciphers = {
+  .argdef = "[fsl]+",
+  .flagdef = cipherflagdef,
+  .commit = backend_ciphers_commit
+};
+
+static int
+lst_set_ciphers (void *ptr, int opt, char const *str)
+{
+  LISTENER *lst = ptr;
+  POUND_CTX *pc;
+
+  SLIST_FOREACH (pc, &lst->ctx_head, next)
+    {
+      if (set_ciphers (pc->ctx, opt, str) == 0)
+	return 0;
+    }
+  return 1;
+}
+
+/* (ListenHTTPS) Ciphers [TYPEOPT] "CIPHERS" ... */
+static int
+lst_ciphers_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return gen_ciphers_commit (arg, lst_set_ciphers, lst);
+}
+
+static CFG_TYPE cfg_type_lst_ciphers = {
+  .argdef = "[fls]+",
+  .flagdef = cipherflagdef,
+  .commit = lst_ciphers_commit
+};
+
+/* (Backend) Disable PROTO */
+static int
+commit_disable_proto (CFG_NODE *node, void *unused, void *baseptr)
+{
+  SSL_CTX *ctx = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int opt;
+
+  static struct kwtab kwtab[] = {
+    { "SSLv2", SSL_OP_NO_SSLv2 },
+    { "SSLv3", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 },
+#ifdef SSL_OP_NO_TLSv1
+    { "TLSv1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_1
+    { "TLSv1_1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+    { "TLSv1_2", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 |
+		 SSL_OP_NO_TLSv1_2 },
+#endif
     { NULL }
   };
 
-  *optflags = 0;
-  *filename = NULL;
-
-  for (;;)
+  if (kw_to_tok (kwtab, string_ptr (arg->v.string), 1, &opt))
     {
-      const char *arg;
-      struct config_option const *opt;
-
-      if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-      if (opt == NULL)
-	break;
-      if (!(allow & opt->code))
-	{
-	  conf_error ("unsupported option: -%s", opt->name);
-	  return CFGPARSER_FAIL;
-	}
-      *optflags |= opt->code;
-      if (opt->code & OPT_FILE)
-	*filename = xstrdup (arg);
-      if ((opt->code & OPT_WATCH) && !watch_seen)
-	{
-	  num_reserved_fds++;
-	  watch_seen = 1;
-	}
-    }
-  return CFGPARSER_OK;
-}
-
-/* String constants */
-#define HT_TYPE STRCONST
-#define HT_NO_HASH_FREE
-#define HT_NO_DELETE
-#define HT_NO_FOREACH
-#include "ht.h"
-
-static STRCONST_HASH *strconst_tab;
-
-static int
-strconst_read (STRCONST *sc, char const *filename, WORKDIR *wd)
-{
-  char *s;
-  size_t n;
-
-  string_unref (sc->value);
-  s = slurp (filename, wd, &sc->locus, &n);
-  if (s == NULL)
-    {
-      sc->value = NULL;
+      conf_error_at_locus_range (&arg->locus, "unknown protocol");
       return -1;
     }
-  if (sc->trim)
-    n -= c_memrspn (s, CCTYPE_SPACE, n);
-  sc->value = string_ninit (s, n);
-  free (s);
+
+  SSL_CTX_set_options (ctx, opt);
+
   return 0;
 }
-
-static int
-dynstrconst_read (void *obj, char const *filename, WORKDIR *wd)
-{
-  STRCONST *sc = obj;
-  return strconst_read (sc, filename, wd);
-}
-
-static void
-dynstrconst_clear (void *obj)
-{
-  STRCONST *sc = obj;
-  sc->value = string_unref (sc->value);
-}
-
-static int
-strconst_register (STRCONST *sc, char const *filename,
-		   struct locus_range const *loc)
-{
-  sc->watcher = watcher_register (sc, filename, loc,
-				  dynstrconst_read, dynstrconst_clear);
-  return sc->watcher == NULL;
-}
-
-static STRCONST *
-strconst_new (char const *name, struct locus_range const *loc)
-{
-  STRCONST *sc;
-
-  XZALLOC (sc);
-  sc->name = xstrdup (name);
-  locus_range_init (&sc->locus);
-  locus_range_copy (&sc->locus, loc);
-  return sc;
-}
-
-static void
-strconst_free (STRCONST *sc)
-{
-  free (sc->name);
-  locus_range_unref (&sc->locus);
-  string_unref (sc->value);
-  free (sc);
-}
-
-static int
-cfg_parse_strconst (void *call_data, void *section_data)
-{
-  STRCONST_HASH **hashptr = call_data;
-  STRCONST *sc, *old;
-  struct token *tok;
-  int opt;
-  char *filename;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  sc = strconst_new (tok->str, &tok->locus);
-
-  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH|OPT_TRIM)
-      == CFGPARSER_FAIL)
-    {
-      strconst_free (sc);
-      return CFGPARSER_FAIL;
-    }
-
-  sc->trim = !!(opt & OPT_TRIM);
-
-  if (!filename)
-    {
-      if ((tok = gettkn_expect (T_STRING)) == NULL)
-	{
-	  strconst_free (sc);
-	  return CFGPARSER_FAIL;
-	}
-      sc->value = string_init (tok->str);
-    }
-  else
-    {
-      if (opt & OPT_WATCH)
-	{
-	  if (strconst_register (sc, filename, &tok->locus))
-	    {
-	      free (filename);
-	      strconst_free (sc);
-	      return CFGPARSER_FAIL;
-	    }
-	}
-      else if (strconst_read (sc, filename, get_include_wd ()))
-	{
-	  free (filename);
-	  return CFGPARSER_FAIL;
-	}
-
-      free (filename);
-    }
-
-  if (!*hashptr)
-    {
-      *hashptr = STRCONST_HASH_NEW ();
-    }
-
-  if ((old = STRCONST_INSERT (*hashptr, sc)) != NULL)
-    {
-      conf_error_at_locus_range (&sc->locus, "%s",
-				 "warning: constant redefined");
-      conf_error_at_locus_range (&old->locus, "%s",
-				 "This is the place of the previous"
-				 " definition");
-      strconst_free (old);
-    }
-  return CFGPARSER_OK;
-}
-
-STRCONST *
-strconst_lookup (STRCONST_HASH *hash, char const *name)
-{
-  STRCONST *sc = NULL;
-  if (hash)
-    {
-      STRCONST key;
-      key.name = (char*)name;
-      sc = STRCONST_RETRIEVE (hash, &key);
-    }
-  return sc;
-}
-
-STRCONST *
-pound_http_get_strconst (POUND_HTTP *phttp, char const *name)
-{
-  STRCONST *s;
-  if ((s = strconst_lookup (phttp->svc->sctab, name)) == NULL)
-    if ((s = strconst_lookup (phttp->lstn->sctab, name)) == NULL)
-      s = strconst_lookup (strconst_tab, name);
-  return s;
-}
 
 /*
- * ACL support
+ * Definitions of directives common for all Backend statements.
  */
-
-/* Max. number of bytes in an inet address (suitable for both v4 and v6) */
-#define MAX_INADDR_BYTES 16
-
-typedef struct cidr
-{
-  int family;                           /* Address family */
-  int len;                              /* Address length */
-  unsigned char addr[MAX_INADDR_BYTES]; /* Network address */
-  unsigned char mask[MAX_INADDR_BYTES]; /* Address mask */
-  SLIST_ENTRY (cidr) next;              /* Link to next CIDR */
-} CIDR;
-
-/* Create a new ACL. */
-static ACL *
-new_acl (char const *name)
-{
-  ACL *acl;
-
-  XZALLOC (acl);
-  if (name)
-    acl->name = xstrdup (name);
-  else
-    acl->name = NULL;
-  SLIST_INIT (&acl->head);
-
-  return acl;
-}
-
-/* Match cidr against inet address ap/len.  Return 0 on match, 1 otherwise. */
-static int
-cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
-{
-  size_t i;
-
-  if (cidr->len == len)
-    {
-      for (i = 0; i < len; i++)
-	{
-	  if (cidr->addr[i] != (ap[i] & cidr->mask[i]))
-	    return 1;
-	}
+static CFG_DEFN common_backend_defn[] = {
+  {
+    .name = "Address",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.hostname)
     }
-  return 0;
-}
+  },
+  {
+    .name = "Port",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_PORT,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.port)
+    }
+  },
+  {
+    .name = "Family",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LITERAL,
+    .commit = commit_address_family,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.family)
+    }
+  },
+  {
+    .name = "Resolve",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LITERAL,
+    .commit = commit_resolve_mode,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.resolve_mode)
+    },
+  },
+
+  {
+    .name = "IgnoreSRVWeight",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.ignore_srv_weight)
+    },
+  },
+  {
+    .name = "OverrideTTL",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.override_ttl)
+    }
+  },
+  {
+    .name = "RetryInterval",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.retry_interval)
+    }
+  },
+  {
+    .name = "Priority",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_INT,
+    .rcvr = {
+      .off = offsetof (BACKEND, priority)
+    }
+  },
+  {
+    .name = "TimeOut",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.to)
+    }
+  },
+  {
+    .name = "WSTimeOut",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.ws_to)
+    }
+  },
+  {
+    .name = "ConnTO",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.conn_to)
+    }
+  },
+  {
+    .name = "HTTPS",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .commit = cfg_commit_null
+  },
+  {
+    .name = "Cert",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = commit_backend_cert
+  },
+  {
+    .name = "Ciphers",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_backend_ciphers,
+  },
+  {
+    .name = "Disable",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .commit = commit_disable_proto,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.ctx)
+    }
+  },
+  {
+    .name = "Disabled",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (BACKEND, disabled)
+    }
+  },
+  {
+    .name = "ServerName",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.servername)
+    }
+  },
+  { NULL }
+};
+
+static char *https_kw[] = { "Cert", "Ciphers", "Disable", NULL };
 
 /*
- * Split the inet address of SA to address pointer and length, suitable
- * for use with the above functions.  Store pointer in RET_PTR.  If
- * RET_PTR is not NULL, store the effective address family there.
- * Return address length in bytes, or -1 if SA address family is not
- * supported.
- */
-int
-sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr, int *ret_family)
-{
-  int len;
-  int fml;
-  struct in6_addr *in6p;
-
-  switch (sa->sa_family)
-    {
-    case AF_INET:
-      fml = AF_INET;
-      len = 4;
-      *ret_ptr = (unsigned char *) &(((struct sockaddr_in*)sa)->sin_addr.s_addr);
-      break;
-
-    case AF_INET6:
-      in6p = &((struct sockaddr_in6*)sa)->sin6_addr;
-      if (IN6_IS_ADDR_V4MAPPED (in6p))
-	{
-	  fml = AF_INET;
-	  len = 4;
-	  *ret_ptr = &in6p->s6_addr[12];
-	}
-      else
-	{
-	  fml = AF_INET6;
-	  len = 16;
-	  *ret_ptr = (unsigned char*) in6p;
-	}
-      break;
-
-    default:
-      return -1;
-    }
-  if (ret_family)
-    *ret_family = fml;
-  return len;
-}
-
-static int
-dynacl_read (void *obj, char const *filename, WORKDIR *wd)
-{
-  return config_parse_acl_file (obj, filename, wd);
-}
-
-static void
-dynacl_clear (void *obj)
-{
-  acl_clear (obj);
-}
-
-static int
-dynacl_register (ACL *acl, char const *filename, struct locus_range const *loc)
-{
-  acl->watcher = watcher_register (acl, filename, loc,
-				   dynacl_read, dynacl_clear);
-  return acl->watcher == NULL;
-}
-
-/*
- * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
- * and -1 on error (invalid address family).
- */
-int
-acl_match (ACL *acl, struct sockaddr *sa)
-{
-  CIDR *cidr;
-  unsigned char *ap;
-  size_t len;
-  int family;
-  int rc = 1;
-
-  if ((len = sockaddr_bytes (sa, &ap, &family)) == -1)
-    return -1;
-
-  acl_lock (acl);
-  SLIST_FOREACH (cidr, &acl->head, next)
-    {
-      if (cidr->family == family && cidr_match (cidr, ap, len) == 0)
-	{
-	  rc = 0;
-	  break;
-	}
-    }
-  acl_unlock (acl);
-
-  return rc;
-}
-
-void
-acl_clear (ACL *acl)
-{
-  while (!SLIST_EMPTY (&acl->head))
-    {
-      struct cidr *cp = SLIST_FIRST (&acl->head);
-      SLIST_SHIFT (&acl->head, next);
-      free (cp);
-    }
-}
-
-static void
-masklen_to_netmask (unsigned char *buf, size_t len, size_t masklen)
-{
-  int i, cnt;
-
-  cnt = masklen / 8;
-  for (i = 0; i < cnt; i++)
-    buf[i] = 0xff;
-  if (i == MAX_INADDR_BYTES)
-    return;
-  cnt = 8 - masklen % 8;
-  buf[i++] = (0xff >> cnt) << cnt;
-  for (; i < MAX_INADDR_BYTES; i++)
-    buf[i] = 0;
-}
-
-static int
-parse_cidr_str (ACL *acl, char const *str, struct locus_range const *loc)
-{
-  char *mask;
-  struct addrinfo hints, *res;
-  unsigned long masklen;
-  int rc;
-
-  if ((mask = strchr (str, '/')) != NULL)
-    {
-      char *p;
-
-      *mask++ = 0;
-
-      errno = 0;
-      masklen = strtoul (mask, &p, 10);
-      if (errno || *p)
-	{
-	  conf_error_at_locus_range (loc, "%s", "invalid netmask");
-	  return CFGPARSER_FAIL;
-	}
-    }
-
-  memset (&hints, 0, sizeof (hints));
-  hints.ai_family = AF_UNSPEC;
-  hints.ai_flags = AI_NUMERICHOST;
-
-  if ((rc = getaddrinfo (str, NULL, &hints, &res)) == 0)
-    {
-      CIDR *cidr;
-      int len, i;
-      unsigned char *p;
-      int family;
-
-      if ((len = sockaddr_bytes (res->ai_addr, &p, &family)) == -1)
-	{
-	  conf_error_at_locus_range (loc, "%s", "unsupported address family");
-	  return CFGPARSER_FAIL;
-	}
-      XZALLOC (cidr);
-      cidr->family = family;
-      cidr->len = len;
-      memcpy (cidr->addr, p, len);
-      if (!mask)
-	masklen = len * 8;
-      masklen_to_netmask (cidr->mask, cidr->len, masklen);
-      /* Fix-up network address, just in case */
-      for (i = 0; i < len; i++)
-	cidr->addr[i] &= cidr->mask[i];
-      SLIST_PUSH (&acl->head, cidr, next);
-      freeaddrinfo (res);
-    }
-  else
-    {
-      conf_error_at_locus_range (loc, "invalid IP address: %s",
-				 gai_strerror (rc));
-      return CFGPARSER_FAIL;
-    }
-  return CFGPARSER_OK;
-}
-
-/* Parse CIDR at the current point of the input. */
-static int
-parse_cidr (ACL *acl)
-{
-  struct token *tok;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  return parse_cidr_str (acl, tok->str, &tok->locus);
-}
-
-/*
- * List of named ACLs.
- * There shouldn't be many of them, so it's perhaps no use in implementing
- * more sophisticated data structures than a mere singly-linked list.
- */
-static ACL_HEAD acl_list = SLIST_HEAD_INITIALIZER (acl_list);
-
-/*
- * Return a pointer to the named ACL, or NULL if no ACL with such name is
- * found.
- */
-static ACL *
-acl_by_name (char const *name)
-{
-  ACL *acl;
-  SLIST_FOREACH (acl, &acl_list, next)
-    {
-      if (strcmp (acl->name, name) == 0)
-	break;
-    }
-  return acl;
-}
-
-int
-config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
-{
-  FILE *fp;
-  char buf[MAXBUF];
-  struct locus_range loc;
-  int rc;
-  char *p;
-
-  fp = fopen_wd (wd, filename);
-  if (fp == NULL)
-    return -1;
-
-  locus_point_init (&loc.beg, filename, wd->name);
-  locus_point_init (&loc.end, NULL, NULL);
-
-  rc = 0;
-  loc.beg.line--;
-  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
-    {
-      char *line;
-      size_t len = strlen (p);
-
-      loc.beg.line++;
-      if (len == 0)
-	continue;
-      if (p[len-1] == '\n')
-	len--;
-      line = c_trimws (p, &len);
-      if (len == 0 || *p == '#')
-	continue;
-      line[len] = 0;
-
-      if (line[0] == '"' && line[len-1] == '"')
-	{
-	  line[--len] = 0;
-	  line++;
-	}
-
-      if (parse_cidr_str (acl, line, &loc))
-	rc++;
-    }
-  fclose (fp);
-  locus_range_unref (&loc);
-  return rc;
-}
-
-static int
-parse_acl_file (ACL *acl, char const *filename)
-{
-  WORKDIR *wd;
-  char const *basename;
-  int rc;
-
-  if ((basename = filename_split_wd (filename, &wd)) == NULL)
-    return CFGPARSER_FAIL;
-  rc = config_parse_acl_file (acl, basename, wd);
-  workdir_unref (wd);
-  if (rc == -1)
-    {
-      if (errno == ENOENT)
-	conf_error ("file %s does not exist", filename);
-      else
-	conf_error ("can't open %s: %s", filename, strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-  else if (rc > 0)
-    {
-      conf_error ("errors reading %s", filename);
-      return CFGPARSER_FAIL;
-    }
-  return CFGPARSER_OK;
-}
-
-/*
- * Parse ACL definition.
- * On entry, input must be positioned on the next token after ACL ["name"].
+ * Prepare backend for HTTPS I/O.
  */
 static int
-parse_acl (ACL *acl)
+backend_prepare_https (BACKEND *be)
 {
-  struct token *tok;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (tok->type != '\n')
-    {
-      conf_error ("expected newline, but found %s", token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  for (;;)
-    {
-      int rc;
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == '\n')
-	continue;
-      if (tok->type == T_IDENT)
-	{
-	  if (c_strcasecmp (tok->str, "end") == 0)
-	    break;
-	  if (c_strcasecmp (tok->str, "include") == 0)
-	    {
-	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
-		return rc;
-	      continue;
-	    }
-	  conf_error ("expected CIDR, \"Include\", or \"End\", but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-      putback_tkn (tok);
-      if ((rc = parse_cidr (acl)) != CFGPARSER_OK)
-	return rc;
-    }
-  return CFGPARSER_OK;
-}
-
-/*
- * Parse a named ACL.
- * Input is positioned after the "ACL" keyword.
- */
-static int
-parse_named_acl (void *call_data, void *section_data)
-{
-  ACL *acl;
-  struct token *tok;
-  int opt;
-  char *filename;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (acl_by_name (tok->str))
-    {
-      conf_error ("%s", "ACL with that name already defined");
-      return CFGPARSER_FAIL;
-    }
-
-  acl = new_acl (tok->str);
-  SLIST_PUSH (&acl_list, acl, next);
-
-  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-
-  if (filename)
-    {
-      int ret = CFGPARSER_OK;
-
-      if (opt & OPT_WATCH)
-	{
-	  if (dynacl_register (acl, filename, &tok->locus))
-	    ret = CFGPARSER_FAIL;
-	}
-      else if (parse_acl_file (acl, filename))
-	ret = CFGPARSER_FAIL;
-
-      free (filename);
-      return ret;
-    }
-
-  return parse_acl (acl);
-}
-
-/*
- * Parse ACL reference.  Three forms are accepted:
- * ACL "name"
- *   References a named ACL.
- * ACL -file "name"
- * ACL -filewatch "name"
- *   Read ACL from file.
- * ACL "\n" ... End
- *   Creates and references an unnamed ACL.
- */
-static int
-parse_acl_ref (ACL **ret_acl, int *pforwarded)
-{
-  struct token *tok;
-  ACL *acl;
-  int opt;
-  char *filename;
-  int optset = OPT_FILE|OPT_WATCH;
-
-  if (pforwarded != NULL)
-    optset |= OPT_FWD;
-  if (get_file_option (&opt, &filename, optset) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-  if (pforwarded)
-    *pforwarded = !!(opt & OPT_FWD);
-
-  if (filename)
-    {
-      int ret = CFGPARSER_OK;
-
-      acl = new_acl (NULL);
-      *ret_acl = acl;
-
-      if (opt & OPT_WATCH)
-	{
-	  if (dynacl_register (acl, filename, last_token_locus_range ()))
-	    ret = CFGPARSER_FAIL;
-	}
-      else if (parse_acl_file (acl, filename))
-	ret = CFGPARSER_FAIL;
-      free (filename);
-      return ret;
-    }
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (tok->type == '\n')
-    {
-      putback_tkn (tok);
-      acl = new_acl (NULL);
-      *ret_acl = acl;
-      return parse_acl (acl);
-    }
-  else if (tok->type == T_STRING)
-    {
-      if ((acl = acl_by_name (tok->str)) == NULL)
-	{
-	  conf_error ("no such ACL: %s", tok->str);
-	  return CFGPARSER_FAIL;
-	}
-      *ret_acl = acl;
-    }
-  else
-    {
-      conf_error ("expected ACL name or definition, but found %s",
-		  token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-  return CFGPARSER_OK;
-}
-
-static int
-assign_acl (void *call_data, void *section_data)
-{
-  return parse_acl_ref (call_data, NULL);
-}
-
-static int
-parse_ECDHCurve (void *call_data, void *section_data)
-{
-  struct token *tok = gettkn_expect (T_STRING);
-  if (!tok)
-    return CFGPARSER_FAIL;
-  conf_error ("%s", "statement ignored");
-  return CFGPARSER_OK;
-}
-
-static int
-parse_SSLEngine (void *call_data, void *section_data)
-{
-  struct token *tok = gettkn_expect (T_STRING);
-  if (!tok)
-    return CFGPARSER_FAIL;
-#if HAVE_OPENSSL_ENGINE_H && OPENSSL_VERSION_MAJOR < 3
-  ENGINE *e;
-
-  if (!(e = ENGINE_by_id (tok->str)))
-    {
-      conf_error ("%s", "unrecognized engine");
-      return CFGPARSER_FAIL;
-    }
-
-  if (!ENGINE_init (e))
-    {
-      ENGINE_free (e);
-      conf_error ("%s", "could not init engine");
-      return CFGPARSER_FAIL;
-    }
-
-  if (!ENGINE_set_default (e, ENGINE_METHOD_ALL))
-    {
-      ENGINE_free (e);
-      conf_error ("%s", "could not set all defaults");
-    }
-
-  ENGINE_finish (e);
-  ENGINE_free (e);
-#else
-  conf_error ("%s", "statement ignored");
-#endif
-
-  return CFGPARSER_OK;
-}
-
-static int
-backend_parse_https (void *call_data, void *section_data)
-{
-  BACKEND *be = call_data;
   struct stringbuf sb;
 
   if ((be->v.mtx.ctx = SSL_CTX_new (SSLv23_client_method ())) == NULL)
     {
-      conf_openssl_error (NULL, "SSL_CTX_new");
-      return CFGPARSER_FAIL;
+      conf_openssl_error (&be->locus, NULL, "SSL_CTX_new");
+      return -1;
     }
 
   SSL_CTX_set_app_data (be->v.mtx.ctx, be);
@@ -1202,448 +1396,728 @@ backend_parse_https (void *call_data, void *section_data)
 
   POUND_SSL_CTX_init (be->v.mtx.ctx);
 
-  return CFGPARSER_OK;
+  return 0;
 }
 
-static int
-backend_parse_cert (void *call_data, void *section_data)
-{
-  BACKEND *be = call_data;
-  struct token *tok;
-  char *filename;
-
-  if (be->v.mtx.ctx == NULL)
-    {
-      conf_error ("%s", "HTTPS must be used before this statement");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((filename = filename_resolve (tok->str)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (SSL_CTX_use_certificate_chain_file (be->v.mtx.ctx, filename) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_use_certificate_chain_file");
-      return CFGPARSER_FAIL;
-    }
-
-  if (SSL_CTX_use_PrivateKey_file (be->v.mtx.ctx, filename, SSL_FILETYPE_PEM) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_use_PrivateKey_file");
-      return CFGPARSER_FAIL;
-    }
-
-  if (SSL_CTX_check_private_key (be->v.mtx.ctx) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_check_private_key failed");
-      return CFGPARSER_FAIL;
-    }
-  free (filename);
-
-  return CFGPARSER_OK;
-}
-
-enum {
-  CIPHER_LIST,
-  CIPHER_SUITES
-};
-
-static char const *cipherset_str[] = { "cipher list", "ciphersuites" };
-
-static int
-set_ciphers (SSL_CTX *ctx, int opt, char const *str)
-{
-  switch (opt)
-    {
-    case CIPHER_LIST:
-      return SSL_CTX_set_cipher_list (ctx, str);
-
-    case CIPHER_SUITES:
-      return SSL_CTX_set_ciphersuites (ctx, str);
-    }
-  abort ();
-}
-
-static int
-getopt_cipher (int *opt)
-{
-  static struct config_option optab[] = {
-    { "ciphersuites", CIPHER_SUITES },
-    { "cipherlist", CIPHER_LIST },
-    { NULL }
-  };
-  int res;
-  struct config_option const *p;
-
-  while ((res = gettok_option (optab, &p, NULL)) == CFGPARSER_OK && p)
-    *opt = p->code;
-  return res;
-}
-
-static int
-backend_assign_ciphers (void *call_data, void *section_data)
-{
-  BACKEND *be = call_data;
-  struct token *tok;
-  int copt = CIPHER_LIST;
-
-  if (be->v.mtx.ctx == NULL)
-    {
-      conf_error ("%s", "HTTPS must be used before this statement");
-      return CFGPARSER_FAIL;
-    }
-
-  for (;;)
-    {
-      if (getopt_cipher (&copt) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == T_STRING)
-	{
-	  if (set_ciphers (be->v.mtx.ctx, copt, tok->str) == 0)
-	    {
-	      conf_error ("failed to set %s %s",
-			  cipherset_str[copt], tok->str);
-	      return CFGPARSER_FAIL;
-	    }
-	}
-      else if (tok->type == '\n')
-	break;
-      else
-	{
-	  conf_error ("expected cipher list, ciphersuites or newline,"
-		      " but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-    }
-  return CFGPARSER_OK_NONL;
-}
-
-static int
-backend_assign_priority (void *call_data, void *section_data)
-{
-  return cfg_assign_int_range (call_data, 1, -1);
-}
-
-static int
-set_proto_opt (int *opt)
-{
-  int n;
-
-  static struct kwtab kwtab[] = {
-    { "SSLv2", SSL_OP_NO_SSLv2 },
-    { "SSLv3", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 },
-#ifdef SSL_OP_NO_TLSv1
-    { "TLSv1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 },
-#endif
-#ifdef SSL_OP_NO_TLSv1_1
-    { "TLSv1_1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 },
-#endif
-#ifdef SSL_OP_NO_TLSv1_2
-    { "TLSv1_2", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
-		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 |
-		 SSL_OP_NO_TLSv1_2 },
-#endif
-    { NULL }
-  };
-  int res = cfg_assign_int_enum (&n, gettkn_expect (T_IDENT), kwtab,
-				 "protocol name");
-  if (res == CFGPARSER_OK)
-    *opt |= n;
-
-  return res;
-}
-
-static int
-disable_proto (void *call_data, void *section_data)
-{
-  SSL_CTX *ctx = *(SSL_CTX**) call_data;
-  int n = 0;
-
-  if (ctx == NULL)
-    {
-      conf_error ("%s", "HTTPS must be used before this statement");
-      return CFGPARSER_FAIL;
-    }
-
-  if (set_proto_opt (&n) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
-
-  SSL_CTX_set_options (ctx, n);
-
-  return CFGPARSER_OK;
-}
-
-static struct kwtab resolve_mode_kwtab[] = {
-  { "immediate", bres_immediate },
-  { "first", bres_first },
-  { "all", bres_all },
-  { "srv", bres_srv },
-  { NULL }
-};
-
-char const *
-resolve_mode_str (int mode)
-{
-  char const *ret = kw_to_str (resolve_mode_kwtab, mode);
-  return ret ? ret : "UNKNOWN";
-}
-
-static int
-assign_resolve_mode (void *call_data, void *section_data)
-{
-  int res = cfg_assign_int_enum (call_data, gettkn_expect (T_IDENT),
-				 resolve_mode_kwtab,
-				 "backend resolve mode");
-#ifndef ENABLE_DYNAMIC_BACKENDS
-  if (res != bres_immediate)
-    {
-      conf_error ("%s", "value not supported: pound compiled without support for dynamic backends");
-      res = CFGPARSER_FAIL;
-    }
-#endif
-  return res;
-}
-
-static CFGPARSER_TABLE backend_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Address",
-    .parser = assign_address_string,
-    .off = offsetof (BACKEND, v.mtx.hostname)
-  },
-  {
-    .name = "Port",
-    .parser = assign_port_int,
-    .off = offsetof (BACKEND, v.mtx.port)
-  },
-  {
-    .name = "Family",
-    .parser = assign_address_family,
-    .off = offsetof (BACKEND, v.mtx.family)
-  },
-  {
-    .name = "Resolve",
-    .parser = assign_resolve_mode,
-    .off = offsetof (BACKEND, v.mtx.resolve_mode)
-  },
-  {
-    .name = "IgnoreSRVWeight",
-    .parser = cfg_assign_bool,
-    .off = offsetof (BACKEND, v.mtx.ignore_srv_weight)
-  },
-  {
-    .name = "OverrideTTL",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.override_ttl)
-  },
-  {
-    .name = "RetryInterval",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.retry_interval)
-  },
-  {
-    .name = "Priority",
-    .parser = backend_assign_priority,
-    .off = offsetof (BACKEND, priority)
-  },
-  {
-    .name = "TimeOut",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.to)
-  },
-  {
-    .name = "WSTimeOut",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.ws_to)
-  },
-  {
-    .name = "ConnTO",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.conn_to)
-  },
-  {
-    .name = "HTTPS",
-    .parser = backend_parse_https
-  },
-  {
-    .name = "Cert",
-    .parser = backend_parse_cert
-  },
-  {
-    .name = "Ciphers",
-    .parser = backend_assign_ciphers
-  },
-  {
-    .name = "Disable",
-    .parser = disable_proto,
-    .off = offsetof (BACKEND, v.mtx.ctx)
-  },
-  {
-    .name = "Disabled",
-    .parser = cfg_assign_bool,
-    .off = offsetof (BACKEND, disabled)
-  },
-  {
-    .name = "ServerName",
-    .parser = cfg_assign_string,
-    .off = offsetof (BACKEND, v.mtx.servername)
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE use_backend_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Priority",
-    .parser = backend_assign_priority,
-    .off = offsetof (BACKEND, priority)
-  },
-  {
-    .name = "Disabled",
-    .parser = cfg_assign_bool,
-    .off = offsetof (BACKEND, disabled)
-  },
-  { NULL }
-};
-
+/* Create and initialize a backend reference. */
 static BACKEND *
-parse_backend_internal (CFGPARSER_TABLE *table, POUND_DEFAULTS *dfl)
+backend_ref_init (CFG_ARG *arg, CFG_NODE *node)
 {
-  BACKEND *be;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
-
-  be = xbackend_create (BE_MATRIX, 5, NULL);
-  be->v.mtx.to = dfl->be_to;
-  be->v.mtx.conn_to = dfl->be_connto;
-  be->v.mtx.ws_to = dfl->ws_to;
-
-  if (parser_loop (table, be, dfl, &range))
+  BACKEND *be = xbackend_create (BE_BACKEND_REF, -1, NULL);
+  if (!be)
     return NULL;
+  be->v.be_name = xstrdup (string_ptr (arg->v.string));
+  be->disabled = -1;
+  locus_range_init (&be->locus);
+  locus_range_copy (&be->locus, &node->locus);
+  return be;
+}
 
-  be->locus = range;
+static char *beref_allowed[] = { "Use", "Priority", "Disabled", NULL };
+
+static int
+check_beref_allowed (CFG_NODE *node)
+{
+  CFG_NODE *np = cfg_ast_locate_node (node->subtree,
+				      cfg_node_name_not_memberof,
+				      beref_allowed);
+  if (np)
+    {
+      while (np)
+	{
+	  conf_error_at_locus_range (&np->locus,
+				     "statement cannot be used in backend reference");
+	  np = cfg_node_locate_next (np, cfg_node_name_not_memberof,
+				     beref_allowed);
+	}
+      return -1;
+    }
+  return 0;
+}
+
+/*
+ * Create and initialize a backend as described in node. Take default values
+ * from dfl.
+ */
+static BACKEND *
+backend_init (CFG_NODE *node, POUND_DEFAULTS *dfl)
+{
+  CFG_NODE *ub;
+  BACKEND *be;
+
+  ub = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "Use");
+  if (ub)
+    {
+      CFG_ARG *arg;
+      if (check_beref_allowed (node))
+	return NULL;
+      arg = cfg_arglist_first (&ub->arglist);
+      be = backend_ref_init (arg, node);
+    }
+  else
+    {
+      CFG_NODE *https;
+      int is_https = 0;
+
+      be = xbackend_create (BE_MATRIX, 5, NULL);
+      be->v.mtx.to = dfl->be_to;
+      be->v.mtx.conn_to = dfl->be_connto;
+      be->v.mtx.ws_to = dfl->ws_to;
+
+      https = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "HTTPS");
+      if (https)
+	{
+	  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+	  is_https = arg == NULL || arg->v.number != 0;
+	}
+      if (cfg_ast_locate_node (node->subtree, cfg_node_name_memberof,
+			       https_kw))
+	is_https = 1;
+
+      if (is_https)
+	{
+	  if (backend_prepare_https (be))
+	    // FIXME: free be
+	    return NULL;
+	}
+
+      locus_range_init (&be->locus);
+      locus_range_copy (&be->locus, &node->locus);
+    }
 
   return be;
 }
 
+/*
+ * Create a backend as described by node and call_data, pointing to
+ * a POUND_DEFAULTS. On success store the backend in *baseptr. Set
+ * node->data to point to NAMED_BACKEND_TABLE, passed in the rcvr.
+ */
 static int
-parse_backend (void *call_data, void *section_data)
+named_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  BALANCER_LIST *bml = call_data;
+  NAMED_BACKEND_TABLE *tab = cfg_rcvr_ptr (&node->rcvr, *baseptr);
   BACKEND *be;
-  struct token *tok;
-  struct locus_point beg = LOCUS_POINT_INITIALIZER;
+  NAMED_BACKEND *olddef;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
 
-  locus_point_copy (&beg, &last_token_locus_range ()->beg);
-
-  if ((tok = gettkn_any ()) == NULL)
+  if (!arg)
     {
-      locus_point_unref (&beg);
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (&node->locus, "tag is missing");
+      return -1;
     }
 
-  if (tok->type == T_STRING)
+  olddef = named_backend_retrieve (tab, string_ptr (arg->v.string));
+  if (olddef)
     {
-      struct locus_range range = LOCUS_RANGE_INITIALIZER;
-      be = xbackend_create (BE_BACKEND_REF, -1, NULL);
-      be->v.be_name = xstrdup (tok->str);
-      be->disabled = -1;
+      conf_error_at_locus_range (&node->locus,
+				 "redefinition of named backend %s",
+				 olddef->name);
+      conf_error_at_locus_range (&olddef->locus,
+				 "original definition was here");
+      return -1;
+    }
 
-      if (parser_loop (use_backend_parsetab, be, section_data, &range))
+  be = backend_init (node, call_data);
+  if (!be)
+    return -1;
+
+  node->data = tab;
+  *baseptr = be;
+
+  return 0;
+}
+
+/* Commit a named backend passed in baseptr. */
+static int
+named_backend_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  NAMED_BACKEND_TABLE *tab = node->data;
+  BACKEND *be = baseptr;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  named_backend_insert (tab, string_ptr (arg->v.string), be);
+  node->data = NULL;
+  return 0;
+}
+
+/* Free a half-constructed backend structure. This function is invoked
+   only if an error occurred while parsing the backend statement. */
+static void
+backend_free (void *data)
+{
+  BACKEND *be = data;
+
+  switch (be->be_type)
+    {
+    case BE_MATRIX:
+      free (be->v.mtx.hostname);
+      if (be->v.mtx.ctx)
+	SSL_CTX_free (be->v.mtx.ctx);
+      break;
+
+    case BE_BACKEND_REF:
+      free (be->v.be_name);
+      break;
+
+    default:
+      break;
+    }
+
+  free (be);
+}
+
+void
+free_nop (void *ptr)
+{
+}
+
+struct cfg_type cfg_type_named_backend = {
+  .argdef = "s",
+  .prepare = named_backend_prepare,
+  .commit = named_backend_commit,
+  .free_data = free_nop
+};
+
+/*
+ * Service backends.
+ */
+
+/* Prepare a service backend and store it in *baseptr. Set node->data to
+   point to it. */
+static int
+service_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  BACKEND *be;
+
+  if (arg)
+    {
+      CFG_NODE *ub;
+
+      if (cfg_deprecation_mode)
 	{
-	  locus_point_unref (&beg);
-	  return CFGPARSER_FAIL;
+	  conf_error_at_locus_range (&arg->locus,
+				     "referring to a named backend by tagged"
+				     " Backend statement is deprecated; use"
+				     " the 'Use \"%s\"' statement instead",
+				     string_ptr (arg->v.string));
+	  if (cfg_deprecation_mode == DEPREC_ERR)
+	    return -1;
 	}
-      be->locus = range;
+
+      ub = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "Use");
+      if (ub)
+	{
+	  conf_error_at_locus_range (&arg->locus,
+				     "this backend uses both deprecated"
+				     " reference style and the Use statement");
+	  conf_error_at_locus_range (&ub->locus, "duplicate reference here");
+	  return -1;
+	}
+      if (check_beref_allowed (node))
+	return -1;
+
+      be = backend_ref_init (arg, node);
     }
   else
-    {
-      putback_tkn (tok);
-      be = parse_backend_internal (backend_parsetab, section_data);
-      if (!be)
-	{
-	  locus_point_unref (&beg);
-	  return CFGPARSER_FAIL;
-	}
-    }
+    be = backend_init (node, call_data);
 
-  locus_point_copy (&be->locus.beg, &beg);
-  locus_point_unref (&beg);
+  if (!be)
+    return -1;
 
-  balancer_add_backend (balancer_list_get_normal (bml), be);
+  *baseptr = be;
+  /* Make sure it will be freed on error. */
+  node->data = be;
 
-  return CFGPARSER_OK;
+  return 0;
 }
 
 static int
-parse_use_backend (void *call_data, void *section_data)
+service_backend_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  BALANCER_LIST *bml = call_data;
-  BACKEND *be;
-  struct token *tok;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  be = xbackend_create (BE_BACKEND_REF, 5, &tok->locus);
-  be->v.be_name = xstrdup (tok->str);
-  locus_range_copy (&be->locus, &tok->locus);
-
+  BACKEND *be = node->data;
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
   balancer_add_backend (balancer_list_get_normal (bml), be);
-
-  return CFGPARSER_OK;
+  /* Prevent it from being freed. */
+  node->data = NULL;
+  return 0;
 }
 
+/* Statements allowed within a Backend section. */
+static CFG_DEFN service_backend_defn[] = {
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = common_backend_defn
+  },
+  {
+    .name = "Use",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = cfg_commit_null
+  },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_service_backend = {
+  .argdef = "s?",
+  .prepare = service_backend_prepare,
+  .commit = service_backend_commit
+};
+
+/*
+ * Emergency backend.
+ */
 static int
-parse_emergency (void *call_data, void *section_data)
+service_emergency_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  BALANCER_LIST *bml = call_data;
   BACKEND *be;
-  POUND_DEFAULTS dfl = *(POUND_DEFAULTS*)section_data;
+  POUND_DEFAULTS dfl = *(POUND_DEFAULTS *)call_data;
 
   dfl.be_to = 120;
   dfl.be_connto = 120;
   dfl.ws_to = 120;
 
-  be = parse_backend_internal (backend_parsetab, &dfl);
+  be = backend_init (node, &dfl);
+
   if (!be)
-    return CFGPARSER_FAIL;
+    return -1;
 
+  *baseptr = be;
+  /* Make sure it will be freed on error. */
+  node->data = be;
+
+  return 0;
+}
+
+static int
+service_emergency_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BACKEND *be = node->data;
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
   balancer_add_backend (balancer_list_get_emerg (bml), be);
-
-  return CFGPARSER_OK;
+  node->data = NULL;
+  return 0;
 }
 
+static CFG_TYPE cfg_type_service_emergency = {
+  .argdef = "",
+  .prepare = service_emergency_prepare,
+  .commit = service_emergency_commit
+};
+
+/* UseBackend "NAME" */
 static int
-parse_control_backend (void *call_data, void *section_data)
+service_use_backend_commit (CFG_NODE *node, void *unused, void *baseptr)
 {
-  BALANCER_LIST *bml = call_data;
-  BACKEND *be = xbackend_create (BE_CONTROL, 1, last_token_locus_range ());
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  BACKEND *be = backend_ref_init (arg, node);
+  if (!be)
+    return -1;
   balancer_add_backend (balancer_list_get_normal (bml), be);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_metrics (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  BACKEND *be = xbackend_create (BE_METRICS, 1, last_token_locus_range ());
-  balancer_add_backend (balancer_list_get_normal (bml), be);
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/*
+ * The Redirect backend:
+ *
+ *  Redirect [CODE] "URL"
+ */
+static int
+service_redirect_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int code = 302;
+  BACKEND *be;
+  POUND_REGMATCH matches[5];
+
+  if (arg->type == T_NUMBER)
+    {
+      switch (arg->v.number)
+	{
+	case 301:
+	case 302:
+	case 303:
+	case 307:
+	case 308:
+	  code = arg->v.number;
+	  break;
+
+	default:
+	  conf_error_at_locus_range (&arg->locus, "invalid status code");
+	  return -1;
+	}
+      arg = cfg_arg_next (arg);
+    }
+
+  be = xbackend_create (BE_REDIRECT, 1, &node->locus);
+  be->v.redirect.status = code;
+  be->v.redirect.url = xstrdup (string_ptr (arg->v.string));
+
+  if (genpat_match (LOCATION, be->v.redirect.url, 4, matches))
+    {
+      conf_error_at_locus_range (&node->locus, "Redirect bad URL");
+      backend_free (be);
+      return -1;
+    }
+
+  if ((be->v.redirect.has_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
+    /* the path is a single '/', so remove it */
+    be->v.redirect.url[matches[3].rm_so] = '\0';
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_service_redirect = {
+  .argdef = "n?s",
+  .commit = service_redirect_commit
+};
+
+/*
+ * The Error backend.
+ */
+static int
+parse_http_errmsg (struct http_errmsg *errmsg, CFG_ARG *arg)
+{
+  char *p;
+
+  p = slurp (string_ptr (arg->v.string), get_include_wd (),
+	     &arg->locus, NULL);
+  if (!p)
+    return -1;
+  errmsg->text = p;
+
+  DLIST_INIT (&errmsg->hdr);
+  if (http_header_list_parse (&errmsg->hdr, errmsg->text, H_REPLACE, &p) == 0
+      && p != errmsg->text)
+    {
+      p++;
+      memmove (errmsg->text, p, strlen (p) + 1);
+    }
+  else
+    http_header_list_free (&errmsg->hdr);
+  return 0;
+}
+
+static void
+http_errmsg_free (struct http_errmsg *errmsg)
+{
+  free (errmsg->text);
+  http_header_list_free (&errmsg->hdr);
+}
+
+/* Error STATUS ["FILE"] */
+static int
+service_error_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  struct http_errmsg errmsg = HTTP_ERRMSG_INITIALIZER (errmsg);
+  BACKEND *be;
+  int status;
+
+  if ((status = http_status_to_pound (arg->v.number)) == -1)
+    {
+      conf_error_at_locus_range (&arg->locus, "unsupported status code");
+      return -1;
+    }
+  arg = cfg_arg_next (arg);
+
+  if (arg)
+    {
+      if (parse_http_errmsg (&errmsg, arg))
+	{
+	  http_errmsg_free (&errmsg);
+	  return -1;
+	}
+    }
+
+  be = xbackend_create (BE_ERROR, 1, &node->locus);
+  be->v.error.status = status;
+  be->v.error.msg = errmsg;
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_service_error = {
+  .argdef = "ns?",
+  .commit = service_error_commit
+};
+
+/*
+ * The SendFile backend.
+ */
+
+/* SendFile "DIR" */
+static int
+service_sendfile_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *filename = string_ptr (arg->v.string);
+  WORKDIR *wd = get_include_wd ();
+  BACKEND *be;
+  int fd;
+
+  fd = openat (wd->fd, filename, O_DIRECTORY | O_RDONLY | O_NDELAY);
+  if (fd == -1)
+    {
+      conf_error_at_locus_range (&node->locus, "can't open %s: %s",
+				 filename, strerror (errno));
+      return -1;
+    }
+
+  be = xbackend_create (BE_FILE, 1, &node->locus);
+  be->v.file.wd = fd;
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+
+  return 0;
+}
+
+/*
+ * The Success backend.
+ */
+static int
+service_success_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  BACKEND *be = xbackend_create (BE_SUCCESS, 1, &node->locus);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+  return 0;
+}
+
+/*
+ * The Metrics backend.
+ */
+static int
+service_metrics_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  BACKEND *be = xbackend_create (BE_METRICS, 1, &node->locus);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+  return 0;
+}
+
+/*
+ * The Control backend.
+ */
+static int
+service_control_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  BACKEND *be = xbackend_create (BE_CONTROL, 1, &node->locus);
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+  return 0;
+}
+
+/*
+ * Lua Backend:
+ *
+ *   LuaBackend "arg" ...
+ */
+static int
+service_luabackend_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  BALANCER_LIST *bml = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  BACKEND *be = xbackend_create (BE_LUA, 1, &node->locus);
+
+  if (pndlua_parse_closure (node, &be->v.lua))
+    {
+      backend_free (be);
+      return -1;
+    }
+
+  balancer_add_backend (balancer_list_get_normal (bml), be);
+  return 0;
+}
+
+static CFG_TYPE cfg_type_luabackend = {
+  .argdef = "s+",
+  .commit = &service_luabackend_commit
+};
+
+/*
+ * Sessions.
+ */
+static int
+service_session_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  SERVICE *svc = cfg_rcvr_ptr (&node->rcvr, baseptr);
+
+  if (svc->sess_type == SESS_NONE)
+    {
+      conf_error_at_locus_range (&node->locus, "Session type not defined");
+      return -1;
+    }
+
+  if (svc->sess_ttl == 0)
+    {
+      conf_error_at_locus_range (&node->locus, "Session TTL not defined");
+      return -1;
+    }
+
+  switch (svc->sess_type)
+    {
+    case SESS_COOKIE:
+    case SESS_URL:
+    case SESS_HEADER:
+      if (svc->sess_id == NULL)
+	{
+	  conf_error_at_locus_range (&node->locus, "Session ID not defined");
+	  return -1;
+	}
+      break;
+
+    default:
+      break;
+    }
+
+  return 0;
+}
+
+struct service_session
+{
+  int type;
+  char *id;
+  unsigned ttl;
+};
+
+static struct kwtab sess_type_tab[] = {
+  { "IP", SESS_IP },
+  { "COOKIE", SESS_COOKIE },
+  { "URL", SESS_URL },
+  { "PARM", SESS_PARM },
+  { "BASIC", SESS_BASIC },
+  { "HEADER", SESS_HEADER },
+  { NULL }
+};
+
+char const *
+sess_type_to_str (int type)
+{
+  if (type == SESS_NONE)
+    return "NONE";
+  return kw_to_str (sess_type_tab, type);
+}
+
+static int
+session_type_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  SESS_TYPE *type = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int n;
+
+  if (kw_to_tok (sess_type_tab, string_ptr (arg->v.string), 1, &n))
+    {
+      conf_error_at_locus_range (&arg->locus, "unknown session type");
+      return -1;
+    }
+  *type = n;
+
+  return 0;
+}
+
+static CFG_DEFN service_session_defn[] = {
+  {
+    .name = "Type",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .commit = session_type_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, sess_type)
+    }
+  },
+  {
+    .name = "TTL",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (SERVICE, sess_ttl)
+    }
+  },
+  {
+    .name = "ID",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (SERVICE, sess_id)
+    }
+  },
+
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_service_session = {
+  .argdef = "",
+  .commit = service_session_commit
+};
+
+/* LogSuppress CLASS [CLASS ...] */
+static int
+session_log_suppress_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  int *ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg;
+  int result = 0;
+  static struct kwtab status_table[] = {
+    { "all",      STATUS_MASK (100) | STATUS_MASK (200) |
+		  STATUS_MASK (300) | STATUS_MASK (400) | STATUS_MASK (500) },
+    { "info",     STATUS_MASK (100) },
+    { "success",  STATUS_MASK (200) },
+    { "redirect", STATUS_MASK (300) },
+    { "clterr",   STATUS_MASK (400) },
+    { "srverr",   STATUS_MASK (500) },
+    { NULL }
+  };
+
+  CFG_ARG_FOREACH (arg, &node->arglist)
+    {
+      int n;
+
+      switch (arg->type)
+	{
+	case T_NUMBER:
+	  if (arg->v.number <= 0 ||
+	      arg->v.number >= sizeof (status_table) / sizeof (status_table[0]))
+	    {
+	      conf_error_at_locus_range (&arg->locus, "unsupported status mask");
+	      return -1;
+	    }
+	  n = STATUS_MASK (arg->v.number * 100);
+	  break;
+
+	case T_LITERAL:
+	  if (kw_to_tok (status_table, string_ptr (arg->v.string), 1, &n) != 0)
+	    {
+	      conf_error_at_locus_range (&arg->locus,
+					 "unsupported status mask");
+	      return -1;
+	    }
+	}
+      result |= n;
+    }
+  *ptr = result;
+  return 0;
+}
+
+static CFG_TYPE cfg_type_log_suppress = {
+  .argdef = "[lsn]+",
+  .commit = session_log_suppress_commit
+};
+
+/*
+ * Service conditions.
+ */
+
+/* Allocate and return a new condition. */
 static SERVICE_COND *
 service_cond_alloc (int type)
 {
@@ -1653,6 +2127,7 @@ service_cond_alloc (int type)
   return sc;
 }
 
+/* Free the condition. */
 static void
 service_cond_free (SERVICE_COND *sc)
 {
@@ -1681,6 +2156,11 @@ service_cond_free (SERVICE_COND *sc)
   free (sc);
 }
 
+/*
+ * Create a new condition of the given TYPE and append it to the condition
+ * list in COND, which must be a boolean (COND_BOOL) or dynamic (COND_DYN)
+ * condition.
+ */
 static SERVICE_COND *
 service_cond_append (SERVICE_COND *cond, int type)
 {
@@ -1693,171 +2173,22 @@ service_cond_append (SERVICE_COND *cond, int type)
   return sc;
 }
 
-struct match_param
-{
-  char *from_file;
-  int watch;
-  STRING *tag;
-  int decode;
-};
-
-#define MATCH_PARAM_INITIALIZER { NULL, 0, NULL, -1 }
-
-static int
-parse_match_mode (int dfl_re_type, int *gp_type, int *sp_flags,
-		  struct match_param *param)
-{
-  enum
-  {
-    MATCH_RE,
-    MATCH_EXACT,
-    MATCH_BEG,
-    MATCH_END,
-    MATCH_CONTAIN,
-    MATCH_ICASE,
-    MATCH_CASE,
-    MATCH_FILE,
-    MATCH_FILEWATCH,
-    MATCH_POSIX,
-    MATCH_PCRE,
-    MATCH_TAG,
-    MATCH_DECODE
-  };
-
-  static struct config_option optab[] = {
-    { "file",      MATCH_FILE, 1 },
-    { "filewatch", MATCH_FILEWATCH, 1 },
-    { "re",        MATCH_RE },
-    { "exact",     MATCH_EXACT },
-    { "beg",       MATCH_BEG },
-    { "end",       MATCH_END },
-    { "contain",   MATCH_CONTAIN },
-    { "icase",     MATCH_ICASE },
-    { "case",      MATCH_CASE },
-    { "posix",     MATCH_POSIX },
-    { "pcre",      MATCH_PCRE },
-    { "perl",      MATCH_PCRE },
-    { "tag",       MATCH_TAG, 1 },
-    { "decode",    MATCH_DECODE },
-    { NULL }
-  };
-
-  int disabled = 0;
-#define MATCH_OPTION_MASK(n) (1<<(n))
-#define MATCH_OPTION_DISABLED(n) (disabled & MATCH_OPTION_MASK(n))
-
-  if (param == NULL)
-    disabled |= MATCH_OPTION_MASK (MATCH_FILE)
-      | MATCH_OPTION_MASK (MATCH_FILEWATCH)
-      | MATCH_OPTION_MASK (MATCH_TAG)
-      | MATCH_OPTION_MASK (MATCH_DECODE);
-  else if (param->decode == -1)
-    disabled |= MATCH_OPTION_MASK (MATCH_DECODE);
-
-  for (;;)
-    {
-      char const *arg;
-      struct config_option const *opt;
-
-      if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-
-      if (!opt)
-	break;
-
-      if (MATCH_OPTION_DISABLED (opt->code))
-	{
-	  conf_error ("unsupported option: -%s", opt->name);
-	  return CFGPARSER_FAIL;
-	}
-
-      switch (opt->code)
-	{
-	case MATCH_CASE:
-	  *sp_flags &= ~GENPAT_ICASE;
-	  break;
-
-	case MATCH_ICASE:
-	  *sp_flags |= GENPAT_ICASE;
-	  break;
-
-	case MATCH_FILE:
-	  param->from_file = xstrdup (arg);
-	  param->watch = 0;
-	  break;
-
-	case MATCH_FILEWATCH:
-	  param->from_file = xstrdup (arg);
-	  param->watch = 1;
-	  break;
-
-	case MATCH_RE:
-	  *gp_type = dfl_re_type;
-	  break;
-
-	case MATCH_POSIX:
-	  *gp_type = GENPAT_POSIX;
-	  break;
-
-	case MATCH_EXACT:
-	  *gp_type = GENPAT_EXACT;
-	  break;
-
-	case MATCH_BEG:
-	  *gp_type = GENPAT_PREFIX;
-	  break;
-
-	case MATCH_END:
-	  *gp_type = GENPAT_SUFFIX;
-	  break;
-
-	case MATCH_CONTAIN:
-	  *gp_type = GENPAT_CONTAIN;
-	  break;
-
-	case MATCH_PCRE:
-#ifdef HAVE_LIBPCRE
-	  *gp_type = GENPAT_PCRE;
-#else
-	  conf_error ("%s", "pound compiled without PCRE");
-	  return CFGPARSER_FAIL;
-#endif
-	  break;
-
-	case MATCH_TAG:
-	  param->tag = string_init (arg);
-	  break;
-
-	case MATCH_DECODE:
-	  param->decode = 1;
-	}
-    }
-  return CFGPARSER_OK;
-}
-
-static int
-parse_regex_compat (GENPAT *regex, int dfl_re_type, int gp_type, int flags)
-{
-  struct token *tok;
-  int rc;
-
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, NULL))
-    return CFGPARSER_FAIL;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  rc = genpat_compile (regex, gp_type, tok->str, flags);
-  if (rc)
-    {
-      conf_regcomp_error (rc, *regex, NULL);
-      genpat_free (*regex);
-      return CFGPARSER_FAIL;
-    }
-
-  return CFGPARSER_OK;
-}
-
+/*
+ * Internal function to read patterns for (dynamic) condition from a
+ * disk file.  Arguments:
+ *
+ *   COND      - a condition of type COND_DYN or COND_BOOL;
+ *   FILENAME  - name of file to read;
+ *   WD        - working directory to resolve relative filenames;
+ *   REF       - name of the object, for StringMatch, QueryParam, and
+ *               two-argument Header conditions;
+ *   COND_TYPE - type of underlying conditions, to be created for each
+ *               valid input line;
+ *   PAT_TYPE  - pattern type;
+ *   FLAGS     - flags to pass to genpat_compile;
+ *
+ * Returns number of errors encountered.
+ */
 static int
 dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 		       STRING *ref, enum service_cond_type cond_type,
@@ -1904,7 +2235,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
       rc = genpat_compile (&hc->re, gpt, p, flags);
       if (rc)
 	{
-	  regcomp_error_at_locus_range (&loc, hc->re, NULL);
+	  conf_regcomp_error (&loc, hc->re, NULL);
 	  service_cond_free (hc);
 	  rc++;
 	}
@@ -1932,6 +2263,8 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
   return rc;
 }
 
+/* Dynamic condition reader, to be passed as READ parameter to
+   watcher_register. */
 static int
 dyncond_read (void *obj, char const *filename, WORKDIR *wd)
 {
@@ -1943,8 +2276,12 @@ dyncond_read (void *obj, char const *filename, WORKDIR *wd)
 				cond->dyn.flags);
 }
 
+/*
+ * Initialize a boolean condition from a file.  See dyncond_read_internal
+ * for the description of its parameters.
+ */
 static int
-dyncond_read_immediate (SERVICE_COND *cond, char *filename,
+dyncond_read_immediate (SERVICE_COND *cond, char const *filename,
 			STRING *ref, enum service_cond_type cond_type,
 			int pat_type, int flags)
 {
@@ -1953,7 +2290,7 @@ dyncond_read_immediate (SERVICE_COND *cond, char *filename,
   int rc;
 
   if ((basename = filename_split_wd (filename, &wd)) == NULL)
-    return CFGPARSER_FAIL;
+    return -1;
   rc = dyncond_read_internal (cond, basename, wd, ref, cond_type, pat_type,
 			      flags);
   workdir_unref (wd);
@@ -1963,16 +2300,19 @@ dyncond_read_immediate (SERVICE_COND *cond, char *filename,
 	conf_error ("file %s does not exist", filename);
       else
 	conf_error ("can't open %s: %s", filename, strerror (errno));
-      return CFGPARSER_FAIL;
+      return -1;
     }
   else if (rc > 0)
     {
       conf_error ("errors reading %s", filename);
-      return CFGPARSER_FAIL;
+      return -1;
     }
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/*
+ * Clear a dynamic condition.
+ */
 static void
 dyncond_clear (void *obj)
 {
@@ -1986,6 +2326,7 @@ dyncond_clear (void *obj)
     }
 }
 
+/* Register dynamic condition COND to monitor changes in FILENAME. */
 static int
 dyncond_register (SERVICE_COND *cond, char const *filename,
 		  struct locus_range const *loc)
@@ -1994,456 +2335,445 @@ dyncond_register (SERVICE_COND *cond, char const *filename,
 				    dyncond_read, dyncond_clear);
   return cond->watcher == NULL;
 }
-
-static int
-parse_cond_matcher (SERVICE_COND *top_cond,
-		    enum service_cond_type type,
-		    int dfl_re_type,
-		    int gp_type, int flags, char const *string)
+
+/*
+ * Structure for keeping condition parameters, supplied by flags:
+ */
+struct match_param
 {
-  struct token *tok;
-  int rc;
-  struct stringbuf sb;
-  SERVICE_COND *cond;
-  STRING *ref;
-  struct match_param match_param = MATCH_PARAM_INITIALIZER;
+  STRING *from_file; /* Name of the file given with -file or -filewatch
+			flag. */
+  int watch;         /* 1 if the -filewatch flag was given. */
+  STRING *tag;       /* Tag (given with the -tag flag. */
+  int decode;        /* 1 if the -decode flag was given. */
+};
 
-  if (type == COND_PATH || type == COND_QUERY_PARAM)
-    match_param.decode = 0;
+#define MATCH_PARAM_INITIALIZER { NULL, 0, NULL, -1 }
 
-  if (parse_match_mode (dfl_re_type, &gp_type, &flags, &match_param))
-    return CFGPARSER_FAIL;
-
-  switch (type)
-    {
-    case COND_HOST:
-      type = COND_NAMEHDR;
-      string = "Host";
-      break;
-
-    case COND_HDR:
-      if (string)
-	type = COND_NAMEHDR;
-      break;
-
-    default:
-      break;
-    }
-
-  if (match_param.from_file)
-    {
-      switch (type)
-	{
-	case COND_NAMEHDR:
-	case COND_QUERY_PARAM:
-	case COND_STRING_MATCH:
-	  ref = string_init (string);
-	  break;
-	default:
-	  ref = NULL;
-	  break;
-	}
-
-      if (match_param.watch)
-	{
-	  cond = service_cond_append (top_cond, COND_DYN);
-	  cond->tag = match_param.tag;
-	  cond->decode = match_param.decode;
-	  cond->dyn.boolean.op = BOOL_OR;
-	  cond->dyn.string = ref;
-	  cond->dyn.cond_type = type;
-	  cond->dyn.pat_type = gp_type;
-	  cond->dyn.flags = flags;
-	  if (dyncond_register (cond, match_param.from_file,
-				last_token_locus_range ()))
-	    return CFGPARSER_FAIL;
-	}
-      else
-	{
-	  cond = service_cond_append (top_cond, COND_BOOL);
-	  cond->tag = match_param.tag;
-	  cond->decode = match_param.decode;
-	  cond->boolean.op = BOOL_OR;
-	  rc = dyncond_read_immediate (cond, match_param.from_file,
-				       ref, type, gp_type, flags);
-	  string_unref (ref);
-	  if (rc)
-	    return rc;
-	}
-      free (match_param.from_file);
-    }
-  else
-    {
-      if ((tok = gettkn_expect (T_STRING)) == NULL)
-	return CFGPARSER_FAIL;
-
-      xstringbuf_init (&sb);
-      cond = service_cond_append (top_cond, type);
-      cond->tag = match_param.tag;
-      cond->decode = match_param.decode;
-      rc = genpat_compile (&cond->re, gp_type, tok->str, flags);
-      if (rc)
-	{
-	  conf_regcomp_error (rc, cond->re, NULL);
-	  // FIXME: genpat_free (cond->re);
-	  return CFGPARSER_FAIL;
-	}
-      switch (type)
-	{
-	case COND_NAMEHDR:
-	case COND_QUERY_PARAM:
-	case COND_STRING_MATCH:
-	  memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));
-	  cond->sm.string = string_init (string);
-	  break;
-
-	default:
-	  break;
-	}
-      stringbuf_free (&sb);
-    }
-
-  return CFGPARSER_OK;
+static void
+match_param_free (struct match_param *p)
+{
+  string_unref (p->from_file);
+  string_unref (p->tag);
 }
 
-static int
-parse_cond_acl (void *call_data, void *section_data)
-{
-  SERVICE_COND *cond = service_cond_append (call_data, COND_ACL);
-  return parse_acl_ref (&cond->acl.acl, &cond->acl.forwarded);
-}
+/* Code names for condition flags. */
+enum
+  {
+    MATCH_RE = 1,
+    MATCH_EXACT,
+    MATCH_BEG,
+    MATCH_END,
+    MATCH_CONTAIN,
+    MATCH_ICASE,
+    MATCH_CASE,
+    MATCH_FILE,
+    MATCH_FILEWATCH,
+    MATCH_POSIX,
+    MATCH_PCRE,
+    MATCH_TAG,
+    MATCH_DECODE
+  };
 
-static int
-parse_cond_method_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_METHOD, dfl->re_type,
-			     dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0),
-			     NULL);
-}
+static CFG_FLAG cond_re_flags[] = {
+  { "re",        MATCH_RE },
+  { "exact",     MATCH_EXACT },
+  { "beg",       MATCH_BEG },
+  { "end",       MATCH_END },
+  { "contain",   MATCH_CONTAIN },
+  { "icase",     MATCH_ICASE },
+  { "case",      MATCH_CASE },
+  { "posix",     MATCH_POSIX },
+  { "pcre",      MATCH_PCRE },
+  { "perl",      MATCH_PCRE },
+  { "file",      MATCH_FILE, 1 },
+  { "filewatch", MATCH_FILEWATCH, 1 },
+  { "tag",       MATCH_TAG, 1 },
+  { NULL }
+};
 
-static int
-parse_cond_url_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_URL, dfl->re_type,
-			     dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0),
-			     NULL);
-}
-
-static int
-parse_cond_path_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_PATH, dfl->re_type,
-			     dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0),
-			     NULL);
-}
-
-static int
-parse_cond_query_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_QUERY, dfl->re_type,
-			     dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0),
-			     NULL);
-}
-
-static int
-parse_cond_query_param_matcher (void *call_data, void *section_data)
-{
-  SERVICE_COND *top_cond = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  int flags = (dfl->ignore_case ? GENPAT_ICASE : 0);
-  struct token *tok;
-  char *string;
-  int rc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  string = xstrdup (tok->str);
-  rc = parse_cond_matcher (top_cond,
-			   COND_QUERY_PARAM, dfl->re_type,
-			   dfl->re_type, flags, string);
-  free (string);
-  return rc;
-}
-
-static int
-parse_cond_string_matcher (void *call_data, void *section_data)
-{
-  SERVICE_COND *top_cond = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  int flags = (dfl->ignore_case ? GENPAT_ICASE : 0);
-  struct token *tok;
-  char *string;
-  int rc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  string = xstrdup (tok->str);
-  rc = parse_cond_matcher (top_cond,
-			   COND_STRING_MATCH, dfl->re_type, dfl->re_type,
-			   flags,
-			   string);
-  free (string);
-  return rc;
-}
-
-static int
-parse_cond_hdr_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  char *string = NULL;
-  struct token *tok;
-  int rc;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == T_STRING)
-    {
-      struct locus_range loc = LOCUS_RANGE_INITIALIZER;
-      string = xstrdup (tok->str);
-      locus_range_copy (&loc, &tok->locus);
-
-      if ((tok = gettkn_any ()) == NULL)
-	{
-	  locus_range_unref (&loc);
-	  free (string);
-	  return CFGPARSER_FAIL;
-	}
-      putback_tkn (tok);
-      if (tok->type == '\n')
-	{
-	  putback_synth (T_STRING, string, &loc);
-	  free (string);
-	  string = NULL;
-	}
-      locus_range_unref (&loc);
-    }
-  else
-    putback_tkn (tok);
-  rc = parse_cond_matcher (call_data, COND_HDR, dfl->re_type, dfl->re_type,
-			   GENPAT_MULTILINE | GENPAT_ICASE,
-			   string);
-  free (string);
-  return rc;
-}
-
-static int
-parse_cond_head_deny_matcher (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
-  cond->boolean.op = BOOL_NOT;
-  return parse_cond_matcher (cond, COND_HDR, dfl->re_type, dfl->re_type,
-			     GENPAT_MULTILINE | GENPAT_ICASE,
-			     NULL);
-}
-
-static int
-parse_cond_host (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return parse_cond_matcher (call_data, COND_HOST, dfl->re_type,
-			     GENPAT_EXACT, GENPAT_ICASE, NULL);
-}
-
-static int
-parse_cond_basic_auth (void *call_data, void *section_data)
-{
-  SERVICE_COND *cond = service_cond_append (call_data, COND_BASIC_AUTH);
-  struct locus_range loc = LOCUS_RANGE_INITIALIZER;
-  struct token *tok;
-  int opt;
-  char *filename;
-  void *wt;
-
-  if (get_file_option (&opt, &filename, OPT_FILE|OPT_WATCH) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-
-  if (filename)
-    {
-      locus_range_copy (&loc, last_token_locus_range ());
-      if (! (opt & OPT_WATCH))
-	{
-	  char const *basename;
-	  WORKDIR *wd;
-	  int ret = CFGPARSER_OK;
-
-	  if ((basename = filename_split_wd (filename, &wd)) == NULL)
-	    ret = CFGPARSER_FAIL;
-	  else
-	    {
-	      int rc = basic_auth_read (cond, basename, wd);
-	      workdir_unref (wd);
-	      if (rc == -1)
-		{
-		  if (errno == ENOENT)
-		    conf_error ("file %s does not exist", filename);
-		  else
-		    conf_error ("can't open %s: %s", filename,
-				strerror (errno));
-		  ret = CFGPARSER_FAIL;
-		}
-	    }
-	  free (filename);
-	  locus_range_unref (&loc);
-	  return ret;
-	}
-    }
-  else if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  else
-    {
-      filename = xstrdup (tok->str);
-      locus_range_copy (&loc, &tok->locus);
-    }
-
-  wt = watcher_register (cond, filename, &loc,
-			 basic_auth_read, basic_auth_clear);
-  free (filename);
-  locus_range_unref (&loc);
-  if (wt == NULL)
-    return CFGPARSER_FAIL;
-  return CFGPARSER_OK;
-}
-
-static int
-parse_cond_client_cert (void *call_data, void *section_data)
-{
-  SERVICE_COND *cond = service_cond_append (call_data, COND_CLIENT_CERT);
-  return assign_cert (&cond->x509, NULL);
-}
-
-#ifndef UINT64_MAX
-# define UINT64_MAX ((uint64_t)-1)
-#endif
+static CFG_FLAG cond_re_decode_flags[] = {
+  { "re",        MATCH_RE },
+  { "exact",     MATCH_EXACT },
+  { "beg",       MATCH_BEG },
+  { "end",       MATCH_END },
+  { "contain",   MATCH_CONTAIN },
+  { "icase",     MATCH_ICASE },
+  { "case",      MATCH_CASE },
+  { "posix",     MATCH_POSIX },
+  { "pcre",      MATCH_PCRE },
+  { "perl",      MATCH_PCRE },
+  { "file",      MATCH_FILE, 1 },
+  { "filewatch", MATCH_FILEWATCH, 1 },
+  { "tag",       MATCH_TAG, 1 },
+  { "decode",    MATCH_DECODE },
+  { NULL }
+};
 
 /*
- * Compute (v * d) / n with range checking.  On success, store the result
- * in retval and return 0.
+ * Read condition parameters from arguments.
+ * Input arguments:
+ *     ARG          - Pointer to the first argument in list;
+ *     DLF_RE_TYPE  - Default pattern type (used unless explicitly specified
+ *                    otherwise);
+ * Output arguments:
+ *     GP_TYPE      - Type of the pattern to use (-re, -posix, -exact, -beg,
+ *                    -end, -contain, or -pcre flags);
+ *     SP_FLAGS     - Case-sensitivity (-case, -icase);
+ *     PARAM        - Settings given by -file, -filewatch, -tag and -decode
+ *                    flags.
+ *     ARGPTR       - Pointer to the first non-flag argument.
  */
 static int
-mulf (unsigned long v, unsigned n, unsigned long d, uint64_t *retval)
+parse_match_mode (CFG_ARG *arg, int dfl_re_type, int *gp_type, int *sp_flags,
+		  struct match_param *param, CFG_ARG **argptr)
 {
-  if (UINT64_MAX / n < v)
+  int c;
+  CFG_ARG *nxt, *farg;
+
+  while ((c = cfg_arglist_getflag (arg, &farg, &nxt)) > 0)
     {
-      uint64_t e = (v - UINT64_MAX / n) * n;
-      if (UINT64_MAX / n < (v - e))
-	return -1;
-      *retval = ((v - e) * n) / d + e / d;
+      switch (c)
+	{
+	case MATCH_CASE:
+	  *sp_flags &= ~GENPAT_ICASE;
+	  break;
+
+	case MATCH_ICASE:
+	  *sp_flags |= GENPAT_ICASE;
+	  break;
+
+	case MATCH_FILE:
+	  param->from_file = string_ref (farg->v.string);
+	  param->watch = 0;
+	  break;
+
+	case MATCH_FILEWATCH:
+	  param->from_file = string_ref (farg->v.string);
+	  param->watch = 1;
+	  break;
+
+	case MATCH_RE:
+	  *gp_type = dfl_re_type;
+	  break;
+
+	case MATCH_POSIX:
+	  *gp_type = GENPAT_POSIX;
+	  break;
+
+	case MATCH_EXACT:
+	  *gp_type = GENPAT_EXACT;
+	  break;
+
+	case MATCH_BEG:
+	  *gp_type = GENPAT_PREFIX;
+	  break;
+
+	case MATCH_END:
+	  *gp_type = GENPAT_SUFFIX;
+	  break;
+
+	case MATCH_CONTAIN:
+	  *gp_type = GENPAT_CONTAIN;
+	  break;
+
+	case MATCH_PCRE:
+#ifdef HAVE_LIBPCRE
+	  *gp_type = GENPAT_PCRE;
+#else
+	  oconf_error_at_locus_range(&arg->locus,
+				     "pound compiled without PCRE support");
+	  return -1;
+#endif
+	  break;
+
+	case MATCH_TAG:
+	  param->tag = string_ref (farg->v.string);
+	  break;
+
+	case MATCH_DECODE:
+	  param->decode = 1;
+	}
+      arg = nxt;
     }
-  else
-    *retval = (v * n) / d;
+  *argptr = arg;
   return 0;
 }
 
+/*
+ * Generic condition creation function.
+ * Arguments:
+ *    NODE        - AST node describing the condition.
+ *    ARG         - Pattern argument.
+ *    TOP_COND    - Top-level condition (COND_BOOL or COND_DYN) to attach the
+ *                  newly created condition to.
+ *    TYPE        - Type of the condition to create.
+ *    DFL_RE_TYPE - Default pattern type.
+ *    GP_TYPE     - Pattern type.
+ *    FLAGS       - flags to pass to genpat_compile.
+ */
 static int
-parse_rate (uint64_t *ret_rate)
+cond_matcher_commit_generic (CFG_NODE *node, CFG_ARG *arg,
+			     SERVICE_COND *top_cond,
+			     enum service_cond_type type,
+			     int dfl_re_type,
+			     int gp_type, int flags, STRING *ref)
 {
-  struct token *tok;
-  unsigned long rate;
-  unsigned long n = 1;
-  char *p;
-  enum { I_SEC, I_MSEC, I_USEC };
-  int i = I_SEC;
-  static struct kwtab intervals[] = {
-    { "s",  I_SEC },
-    { "ms", I_MSEC },
-    { "us", I_USEC },
-    { NULL }
-  };
-  static unsigned mul[] = {
-    NANOSECOND,
-    1000000,
-    1000,
-  };
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  errno = 0;
-  rate = strtoul (tok->str, &p, 10);
-  if (errno || rate == 0)
-    {
-      conf_error ("%s", "bad unsigned number");
-      return CFGPARSER_FAIL;
-    }
-  else if (*p == '/')
-    {
-      ++p;
+  int rc = 0;
+  SERVICE_COND *cond;
+  struct match_param match_param = MATCH_PARAM_INITIALIZER;
 
-      if (c_isdigit (p[0]))
+  if (parse_match_mode (arg, dfl_re_type, &gp_type, &flags, &match_param,
+			&arg))
+    return -1;
+
+  if (match_param.from_file)
+    {
+      if (arg)
 	{
-	  n = strtoul (p, &p, 10);
-	  if (n == 0 || errno)
+	  conf_error_at_locus_range (&arg->locus, "superfluous arguments");
+	  rc = -1;
+	}
+      else
+	{
+	  if (match_param.watch)
 	    {
-	      conf_error ("%s", "bad interval specifier");
-	      return CFGPARSER_FAIL;
+	      cond = service_cond_append (top_cond, COND_DYN);
+	      cond->tag = match_param.tag;
+	      cond->decode = match_param.decode;
+	      cond->dyn.boolean.op = BOOL_OR;
+	      cond->dyn.string = string_ref (ref);
+	      cond->dyn.cond_type = type;
+	      cond->dyn.pat_type = gp_type;
+	      cond->dyn.flags = flags;
+	      if (dyncond_register (cond, string_ptr (match_param.from_file),
+				    &node->locus))
+		rc = -1;
+	    }
+	  else
+	    {
+	      cond = service_cond_append (top_cond, COND_BOOL);
+	      cond->tag = string_ref (match_param.tag);
+	      cond->decode = match_param.decode;
+	      cond->boolean.op = BOOL_OR;
+	      rc = dyncond_read_immediate (cond,
+					   string_ptr (match_param.from_file),
+					   ref, type, gp_type, flags);
 	    }
 	}
-
-      if (kw_to_tok (intervals, p, 1, &i))
+    }
+  else if (arg)
+    {
+      cond = service_cond_append (top_cond, type);
+      cond->tag = string_ref (match_param.tag);
+      cond->decode = match_param.decode;
+      rc = genpat_compile (&cond->re, gp_type, string_ptr (arg->v.string),
+			   flags);
+      if (rc)
 	{
-	  struct locus_range r = *last_token_locus_range ();
-	  r.beg.col += p - tok->str;
-	  conf_error_at_locus_range (&r, "%s", "bad interval specifier");
-	  return CFGPARSER_FAIL;
+	  conf_regcomp_error (&arg->locus, cond->re, NULL);
+	  // FIXME: genpat_free (cond->re);
+	  rc = -1;
+	}
+      else
+	{
+	  switch (type)
+	    {
+	    case COND_NAMEHDR:
+	    case COND_QUERY_PARAM:
+	    case COND_STRING_MATCH:
+	      memmove (&cond->sm.re, &cond->re, sizeof (cond->sm.re));
+	      cond->sm.string = string_ref (ref);
+	      break;
+
+	    default:
+	      break;
+	    }
 	}
     }
-  else if (*p != 0)
+  else
     {
-      conf_error ("%s", "invalid rate");
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (&node->locus, "required argument missing");
+      rc = -1;
     }
 
-  if (mulf (n, mul[i], rate, ret_rate))
-    {
-      conf_error ("%s", "effective rate is out of range");
-      return CFGPARSER_FAIL;
-    }
+  match_param_free (&match_param);
 
-  if (*ret_rate == 0)
-    {
-      conf_error ("%s", "effective rate is 0");
-      return CFGPARSER_FAIL;
-    }
-
-  return CFGPARSER_OK;
+  return rc;
 }
 
+/*
+ * Simple condition creation: Method, URL, Path, and the like.
+ */
 static int
-parse_cond_tbf (void *call_data, void *section_data)
+cond_matcher_commit_simple (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_TBF);
-  struct token *tok;
-  uint64_t rate;
-  unsigned maxtok;
-  STRING *key;
-  int rc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  key = string_init (tok->str);
-
-  if ((rc = parse_rate (&rate)) != CFGPARSER_OK)
-    return rc;
-  if ((rc = cfg_assign_unsigned (&maxtok, section_data)) != CFGPARSER_OK)
-    return rc;
-
-  cond->tbf.key = key;
-  cond->tbf.tbf = tbf_alloc (rate, maxtok);
-  return CFGPARSER_OK;
+  POUND_DEFAULTS *dfl = call_data;
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  return cond_matcher_commit_generic (node, cfg_arglist_first (&node->arglist),
+				      cond, (int)(intptr_t)node->defn->data,
+				      dfl->re_type, dfl->re_type,
+				      (dfl->ignore_case ? GENPAT_ICASE : 0),
+				      NULL);
 }
 
+/* Host [FLAGS] "PAT" */
 static int
-parse_lua_match (void *call_data, void *section_data)
+cond_host_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  SERVICE_COND *cond = service_cond_append (call_data, COND_LUA);
-  return pndlua_parse_closure (&cond->clua);
+  POUND_DEFAULTS *dfl = call_data;
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  STRING *s = string_init ("Host");
+  int rc = cond_matcher_commit_generic (node,
+					cfg_arglist_first (&node->arglist),
+					cond, COND_NAMEHDR,
+					dfl->re_type, GENPAT_EXACT,
+					GENPAT_ICASE,
+					s);
+  string_unref (s);
+  return rc;
+}
+
+/*
+ * Two-argument conditions:
+ *   Header "NAME" [FLAGS] "PAT"
+ *   QueryParam "NAME" [FLAGS] "PAT"
+ *   StringMatch "STR" [FLAGS] "PAT"
+ */
+static int
+cond_matcher_commit_twoarg (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  POUND_DEFAULTS *dfl = call_data;
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  return cond_matcher_commit_generic (node, cfg_arg_next (arg),
+				      cond, (int)(intptr_t)node->defn->data,
+				      dfl->re_type, dfl->re_type,
+				      (dfl->ignore_case ? GENPAT_ICASE : 0),
+				      arg->v.string);
+}
+
+/*
+ * The Header condition:
+ *   Header [FLAGS] "PAT"
+ *   Header "NAME" [FLAGS] "PAT"
+ */
+static int
+cond_header_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  POUND_DEFAULTS *dfl = call_data;
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  static char single_arg[] = "f*s?";
+  static char two_arg[] = "sf*s?";
+  char const *expdef;
+  CFG_ARG *errarg;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  STRING *string;
+  int type;
+
+  if (lex_argcmp (single_arg, &node->arglist, &expdef, &errarg) == 0)
+    {
+      type = COND_HDR;
+      string = NULL;
+    }
+  else if (lex_argcmp (two_arg, &node->arglist, &expdef, &errarg) == 0)
+    {
+      type = COND_NAMEHDR;
+      string = arg->v.string;
+      arg = cfg_arg_next (arg);
+    }
+  else
+    {
+      arg_mismatch_error (expdef, errarg, &node->locus);
+      return -1;
+    }
+
+  return cond_matcher_commit_generic (node, arg,
+				      cond, type,
+				      dfl->re_type, dfl->re_type,
+				      GENPAT_MULTILINE | GENPAT_ICASE,
+				      string);
+}
+
+/*
+ * Prepare function for committing the Match statement:
+ *
+ *   Match [AND|OR]
+ *       ...
+ *   End
+ *
+ * The function creates a new boolean condition and attaches it to the
+ * condition supplied by the node receiver and baseptr. Upon successful
+ * return, the new condition is saved in *baseptr.
+ */
+static int
+match_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, *baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int op;
+
+  if (!arg)
+    op = BOOL_AND;
+  else
+    {
+      char const *opname = string_ptr (arg->v.string);
+      if (c_strcasecmp (opname, "and") == 0)
+	op = BOOL_AND;
+      else if (c_strcasecmp (opname, "or") == 0)
+	op = BOOL_OR;
+      else
+	{
+	  conf_error_at_locus_range (&arg->locus,
+				     "expected AND or OR, but found %s",
+				     opname);
+	  return -1;
+	}
+    }
+
+  cond = service_cond_append (cond, COND_BOOL);
+  cond->boolean.op = op;
+
+  *baseptr = cond;
+
+  return 0;
+}
+
+/*
+ * Not COND
+ */
+static int
+not_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, *baseptr), COND_BOOL);
+  cond->boolean.op = BOOL_NOT;
+
+  *baseptr = cond;
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_match = {
+  .argdef = "l?",
+  .prepare = match_prepare
+};
+
+static CFG_TYPE cfg_type_not = {
+  .argdef = "",
+  .prepare = not_prepare
+};
+
+/*
+ * The ClientCert condition:
+ *   ClientCert MODE [DEPTH]
+ */
+static int
+clientcert_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_CLIENT_CERT);
+  return cfg_cert_commit (node, call_data, &cond->x509);
 }
 
 /* Named and detached conditions. */
@@ -2471,7 +2801,7 @@ typedef struct named_cond
 static NAMED_COND_HASH *named_cond_hash;
 
 /* Array of detached conditions. */
-SERVICE_COND **detcond_index;
+static SERVICE_COND **detcond_index;
 static int detcond_count;
 
 /* Return a pointer to the detached condition with the given number. */
@@ -2575,18 +2905,18 @@ named_cond_lookup (char const *name)
 
 /* Allocate new named condition with boolean operation op. */
 static NAMED_COND *
-named_cond_new (char *name, int op)
+named_cond_new (char const *name, int op, struct locus_range const *loc)
 {
   NAMED_COND *nc, *old;
 
   if (!named_cond_hash)
     named_cond_hash = NAMED_COND_HASH_NEW ();
   XZALLOC (nc);
-  nc->name = name;
+  nc->name = xstrdup (name);
   nc->cond = service_cond_alloc (COND_BOOL);
   nc->cond->boolean.op = op;
   locus_range_init (&nc->locus);
-  locus_range_copy (&nc->locus, last_token_locus_range ());
+  locus_range_copy (&nc->locus, loc);
 
   old = NAMED_COND_INSERT (named_cond_hash, nc);
   if (old != NULL)
@@ -2600,1988 +2930,79 @@ named_cond_new (char *name, int op)
   return nc;
 }
 
-static int parse_bool_cond (SERVICE_COND *cond, void *section_data);
-
-/* Parse a standalone Condition statement. */
 static int
-parse_named_cond (void *call_data, void *section_data)
+condition_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  struct token *tok;
-  char *name;
-  int op = BOOL_AND;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int op;
   NAMED_COND *nc;
-  int result;
-  struct locus_range const *r;
+  char const *name;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  name = xstrdup (tok->str);
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == T_IDENT)
+  name = string_ptr (arg->v.string);
+  arg = cfg_arg_next (arg);
+
+  if (!arg)
+    op = BOOL_AND;
+  else
     {
-      if (c_strcasecmp (tok->str, "and") == 0)
+      char const *opname = string_ptr (arg->v.string);
+      if (c_strcasecmp (opname, "and") == 0)
 	op = BOOL_AND;
-      else if (c_strcasecmp (tok->str, "or") == 0)
+      else if (c_strcasecmp (opname, "or") == 0)
 	op = BOOL_OR;
       else
 	{
-	  conf_error ("expected AND or OR, but found %s", tok->str);
-	  return CFGPARSER_FAIL;
+	  conf_error_at_locus_range (&arg->locus,
+				     "expected AND or OR, but found %s",
+				     opname);
+	  return -1;
 	}
     }
-  else
-    {
-      op = BOOL_AND;
-      putback_tkn (tok);
-    }
 
-  nc = named_cond_new (name, op);
+  if ((nc = named_cond_new (name, op, &node->locus)) == NULL)
+    return -1;
 
-  if (nc == NULL)
-    return CFGPARSER_FAIL;
-
-  result = parse_bool_cond (nc->cond, section_data);
-
-  if ((r = last_token_locus_range ()) != NULL)
-    locus_point_copy (&nc->locus.end, &r->end);
-  return result;
-}
-
-static int
-parse_cond_eval (void *call_data, void *section_data)
-{
-  struct token *tok;
-  SERVICE_COND *cond;
-  NAMED_COND *nc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((nc = named_cond_lookup (tok->str)) == NULL)
-    {
-      conf_error ("%s: no such condition", tok->str);
-      return CFGPARSER_FAIL;
-    }
-
-  cond = service_cond_append (call_data, COND_REF);
-  cond->ref = nc->idx;
-
-  return CFGPARSER_OK;
-}
-
-static int
-parse_redirect_backend (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  struct token *tok;
-  int code = 302;
-  BACKEND *be;
-  POUND_REGMATCH matches[5];
-  struct locus_range range;
-
-  range.beg = last_token_locus_range ()->beg;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (tok->type == T_NUMBER)
-    {
-      int n = atoi (tok->str);
-      switch (n)
-	{
-	case 301:
-	case 302:
-	case 303:
-	case 307:
-	case 308:
-	  code = n;
-	  break;
-
-	default:
-	  conf_error ("%s", "invalid status code");
-	  return CFGPARSER_FAIL;
-	}
-
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-    }
-
-  range.end = last_token_locus_range ()->end;
-
-  if (tok->type != T_STRING)
-    {
-      conf_error ("expected %s, but found %s", token_type_str (T_STRING), token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  be = xbackend_create (BE_REDIRECT, 1, &range);
-  be->v.redirect.status = code;
-  be->v.redirect.url = xstrdup (tok->str);
-
-  if (genpat_match (LOCATION, be->v.redirect.url, 4, matches))
-    {
-      conf_error ("%s", "Redirect bad URL");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((be->v.redirect.has_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
-    /* the path is a single '/', so remove it */
-    be->v.redirect.url[matches[3].rm_so] = '\0';
-
-  balancer_add_backend (balancer_list_get_normal (bml), be);
-
-  return CFGPARSER_OK;
-}
-
-static int
-parse_http_errmsg (struct http_errmsg *errmsg)
-{
-  int rc;
-  char *p;
-
-  rc = cfg_assign_string_from_file (&errmsg->text, NULL);
-  if (rc == CFGPARSER_FAIL)
-    return rc;
-
-  DLIST_INIT (&errmsg->hdr);
-  if (http_header_list_parse (&errmsg->hdr, errmsg->text, H_REPLACE, &p) == 0
-      && p != errmsg->text)
-    {
-      p++;
-      memmove (errmsg->text, p, strlen (p) + 1);
-    }
-  else
-    http_header_list_free (&errmsg->hdr);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_error_backend (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  struct token *tok;
-  int n, status;
-  BACKEND *be;
-  int rc;
-  struct locus_range range;
-  struct http_errmsg errmsg = HTTP_ERRMSG_INITIALIZER(errmsg);
-
-  range.beg = last_token_locus_range ()->beg;
-
-  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
-    return CFGPARSER_FAIL;
-
-  n = atoi (tok->str);
-  if ((status = http_status_to_pound (n)) == -1)
-    {
-      conf_error ("%s", "unsupported status code");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (tok->type == T_STRING)
-    {
-      putback_tkn (tok);
-      if ((rc = parse_http_errmsg (&errmsg)) == CFGPARSER_FAIL)
-	return rc;
-    }
-  else if (tok->type == '\n')
-    rc = CFGPARSER_OK_NONL;
-  else
-    {
-      conf_error ("%s", "string or newline expected");
-      return CFGPARSER_FAIL;
-    }
-
-  range.end = last_token_locus_range ()->end;
-
-  be = xbackend_create (BE_ERROR, 1, &range);
-  be->v.error.status = status;
-  be->v.error.msg = errmsg;
-
-  balancer_add_backend (balancer_list_get_normal (bml), be);
-
-  return rc;
-}
-
-static int
-parse_success_backend (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  BACKEND *be;
-
-  be = xbackend_create (BE_SUCCESS, 1, last_token_locus_range ());
-  balancer_add_backend (balancer_list_get_normal (bml), be);
+  *baseptr = nc->cond;
 
   return 0;
 }
 
-static int
-parse_errorfile (void *call_data, void *section_data)
-{
-  struct token *tok;
-  int status;
-  struct http_errmsg **http_err = call_data;
-
-  if ((tok = gettkn_expect (T_NUMBER)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((status = http_status_to_pound (atoi (tok->str))) == -1)
-    {
-      conf_error ("%s", "unsupported status code");
-      return CFGPARSER_FAIL;
-    }
-
-  if (!http_err[status])
-    XZALLOC (http_err[status]);
-  return parse_http_errmsg (http_err[status]);
-}
-
-static int
-parse_errN (void *call_data, void *section_data)
-{
-  struct http_errmsg **http_err = call_data;
-
-  if (!*http_err)
-    XZALLOC (*http_err);
-  return parse_http_errmsg (*http_err);
-}
-
-static int
-parse_sendfile_backend (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  struct token *tok;
-  BACKEND *be;
-  int fd;
-  struct locus_range range;
-  WORKDIR *wd = get_include_wd ();
-
-  range.beg = last_token_locus_range ()->beg;
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  range.end = last_token_locus_range ()->end;
-
-  fd = openat (wd->fd, tok->str, O_DIRECTORY | O_RDONLY | O_NDELAY);
-  if (fd == -1)
-    {
-      conf_error ("can't open %s: %s", tok->str, strerror (errno));
-      return CFGPARSER_FAIL;
-    }
-
-  be = xbackend_create (BE_FILE, 1, &range);
-  be->v.file.wd = fd;
-
-  balancer_add_backend (balancer_list_get_normal (bml), be);
-
-  return CFGPARSER_OK;
-}
-
-static int
-parse_lua_backend (void *call_data, void *section_data)
-{
-  BALANCER_LIST *bml = call_data;
-  BACKEND *be;
-  int rc;
-
-  be = xbackend_create (BE_LUA, 1, last_token_locus_range ());
-  if ((rc = pndlua_parse_closure (&be->v.lua)) == CFGPARSER_OK ||
-      rc == CFGPARSER_OK_NONL)
-    balancer_add_backend (balancer_list_get_normal (bml), be);
-  return rc;
-}
-
-struct service_session
-{
-  int type;
-  char *id;
-  unsigned ttl;
+static CFG_TYPE cfg_type_condition = {
+  .argdef = "sl?",
+  .prepare = condition_prepare
 };
-
-static struct kwtab sess_type_tab[] = {
-  { "IP", SESS_IP },
-  { "COOKIE", SESS_COOKIE },
-  { "URL", SESS_URL },
-  { "PARM", SESS_PARM },
-  { "BASIC", SESS_BASIC },
-  { "HEADER", SESS_HEADER },
-  { NULL }
-};
-
-char const *
-sess_type_to_str (int type)
-{
-  if (type == SESS_NONE)
-    return "NONE";
-  return kw_to_str (sess_type_tab, type);
-}
-
-static int
-session_type_parser (void *call_data, void *section_data)
-{
-  SERVICE *svc = call_data;
-  struct token *tok;
-  int n;
-
-  if ((tok = gettkn_expect (T_IDENT)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (kw_to_tok (sess_type_tab, tok->str, 1, &n))
-    {
-      conf_error ("%s", "Unknown Session type");
-      return CFGPARSER_FAIL;
-    }
-  svc->sess_type = n;
-
-  return CFGPARSER_OK;
-}
-
-static CFGPARSER_TABLE session_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Type",
-    .parser = session_type_parser
-  },
-  {
-    .name = "TTL",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (SERVICE, sess_ttl)
-  },
-  {
-    .name = "ID",
-    .parser = cfg_assign_string,
-    .off = offsetof (SERVICE, sess_id)
-  },
-  { NULL }
-};
-
-static int
-parse_session (void *call_data, void *section_data)
-{
-  SERVICE *svc = call_data;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
-
-  if (parser_loop (session_parsetab, svc, section_data, &range))
-    return CFGPARSER_FAIL;
-
-  if (svc->sess_type == SESS_NONE)
-    {
-      conf_error_at_locus_range (&range, "Session type not defined");
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  if (svc->sess_ttl == 0)
-    {
-      conf_error_at_locus_range (&range, "Session TTL not defined");
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  switch (svc->sess_type)
-    {
-    case SESS_COOKIE:
-    case SESS_URL:
-    case SESS_HEADER:
-      if (svc->sess_id == NULL)
-	{
-	  conf_error ("%s", "Session ID not defined");
-	  locus_range_unref (&range);
-	  return CFGPARSER_FAIL;
-	}
-      break;
-
-    default:
-      break;
-    }
-
-  locus_range_unref (&range);
-  return CFGPARSER_OK;
-}
-
-static int
-assign_dfl_ignore_case (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  return cfg_assign_bool (&dfl->ignore_case, NULL);
-}
-
-static int parse_cond (int op, SERVICE_COND *cond, void *section_data);
-
-static int
-parse_match (void *call_data, void *section_data)
-{
-  struct token *tok;
-  int op = BOOL_AND;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == T_IDENT)
-    {
-      if (c_strcasecmp (tok->str, "and") == 0)
-	op = BOOL_AND;
-      else if (c_strcasecmp (tok->str, "or") == 0)
-	op = BOOL_OR;
-      else
-	{
-	  conf_error ("expected AND or OR, but found %s", tok->str);
-	  return CFGPARSER_FAIL;
-	}
-    }
-  else
-    putback_tkn (tok);
-
-  return parse_cond (op, call_data, section_data);
-}
-
-static int parse_not_cond (void *call_data, void *section_data);
-
-static CFGPARSER_TABLE match_conditions[] = {
-  {
-    .name = "ACL",
-    .parser = parse_cond_acl
-  },
-  {
-    .name = "Method",
-    .parser = parse_cond_method_matcher
-  },
-  {
-    .name = "URL",
-    .parser = parse_cond_url_matcher
-  },
-  {
-    .name = "Path",
-    .parser = parse_cond_path_matcher
-  },
-  {
-    .name = "Query",
-    .parser = parse_cond_query_matcher
-  },
-  {
-    .name = "QueryParam",
-    .parser = parse_cond_query_param_matcher
-  },
-  {
-    .name = "Header",
-    .parser = parse_cond_hdr_matcher
-  },
-  {
-    .name = "HeadRequire",
-    .type = KWT_ALIAS,
-    .deprecated = 1
-  },
-  {
-    .name = "HeadDeny",
-    .parser = parse_cond_head_deny_matcher,
-    .deprecated = 1,
-    .message = "use \"Not Header\" instead"
-  },
-  {
-    .name = "Host",
-    .parser = parse_cond_host
-  },
-  {
-    .name = "BasicAuth",
-    .parser = parse_cond_basic_auth
-  },
-  {
-    .name = "TBF",
-    .parser = parse_cond_tbf
-  },
-  {
-    .name = "StringMatch",
-    .parser = parse_cond_string_matcher
-  },
-  {
-    .name = "LuaMatch",
-    .parser = parse_lua_match
-  },
-  {
-    .name = "Match",
-    .parser = parse_match
-  },
-  {
-    .name = "NOT",
-    .parser = parse_not_cond
-  },
-  {
-    .name = "ClientCert",
-    .parser = parse_cond_client_cert
-  },
-  {
-    .name = "Eval",
-    .parser = parse_cond_eval
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE negate_parsetab[] = {
-  {
-    .name = "",
-    .type = KWT_SOFTREF,
-    .ref = match_conditions
-  },
-  { NULL }
-};
-
-static int
-parse_not_cond (void *call_data, void *section_data)
-{
-  SERVICE_COND *cond = service_cond_append (call_data, COND_BOOL);
-  cond->boolean.op = BOOL_NOT;
-  return cfgparser (negate_parsetab, cond, section_data,
-		    1,
-		    feature_is_set (FEATURE_WARN_DEPRECATED)
-			   ? DEPREC_WARN : DEPREC_OK,
-		    NULL);
-}
-
-static CFGPARSER_TABLE logcon_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "",
-    .type = KWT_SOFTREF,
-    .ref = match_conditions
-  },
-  { NULL }
-};
-
-static int
-parse_bool_cond (SERVICE_COND *cond, void *section_data)
-{
-  return parser_loop (logcon_parsetab, cond, section_data, NULL);
-}
-
-static int
-parse_cond (int op, SERVICE_COND *cond, void *section_data)
-{
-  SERVICE_COND *subcond = service_cond_append (cond, COND_BOOL);
-  subcond->boolean.op = op;
-  return parse_bool_cond (subcond, section_data);
-}
-
-static int parse_else (void *call_data, void *section_data);
-static int parse_rewrite (void *call_data, void *section_data);
-static int parse_set_header (void *call_data, void *section_data);
-static int parse_delete_header (void *call_data, void *section_data);
-static int parse_set_url (void *call_data, void *section_data);
-static int parse_set_path (void *call_data, void *section_data);
-static int parse_set_query (void *call_data, void *section_data);
-static int parse_delete_query (void *call_data, void *section_data);
-static int parse_set_query_param (void *call_data, void *section_data);
-static int parse_sub_rewrite (void *call_data, void *section_data);
-static int parse_lua_modify (void *call_data, void *section_data);
-
-static CFGPARSER_TABLE rewrite_ops[] = {
-  {
-    .name = "SetHeader",
-    .parser = parse_set_header
-  },
-  {
-    .name = "DeleteHeader",
-    .parser = parse_delete_header
-  },
-  {
-    .name = "SetURL",
-    .parser = parse_set_url },
-  {
-    .name = "SetPath",
-    .parser = parse_set_path
-  },
-  {
-    .name = "SetQuery",
-    .parser = parse_set_query
-  },
-  {
-    .name = "DeleteQuery",
-    .parser = parse_delete_query
-  },
-  {
-    .name = "SetQueryParam",
-    .parser = parse_set_query_param
-  },
-  {
-    .name = "LuaModify",
-    .parser = parse_lua_modify
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE rewrite_rule_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Rewrite",
-    .parser = parse_sub_rewrite,
-    .off = offsetof (REWRITE_RULE, ophead)
-  },
-  {
-    .name = "Else",
-    .parser = parse_else,
-    .off = offsetof (REWRITE_RULE, iffalse)
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, cond),
-    .type = KWT_SOFTREF,
-    .ref = match_conditions
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, ophead),
-    .type = KWT_SOFTREF,
-    .ref = rewrite_ops
-  },
-  { NULL }
-};
-
-static int
-parse_end_else (void *call_data, void *section_data)
-{
-  struct token nl = { '\n' };
-  putback_tkn (NULL);
-  putback_tkn (&nl);
-  return CFGPARSER_END;
-}
-
-static CFGPARSER_TABLE else_rule_parsetab[] = {
-  {
-    .name = "End",
-    .parser = parse_end_else
-  },
-  {
-    .name = "Rewrite",
-    .parser = parse_sub_rewrite,
-    .off = offsetof (REWRITE_RULE, ophead)
-  },
-  {
-    .name = "Else",
-    .parser = parse_else,
-    .off = offsetof (REWRITE_RULE, iffalse)
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, cond),
-    .type = KWT_SOFTREF,
-    .ref = match_conditions
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, ophead),
-    .type = KWT_SOFTREF,
-    .ref = rewrite_ops
-  },
-  { NULL }
-};
-
-static REWRITE_OP *
-rewrite_op_alloc (REWRITE_OP_HEAD *head, enum rewrite_type type)
-{
-  REWRITE_OP *op;
-
-  XZALLOC (op);
-  op->type = type;
-  SLIST_PUSH (head, op, next);
-
-  return op;
-}
-
-static int
-parse_encode_option (int *p)
-{
-  static struct config_option optab[] = {
-    { "encode", 1, 0 },
-    { NULL }
-  };
-  struct config_option const *opt;
-
-  if (gettok_option (optab, &opt, NULL) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-
-  if (*p == -1 && opt)
-    *p = 1;
-
-  return CFGPARSER_OK;
-}
-
-static int
-parse_rewrite_op (REWRITE_OP_HEAD *head, enum rewrite_type type, int encode)
-{
-  REWRITE_OP *op = rewrite_op_alloc (head, type);
-  struct token *tok;
-
-  if (encode)
-    {
-      op->encode = -1;
-      if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-      op->encode = op->encode == 1;
-    }
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  op->v.str = xstrdup (tok->str);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_delete_header (void *call_data, void *section_data)
-{
-  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_HDR_DEL);
-  POUND_DEFAULTS *dfl = section_data;
-
-  XZALLOC (op->v.hdrdel);
-  return parse_regex_compat (&op->v.hdrdel->pat, dfl->re_type, dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0));
-}
-
-static int
-parse_set_header (void *call_data, void *section_data)
-{
-  return parse_rewrite_op (call_data, REWRITE_HDR_SET, 0);
-}
-
-static int
-parse_set_url (void *call_data, void *section_data)
-{
-  return parse_rewrite_op (call_data, REWRITE_URL_SET, 0);
-}
-
-static int
-parse_set_path (void *call_data, void *section_data)
-{
-  return parse_rewrite_op (call_data, REWRITE_PATH_SET, 1);
-}
-
-static int
-parse_set_query (void *call_data, void *section_data)
-{
-  return parse_rewrite_op (call_data, REWRITE_QUERY_SET, 0);
-}
-
-static int
-parse_delete_query (void *call_data, void *section_data)
-{
-  rewrite_op_alloc (call_data, REWRITE_QUERY_DELETE);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_set_query_param (void *call_data, void *section_data)
-{
-  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_QUERY_PARAM_SET);
-  struct token *tok;
-
-  op->encode = -1;
-  if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  op->v.qp.name = xstrdup (tok->str);
-
-  /* -encode option is allowed both before and after parameter name, */
-  if (parse_encode_option (&op->encode) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-  op->encode = op->encode == 1;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == '\n')
-    {
-      op->v.qp.value = NULL;
-      return CFGPARSER_OK_NONL;
-    }
-  else if (tok->type != T_STRING)
-    {
-      conf_error ("expected %s, but found %s", "string",
-		  token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  op->v.qp.value = xstrdup (tok->str);
-
-  return CFGPARSER_OK;
-
-}
-
-static int
-parse_lua_modify (void *call_data, void *section_data)
-{
-  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_LUA);
-  return pndlua_parse_closure (&op->v.lua);
-}
-
-static REWRITE_RULE *
-rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
-{
-  REWRITE_RULE *rule;
-
-  XZALLOC (rule);
-  service_cond_init (&rule->cond, COND_BOOL);
-  SLIST_INIT (&rule->ophead);
-
-  if (head)
-    SLIST_PUSH (head, rule, next);
-
-  return rule;
-}
-
-static int
-parse_else (void *call_data, void *section_data)
-{
-  REWRITE_RULE *rule = rewrite_rule_alloc (NULL);
-  *(REWRITE_RULE**)call_data = rule;
-  return parser_loop (else_rule_parsetab, rule, section_data, NULL);
-}
-
-static int
-parse_sub_rewrite (void *call_data, void *section_data)
-{
-  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_REWRITE_RULE);
-  op->v.rule = rewrite_rule_alloc (NULL);
-  return parser_loop (rewrite_rule_parsetab, op->v.rule, section_data, NULL);
-}
-
-static CFGPARSER_TABLE match_response_conditions[] = {
-  {
-    .name = "Header",
-    .parser = parse_cond_hdr_matcher
-  },
-  {
-    .name = "StringMatch",
-    .parser = parse_cond_string_matcher
-  },
-  {
-    .name = "LuaMatch",
-    .parser = parse_lua_match
-  },
-  {
-    .name = "Match",
-    .parser = parse_match
-  },
-  {
-    .name = "NOT",
-    .parser = parse_not_cond
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE rewrite_response_ops[] = {
-  {
-    .name = "SetHeader",
-    .parser = parse_set_header
-  },
-  {
-    .name = "DeleteHeader",
-    .parser = parse_delete_header
-  },
-  {
-    .name = "LuaModify",
-    .parser = parse_lua_modify
-  },
-  { NULL },
-};
-
-static int parse_response_else (void *call_data, void *section_data);
-static int parse_response_sub_rewrite (void *call_data, void *section_data);
-
-static CFGPARSER_TABLE response_rewrite_rule_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Rewrite",
-    .parser = parse_response_sub_rewrite,
-    .off = offsetof (REWRITE_RULE, ophead)
-  },
-  {
-    .name = "Else",
-    .parser = parse_response_else,
-    .off = offsetof (REWRITE_RULE, iffalse)
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, cond),
-    .type = KWT_SOFTREF,
-    .ref = match_response_conditions
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, ophead),
-    .type = KWT_SOFTREF,
-    .ref = rewrite_response_ops
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE response_else_rule_parsetab[] = {
-  {
-    .name = "End",
-    .parser = parse_end_else
-  },
-  {
-    .name = "Rewrite",
-    .parser = parse_response_sub_rewrite,
-    .off = offsetof (REWRITE_RULE, ophead)
-  },
-  {
-    .name = "Else",
-    .parser = parse_else,
-    .off = offsetof (REWRITE_RULE, iffalse)
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, cond),
-    .type = KWT_SOFTREF,
-    .ref = match_response_conditions
-  },
-  {
-    .name = "",
-    .off = offsetof (REWRITE_RULE, ophead),
-    .type = KWT_SOFTREF,
-    .ref = rewrite_response_ops
-  },
-  { NULL }
-};
-
-static int
-parse_response_else (void *call_data, void *section_data)
-{
-  REWRITE_RULE *rule = rewrite_rule_alloc (NULL);
-  *(REWRITE_RULE**)call_data = rule;
-  return parser_loop (response_else_rule_parsetab, rule, section_data, NULL);
-}
-
-static int
-parse_response_sub_rewrite (void *call_data, void *section_data)
-{
-  REWRITE_OP *op = rewrite_op_alloc (call_data, REWRITE_REWRITE_RULE);
-  op->v.rule = rewrite_rule_alloc (NULL);
-  return parser_loop (response_rewrite_rule_parsetab, op->v.rule, section_data, NULL);
-}
-
-static int
-parse_rewrite (void *call_data, void *section_data)
-{
-  struct token *tok;
-  CFGPARSER_TABLE *table;
-  REWRITE_RULE_HEAD *rw = call_data, *head;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  if (tok->type == T_IDENT)
-    {
-      if (c_strcasecmp (tok->str, "response") == 0)
-	{
-	  table = response_rewrite_rule_parsetab;
-	  head = &rw[REWRITE_RESPONSE];
-	}
-      else if (c_strcasecmp (tok->str, "request") == 0)
-	{
-	  table = rewrite_rule_parsetab;
-	  head = &rw[REWRITE_REQUEST];
-	}
-      else
-	{
-	  conf_error ("expected response, request, or newline, but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-    }
-  else
-    {
-      putback_tkn (tok);
-      table = rewrite_rule_parsetab;
-      head = &rw[REWRITE_REQUEST];
-    }
-  return parser_loop (table, rewrite_rule_alloc (head), section_data, NULL);
-}
-
-static REWRITE_RULE *
-rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
-{
-  if (!SLIST_EMPTY (head))
-    {
-      REWRITE_RULE *rw = SLIST_LAST (head);
-      if (rw->cond.type == COND_BOOL && SLIST_EMPTY (&rw->cond.boolean.head))
-	return rw;
-    }
-
-  return rewrite_rule_alloc (head);
-}
-
-#define __cat2__(a,b) a ## b
-#define SETFN_NAME(part)			\
-  __cat2__(parse_,part)
-#define SETFN_SVC_NAME(part)			\
-  __cat2__(parse_svc_,part)
-#define SETFN_SVC_DECL(part)					     \
-  static int							     \
-  SETFN_SVC_NAME(part) (void *call_data, void *section_data)	     \
-  {								     \
-    REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);	     \
-    return SETFN_NAME(part) (&rule->ophead, section_data);	     \
-  }
-
-SETFN_SVC_DECL (set_url)
-SETFN_SVC_DECL (set_path)
-SETFN_SVC_DECL (set_query)
-SETFN_SVC_DECL (delete_query)
-SETFN_SVC_DECL (set_query_param)
-SETFN_SVC_DECL (set_header)
-SETFN_SVC_DECL (delete_header)
-SETFN_SVC_DECL (lua_modify)
 
 /*
- * Support for backward-compatible HeaderRemove and HeadRemove directives.
+ * Eval "NAME"
  */
 static int
-parse_header_remove (void *call_data, void *section_data)
+eval_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  POUND_DEFAULTS *dfl = section_data;
-  REWRITE_RULE *rule = rewrite_rule_last_uncond (call_data);
-  REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
-  XZALLOC (op->v.hdrdel);
-  return parse_regex_compat (&op->v.hdrdel->pat, dfl->re_type, dfl->re_type,
-			     GENPAT_ICASE | GENPAT_MULTILINE);
-}
-
-static int
-parse_balancer (void *call_data, void *section_data)
-{
-  BALANCER_ALGO *t = call_data;
-  struct token *tok;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *name = string_ptr (arg->v.string);
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  NAMED_COND *nc;
 
-  if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
-    return CFGPARSER_FAIL;
-  if (c_strcasecmp (tok->str, "random") == 0)
-    *t = BALANCER_ALGO_RANDOM;
-  else if (c_strcasecmp (tok->str, "iwrr") == 0)
-    *t = BALANCER_ALGO_IWRR;
-  else
+  if ((nc = named_cond_lookup (name)) == NULL)
     {
-      conf_error ("unsupported balancing strategy: %s", tok->str);
-      return CFGPARSER_FAIL;
+      conf_error ("%s: no such condition", name);
+      return -1;
     }
-  return CFGPARSER_OK;
-}
 
-static int
-parse_log_suppress (void *call_data, void *section_data)
-{
-  int *result_ptr = call_data;
-  struct token *tok;
-  int n;
-  int result = 0;
-  static struct kwtab status_table[] = {
-    { "all",      STATUS_MASK (100) | STATUS_MASK (200) |
-		  STATUS_MASK (300) | STATUS_MASK (400) | STATUS_MASK (500) },
-    { "info",     STATUS_MASK (100) },
-    { "success",  STATUS_MASK (200) },
-    { "redirect", STATUS_MASK (300) },
-    { "clterr",   STATUS_MASK (400) },
-    { "srverr",   STATUS_MASK (500) },
-    { NULL }
-  };
+  cond = service_cond_append (cond, COND_REF);
+  cond->ref = nc->idx;
 
-  if ((tok = gettkn_expect_mask (T_UNQ)) == NULL)
-    return CFGPARSER_FAIL;
-
-  do
-    {
-      if (strlen (tok->str) == 1 && c_isdigit (tok->str[0]))
-	{
-	  n = tok->str[0] - '0';
-	  if (n <= 0 || n >= sizeof (status_table) / sizeof (status_table[0]))
-	    {
-	      conf_error ("%s", "unsupported status mask");
-	      return CFGPARSER_FAIL;
-	    }
-	  n = STATUS_MASK (n * 100);
-	}
-      else if (kw_to_tok (status_table, tok->str, 1, &n) != 0)
-	{
-	  conf_error ("%s", "unsupported status mask");
-	  return CFGPARSER_FAIL;
-	}
-      result |= n;
-    }
-  while ((tok = gettkn_any ()) != NULL && tok->type != T_ERROR &&
-	 T_MASK_ISSET (T_UNQ, tok->type));
-
-  if (tok == NULL)
-    {
-      conf_error ("%s", "unexpected end of file");
-      return CFGPARSER_FAIL;
-    }
-  if (tok->type == T_ERROR)
-    return CFGPARSER_FAIL;
-
-  putback_tkn (tok);
-
-  *result_ptr = result;
-
-  return CFGPARSER_OK;
-}
-
-static CFGPARSER_TABLE service_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "",
-    .off = offsetof (SERVICE, cond),
-    .type = KWT_SOFTREF,
-    .ref = match_conditions
-  },
-  {
-    .name = "Rewrite",
-    .parser = parse_rewrite,
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "RewriteErrors",
-    .parser =  cfg_assign_bool,
-    .off = offsetof (SERVICE, rewrite_errors)
-  },
-  {
-    .name = "SetHeader",
-    .parser = SETFN_SVC_NAME (set_header),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "DeleteHeader",
-    .parser = SETFN_SVC_NAME (delete_header),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "LuaModify",
-    .parser = SETFN_SVC_NAME (lua_modify),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "ContentCapture",
-    .parser = cfg_assign_unsigned,
-    .off = offsetof (SERVICE, capture_size)
-  },
-  {
-    .name = "SetURL",
-    .parser = SETFN_SVC_NAME (set_url),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "SetPath",
-    .parser = SETFN_SVC_NAME (set_path),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "SetQuery",
-    .parser = SETFN_SVC_NAME (set_query),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "DeleteQuery",
-    .parser = SETFN_SVC_NAME (delete_query),
-    .off = offsetof (SERVICE, rewrite)
-  },
-  {
-    .name = "SetQueryParam",
-    .parser = SETFN_SVC_NAME (set_query_param),
-    .off = offsetof (SERVICE, rewrite)
-  },
-
-  {
-    .name = "Disabled",
-    .parser = cfg_assign_bool,
-    .off = offsetof (SERVICE, disabled)
-  },
-  {
-    .name = "Redirect",
-    .parser = parse_redirect_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Error",
-    .parser = parse_error_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "SendFile",
-    .parser = parse_sendfile_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Success",
-    .parser = parse_success_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Backend",
-    .parser = parse_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "UseBackend",
-    .parser = parse_use_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Emergency",
-    .parser = parse_emergency,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Metrics",
-    .parser = parse_metrics,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Control",
-    .parser = parse_control_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "LuaBackend",
-    .parser = parse_lua_backend,
-    .off = offsetof (SERVICE, balancers)
-  },
-  {
-    .name = "Session",
-    .parser = parse_session
-  },
-  {
-    .name = "Balancer",
-    .parser = parse_balancer,
-    .off = offsetof (SERVICE, balancer_algo)
-  },
-  {
-    .name = "ForwardedHeader",
-    .parser = cfg_assign_string,
-    .off = offsetof (SERVICE, forwarded_header)
-  },
-  {
-    .name = "TrustedIP",
-    .parser = assign_acl,
-    .off = offsetof (SERVICE, trusted_ips)
-  },
-  {
-    .name = "LogSuppress",
-    .parser = parse_log_suppress,
-    .off = offsetof (SERVICE, log_suppress_mask)
-  },
-  {
-    .name = "Constant",
-    .parser = cfg_parse_strconst,
-    .off = offsetof (SERVICE, sctab)
-  },
-  /* Backward compatibility */
-  {
-    .name = "IgnoreCase",
-    .parser = assign_dfl_ignore_case,
-    .deprecated = 1,
-    .message = "use the -icase matching directive flag to request case-insensitive comparison"
-  },
-
-  { NULL }
-};
-
-static int
-find_service_ident (SERVICE_HEAD *svc_head, char const *name)
-{
-  SERVICE *svc;
-  SLIST_FOREACH (svc, svc_head, next)
-    {
-      if (svc->name && strcmp (svc->name, name) == 0)
-	return 1;
-    }
   return 0;
 }
 
-static SERVICE *
-new_service (BALANCER_ALGO algo)
-{
-  SERVICE *svc;
-
-  XZALLOC (svc);
-
-  service_cond_init (&svc->cond, COND_BOOL);
-  DLIST_INIT (&svc->balancers);
-
-  svc->sess_type = SESS_NONE;
-  pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
-  svc->balancer_algo = algo;
-  svc->rewrite_errors = -1;
-  locus_range_init (&svc->locus);
-
-  DLIST_INIT (&svc->be_rem_head);
-  pthread_cond_init (&svc->be_rem_cond, NULL);
-
-  return svc;
-}
-
-static int
-parse_service (void *call_data, void *section_data)
-{
-  SERVICE_HEAD *head = call_data;
-  POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) section_data;
-  struct token *tok;
-  SERVICE *svc;
-
-  svc = new_service (dfl->balancer_algo);
-
-  tok = gettkn_any ();
-
-  if (!tok)
-    return CFGPARSER_FAIL;
-
-  if (tok->type == T_STRING)
-    {
-      if (find_service_ident (head, tok->str))
-	{
-	  conf_error ("%s", "service name is not unique");
-	  return CFGPARSER_FAIL;
-	}
-      svc->name = xstrdup (tok->str);
-    }
-  else
-    putback_tkn (tok);
-
-  if ((svc->sessions = session_table_new ()) == NULL)
-    {
-      conf_error ("%s", "session_table_new failed");
-      return CFGPARSER_FAIL;
-    }
-
-  if (parser_loop (service_parsetab, svc, dfl, &svc->locus))
-    return CFGPARSER_FAIL;
-
-  SLIST_PUSH (head, svc, next);
-
-  return CFGPARSER_OK;
-}
-
-static int
-parse_acme (void *call_data, void *section_data)
-{
-  SERVICE_HEAD *head = call_data;
-  SERVICE *svc;
-  BACKEND *be;
-  SERVICE_COND *cond;
-  struct token *tok;
-  struct stat st;
-  int rc;
-  static char sp_acme[] = "^/\\.well-known/acme-challenge/(.+)";
-  int fd;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
-
-  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    {
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  if (stat (tok->str, &st))
-    {
-      conf_error ("can't stat %s: %s", tok->str, strerror (errno));
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-  if (!S_ISDIR (st.st_mode))
-    {
-      conf_error ("%s is not a directory: %s", tok->str, strerror (errno));
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-  if ((fd = open (tok->str, O_RDONLY | O_NONBLOCK | O_DIRECTORY)) == -1)
-    {
-      conf_error ("can't open directory %s: %s", tok->str, strerror (errno));
-      locus_range_unref (&range);
-      return CFGPARSER_FAIL;
-    }
-
-  /* Create service; there'll be only one backend so the balancing algorithm
-     doesn't really matter. */
-  svc = new_service (BALANCER_ALGO_RANDOM);
-
-  /* Create a URL matcher */
-  cond = service_cond_append (&svc->cond, COND_URL);
-  rc = genpat_compile (&cond->re, GENPAT_POSIX, sp_acme, 0);
-  if (rc)
-    {
-      conf_regcomp_error (rc, cond->re, NULL);
-      return CFGPARSER_FAIL;
-    }
-
-  locus_point_copy (&range.end, &last_token_locus_range ()->end);
-  svc->locus = range;
-
-  /* Create ACME backend */
-  be = xbackend_create (BE_ACME, 1, &range);
-  be->service = svc;
-  be->priority = 1;
-  be->v.acme.wd = fd;
-
-  /* Register backend in service */
-  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
-  service_recompute_pri_unlocked (svc, NULL, NULL);
-
-  /* Register service in the listener */
-  SLIST_PUSH (head, svc, next);
-
-  return CFGPARSER_OK;
-}
-
+static CFG_TYPE cfg_type_eval = {
+  .argdef = "s",
+  .commit = eval_commit
+};
 
-static int
-listener_parse_xhttp (void *call_data, void *section_data)
-{
-  return cfg_assign_int_range (call_data, 0, 3);
-}
-
-static int
-listener_parse_checkurl (void *call_data, void *section_data)
-{
-  LISTENER *lst = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-
-  if (lst->url_pat)
-    {
-      conf_error ("%s", "CheckURL multiple pattern");
-      return CFGPARSER_FAIL;
-    }
-
-  return parse_regex_compat (&lst->url_pat, dfl->re_type, dfl->re_type,
-			     (dfl->ignore_case ? GENPAT_ICASE : 0));
-}
-
-static int
-listener_parse_socket_from (void *call_data, void *section_data)
-{
-  LISTENER *lst = call_data;
-  struct token *tok;
-  struct sockaddr_un *sun;
-  size_t len;
-
-  if (lst->addr_str || lst->port_str)
-    {
-      conf_error ("%s", "Duplicate Address or SocketFrom statement");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  len = strlen (tok->str);
-  if (len > UNIX_PATH_MAX)
-    {
-      conf_error ("%s", "UNIX path name too long");
-      return CFGPARSER_FAIL;
-    }
-
-  len += offsetof (struct sockaddr_un, sun_path) + 1;
-  sun = xmalloc (len);
-  sun->sun_family = AF_UNIX;
-  strcpy (sun->sun_path, tok->str);
-
-  lst->addr.ai_socktype = SOCK_STREAM;
-  lst->addr.ai_family = AF_UNIX;
-  lst->addr.ai_protocol = 0;
-  lst->addr.ai_addr = (struct sockaddr *) sun;
-  lst->addr.ai_addrlen = len;
-
-  lst->socket_from = 1;
-  return CFGPARSER_OK;
-}
-
-static int
-parse_rewritelocation (void *call_data, void *section_data)
-{
-  return cfg_assign_int_range (call_data, 0, 2);
-}
-
-struct canned_log_format
-{
-  char *name;
-  char *fmt;
-};
-
-static struct canned_log_format canned_log_format[] = {
-  /* 0 - not used */
-  { "null", "" },
-  /* 1 - regular logging */
-  { "regular", "%a %r - %>s" },
-  /* 2 - extended logging (show chosen backend server as well) */
-  { "extended", "%a %r - %>s (%{Host}i/%{service}N -> %{backend}N) %{f}T sec" },
-  /* 3 - Apache-like format (Combined Log Format with Virtual Host) */
-  { "vhost_combined", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
-  /* 4 - same as 3 but without the virtual host information */
-  { "combined", "%a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\"" },
-  /* 5 - same as 3 but with information about the Service and Backend used */
-  { "detailed", "%v:%p %a %l %u %t \"%r\" %s %b \"%{Referer}i\" \"%{User-Agent}i\" (%{service}N -> %{backend}N) %{f}T sec" },
-};
-static int max_canned_log_format =
-  sizeof (canned_log_format) / sizeof (canned_log_format[0]);
-
-struct log_format_data
-{
-  struct locus_range *locus;
-  int fn;
-  int fatal;
-};
-
-void
-log_format_diag (void *data, int fatal, char const *msg, int off)
-{
-  struct log_format_data *ld = data;
-  if (ld->fn == -1)
-    {
-      struct locus_range loc = *ld->locus;
-      loc.beg.col += off;
-      loc.end = loc.beg;
-      conf_error_at_locus_range (&loc, "%s", msg);
-    }
-  else
-    {
-      conf_error_at_locus_range (ld->locus, "INTERNAL ERROR: error compiling built-in format %d", ld->fn);
-      conf_error_at_locus_range (ld->locus, "%s: near %s", msg,
-				 canned_log_format[ld->fn].fmt + off);
-      conf_error_at_locus_range (ld->locus, "please report");
-    }
-  ld->fatal = fatal;
-}
-
-static void
-compile_canned_formats (void)
-{
-  struct log_format_data ld;
-  int i;
-
-  ld.locus = NULL;
-  ld.fatal = 0;
-
-  for (i = 0; i < max_canned_log_format; i++)
-    {
-      ld.fn = i;
-      if (http_log_format_compile (canned_log_format[i].name,
-				   canned_log_format[i].fmt,
-				   log_format_diag, &ld) == -1 || ld.fatal)
-	exit (1);
-    }
-}
-
-static int
-parse_log_level (void *call_data, void *section_data)
-{
-  int level;
-  int *log_level_ptr = call_data;
-  struct token *tok = gettkn_expect_mask (T_BIT (T_STRING) | T_BIT (T_NUMBER));
-  if (!tok)
-    return CFGPARSER_FAIL;
-
-  if (tok->type == T_STRING)
-    {
-      level = http_log_format_find (tok->str);
-      if (level == -1)
-	{
-	  conf_error ("undefined format: %s", tok->str);
-	  return CFGPARSER_FAIL;
-	}
-    }
-  else
-    {
-      char *p;
-      long n;
-
-      errno = 0;
-      n = strtol (tok->str, &p, 10);
-      if (errno || *p || n < 0 || n > INT_MAX)
-	{
-	  conf_error ("%s", "unsupported log level number");
-	  return CFGPARSER_FAIL;
-	}
-      if (http_log_format_check (n))
-	{
-	  conf_error ("%s", "undefined log level");
-	  return CFGPARSER_FAIL;
-	}
-      level = n;
-    }
-  *log_level_ptr = level;
-  return CFGPARSER_OK;
-}
-
-static int
-parse_log_format (void *call_data, void *section_data)
-{
-  struct token *tok;
-  char *name;
-  struct log_format_data ld;
-  int rc;
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-  name = strdup (tok->str);
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    {
-      free (name);
-      return CFGPARSER_FAIL;
-    }
-
-  ld.locus = &tok->locus;
-  ld.fn = -1;
-  ld.fatal = 0;
-
-  if (http_log_format_compile (name, tok->str, log_format_diag, &ld) == -1 ||
-      ld.fatal)
-    rc = CFGPARSER_FAIL;
-  else
-    rc = CFGPARSER_OK;
-  free (name);
-  return rc;
-}
-
-static int
-parse_header_options (void *call_data, void *section_data)
-{
-  int *opt = call_data;
-  int n;
-  struct token *tok;
-  static struct kwtab options[] = {
-    { "forwarded", HDROPT_FORWARDED_HEADERS },
-    { "ssl",       HDROPT_SSL_HEADERS },
-    { "all",       HDROPT_FORWARDED_HEADERS|HDROPT_SSL_HEADERS },
-    { NULL }
-  };
-
-  for (;;)
-    {
-      char *name;
-      int neg;
-
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == '\n')
-	break;
-      if (!(tok->type == T_IDENT || tok->type == T_LITERAL))
-	{
-	  conf_error ("unexpected %s", token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-
-      name = tok->str;
-      if (c_strcasecmp (name, "none") == 0)
-	*opt = 0;
-      else
-	{
-	  if (c_strncasecmp (name, "no-", 3) == 0)
-	    {
-	      neg = 1;
-	      name += 3;
-	    }
-	  else
-	    neg = 0;
-
-	  if (kw_to_tok (options, name, 1, &n))
-	    {
-	      conf_error ("%s", "unknown option");
-	      return CFGPARSER_FAIL;
-	    }
-
-	  if (neg)
-	    *opt &= ~n;
-	  else
-	    *opt |= n;
-	}
-    }
-
-  return CFGPARSER_OK_NONL;
-}
-
-static CFGPARSER_TABLE listener_address_common[] = {
-  {
-    .name = "Address",
-    .parser = assign_address_string,
-    .off = offsetof (LISTENER, addr_str)
-  },
-  {
-    .name = "Port",
-    .parser = assign_port_string,
-    .off = offsetof (LISTENER, port_str)
-  },
-  {
-    .name = "SocketFrom",
-    .parser = listener_parse_socket_from
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE http_common[] = {
-  {
-    .name = "",
-    .type = KWT_TABREF,
-    .ref = listener_address_common
-  },
-  {
-    .name = "xHTTP",
-    .parser = listener_parse_xhttp,
-    .off = offsetof (LISTENER, verb)
-  },
-  {
-    .name = "Client",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (LISTENER, to)
-  },
-  {
-    .name = "CheckURL",
-    .parser = listener_parse_checkurl
-  },
-  {
-    .name = "ErrorFile",
-    .parser = parse_errorfile,
-    .off = offsetof (LISTENER, http_err)
-  },
-  {
-    .name = "MaxRequest",
-    .parser = assign_CONTENT_LENGTH,
-    .off = offsetof (LISTENER, max_req_size)
-  },
-  {
-    .name = "MaxURI",
-    .parser = cfg_assign_unsigned,
-    .off = offsetof (LISTENER, max_uri_length)
-  },
-
-  {
-    .name = "Rewrite",
-    .parser = parse_rewrite,
-    .off = offsetof (LISTENER, rewrite)
-  },
-
-  {
-    .name = "RewriteErrors",
-    .parser =  cfg_assign_bool,
-    .off = offsetof (LISTENER, rewrite_errors)
-  },
-  {
-    .name = "SetHeader",
-    .parser = SETFN_SVC_NAME (set_header),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "HeaderAdd",
-    .type = KWT_ALIAS,
-    .deprecated = 1
-  },
-  {
-    .name = "AddHeader",
-    .type = KWT_ALIAS,
-    .deprecated = 1
-  },
-  {
-    .name = "DeleteHeader",
-    .parser = SETFN_SVC_NAME (delete_header),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "HeaderRemove",
-    .parser = parse_header_remove,
-    .off = offsetof (LISTENER, rewrite),
-    .deprecated = 1,
-    .message = "use \"DeleteHeader\" instead"
-  },
-  {
-    .name = "HeadRemove",
-    .type = KWT_ALIAS,
-    .deprecated = 1,
-    .message = "use \"DeleteHeader\" instead"
-  },
-  {
-    .name = "SetURL",
-    .parser = SETFN_SVC_NAME (set_url),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "SetPath",
-    .parser = SETFN_SVC_NAME (set_path),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "DeleteQuery",
-    .parser = SETFN_SVC_NAME (delete_query),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "SetQuery",
-    .parser = SETFN_SVC_NAME (set_query),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "SetQueryParam",
-    .parser = SETFN_SVC_NAME (set_query_param),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "LuaModify",
-    .parser = SETFN_SVC_NAME (lua_modify),
-    .off = offsetof (LISTENER, rewrite)
-  },
-  {
-    .name = "HeaderOption",
-    .parser = parse_header_options,
-    .off = offsetof (LISTENER, header_options)
-  },
-
-  {
-    .name = "RewriteLocation",
-    .parser = parse_rewritelocation,
-    .off = offsetof (LISTENER, rewr_loc)
-  },
-  {
-    .name = "RewriteDestination",
-    .parser = cfg_assign_bool,
-    .off = offsetof (LISTENER, rewr_dest)
-  },
-  {
-    .name = "LogLevel",
-    .parser = parse_log_level,
-    .off = offsetof (LISTENER, log_level)
-  },
-  {
-    .name = "ForwardedHeader",
-    .parser = cfg_assign_string,
-    .off = offsetof (LISTENER, forwarded_header)
-  },
-  {
-    .name = "TrustedIP",
-    .parser = assign_acl,
-    .off = offsetof (LISTENER, trusted_ips)
-  },
-  {
-    .name = "Service",
-    .parser = parse_service,
-    .off = offsetof (LISTENER, services)
-  },
-  {
-    .name = "LineBufferSize",
-    .parser = assign_bufsize,
-    .off = offsetof (LISTENER, linebufsize),
-  },
-  {
-    .name = "Constant",
-    .parser = cfg_parse_strconst,
-    .off = offsetof (LISTENER, sctab)
-  },
-  { NULL }
-};
-
-static CFGPARSER_TABLE http_deprecated[] = {
-  /* Backward compatibility */
-  {
-    .name = "Err400",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 400\" instead"
-  },
-  {
-    .name = "Err401",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 401\" instead"
-  },
-  {
-    .name = "Err403",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 403\" instead"
-  },
-  {
-    .name = "Err404",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 404\" instead"
-  },
-  {
-    .name = "Err413",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 413\" instead"
-  },
-  {
-    .name = "Err414",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 414\" instead"
-  },
-  {
-    .name = "Err500",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 500\" instead"
-  },
-  {
-    .name = "Err501",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 501\" instead"
-  },
-  {
-    .name = "Err503",
-    .parser = parse_errN,
-    .off = offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
-    .deprecated = 1,
-    .message = "use \"ErrorFile 503\" instead"
-  },
-
-  { NULL }
-};
-
-static CFGPARSER_TABLE http_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "",
-    .type = KWT_TABREF,
-    .ref = http_common
-  },
-  {
-    .name = "",
-    .type = KWT_TABREF,
-    .ref = http_deprecated
-  },
-  {
-    .name = "ACME",
-    .parser = parse_acme,
-    .off = offsetof (LISTENER, services)
-  },
-
-  { NULL }
-};
+/*
+ * Listener operations.
+ */
 
 static LISTENER *
 listener_alloc (POUND_DEFAULTS *dfl)
@@ -4619,146 +3040,3017 @@ find_listener_ident (LISTENER_HEAD *list_head, char const *name)
     }
   return 0;
 }
+
+/*
+ * The Control statement.
+ */
+static SERVICE *new_service (BALANCER_ALGO algo);
 
-static int
-foreach_client_cert (SERVICE_COND *cond, int (*cb) (X509 *, void *), void *data)
+static void
+control_listener_finalize (LISTENER *lst)
 {
-  int rc = 0;
+  SERVICE *svc;
+  BACKEND *be;
 
-  switch (cond->type)
-    {
-    case COND_CLIENT_CERT:
-      if (cb)
-	rc = cb (cond->x509, data);
-      else
-	rc = 1;
-      break;
+  lst->verb = 1; /* Need PUT and DELETE methods */
+  /* Register listener in the global listener list */
+  SLIST_PUSH (&listeners, lst, next);
 
-    case COND_BOOL:
-      {
-	SERVICE_COND *subcond;
-	SLIST_FOREACH (subcond, &cond->boolean.head, next)
-	  {
-	    if ((rc = foreach_client_cert (subcond, cb, data)) != 0)
-	      break;
-	  }
-      }
-      break;
+  /* Create service; there'll be only one backend so the balancing algorithm
+     doesn't really matter. */
+  svc = new_service (BALANCER_ALGO_RANDOM);
+  svc->lstn = lst;
+  locus_range_copy (&svc->locus, &lst->locus);
 
-    default:
-      break;
-    }
-  return rc;
+  /* Register service in the listener */
+  SLIST_PUSH (&lst->services, svc, next);
+
+  /* Create backend */
+  be = xbackend_create (BE_CONTROL, 1, &lst->locus);
+  be->service = svc;
+  /* Register backend in service */
+  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
+  service_recompute_pri_unlocked (svc, NULL, NULL);
 }
 
 static int
-forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
+parse_control_address (struct addrinfo *addr, CFG_ARG *arg)
 {
-  SERVICE *svc;
-  SLIST_FOREACH (svc, s_head, next)
+  struct sockaddr_un *sun;
+  char const *str = string_ptr (arg->v.string);
+  size_t len = strlen (str);
+
+  if (len > UNIX_PATH_MAX)
     {
-      if (foreach_client_cert (&svc->cond, NULL, NULL))
+      conf_error_at_locus_range (&arg->locus, "UNIX path name too long");
+      return -1;
+    }
+
+  len += offsetof (struct sockaddr_un, sun_path) + 1;
+  sun = xmalloc (len);
+  sun->sun_family = AF_UNIX;
+  strcpy (sun->sun_path, str);
+  unlink_at_exit (sun->sun_path);
+
+  addr->ai_socktype = SOCK_STREAM;
+  addr->ai_family = AF_UNIX;
+  addr->ai_protocol = 0;
+  addr->ai_addr = (struct sockaddr *) sun;
+  addr->ai_addrlen = len;
+
+  return 0;
+}
+
+/* Allocates a new control listener and returns it in *baseptr. */
+static int
+control_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  LISTENER *lst = listener_alloc (call_data);
+  *baseptr = lst;
+  // FIXME: Prepare lst for freeing in case of error. This will require a
+  // free_data method.
+  return 0;
+}
+
+/* The Control statement:
+ *    Control "SOCKET"
+ */
+static int
+control_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = baseptr;
+  if (!cfg_arglist_empty (&node->arglist))
+    {
+      CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+      if (parse_control_address (&lst->addr, arg))
 	{
-	  conf_error_at_locus_range (&svc->locus, "%s", msg);
-	  return 1;
+	  // FIXME: listener_free
+	  return -1;
+	}
+    }
+  control_listener_finalize (lst);
+  return 0;
+}
+
+static CFG_TYPE cfg_type_control = {
+  .argdef = "s?",
+  .prepare = control_prepare,
+  .commit = control_commit
+};
+
+static int
+socket_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  struct addrinfo *addr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  return parse_control_address (addr, arg);
+}
+
+static int
+file_mode_verify (CFG_NODE *node)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  if (arg->v.number & ~0777)
+    {
+      conf_error_at_locus_range (&arg->locus, "invalid file mode");
+      return -1;
+    }
+  return 0;
+}
+
+/* Directives allowed for use in the Control section. */
+static CFG_DEFN control_defn[] = {
+  {
+    .name = "Socket",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = socket_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, addr)
+    }
+  },
+  {
+    .name = "ChangeOwner",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (LISTENER, chowner)
+    }
+  },
+  {
+    .name = "Mode",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_INT,
+    .verify = file_mode_verify,
+    .rcvr = {
+      .off = offsetof (LISTENER, mode)
+    }
+  },
+  { NULL }
+};
+
+#define FLG_MASK(n) (1<<(n))
+
+static int
+get_file_option (CFG_ARG **argptr, CFG_ARG **file)
+{
+  CFG_ARG *arg = *argptr;
+  CFG_ARG *filearg = NULL;
+  CFG_ARG *farg;
+  int c;
+  int opt = 0;
+
+  while ((c = cfg_arglist_getflag (arg, &farg, &arg)) > 0)
+    {
+      switch (c)
+	{
+	case FLG_FILE:
+	case FLG_FILEWATCH:
+	  if (filearg)
+	    conf_error_at_locus_range (&farg->locus, "duplicate -file flag");
+	  filearg = farg;
+	}
+      opt |= FLG_MASK (c);
+    }
+
+  if (opt & FLG_MASK (FLG_FILEWATCH))
+    num_reserved_fds++;
+
+  *argptr = arg;
+  *file = filearg;
+
+  return opt;
+}
+
+/*
+ * ACL support
+ */
+
+/* Max. number of bytes in an inet address (suitable for both v4 and v6) */
+#define MAX_INADDR_BYTES 16
+
+typedef struct cidr
+{
+  int family;                           /* Address family */
+  int len;                              /* Address length */
+  unsigned char addr[MAX_INADDR_BYTES]; /* Network address */
+  unsigned char mask[MAX_INADDR_BYTES]; /* Address mask */
+  SLIST_ENTRY (cidr) next;              /* Link to next CIDR */
+} CIDR;
+
+/* Create a new ACL. */
+static ACL *
+new_acl (char const *name)
+{
+  ACL *acl;
+
+  XZALLOC (acl);
+  if (name)
+    acl->name = xstrdup (name);
+  else
+    acl->name = NULL;
+  SLIST_INIT (&acl->head);
+
+  return acl;
+}
+
+/* Match cidr against inet address ap/len.  Return 0 on match, 1 otherwise. */
+static int
+cidr_match (CIDR *cidr, unsigned char *ap, size_t len)
+{
+  size_t i;
+
+  if (cidr->len == len)
+    {
+      for (i = 0; i < len; i++)
+	{
+	  if (cidr->addr[i] != (ap[i] & cidr->mask[i]))
+	    return 1;
 	}
     }
   return 0;
 }
 
-static int
-resolve_listener_address (LISTENER *lst, char *defsrv)
+/*
+ * Split the inet address of SA to address pointer and length, suitable
+ * for use with the above functions.  Store pointer in RET_PTR.  If
+ * RET_PTR is not NULL, store the effective address family there.
+ * Return address length in bytes, or -1 if SA address family is not
+ * supported.
+ */
+int
+sockaddr_bytes (struct sockaddr *sa, unsigned char **ret_ptr, int *ret_family)
 {
-  if (lst->addr.ai_addr == NULL)
+  int len;
+  int fml;
+  struct in6_addr *in6p;
+
+  switch (sa->sa_family)
     {
-      struct addrinfo hints, *res, *ptr;
-      char *service;
-      int rc;
+    case AF_INET:
+      fml = AF_INET;
+      len = 4;
+      *ret_ptr = (unsigned char *) &(((struct sockaddr_in*)sa)->sin_addr.s_addr);
+      break;
 
-      memset (&hints, 0, sizeof (hints));
-      hints.ai_family = AF_UNSPEC;
-      hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
-      hints.ai_socktype = SOCK_STREAM;
-      service = lst->port_str ? lst->port_str : defsrv;
-      rc = getaddrinfo (lst->addr_str, service, &hints, &res);
-      if (rc != 0)
+    case AF_INET6:
+      in6p = &((struct sockaddr_in6*)sa)->sin6_addr;
+      if (IN6_IS_ADDR_V4MAPPED (in6p))
 	{
-	  conf_error_at_locus_range (&lst->locus, "bad listener address: %s",
-				     gai_strerror (rc));
-	  return CFGPARSER_FAIL;
+	  fml = AF_INET;
+	  len = 4;
+	  *ret_ptr = &in6p->s6_addr[12];
 	}
+      else
+	{
+	  fml = AF_INET6;
+	  len = 16;
+	  *ret_ptr = (unsigned char*) in6p;
+	}
+      break;
 
-      ptr = res;
-      /* Prefer in6addr_any over INADDR_ANY. */
-      if (ptr->ai_family == AF_INET &&
-	  ((struct sockaddr_in*)ptr->ai_addr)->sin_addr.s_addr == INADDR_ANY &&
-	  ptr->ai_next != NULL &&
-	  ptr->ai_next->ai_family == AF_INET6 &&
-	  memcmp (&((struct sockaddr_in6*)ptr->ai_next->ai_addr)->sin6_addr,
-		  &in6addr_any, sizeof (in6addr_any)) == 0)
-	ptr = ptr->ai_next;
-
-      lst->addr = *ptr;
-      lst->addr.ai_next = NULL;
-      lst->addr.ai_addr = xmalloc (ptr->ai_addrlen);
-      memcpy (lst->addr.ai_addr, ptr->ai_addr, ptr->ai_addrlen);
-      freeaddrinfo (res);
+    default:
+      return -1;
     }
-  return CFGPARSER_OK;
+  if (ret_family)
+    *ret_family = fml;
+  return len;
+}
+
+static int config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd);
+
+static int
+dynacl_read (void *obj, char const *filename, WORKDIR *wd)
+{
+  return config_parse_acl_file (obj, filename, wd);
 }
 
 static void
-listener_service_backlink (LISTENER *lstn)
+dynacl_clear (void *obj)
 {
-  SERVICE *svc;
-  SLIST_FOREACH (svc, &lstn->services, next)
-    svc->lstn = lstn;
+  acl_clear (obj);
 }
 
 static int
-parse_listen_http (void *call_data, void *section_data)
+dynacl_register (ACL *acl, char const *filename, struct locus_range const *loc)
 {
-  LISTENER *lst;
-  LISTENER_HEAD *list_head = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  struct token *tok;
+  acl->watcher = watcher_register (acl, filename, loc,
+				   dynacl_read, dynacl_clear);
+  return acl->watcher == NULL;
+}
 
-  if ((lst = listener_alloc (dfl)) == NULL)
-    return CFGPARSER_FAIL;
+/*
+ * Match sockaddr SA against ACL.  Return 0 if it matches, 1 if it does not
+ * and -1 on error (invalid address family).
+ */
+int
+acl_match (ACL *acl, struct sockaddr *sa)
+{
+  CIDR *cidr;
+  unsigned char *ap;
+  size_t len;
+  int family;
+  int rc = 1;
 
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  else if (tok->type == T_STRING)
+  if ((len = sockaddr_bytes (sa, &ap, &family)) == -1)
+    return -1;
+
+  acl_lock (acl);
+  SLIST_FOREACH (cidr, &acl->head, next)
     {
-      if (find_listener_ident (list_head, tok->str))
+      if (cidr->family == family && cidr_match (cidr, ap, len) == 0)
 	{
-	  conf_error ("%s", "listener name is not unique");
-	  return CFGPARSER_FAIL;
+	  rc = 0;
+	  break;
 	}
-      lst->name = xstrdup (tok->str);
+    }
+  acl_unlock (acl);
+
+  return rc;
+}
+
+void
+acl_clear (ACL *acl)
+{
+  while (!SLIST_EMPTY (&acl->head))
+    {
+      struct cidr *cp = SLIST_FIRST (&acl->head);
+      SLIST_SHIFT (&acl->head, next);
+      free (cp);
+    }
+}
+
+void
+acl_free (ACL *acl)
+{
+  if (acl)
+    {
+      acl_clear (acl);
+      free (acl->name);
+      // FIXME: what about watcher?
+      free (acl);
+    }
+}
+
+static void
+masklen_to_netmask (unsigned char *buf, size_t len, size_t masklen)
+{
+  int i, cnt;
+
+  cnt = masklen / 8;
+  for (i = 0; i < cnt; i++)
+    buf[i] = 0xff;
+  if (i == MAX_INADDR_BYTES)
+    return;
+  cnt = 8 - masklen % 8;
+  buf[i++] = (0xff >> cnt) << cnt;
+  for (; i < MAX_INADDR_BYTES; i++)
+    buf[i] = 0;
+}
+
+static int
+parse_cidr_str (ACL *acl, char const *str, struct locus_range const *loc)
+{
+  char *mask;
+  struct addrinfo hints, *res;
+  unsigned long masklen;
+  int rc;
+
+  if ((mask = strchr (str, '/')) != NULL)
+    {
+      char *p;
+
+      *mask++ = 0;
+
+      errno = 0;
+      masklen = strtoul (mask, &p, 10);
+      if (errno || *p)
+	{
+	  conf_error_at_locus_range (loc, "invalid netmask");
+	  return -1;
+	}
+    }
+
+  memset (&hints, 0, sizeof (hints));
+  hints.ai_family = AF_UNSPEC;
+  hints.ai_flags = AI_NUMERICHOST;
+
+  if ((rc = getaddrinfo (str, NULL, &hints, &res)) == 0)
+    {
+      CIDR *cidr;
+      int len, i;
+      unsigned char *p;
+      int family;
+
+      if ((len = sockaddr_bytes (res->ai_addr, &p, &family)) == -1)
+	{
+	  conf_error_at_locus_range (loc, "unsupported address family");
+	  return -1;
+	}
+      XZALLOC (cidr);
+      cidr->family = family;
+      cidr->len = len;
+      memcpy (cidr->addr, p, len);
+      if (!mask)
+	masklen = len * 8;
+      masklen_to_netmask (cidr->mask, cidr->len, masklen);
+      /* Fix-up network address, just in case */
+      for (i = 0; i < len; i++)
+	cidr->addr[i] &= cidr->mask[i];
+      SLIST_PUSH (&acl->head, cidr, next);
+      freeaddrinfo (res);
     }
   else
-    putback_tkn (tok);
+    {
+      conf_error_at_locus_range (loc, "invalid IP address: %s",
+				 gai_strerror (rc));
+      return -1;
+    }
+  return 0;
+}
 
-  if (parser_loop (http_parsetab, lst, section_data, &lst->locus))
-    return CFGPARSER_FAIL;
+/*
+ * List of named ACLs.
+ * There shouldn't be many of them, so it's perhaps no use in implementing
+ * more sophisticated data structures than a mere singly-linked list.
+ */
+static ACL_HEAD acl_list = SLIST_HEAD_INITIALIZER (acl_list);
 
-  if (resolve_listener_address (lst, PORT_HTTP_STR) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
+/*
+ * Return a pointer to the named ACL, or NULL if no ACL with such name is
+ * found.
+ */
+static ACL *
+acl_by_name (char const *name)
+{
+  ACL *acl;
+  SLIST_FOREACH (acl, &acl_list, next)
+    {
+      if (strcmp (acl->name, name) == 0)
+	break;
+    }
+  return acl;
+}
 
-  listener_service_backlink (lst);
+/*
+ * Read CIDRs from file FILENAME, resolved relative to the directory WD.
+ * Store them in ACL.
+ * Return the number of errors detected.
+ */
+static int
+config_parse_acl_file (ACL *acl, char const *filename, WORKDIR *wd)
+{
+  FILE *fp;
+  char buf[MAXBUF];
+  struct locus_range loc;
+  int rc;
+  char *p;
 
-  if (forbid_ssl_usage (&lst->services,
-			"use of SSL features in ListenHTTP sections"
-			" is forbidden"))
-    return CFGPARSER_FAIL;
-  if (lst->max_uri_length > lst->linebufsize)
-    lst->max_uri_length = lst->linebufsize;
+  fp = fopen_wd (wd, filename);
+  if (fp == NULL)
+    return -1;
 
-  SLIST_PUSH (list_head, lst, next);
-  return CFGPARSER_OK;
+  locus_point_init (&loc.beg, filename, wd->name);
+  locus_point_init (&loc.end, NULL, NULL);
+
+  rc = 0;
+  loc.beg.line--;
+  while ((p = fgets (buf, sizeof buf, fp)) != NULL)
+    {
+      char *line;
+      size_t len = strlen (p);
+
+      loc.beg.line++;
+      if (len == 0)
+	continue;
+      if (p[len-1] == '\n')
+	len--;
+      line = c_trimws (p, &len);
+      if (len == 0 || *line == '#')
+	continue;
+      line[len] = 0;
+
+      if (line[0] == '"' && line[len-1] == '"')
+	{
+	  line[--len] = 0;
+	  line++;
+	}
+
+      if (parse_cidr_str (acl, line, &loc))
+	rc++;
+    }
+  fclose (fp);
+  locus_range_unref (&loc);
+  return rc;
+}
+
+/* A wrapper over config_parse_acl_file. Adds error reporting. */
+static int
+parse_acl_file (ACL *acl, char const *filename, struct locus_range const *loc)
+{
+  WORKDIR *wd;
+  char const *basename;
+  int rc;
+
+  if ((basename = filename_split_wd (filename, &wd)) == NULL)
+    return -1;
+  rc = config_parse_acl_file (acl, basename, wd);
+  workdir_unref (wd);
+  if (rc == -1)
+    {
+      if (errno == ENOENT)
+	conf_error_at_locus_range (loc, "file %s does not exist", filename);
+      else
+	conf_error_at_locus_range (loc, "can't open %s: %s", filename,
+				   strerror (errno));
+      return -1;
+    }
+  else if (rc > 0)
+    {
+      conf_error_at_locus_range (loc, "errors reading %s", filename);
+      return -1;
+    }
+  return 0;
+}
+
+/*
+ * Commit function for an immediate ACL definition:
+ *   ACL "NAME"
+ *     CIDR
+ *     ...
+ *   End
+ *
+ * ACL name is in node->tag, and list of CIDRs is in node->arglist.
+ */
+static int
+acldef_commit_imm (ACL *acl, CFG_ARG *arg)
+{
+  int rc = 0;
+  for (; arg; arg = cfg_arg_next (arg))
+    if (parse_cidr_str (acl, string_ptr (arg->v.string), &arg->locus))
+      rc = 1;
+  return rc;
+}
+
+/*
+ * Commit function for referencing ACL definition:
+ *   ACL "NAME" [-file|-filewatch] [FLAGS] "FILE"
+ * Arguments:
+ *   ACL
+ */
+static int
+acldef_commit_ref (ACL *acl, CFG_NODE *node)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  CFG_ARG *filename = NULL;
+  int opt;
+
+  if ((opt = get_file_option (&arg, &filename)) == -1)
+    return -1;
+
+  if (arg)
+    {
+      /* Shouldn't happen */
+      conf_error_at_locus_range (&arg->locus,
+				 "internal error:"
+				 " ACL reference not allowed here");
+      abort ();
+    }
+  else
+    {
+      if (opt & FLG_MASK (FLG_FILEWATCH))
+	{
+	  if (dynacl_register (acl, string_ptr (filename->v.string),
+			       &filename->locus))
+	    return -1;
+	}
+      else if (parse_acl_file (acl, string_ptr (filename->v.string),
+			       &filename->locus))
+	return -1;
+    }
+
+  return 0;
+}
+
+/* Commit function for various named ACL forms. */
+static int
+acldef_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  char const *name = string_ptr (node->acl.tag);
+  ACL *acl;
+  int rc;
+
+  if (acl_by_name (name))
+    {
+      conf_error_at_locus_range (&node->locus,
+				 "ACL with that name already defined");
+      return -1;
+    }
+
+  acl = new_acl (name);
+
+  switch (node->acl.type)
+    {
+    case ACLT_IMM:
+      rc = acldef_commit_imm (acl, cfg_arglist_first (&node->arglist));
+      break;
+
+    case ACLT_REF:
+      rc = acldef_commit_ref (acl, node);
+      break;
+
+    default:
+      conf_error_at_locus_range (&node->locus,
+				 "internal error: malformed ACL node");
+      abort ();
+    }
+
+  if (rc == 0)
+    SLIST_PUSH (&acl_list, acl, next);
+  else
+    acl_free (acl);
+
+  return rc;
+}
+
+static CFG_FLAG acl_flagdef[] = {
+  { "file", FLG_FILE, 1 },
+  { "filewatch", FLG_FILEWATCH, 1 },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_named_acl = {
+  .argdef = "[fls]+",
+  .flagdef = acl_flagdef,
+  .commit = acldef_commit
+};
+
+/*
+ * ACL conditions have the following forms:
+ *
+ * ACL [-forwarded] "\n" ... End
+ *   Creates and references an unnamed ACL.
+ * ACL [-forwarded] "name"
+ *   References a named ACL.
+ * ACL [-forwarded] -file "name"
+ * ACL [-forwarded] -filewatch "name"
+ *   Read ACL from file.
+ */
+static int
+acl_build (CFG_NODE *node, ACL **ret_acl, int *ret_fwd)
+{
+  ACL *acl;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist), *nxt;
+  CFG_ARG *flgarg, *filename = NULL;
+  int c;
+  int watch = 0;
+  int fwd = 0;
+  int rc = 0;
+
+  while ((c = cfg_arglist_getflag (arg, &flgarg, &nxt)) != 0)
+    {
+      switch (c)
+	{
+	case FLG_FILE:
+	  filename = flgarg;
+	  break;
+
+	case FLG_FILEWATCH:
+	  filename = flgarg;
+	  watch = 1;
+	  break;
+
+	case FLG_FWD:
+	  fwd = 1;
+	  break;
+	}
+
+      arg = nxt;
+    }
+
+  switch (node->acl.type)
+    {
+    case ACLT_IMM:
+      acl = new_acl (NULL);
+      rc = acldef_commit_imm (acl, arg);
+      break;
+
+    case ACLT_REF:
+      if (filename)
+	{
+	  acl = new_acl (NULL);
+
+	  if (watch)
+	    {
+	      if (dynacl_register (acl, string_ptr (filename->v.string),
+				   &filename->locus))
+		rc = -1;
+	    }
+	  else if (parse_acl_file (acl, string_ptr (filename->v.string),
+				   &filename->locus))
+	    rc = -1;
+	}
+      else if (arg)
+	{
+	  if ((acl = acl_by_name (string_ptr (arg->v.string))) == NULL)
+	    {
+	      conf_error_at_locus_range (&arg->locus, "no such ACL");
+	      rc = -1;
+	    }
+	}
+      else
+	{
+	  /* shouldn't happen */
+	  conf_error_at_locus_range (&node->locus, "internal error");
+	  abort ();
+	}
+    }
+
+  if (rc == 0)
+    {
+      *ret_acl = acl;
+      if (ret_fwd)
+	*ret_fwd = fwd;
+    }
+  else
+    acl_free (acl);
+
+  return rc;
+}
+
+/* Commit function for any form of ACL condition. */
+static int
+aclcond_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  ACL *acl;
+  int fwd;
+
+  if (acl_build (node, &acl, &fwd))
+    return -1;
+
+  cond = service_cond_append (cond, COND_ACL);
+  cond->acl.acl = acl;
+  cond->acl.forwarded = fwd;
+
+  return 0;
+}
+
+static CFG_FLAG aclcond_flagdef[] = {
+  { "file", FLG_FILE, 1 },
+  { "filewatch", FLG_FILEWATCH, 1 },
+  { "forwarded", FLG_FWD },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_aclcond = {
+  .argdef = "f*s*",
+  .flagdef = aclcond_flagdef,
+  .commit = aclcond_commit
+};
+
+/*
+ * TrustedIP lists.
+ */
+
+static int
+trustedip_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  ACL **aclptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  return acl_build (node, aclptr, NULL);
+}
+
+static CFG_FLAG trustedip_flagdef[] = {
+  { "file", FLG_FILE, 1 },
+  { "filewatch", FLG_FILEWATCH, 1 },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_trustedip = {
+  .argdef = "f?s*",
+  .flagdef = trustedip_flagdef,
+  .commit = trustedip_commit
+};
+
+/*
+ * String constants.
+ */
+#define HT_TYPE STRCONST
+#define HT_NO_HASH_FREE
+#define HT_NO_DELETE
+#define HT_NO_FOREACH
+#include "ht.h"
+
+static STRCONST_HASH *strconst_tab;
+
+static int
+strconst_read (STRCONST *sc, char const *filename, WORKDIR *wd)
+{
+  char *s;
+  size_t n;
+
+  string_unref (sc->value);
+  s = slurp (filename, wd, &sc->locus, &n);
+  if (s == NULL)
+    {
+      sc->value = NULL;
+      return -1;
+    }
+  if (sc->trim)
+    n -= c_memrspn (s, CCTYPE_SPACE, n);
+  sc->value = string_ninit (s, n);
+  free (s);
+  return 0;
+}
+
+static int
+dynstrconst_read (void *obj, char const *filename, WORKDIR *wd)
+{
+  STRCONST *sc = obj;
+  return strconst_read (sc, filename, wd);
+}
+
+static void
+dynstrconst_clear (void *obj)
+{
+  STRCONST *sc = obj;
+  sc->value = string_unref (sc->value);
+}
+
+static int
+strconst_register (STRCONST *sc, char const *filename,
+		   struct locus_range const *loc)
+{
+  sc->watcher = watcher_register (sc, filename, loc,
+				  dynstrconst_read, dynstrconst_clear);
+  return sc->watcher == NULL;
+}
+
+static STRCONST *
+strconst_new (char const *name, struct locus_range const *loc)
+{
+  STRCONST *sc;
+
+  XZALLOC (sc);
+  sc->name = xstrdup (name);
+  locus_range_init (&sc->locus);
+  locus_range_copy (&sc->locus, loc);
+  return sc;
+}
+
+static void
+strconst_free (STRCONST *sc)
+{
+  free (sc->name);
+  locus_range_unref (&sc->locus);
+  string_unref (sc->value);
+  free (sc);
+}
+
+/*
+ * The Constant statement:
+ *   Constant "NAME" "VALUE"
+ *   Constant "NAME" -file|-filewatch FILE [-trim]
+ */
+static int
+constant_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  STRCONST_HASH **hashptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *filename = NULL;
+  int opt;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  STRCONST *sc, *old;
+
+  sc = strconst_new (string_ptr (arg->v.string), &arg->locus);
+  arg = cfg_arg_next (arg);
+
+  if ((opt = get_file_option (&arg, &filename)) == -1)
+    {
+      strconst_free (sc);
+      return -1;
+    }
+
+  sc->trim = !!(opt & FLG_MASK (FLG_TRIM));
+
+  if (filename)
+    {
+      if (arg)
+	{
+	  conf_error_at_locus_range (&arg->locus, "superfluous arguments");
+	  strconst_free (sc);
+	  return -1;
+	}
+      if (opt & FLG_MASK (FLG_FILEWATCH))
+	{
+	  if (strconst_register (sc, string_ptr (filename->v.string),
+				 &filename->locus))
+	    {
+	      strconst_free (sc);
+	      return -1;
+	    }
+	}
+      else if (strconst_read (sc, string_ptr (filename->v.string),
+			      get_include_wd ()))
+	{
+	  strconst_free (sc);
+	  return -1;
+	}
+    }
+  else if (!arg)
+    {
+      conf_error_at_locus_range (&node->locus, "required argument missing");
+      strconst_free (sc);
+      return -1;
+    }
+  else if (cfg_arg_next (arg))
+    {
+      conf_error_at_locus_range (&cfg_arg_next (arg)->locus,
+				 "superfluous arguments");
+      strconst_free (sc);
+      return -1;
+    }
+  else
+    {
+      sc->value = string_ref (arg->v.string);
+    }
+
+  if (!*hashptr)
+    *hashptr = STRCONST_HASH_NEW ();
+
+  if ((old = STRCONST_INSERT (*hashptr, sc)) != NULL)
+    {
+      conf_error_at_locus_range (&sc->locus, "%s",
+				 "warning: constant redefined");
+      conf_error_at_locus_range (&old->locus, "%s",
+				 "This is the place of the previous"
+				 " definition");
+      strconst_free (old);
+    }
+
+  return 0;
+}
+
+static CFG_FLAG constant_flagdef[] = {
+  { "file", FLG_FILE, 1 },
+  { "filewatch", FLG_FILEWATCH, 1 },
+  { "trim", FLG_TRIM },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_constant = {
+  .argdef = "sf*s?",
+  .flagdef = constant_flagdef,
+  .commit = constant_commit
+};
+
+STRCONST *
+strconst_lookup (STRCONST_HASH *hash, char const *name)
+{
+  STRCONST *sc = NULL;
+  if (hash)
+    {
+      STRCONST key;
+      key.name = (char*)name;
+      sc = STRCONST_RETRIEVE (hash, &key);
+    }
+  return sc;
+}
+
+STRCONST *
+pound_http_get_strconst (POUND_HTTP *phttp, char const *name)
+{
+  STRCONST *s;
+  if ((s = strconst_lookup (phttp->svc->sctab, name)) == NULL)
+    if ((s = strconst_lookup (phttp->lstn->sctab, name)) == NULL)
+      s = strconst_lookup (strconst_tab, name);
+  return s;
 }
 
+/*
+ * The CombineHeaders section
+ *   CombineHeaders
+ *      HEADER
+ *      ...
+ *   End
+ */
+static int
+comheaders_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  CFG_ARG *arg;
+  CFG_ARG_FOREACH (arg, &node->arglist)
+    combinable_header_add (string_ptr (arg->v.string));
+  return 0;
+}
+
+/*
+ * The Resolver section.
+ */
+
+/* ConfigFile "FILE" */
+static int
+commit_configfile (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char **ptr = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  char *s;
+
+  s = slurp (string_ptr (arg->v.string), get_include_wd (), &arg->locus, NULL);
+  if (!s)
+    return -1;
+  *ptr = s;
+  return 0;
+}
+
+/* Statements allowed for use in the Resolver section. */
+static CFG_DEFN resolver_defn[] = {
+  {
+    .name = "ConfigFile",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = commit_configfile,
+    .rcvr = {
+      .off = offsetof (struct resolver_config, config_text)
+    }
+  },
+  {
+    .name = "ConfigText",
+    .token = T_TEXT,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (struct resolver_config, config_text)
+    }
+  },
+  {
+    .name = "Debug",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (struct resolver_config, debug)
+    }
+  },
+  {
+    .name = "CNAMEChain",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .rcvr = {
+      .off = offsetof (struct resolver_config, max_cname_chain)
+    }
+  },
+  {
+    .name = "RetryInterval",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (struct resolver_config, retry_interval)
+    }
+  },
+  { NULL }
+};
+
+static char *resolv_conf_names[] = { "ConfigText", "ConfigFile", NULL };
+
+/*
+ * Prepare for committing the resolver settings. Verify if at most one
+ * of ConfigFile or ConfigText is used. If both are used, emit a warning
+ * and use the last one.
+ * On success, store the resolver to *baseptr.
+ */
+static int
+resolver_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  POUND_DEFAULTS *dfl = call_data;
+  CFG_NODE *prev;
+
+  *baseptr = &dfl->resolver;
+
+  prev = cfg_ast_locate_node (node->subtree, cfg_node_name_memberof,
+			      resolv_conf_names);
+  while (prev)
+    {
+      CFG_NODE *next;
+
+      next = cfg_node_locate_next (prev, cfg_node_name_memberof,
+				   resolv_conf_names);
+      if (next)
+	{
+	  conf_error_at_locus_range (&next->locus,
+				     "%s overrides prior %s",
+				     next->defn->name, prev->defn->name);
+	  conf_error_at_locus_range (&prev->locus,
+				     "%s previosly defined here",
+				     prev->defn->name);
+	  DLIST_REMOVE (node->subtree, prev, link);
+	  cfg_node_free (prev);
+	  prev = next;
+	}
+      else
+	prev = NULL;
+    }
+
+  return 0;
+}
+
+static int
+resolver_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+#ifndef ENABLE_DYNAMIC_BACKENDS
+  conf_error_at_locus_range (&node->locus,
+			     "section ignored: "
+			     "pound compiled without support "
+			     "for dynamic backends");
+#endif
+  return 0;
+}
+
+static CFG_TYPE cfg_type_resolver = {
+  .argdef = "",
+  .prepare = resolver_prepare,
+  .commit = resolver_commit
+};
+
+/*
+ * Lua extensions.
+ */
+#ifdef ENABLE_LUA
+extern CFG_DEFN pndlua_defn[];
+#else
+static int
+nolua_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  conf_error_at_locus_range (&node->locus,
+			     "this pound is compiled without support for Lua");
+  return -1;
+}
+#endif
+
+static int
+luamatch_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_LUA);
+  return pndlua_parse_closure (node, &cond->clua);
+}
+
+static CFG_TYPE cfg_type_luamatch = {
+  .argdef = "s+",
+  .commit = luamatch_commit
+};
+
+/* The deprecated HeadDeny statement. */
+static int
+head_deny_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  POUND_DEFAULTS *dfl = call_data;
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BOOL);
+  cond->boolean.op = BOOL_NOT;
+  return cond_matcher_commit_generic (node, cfg_arglist_first (&node->arglist),
+				      cond, COND_HDR,
+				      dfl->re_type, dfl->re_type,
+				      GENPAT_MULTILINE | GENPAT_ICASE,
+				      NULL);
+}
+
+static CFG_TYPE cond_type_simple = {
+  .argdef = "f*s?",
+  .flagdef = cond_re_flags,
+  .commit = cond_matcher_commit_simple
+};
+
+static CFG_TYPE cond_type_simple_decode = {
+  .argdef = "f*s",
+  .flagdef = cond_re_decode_flags,
+  .commit = cond_matcher_commit_simple
+};
+
+static CFG_TYPE cond_type_twoarg = {
+  .argdef = "sf*s",
+  .flagdef = cond_re_flags,
+  .commit = cond_matcher_commit_twoarg
+};
+
+static CFG_TYPE cond_type_twoarg_decode = {
+  .argdef = "sf*s",
+  .flagdef = cond_re_decode_flags,
+  .commit = cond_matcher_commit_twoarg
+};
+
+static CFG_TYPE cond_type_header = {
+  .argdef = ".*",
+  .flagdef = cond_re_flags,
+  .commit = cond_header_commit
+};
+
+/* BasicAuth [-file|-filewatch] "FILE" */
+static int
+cond_basicauth_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BASIC_AUTH);
+  CFG_ARG *filename = NULL;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int opt;
+  void *wt;
+
+  if ((opt = get_file_option (&arg, &filename)) == -1)
+    return -1;
+
+  if (filename)
+    {
+      if (!(opt & FLG_MASK (FLG_FILEWATCH)))
+	{
+	  char const *basename;
+	  WORKDIR *wd;
+	  int ret = 0;
+
+	  if ((basename = filename_split_wd (string_ptr (filename->v.string),
+					     &wd))
+	      == NULL)
+	    ret = -1;
+	  else
+	    {
+	      int rc = basic_auth_read (cond, basename, wd);
+	      workdir_unref (wd);
+	      if (rc == -1)
+		{
+		  if (errno == ENOENT)
+		    conf_error_at_locus_range (&filename->locus,
+					       "file %s does not exist",
+					       string_ptr (filename->v.string));
+		  else
+		    conf_error_at_locus_range (&filename->locus,
+					       "can't open %s: %s",
+					       string_ptr (filename->v.string),
+					       strerror (errno));
+		  ret = -1;
+		}
+	    }
+	  return ret;
+	}
+    }
+  else if (arg)
+    filename = arg;
+  else
+    {
+      conf_error_at_locus_range (&node->locus,
+				 "required argument missing");
+      return -1;
+    }
+
+  wt = watcher_register (cond, string_ptr (filename->v.string),
+			 &filename->locus,
+			 basic_auth_read, basic_auth_clear);
+  if (wt == NULL)
+    return -1;
+  return 0;
+}
+
+static CFG_TYPE cond_type_basicauth = {
+  .argdef = "f?s?",
+  .flagdef = acl_flagdef,
+  .commit = cond_basicauth_commit
+};
+
+/*
+ * TBF
+ */
+
+#ifndef UINT64_MAX
+# define UINT64_MAX ((uint64_t)-1)
+#endif
+
+/*
+ * Compute (v * d) / n with range checking.  On success, store the result
+ * in retval and return 0.
+ */
+static int
+mulf (unsigned long v, unsigned n, unsigned long d, uint64_t *retval)
+{
+  if (UINT64_MAX / n < v)
+    {
+      uint64_t e = (v - UINT64_MAX / n) * n;
+      if (UINT64_MAX / n < (v - e))
+	return -1;
+      *retval = ((v - e) * n) / d + e / d;
+    }
+  else
+    *retval = (v * n) / d;
+  return 0;
+}
+
+static int
+parse_rate (CFG_ARG *arg, uint64_t *ret_rate)
+{
+  unsigned long rate;
+  unsigned long n = 1;
+  char *p;
+  enum { I_SEC, I_MSEC, I_USEC };
+  int i = I_SEC;
+  static struct kwtab intervals[] = {
+    { "s",  I_SEC },
+    { "ms", I_MSEC },
+    { "us", I_USEC },
+    { NULL }
+  };
+  static unsigned mul[] = {
+    NANOSECOND,
+    1000000,
+    1000,
+  };
+
+  if (arg->type == T_NUMBER)
+    {
+      rate = arg->v.number;
+    }
+  else
+    {
+      errno = 0;
+      rate = strtoul (string_ptr (arg->v.string), &p, 10);
+      if (errno || rate == 0)
+	{
+	  conf_error_at_locus_range (&arg->locus, "bad unsigned number");
+	  return -1;
+	}
+      else if (*p == '/')
+	{
+	  ++p;
+
+	  if (c_isdigit (p[0]))
+	    {
+	      n = strtoul (p, &p, 10);
+	      if (n == 0 || errno)
+		{
+		  conf_error_at_locus_range (&arg->locus,
+					     "bad interval specifier");
+		  return -1;
+		}
+	    }
+
+	  if (kw_to_tok (intervals, p, 1, &i))
+	    {
+	      conf_error_at_locus_range (&arg->locus, "bad interval specifier");
+	      return -1;
+	    }
+	}
+      else if (*p != 0)
+	{
+	  conf_error_at_locus_range (&arg->locus, "invalid rate");
+	  return -1;
+	}
+    }
+
+  if (mulf (n, mul[i], rate, ret_rate))
+    {
+      conf_error_at_locus_range (&arg->locus,
+				 "effective rate is out of range");
+      return -1;
+    }
+
+  if (*ret_rate == 0)
+    {
+      conf_error_at_locus_range (&arg->locus, "effective rate is 0");
+      return -1;
+    }
+
+  return 0;
+}
+
+/* TBF <KEY> <RATE> <BURST> */
+static int
+cond_tbf_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_TBF);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  uint64_t rate;
+  unsigned maxtok;
+  STRING *key;
+
+  key = string_ref (arg->v.string);
+  arg = cfg_arg_next (arg);
+
+  if (parse_rate (arg, &rate))
+    return -1;
+  arg = cfg_arg_next (arg);
+
+  if (cfg_assert_range (arg, 0, UINT_MAX))
+    return -1;
+  maxtok = arg->v.number;
+
+  cond->tbf.key = key;
+  cond->tbf.tbf = tbf_alloc (rate, maxtok);
+
+  return 0;
+}
+
+static CFG_TYPE cond_type_tbf = {
+  .argdef = "s[nl]n",
+  .commit = cond_tbf_commit
+};
+
+/* Base conditions, useful in both request and response processing. */
+static CFG_DEFN cond_base_defn[] = {
+  {
+    .name = "Header",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_header,
+    .data = (void *) (intptr_t) COND_HDR
+  },
+  {
+    .name = "StringMatch",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_twoarg,
+    .data = (void *) (intptr_t) COND_STRING_MATCH
+  },
+  {
+    .name = "LuaMatch",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_luamatch,
+  },
+  {
+    .name = "Match",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_match,
+    .ref = cond_base_defn
+  },
+  {
+    .name = "NOT",
+    .token = T_NOT,
+    .vtype = &cfg_type_not,
+    .ref = cond_base_defn
+  },
+  /* FIXME: Eval should make sure that the condition referred to uses only
+     conditions from this defn. */
+  {
+    .name = "Eval",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_eval
+  },
+  { NULL }
+};
+
+/* Full set of conditions, only for request processing. */
+static CFG_DEFN cond_defn[] = {
+  {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = &cfg_type_aclcond
+  },
+  {
+    .name = "Method",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple,
+    .data = (void *) (intptr_t) COND_METHOD,
+  },
+  {
+    .name = "URL",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple,
+    .data = (void *) (intptr_t) COND_URL,
+  },
+  {
+    .name = "Path",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple_decode,
+    .data = (void *) (intptr_t) COND_PATH
+  },
+  {
+    .name = "Query",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple,
+    .data = (void *) (intptr_t) COND_QUERY
+  },
+  {
+    .name = "QueryParam",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_twoarg_decode,
+    .data = (void *) (intptr_t) COND_QUERY_PARAM
+  },
+  {
+    .name = "Header",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_header,
+    .data = (void *) (intptr_t) COND_HDR
+  },
+  {
+    .name = "HeadRequire",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "HeadDeny",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple,
+    .commit = head_deny_commit,
+    .deprecated = 1,
+    .message = "use \"Not Header\" instead"
+  },
+  {
+    .name = "Host",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_simple,
+    .commit = cond_host_commit,
+  },
+  {
+    .name = "BasicAuth",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_basicauth
+  },
+  {
+    .name = "TBF",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_tbf
+  },
+  {
+    .name = "StringMatch",
+    .token = T_DIRECTIVE,
+    .vtype = &cond_type_twoarg,
+    .data = (void *) (intptr_t) COND_STRING_MATCH
+  },
+  {
+    .name = "Match",
+    .token = T_SECTION,
+    .vtype = &cfg_type_match,
+    .ref = cond_defn
+  },
+  {
+    .name = "NOT",
+    .token = T_NOT,
+    .vtype = &cfg_type_not,
+    .ref = cond_defn
+  },
+  {
+    .name = "ClientCert",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_CERT,
+    .commit = clientcert_commit
+  },
+  {
+    .name = "Eval",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_eval
+  },
+  {
+    .name = "LuaMatch",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_luamatch,
+  },
+  { NULL }
+};
+
+/*
+ * The Rewrite section.
+ */
+static REWRITE_OP *
+rewrite_op_alloc (REWRITE_OP_HEAD *head, enum rewrite_type type)
+{
+  REWRITE_OP *op;
+
+  XZALLOC (op);
+  op->type = type;
+  SLIST_PUSH (head, op, next);
+
+  return op;
+}
+
+static void rewrite_rule_free (REWRITE_RULE *rule);
+
+static void
+rewrite_op_free (REWRITE_OP *op)
+{
+  switch (op->type)
+    {
+    case REWRITE_REWRITE_RULE:
+      rewrite_rule_free (op->v.rule);
+      break;
+
+    case REWRITE_HDR_DEL:
+      genpat_free (op->v.hdrdel);
+      break;
+
+    case REWRITE_QUERY_PARAM_SET:
+      free (op->v.qp.name);
+      free (op->v.qp.value);
+      break;
+
+    case REWRITE_LUA:
+      pndlua_closure_free (&op->v.lua);
+      break;
+
+    default:
+      free (op->v.str);
+    }
+  free (op);
+}
+
+static void
+rewrite_op_head_free (REWRITE_OP_HEAD *ophead)
+{
+  while (!SLIST_EMPTY (ophead))
+    {
+      REWRITE_OP *op = SLIST_FIRST (ophead);
+      SLIST_SHIFT (ophead, next);
+      rewrite_op_free (op);
+    }
+}
+
+static REWRITE_RULE *
+rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
+{
+  REWRITE_RULE *rule;
+
+  XZALLOC (rule);
+  service_cond_init (&rule->cond, COND_BOOL);
+  SLIST_INIT (&rule->ophead);
+
+  if (head)
+    SLIST_PUSH (head, rule, next);
+
+  return rule;
+}
+
+static void
+rewrite_rule_free (REWRITE_RULE *rule)
+{
+  if (rule)
+    {
+      service_cond_free (&rule->cond);
+      rewrite_rule_free (rule->iffalse);
+      rewrite_op_head_free (&rule->ophead);
+    }
+}
+
+static REWRITE_RULE *
+rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
+{
+  if (!SLIST_EMPTY (head))
+    {
+      REWRITE_RULE *rw = SLIST_LAST (head);
+      if (rw->cond.type == COND_BOOL && SLIST_EMPTY (&rw->cond.boolean.head))
+	return rw;
+    }
+
+  return rewrite_rule_alloc (head);
+}
+
+enum {
+  FLG_ENCODE = 1
+};
+
+static CFG_FLAG encode_flags[] = {
+  { "encode", FLG_ENCODE },
+  { NULL }
+};
+
+static void
+gen_rewrite_op (CFG_NODE *node, REWRITE_OP_HEAD *head, enum rewrite_type type)
+{
+  REWRITE_OP *op = rewrite_op_alloc (head, type);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  op->encode = cfg_arglist_getflag (arg, NULL, &arg) == FLG_ENCODE;
+  op->v.str = xstrdup (string_ptr (arg->v.string));
+}
+
+static int
+service_reqmod_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  gen_rewrite_op (node, &rule->ophead, (int)(intptr_t)node->defn->data);
+  return 0;
+}
+
+static CFG_TYPE cfg_type_svc_reqmod_encode = {
+  .argdef = "f?s",
+  .flagdef = encode_flags,
+  .commit = service_reqmod_commit
+};
+
+static CFG_TYPE cfg_type_svc_reqmod = {
+  .argdef = "s",
+  .commit = service_reqmod_commit
+};
+
+static int
+rw_reqmod_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  gen_rewrite_op (node, cfg_rcvr_ptr (&node->rcvr, baseptr),
+		  (int)(intptr_t)node->defn->data);
+  return 0;
+}
+
+static CFG_TYPE cfg_type_rw_reqmod_encode = {
+  .argdef = "f?s",
+  .flagdef = encode_flags,
+  .commit = rw_reqmod_commit
+};
+
+static CFG_TYPE cfg_type_rw_reqmod = {
+  .argdef = "s",
+  .commit = rw_reqmod_commit
+};
+
+/*
+ * Generic pattern compiler, useful in deprecated conditional statements.
+ */
+static int
+gen_regex_compat (CFG_ARG *arg, GENPAT *regex, int dfl_re_type, int flags)
+{
+  struct match_param match_param = MATCH_PARAM_INITIALIZER;
+  int rc;
+  int gp_type = dfl_re_type;
+
+  if (parse_match_mode (arg, dfl_re_type, &gp_type, &flags, &match_param,
+			&arg))
+    return -1;
+
+  rc = genpat_compile (regex, gp_type, string_ptr (arg->v.string), flags);
+  if (rc)
+    {
+      conf_regcomp_error (&arg->locus, *regex, NULL);
+      genpat_free (*regex);
+      *regex = NULL;
+      return -1;
+    }
+  return 0;
+}
+
+static int
+gen_delete_header_commit (CFG_NODE *node, POUND_DEFAULTS *dfl,
+			  REWRITE_OP_HEAD *head)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  REWRITE_OP *op = rewrite_op_alloc (head, REWRITE_HDR_DEL);
+
+  XZALLOC (op->v.hdrdel);
+  return gen_regex_compat (arg, &op->v.hdrdel, dfl->re_type,
+			   (dfl->ignore_case ? GENPAT_ICASE : 0));
+}
+
+/* DeleteHeader [FLAGS] "PAT", used from a Service section. */
+static int
+service_delete_header_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  return gen_delete_header_commit (node, call_data, &rule->ophead);
+}
+
+static CFG_TYPE cfg_type_svc_delete_header = {
+  .argdef = "f*s",
+  .flagdef = cond_re_flags,
+  .commit = service_delete_header_commit
+};
+
+/* DeleteHeader used from a Rewrite section. */
+static int
+rw_delete_header_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  return gen_delete_header_commit (node, call_data,
+				   cfg_rcvr_ptr (&node->rcvr, baseptr));
+}
+
+static CFG_TYPE cfg_type_rw_delete_header = {
+  .argdef = "f*s",
+  .flagdef = cond_re_flags,
+  .commit = rw_delete_header_commit
+};
+
+/* DeleteQuery, used from a Service section. */
+static int
+service_delete_query_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  rewrite_op_alloc (&rule->ophead, REWRITE_QUERY_DELETE);
+  return 0;
+}
+
+/* DeleteQuery, used from a Rewrite section. */
+static int
+rw_delete_query_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  rewrite_op_alloc (cfg_rcvr_ptr (&node->rcvr, baseptr), REWRITE_QUERY_DELETE);
+  return 0;
+}
+
+static int
+gen_setqp_commit (CFG_NODE *node, REWRITE_OP_HEAD *head)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  REWRITE_OP *op = rewrite_op_alloc (head, REWRITE_QUERY_PARAM_SET);
+
+  op->v.qp.name = xstrdup (string_ptr (arg->v.string));
+  arg = cfg_arg_next (arg);
+
+  op->encode = cfg_arglist_getflag (arg, NULL, &arg) == FLG_ENCODE;
+
+  if (arg)
+    op->v.qp.value = xstrdup (string_ptr (arg->v.string));
+
+  return 0;
+}
+
+/*
+ * The SetQueryParam statement used in a Service section.
+ *
+ * SetQueryParam "NAME" [-encode] "VALUE"
+ * SetQueryParam "NAME"
+ */
+static int
+service_setqp_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  return gen_setqp_commit (node, &rule->ophead);
+}
+
+static CFG_TYPE cfg_type_svc_setqp = {
+  .argdef = "sf?s?",
+  .flagdef = encode_flags,
+  .commit = service_setqp_commit
+};
+
+/* SetQueryParam statement used in a Rewrite section. */
+static int
+rw_setqp_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  return gen_setqp_commit (node, cfg_rcvr_ptr (&node->rcvr, baseptr));
+}
+
+static CFG_TYPE cfg_type_rw_setqp = {
+  .argdef = "sf?s?",
+  .flagdef = encode_flags,
+  .commit = rw_setqp_commit
+};
+
+/*
+ * LuaModify "ARG" ...
+ */
+static int
+service_lua_modify_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_LUA);
+  return pndlua_parse_closure (node, &op->v.lua);
+}
+
+static CFG_TYPE cfg_type_svc_lua_modify = {
+  .argdef = "s+",
+  .commit = service_lua_modify_commit
+};
+
+static int
+rw_lua_modify_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  REWRITE_OP *op = rewrite_op_alloc (cfg_rcvr_ptr (&node->rcvr, baseptr),
+				     REWRITE_LUA);
+  return pndlua_parse_closure (node, &op->v.lua);
+}
+
+static CFG_TYPE cfg_type_rw_lua_modify = {
+  .argdef = "s+",
+  .commit = rw_lua_modify_commit
+};
+
+/* Minimal set of request modification statements for use in Rewrite sections.
+ */
+static CFG_DEFN rw_mod_base[] = {
+  {
+    .name = "SetHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_reqmod,
+    .data = (void*)(intptr_t) REWRITE_HDR_SET,
+  },
+  {
+    .name = "DeleteHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_delete_header,
+  },
+  {
+    .name = "LuaModify",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_lua_modify,
+  },
+  { NULL }
+};
+
+/* Extended set of request modification statements for use in Rewrite sections.
+ */
+static CFG_DEFN rw_mod_ext[] = {
+  {
+    .name = "SetURL",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_reqmod,
+    .data = (void*)(intptr_t) REWRITE_URL_SET,
+  },
+  {
+    .name = "SetPath",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_reqmod_encode,
+    .data = (void*)(intptr_t) REWRITE_PATH_SET,
+  },
+  {
+    .name = "SetQuery",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_reqmod,
+    .data = (void*)(intptr_t) REWRITE_QUERY_SET,
+  },
+  {
+    .name = "DeleteQuery",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .commit = rw_delete_query_commit,
+  },
+  {
+    .name = "SetQueryParam",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_rw_setqp,
+  },
+  { NULL }
+};
+
+/* Modification statements allowed for use in Rewrite response sections. */
+static CFG_DEFN rw_resp_defn[] = {
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = cond_base_defn,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, cond),
+    }
+  },
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = rw_mod_base,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, ophead),
+    }
+  },
+  {
+    .name = "Else",
+    .token = T_ELSE,
+    .ref = rw_resp_defn,
+  },
+  { NULL }
+};
+
+/* Modification statements allowed for use in Rewrite request sections. */
+static CFG_DEFN rw_req_defn[] = {
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = cond_defn,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, cond),
+    }
+  },
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = rw_mod_base,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, ophead),
+    }
+  },
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = rw_mod_ext,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, ophead),
+    }
+  },
+  {
+    .name = "Else",
+    .token = T_ELSE,
+    .ref = rw_req_defn,
+  },
+  { NULL }
+};
+
+/* Selector for the two Rewrite flavors. */
+static CFG_DEFN rw_defn[] = {
+  {
+    .name = "request",
+    .type = KWT_TABREF,
+    .ref  = rw_req_defn
+  },
+  {
+    .name = "response",
+    .type = KWT_TABREF,
+    .ref  = rw_resp_defn
+  },
+  { NULL }
+};
+
+struct rwclosure
+{
+  REWRITE_RULE *prev;
+  REWRITE_RULE *rule;
+};
+
+static int
+rewrite_branch_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  struct rwclosure *clos = *baseptr;
+
+  if (clos->prev)
+    {
+      clos->rule = rewrite_rule_alloc (NULL);
+      clos->prev->iffalse = clos->rule;
+    }
+  clos->prev = clos->rule;
+
+  *baseptr = clos->rule;
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_rewrite_branch = {
+  .prepare = rewrite_branch_prepare
+};
+
+static int
+service_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  REWRITE_RULE_HEAD *rw = cfg_rcvr_ptr (&node->rcvr, *baseptr);
+  struct rwclosure *clos;
+
+  assert (node->rwtarget == REWRITE_REQUEST ||
+	  node->rwtarget == REWRITE_RESPONSE);
+
+  XZALLOC (clos);
+  clos->rule = rewrite_rule_alloc (&rw[node->rwtarget]);
+  node->data = clos;
+
+  *baseptr = clos;
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_svc_rewrite = {
+  .prepare = service_rewrite_prepare,
+};
+
+/*
+ * Service operations.
+ */
+
+/* Return 1 if a service with the given NAME exists in SVC_HEAD. */
+static int
+find_service_ident (SERVICE_HEAD *svc_head, char const *name)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, svc_head, next)
+    {
+      if (svc->name && strcmp (svc->name, name) == 0)
+	return 1;
+    }
+  return 0;
+}
+
+/* Create a new service, using balancing algorithm ALGO. */
+static SERVICE *
+new_service (BALANCER_ALGO algo)
+{
+  SERVICE *svc;
+
+  XZALLOC (svc);
+
+  service_cond_init (&svc->cond, COND_BOOL);
+  DLIST_INIT (&svc->balancers);
+
+  svc->sess_type = SESS_NONE;
+  pthread_mutex_init (&svc->mut, &mutex_attr_recursive);
+  svc->balancer_algo = algo;
+  svc->rewrite_errors = -1;
+  locus_range_init (&svc->locus);
+
+  DLIST_INIT (&svc->be_rem_head);
+  pthread_cond_init (&svc->be_rem_cond, NULL);
+
+  return svc;
+}
+
+/* Prepare the Service section. */
+static int
+svc_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) call_data;
+  SERVICE_HEAD *head = cfg_rcvr_ptr (&node->rcvr, *baseptr);
+  SERVICE *svc;
+
+  svc = new_service (dfl->balancer_algo);
+  locus_range_copy (&svc->locus, &node->locus);
+  if (!cfg_arglist_empty (&node->arglist))
+    {
+      CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+      char const *tag = string_ptr (arg->v.string);
+
+      if (find_service_ident (head, tag))
+	{
+	  conf_error_at_locus_range (&arg->locus,
+				     "service name is not unique");
+	  return -1;
+	}
+      svc->name = xstrdup (tag);
+    }
+
+  if ((svc->sessions = session_table_new ()) == NULL)
+    {
+      /* FIXME: service_free (svc) */
+      conf_error_at_locus_range (&node->locus, "session_table_new failed");
+      return -1;
+    }
+
+  *baseptr = svc;
+
+  /* FIXME: Instead of this, assign svc to node->data and provide
+     vtype->free_data so that it gets freed in case of errors. */
+  SLIST_PUSH (head, svc, next);
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_service = {
+  .argdef = "s?",
+  .prepare = svc_prepare
+};
+
+/* The deprecated IgnoreCase statement, used in the Service section. */
+static int
+svc_ignorecase_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) call_data;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  dfl->ignore_case = arg->v.number;
+  return 0;
+}
+
+/* Statements allowed for use in Service sections. */
+static CFG_DEFN svc_defn[] = {
+  {
+    .name = "",
+    .type = KWT_SOFTREF,
+    .ref = cond_defn,
+    .rcvr = {
+      .off = offsetof (SERVICE, cond),
+    }
+  },
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = &cfg_type_service_backend,
+    .ref = service_backend_defn,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "UseBackend",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = service_use_backend_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Emergency",
+    .token = T_SECTION,
+    .vtype = &cfg_type_service_emergency,
+    .ref = service_backend_defn,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Redirect",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_service_redirect,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Error",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_service_error,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "SendFile",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = &service_sendfile_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Success",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_NULL,
+    .commit = service_success_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Metrics",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_NULL,
+    .commit = service_metrics_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Control",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_NULL,
+    .commit = service_control_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "RewriteErrors",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite_errors)
+    }
+  },
+  {
+    .name = "LuaBackend",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_luabackend,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancers)
+    }
+  },
+  {
+    .name = "Session",
+    .token = T_SECTION,
+    .vtype = &cfg_type_service_session,
+    .ref = service_session_defn
+  },
+  {
+    .name = "Balancer",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_balancer,
+    .rcvr = {
+      .off = offsetof (SERVICE, balancer_algo)
+    }
+  },
+  {
+    .name = "ForwardedHeader",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (SERVICE, forwarded_header)
+    }
+  },
+  {
+    .name = "TrustedIP",
+    .token = T_TRUSTEDIP,
+    .vtype = &cfg_type_trustedip,
+    .rcvr = {
+      .off = offsetof (SERVICE, trusted_ips)
+    }
+  },
+  {
+    .name = "LogSuppress",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_log_suppress,
+    .rcvr = {
+      .off = offsetof (SERVICE, log_suppress_mask)
+    }
+  },
+  {
+    .name = "Constant",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_constant,
+    .rcvr = {
+      .off = offsetof (SERVICE, sctab)
+    }
+  },
+  {
+    .name = "Disabled",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (SERVICE, disabled)
+    }
+  },
+
+  /* Set* statements */
+  {
+    .name = "SetURL",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_URL_SET,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "SetPath",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod_encode,
+    .data = (void*)(intptr_t) REWRITE_PATH_SET,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "SetQuery",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_QUERY_SET,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "SetHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_HDR_SET,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "DeleteHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_delete_header,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "DeleteQuery",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .commit = service_delete_query_commit,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "SetQueryParam",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_setqp,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "LuaModify",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_lua_modify,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "ContentCapture",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_SIZE,
+    .rcvr = {
+      .off = offsetof (SERVICE, capture_size)
+    }
+  },
+  {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = &cfg_type_svc_rewrite,
+    .ref = rw_defn,
+    .rcvr = {
+      .off = offsetof (SERVICE, rewrite)
+    }
+  },
+  {
+    .name = "IgnoreCase",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .commit = svc_ignorecase_commit,
+    .deprecated = 1,
+    .message = "use the -icase matching directive flag to request case-insensitive comparison"
+  },
+  { NULL }
+};
+
+/*
+ * Listeners
+ */
+static int
+socketfrom_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *sockname = string_ptr (arg->v.string);
+  struct sockaddr_un *sun;
+  size_t len;
+
+  len = strlen (sockname);
+  if (len > UNIX_PATH_MAX)
+    {
+      conf_error_at_locus_range (&arg->locus, "UNIX path name too long");
+      return -1;
+    }
+
+  len += offsetof (struct sockaddr_un, sun_path) + 1;
+  sun = xmalloc (len);
+  sun->sun_family = AF_UNIX;
+  strcpy (sun->sun_path, sockname);
+
+  lst->addr.ai_socktype = SOCK_STREAM;
+  lst->addr.ai_family = AF_UNIX;
+  lst->addr.ai_protocol = 0;
+  lst->addr.ai_addr = (struct sockaddr *) sun;
+  lst->addr.ai_addrlen = len;
+
+  lst->socket_from = 1;
+
+  return 0;
+}
+
+static CFG_DEFN listener_address_common[] = {
+  {
+    .name = "Address",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .rcvr = {
+      .off = offsetof (LISTENER, addr_str)
+    }
+  },
+  {
+    .name = "Port",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_PORT_STRING,
+    .rcvr = {
+      .off = offsetof (LISTENER, port_str)
+    }
+  },
+  {
+    .name = "SocketFrom",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = socketfrom_commit
+  },
+  { NULL }
+};
+
+/* XHTTP <N> */
+static int
+xhttp_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  if (cfg_assert_range (arg, 0, 3))
+    return -1;
+
+  *(int*) cfg_rcvr_ptr (&node->rcvr, baseptr) = arg->v.number;
+  return 0;
+}
+
+/* CheckURL "PAT" */
+static int
+checkurl_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  POUND_DEFAULTS *dfl = call_data;
+
+  if (lst->url_pat)
+    {
+      conf_error_at_locus_range (&node->locus, "CheckURL multiple pattern");
+      return -1;
+    }
+
+  return gen_regex_compat (arg, &lst->url_pat, dfl->re_type,
+			   (dfl->ignore_case ? GENPAT_ICASE : 0));
+}
+
+/* ErrorFile CODE "FILENAME" */
+static int
+errorfile_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  struct http_errmsg **http_err = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int status;
+
+  if (arg->v.number > INT_MAX ||
+      (status = http_status_to_pound (arg->v.number)) == -1)
+    {
+      conf_error_at_locus_range (&arg->locus, "unsupported status code");
+      return -1;
+    }
+
+  if (!http_err[status])
+    XZALLOC (http_err[status]);
+
+  return parse_http_errmsg (http_err[status], cfg_arg_next (arg));
+}
+
+/* MaxRequest <N> */
+static CFG_TYPE cfg_type_errorfile = {
+  .argdef = "ns",
+  .commit = errorfile_commit
+};
+
+/*
+ * Support for backward-compatible HeaderRemove and HeadRemove directives.
+ */
+static int
+headerremove_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  POUND_DEFAULTS *dfl = call_data;
+  REWRITE_RULE *rule =
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+  REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
+  XZALLOC (op->v.hdrdel);
+  return gen_regex_compat (cfg_arglist_first (&node->arglist),
+			   &op->v.hdrdel, dfl->re_type,
+			   GENPAT_ICASE | GENPAT_MULTILINE);
+}
+
+/* RewriteLocation <N> */
+static int
+rewritelocation_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  if (cfg_assert_range (arg, 0, 3))
+    return -1;
+
+  *(int*) cfg_rcvr_ptr (&node->rcvr, baseptr) = arg->v.number;
+  return 0;
+}
+
+/* ACME <DIR> */
+static int
+acme_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_HEAD *head = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *dir = string_ptr (arg->v.string);
+  SERVICE *svc;
+  BACKEND *be;
+  SERVICE_COND *cond;
+  struct stat st;
+  int rc;
+  static char sp_acme[] = "^/\\.well-known/acme-challenge/(.+)";
+  int fd;
+  WORKDIR *wd = get_include_wd ();
+
+  if (fstatat (wd ? wd->fd : AT_FDCWD, dir, &st, 0))
+    {
+      conf_error_at_locus_range (&arg->locus, "can't stat %s: %s",
+				 dir, strerror (errno));
+      return -1;
+    }
+  if (!S_ISDIR (st.st_mode))
+    {
+      conf_error_at_locus_range (&arg->locus, "%s is not a directory", dir);
+      return -1;
+    }
+  if ((fd = open_wd (wd, dir, O_RDONLY | O_NONBLOCK | O_DIRECTORY, 0)) == -1)
+    {
+      conf_error_at_locus_range (&arg->locus, "can't open: %s",
+				 strerror (errno));
+      return -1;
+    }
+
+  /* Create service; there'll be only one backend so the balancing algorithm
+     doesn't really matter. */
+  svc = new_service (BALANCER_ALGO_RANDOM);
+
+  /* Create a URL matcher */
+  cond = service_cond_append (&svc->cond, COND_URL);
+  rc = genpat_compile (&cond->re, GENPAT_POSIX, sp_acme, 0);
+  if (rc)
+    {
+      conf_regcomp_error (&node->locus, cond->re, NULL);
+      /* FIXME: service_free (svc) */
+      return -1;
+    }
+
+  locus_range_init (&svc->locus);
+  locus_range_copy (&svc->locus, &node->locus);
+
+  /* Create ACME backend */
+  be = xbackend_create (BE_ACME, 1, &node->locus);
+  be->service = svc;
+  be->priority = 1;
+  be->v.acme.wd = fd;
+
+  /* Register backend in service */
+  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
+  service_recompute_pri_unlocked (svc, NULL, NULL);
+
+  /* Register service in the listener */
+  SLIST_PUSH (head, svc, next);
+
+  return 0;
+}
+
+/* Statements allowed for use in both ListenHTTP and ListenHTTPS sections. */
+static CFG_DEFN http_common[] = {
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = listener_address_common
+  },
+  {
+    .name = "xHTTP",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_INT,
+    .commit = xhttp_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, verb)
+    }
+  },
+  {
+    .name = "Client",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (LISTENER, to)
+    }
+  },
+  {
+    .name = "CheckURL",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = checkurl_commit
+  },
+  {
+    .name = "ErrorFile",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_errorfile,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err)
+    }
+  },
+  {
+    .name = "MaxRequest",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_CONTENT_LENGTH,
+    .rcvr = {
+      .off = offsetof (LISTENER, max_req_size)
+    }
+  },
+  {
+    .name = "MaxURI",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_SIZE,
+    .rcvr = {
+      .off = offsetof (LISTENER, max_uri_length)
+    }
+  },
+  {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = &cfg_type_svc_rewrite,
+    .ref = rw_defn,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "RewriteErrors",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite_errors)
+    }
+  },
+  {
+    .name = "SetHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_HDR_SET,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "HeaderAdd",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "AddHeader",
+    .type = KWT_ALIAS,
+    .deprecated = 1
+  },
+  {
+    .name = "DeleteHeader",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_delete_header,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "HeaderRemove",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = headerremove_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    },
+    .deprecated = 1,
+    .message = "use \"DeleteHeader\" instead"
+  },
+  {
+    .name = "HeadRemove",
+    .type = KWT_ALIAS,
+    .deprecated = 1,
+    .message = "use \"DeleteHeader\" instead"
+  },
+  {
+    .name = "SetURL",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_URL_SET,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "SetPath",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod_encode,
+    .data = (void*)(intptr_t) REWRITE_PATH_SET,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "DeleteQuery",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .commit = service_delete_query_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "SetQuery",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_reqmod,
+    .data = (void*)(intptr_t) REWRITE_QUERY_SET,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "SetQueryParam",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_setqp,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "LuaModify",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_svc_lua_modify,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewrite)
+    }
+  },
+  {
+    .name = "HeaderOption",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_headeroptions,
+    .rcvr = {
+      .off = offsetof (LISTENER, header_options)
+    }
+  },
+  {
+    .name = "RewriteLocation",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .commit = rewritelocation_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewr_loc)
+    }
+  },
+  {
+    .name = "RewriteDestination",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (LISTENER, rewr_dest)
+    }
+  },
+  {
+    .name = "LogLevel",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_loglevel,
+    .rcvr = {
+      .off = offsetof (LISTENER, log_level)
+    }
+  },
+  {
+    .name = "ForwardedHeader",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .off = offsetof (LISTENER, forwarded_header)
+    }
+  },
+  {
+    .name = "TrustedIP",
+    .token = T_TRUSTEDIP,
+    .vtype = &cfg_type_trustedip,
+    .rcvr = {
+      .off = offsetof (LISTENER, trusted_ips)
+    }
+  },
+  {
+    .name = "Service",
+    .token = T_SECTION,
+    .vtype = &cfg_type_service,
+    .ref = svc_defn,
+    .rcvr = {
+      .off = offsetof (LISTENER, services)
+    }
+  },
+  {
+    .name = "LineBufferSize",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_SIZE,
+    .rcvr = {
+      .off = offsetof (LISTENER, linebufsize),
+    }
+  },
+  {
+    .name = "Constant",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_constant,
+    .rcvr = {
+      .off = offsetof (LISTENER, sctab)
+    }
+  },
+  { NULL }
+};
+
+/*
+ * Deprecated ErrN statements.
+ */
+static int
+errN_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  struct http_errmsg **http_err = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  if (!*http_err)
+    XZALLOC (*http_err);
+  return parse_http_errmsg (*http_err, cfg_arglist_first (&node->arglist));
+}
+
+static CFG_DEFN http_deprecated[] = {
+  {
+    .name = "Err400",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_BAD_REQUEST]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 400\" instead"
+  },
+  {
+    .name = "Err401",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_UNAUTHORIZED]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 401\" instead"
+  },
+  {
+    .name = "Err403",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_FORBIDDEN]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 403\" instead"
+  },
+  {
+    .name = "Err404",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_FOUND]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 404\" instead"
+  },
+  {
+    .name = "Err413",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_PAYLOAD_TOO_LARGE]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 413\" instead"
+  },
+  {
+    .name = "Err414",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_URI_TOO_LONG]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 414\" instead"
+  },
+  {
+    .name = "Err500",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_INTERNAL_SERVER_ERROR]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 500\" instead"
+  },
+  {
+    .name = "Err501",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_NOT_IMPLEMENTED]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 501\" instead"
+  },
+  {
+    .name = "Err503",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = errN_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, http_err[HTTP_STATUS_SERVICE_UNAVAILABLE]),
+    },
+    .deprecated = 1,
+    .message = "use \"ErrorFile 503\" instead"
+  },
+  { NULL }
+};
+
+
+/* Statements allowed in ListenHTTP */
+static CFG_DEFN lst_http_defn[] = {
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_common
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = http_deprecated
+  },
+  {
+    .name = "ACME",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = acme_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, services)
+    }
+  },
+  { NULL }
+};
+
+/*
+ * ListenHTTPS support.
+ */
 #define general_name_string(n) \
 	xstrndup ((char*)ASN1_STRING_get0_data (n->d.dNSName),	\
 		 ASN1_STRING_length (n->d.dNSName) + 1)
@@ -4801,184 +6093,352 @@ get_subjectaltnames (X509 *x509, POUND_CTX *pc, size_t san_max)
 }
 
 static int
-load_cert (char const *filename, LISTENER *lst)
+load_ca_certs (SSL_CTX *ctx, BIO *in)
 {
-  POUND_CTX *pc;
+  X509 *ca;
+  int rc;
+  unsigned long err;
 
-  XZALLOC (pc);
+  rc = SSL_CTX_clear_chain_certs (ctx);
+  if (!rc)
+    return 0;
 
-  if ((pc->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
+  while ((ca = PEM_read_bio_X509 (in, NULL, NULL, NULL)) != NULL)
     {
-      conf_openssl_error (NULL, "SSL_CTX_new");
-      return CFGPARSER_FAIL;
+      rc = SSL_CTX_add0_chain_cert (ctx, ca);
+      if (!rc)
+	{
+	  X509_free (ca);
+	  return rc;
+	}
     }
 
-  if (SSL_CTX_use_certificate_chain_file (pc->ctx, filename) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_use_certificate_chain_file");
-      return CFGPARSER_FAIL;
-    }
-  if (SSL_CTX_use_PrivateKey_file (pc->ctx, filename, SSL_FILETYPE_PEM) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_use_PrivateKey_file");
-      return CFGPARSER_FAIL;
-    }
-
-  if (SSL_CTX_check_private_key (pc->ctx) != 1)
-    {
-      conf_openssl_error (filename, "SSL_CTX_check_private_key");
-      return CFGPARSER_FAIL;
-    }
-
-#ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
-  {
-    /* we have support for SNI */
-    FILE *fcert;
-    X509 *x509;
-    X509_NAME *xname = NULL;
-    int i;
-    size_t san_max;
-
-    if ((fcert = fopen (filename, "r")) == NULL)
-      {
-	conf_error ("%s: could not open certificate file: %s", filename,
-		    strerror (errno));
-	return CFGPARSER_FAIL;
-      }
-
-    x509 = PEM_read_X509 (fcert, NULL, NULL, NULL);
-    fclose (fcert);
-
-    if (!x509)
-      {
-	conf_error ("%s: could not get certificate subject", filename);
-	return CFGPARSER_FAIL;
-      }
-
-    pc->subjectAltNameCount = 0;
-    pc->subjectAltNames = NULL;
-    san_max = 0;
-
-    /* Extract server name */
-    xname = X509_get_subject_name (x509);
-    for (i = -1;
-	 (i = X509_NAME_get_index_by_NID (xname, NID_commonName, i)) != -1;)
-      {
-	X509_NAME_ENTRY *entry = X509_NAME_get_entry (xname, i);
-	ASN1_STRING *value;
-	char *str = NULL;
-	value = X509_NAME_ENTRY_get_data (entry);
-	if (ASN1_STRING_to_UTF8 ((unsigned char **)&str, value) >= 0)
-	  {
-	    if (pc->server_name == NULL)
-	      pc->server_name = str;
-	    else
-	      {
-		if (pc->subjectAltNameCount == san_max)
-		  pc->subjectAltNames = x2nrealloc (pc->subjectAltNames,
-						    &san_max,
-						    sizeof (pc->subjectAltNames[0]));
-		pc->subjectAltNames[pc->subjectAltNameCount++] = str;
-	      }
-	  }
-      }
-
-    get_subjectaltnames (x509, pc, san_max);
-    X509_free (x509);
-
-    if (pc->server_name == NULL)
-      {
-	conf_error ("%s: no CN in certificate subject name", filename);
-	return CFGPARSER_FAIL;
-      }
-  }
-#else
-  if (res->ctx)
-    conf_error ("%s: multiple certificates not supported", filename);
-#endif
-  SLIST_PUSH (&lst->ctx_head, pc, next);
-
-  return CFGPARSER_OK;
+  err = ERR_peek_last_error ();
+  if (ERR_GET_LIB (err) == ERR_LIB_PEM
+      && ERR_GET_REASON (err) == PEM_R_NO_START_LINE)
+    ERR_clear_error ();
+  else
+    rc = 0;            /* some real error */
+  return rc;
 }
 
 static int
-https_parse_cert (void *call_data, void *section_data)
+load_certificate_chain (SSL_CTX *ctx, BIO *in)
 {
-  LISTENER *lst = call_data;
-  struct token *tok;
-  struct stat st;
-  char *certname;
-  int rc = CFGPARSER_OK;
+  int rc = 0;
+  X509 *x = NULL;
 
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
+  ERR_clear_error ();
 
-  if ((certname = filename_resolve (tok->str)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (stat (certname, &st))
+  x = PEM_read_bio_X509_AUX (in, NULL, NULL, NULL);
+  if (x)
     {
-      conf_error ("%s: stat error: %s", certname, strerror (errno));
-      return CFGPARSER_FAIL;
+      rc = SSL_CTX_use_certificate (ctx, x);
+      if (ERR_peek_error () != 0)
+	rc = 0;
+
+      if (rc)
+	rc = load_ca_certs (ctx, in);
+
+      X509_free (x);
     }
 
-  if (S_ISREG (st.st_mode))
+  return rc;
+}
+
+static int
+load_private_key (SSL_CTX *ctx, BIO *in)
+{
+  int rc;
+  EVP_PKEY *pkey = PEM_read_bio_PrivateKey (in, NULL, NULL, NULL);
+  if (!pkey)
+    return 0;
+  rc = SSL_CTX_use_PrivateKey (ctx, pkey);
+  EVP_PKEY_free (pkey);
+  return rc;
+}
+
+static int
+load_san (POUND_CTX *pc, BIO *bio, struct locus_range const *loc)
+{
+  int i;
+  size_t san_max = 0;
+  X509 *x509;
+  X509_NAME *xname;
+
+  x509 = PEM_read_bio_X509 (bio, NULL, NULL, NULL);
+
+  if (!x509)
     {
-      rc = load_cert (certname, lst);
+      conf_error_at_locus_range (loc, "could not get certificate subject");
+      return -1;
     }
-  else if (S_ISDIR (st.st_mode))
+
+  pc->subjectAltNameCount = 0;
+  pc->subjectAltNames = NULL;
+  san_max = 0;
+
+  /* Extract server name */
+  xname = X509_get_subject_name (x509);
+  for (i = -1;
+       (i = X509_NAME_get_index_by_NID (xname, NID_commonName, i)) != -1;)
     {
-      DIR *dp;
-      struct dirent *ent;
-      struct stringbuf namebuf;
-      size_t dirlen;
-
-      dirlen = strlen (certname);
-      while (dirlen > 0 && certname[dirlen-1] == '/')
-	dirlen--;
-
-      xstringbuf_init (&namebuf);
-      stringbuf_add (&namebuf, certname, dirlen);
-      stringbuf_add_char (&namebuf, '/');
-      dirlen++;
-
-      dp = opendir (certname);
-      if (dp == NULL)
+      X509_NAME_ENTRY *entry = X509_NAME_get_entry (xname, i);
+      ASN1_STRING *value;
+      char *str = NULL;
+      value = X509_NAME_ENTRY_get_data (entry);
+      if (ASN1_STRING_to_UTF8 ((unsigned char **)&str, value) >= 0)
 	{
-	  conf_error ("%s: error opening directory: %s", certname,
-		      strerror (errno));
-	  stringbuf_free (&namebuf);
-	  return CFGPARSER_FAIL;
-	}
-
-      while ((ent = readdir (dp)) != NULL)
-	{
-	  char *filename;
-
-	  if (strcmp (ent->d_name, ".") == 0 || strcmp (ent->d_name, "..") == 0)
-	    continue;
-
-	  stringbuf_add_string (&namebuf, ent->d_name);
-	  filename = stringbuf_finish (&namebuf);
-	  if (stat (filename, &st))
+	  if (pc->server_name == NULL)
+	    pc->server_name = str;
+	  else
 	    {
-	      conf_error ("%s: stat error: %s", filename, strerror (errno));
+	      if (pc->subjectAltNameCount == san_max)
+		pc->subjectAltNames = x2nrealloc (pc->subjectAltNames,
+						  &san_max,
+						  sizeof (pc->subjectAltNames[0]));
+	      pc->subjectAltNames[pc->subjectAltNameCount++] = str;
 	    }
-	  else if (S_ISREG (st.st_mode))
+	}
+    }
+
+  get_subjectaltnames (x509, pc, san_max);
+  X509_free (x509);
+
+  if (pc->server_name == NULL)
+    {
+      conf_error_at_locus_range (loc, "no CN in certificate subject name");
+      return -1;
+    }
+
+  return 0;
+}
+
+static int
+pound_ctx_load_cert (POUND_CTX *pc, BIO *bio, char const *filename,
+		     struct locus_range const *loc)
+{
+  if ((pc->ctx = SSL_CTX_new (SSLv23_server_method ())) == NULL)
+    {
+      conf_openssl_error (loc, NULL, "SSL_CTX_new");
+      return -1;
+    }
+
+  if (load_certificate_chain (pc->ctx, bio) != 1)
+    {
+      conf_openssl_error (loc, filename, "can't load certificate chain");
+      return -1;
+    }
+
+  BIO_seek (bio, 0);
+
+  if (load_private_key (pc->ctx, bio) != 1)
+    {
+      conf_openssl_error (loc, filename, "can't load private keys");
+      return -1;
+    }
+  if (SSL_CTX_check_private_key (pc->ctx) != 1)
+    {
+      conf_openssl_error (loc, filename, "SSL_CTX_check_private_key");
+      return -1;
+    }
+
+  BIO_seek (bio, 0);
+
+  return load_san (pc, bio, loc);
+}
+
+void
+pound_ctx_free (POUND_CTX *pc)
+{
+  size_t i;
+
+  if (pc->ctx)
+    SSL_CTX_free (pc->ctx);
+  if (pc->server_name)
+    OPENSSL_free (pc->server_name);
+
+  for (i = 0; i < pc->subjectAltNameCount; i++)
+    OPENSSL_free (pc->subjectAltNames[i]);
+
+  free (pc->subjectAltNames);
+  free (pc);
+}
+
+static int
+load_cert_wd (WORKDIR *wd, char const *filename,
+	      struct locus_range const *loc, LISTENER *lst)
+{
+  POUND_CTX *pc;
+  int fd;
+  BIO *bio;
+  int rc;
+
+  fd = open_wd (wd, filename, O_RDONLY, 0);
+  if (fd == -1)
+    {
+      conf_error_at_locus_range (loc, "can't open %s: %s", filename,
+				 strerror (errno));
+      return -1;
+    }
+
+  bio = BIO_new_fd (fd, BIO_CLOSE);
+  if (!bio)
+    {
+      conf_error_at_locus_range (loc, "BIO_new_fd failed");
+      return -1;
+    }
+
+  XZALLOC (pc);
+
+  rc = pound_ctx_load_cert (pc, bio, filename, loc);
+
+  BIO_free (bio);
+
+  if (rc == 0)
+    SLIST_PUSH (&lst->ctx_head, pc, next);
+  else
+    pound_ctx_free (pc);
+
+  return rc;
+}
+
+static int
+try_cert_wd (WORKDIR *wd, char const *filename,
+	     struct locus_range const *loc, LISTENER *lst)
+{
+  struct stat st;
+  int rc = 0;
+
+  if (fstatat (wd->fd, filename, &st, 0))
+    {
+      conf_error_at_locus_range (loc,
+				 "%s: stat error: %s",
+				 filename, strerror (errno));
+      rc = -1;
+    }
+  else if (S_ISREG (st.st_mode))
+    rc = load_cert_wd (wd, filename, loc, lst);
+  else
+    conf_error_at_locus_range (loc,
+			       "warning: "
+			       "ignoring %s: not a regular file",
+			       filename);
+  return rc;
+}
+
+static DIR *
+opendir_wd (WORKDIR *wd, char const *name)
+{
+  DIR *dir;
+  int fd = open_wd (wd, name, O_DIRECTORY | O_RDONLY | O_NDELAY, 0);
+  if (fd == -1)
+    return NULL;
+  dir = fdopendir (fd);
+  if (!dir)
+    {
+      int ec = errno;
+      close (fd);
+      errno = ec;
+    }
+  return dir;
+}
+
+/* Cert "FILE" */
+static int
+cert_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *certname = string_ptr (arg->v.string);
+  struct stat st;
+  int rc = 0;
+  WORKDIR *wd = get_include_wd ();
+
+  if (fstatat (wd ? wd->fd : AT_FDCWD, certname, &st, 0) == 0)
+    {
+      if (S_ISREG (st.st_mode))
+	rc = load_cert_wd (wd, certname, &arg->locus, lst);
+      else if (S_ISDIR (st.st_mode))
+	{
+	  DIR *dp;
+	  struct dirent *ent;
+
+	  dp = opendir_wd (wd, certname);
+	  if (dp == NULL)
 	    {
-	      if ((rc = load_cert (filename, lst)) != CFGPARSER_OK)
+	      conf_error_at_locus_range (&arg->locus,
+					 "%s: error opening directory: %s",
+					 certname,
+					 strerror (errno));
+	      return -1;
+	    }
+
+	  wd = workdir_get (certname);
+	  if (wd == NULL)
+	    {
+	      conf_error_at_locus_range (&arg->locus,
+					 "%s: error opening directory: %s",
+					 certname,
+					 strerror (errno));
+	      closedir (dp);
+	      return -1;
+	    }
+
+	  while ((ent = readdir (dp)) != NULL)
+	    {
+	      if (strcmp (ent->d_name, ".") == 0 ||
+		  strcmp (ent->d_name, "..") == 0)
+		continue;
+
+	      if ((rc = try_cert_wd (wd, ent->d_name, &node->locus, lst)) != 0)
 		break;
 	    }
-	  else
-	    conf_error ("warning: ignoring %s: not a regular file", filename);
-	  stringbuf_truncate (&namebuf, dirlen);
+	  closedir (dp);
+	  workdir_free (wd);
 	}
-      closedir (dp);
-      stringbuf_free (&namebuf);
+      else
+	{
+	  conf_error_at_locus_range (&arg->locus,
+				     "%s: not a regular file or directory",
+				     certname);
+	  rc = -1;
+	}
+    }
+  else if (errno == ENOENT)
+    {
+      glob_t glob;
+      rc = globat (wd->fd, certname, GLOB_ERR | GLOB_MARK, NULL, &glob);
+      if (rc == 0)
+	{
+	  size_t i;
+
+	  for (i = 0; i < glob.gl_pathc; i++)
+	    {
+	      if ((rc = try_cert_wd (wd, glob.gl_pathv[i],
+				     &arg->locus, lst)) != 0)
+		break;
+	    }
+	  globfree(&glob);
+	}
+      else
+	{
+	  if (rc != GLOB_NOMATCH)
+	    conf_error_at_locus_range (&arg->locus, "glob error: %s",
+				       globstrerror (rc));
+	  else
+	    conf_error_at_locus_range (&arg->locus, "%s: stat error: %s",
+				       certname, strerror (ENOENT));
+	  return -1;
+	}
     }
   else
-    conf_error ("%s: not a regular file or directory", certname);
-  free (certname);
+    {
+      conf_error_at_locus_range (&arg->locus, "%s: stat error: %s",
+				 certname, strerror (errno));
+      return -1;
+    }
+
   return rc;
 }
 
@@ -4998,7 +6458,8 @@ SNI_server_name (SSL *ssl, int *dummy, POUND_CTX_HEAD *ctx_head)
   if ((server_name = SSL_get_servername (ssl, TLSEXT_NAMETYPE_host_name)) == NULL)
     return SSL_TLSEXT_ERR_NOACK;
 
-  /* logmsg(LOG_DEBUG, "Received SSL SNI Header for servername %s", servername); */
+  /* logmsg(LOG_DEBUG,
+     "Received SSL SNI Header for servername %s", servername); */
 
   SSL_set_SSL_CTX (ssl, NULL);
   SLIST_FOREACH (pc, ctx_head, next)
@@ -5031,24 +6492,31 @@ SNI_server_name (SSL *ssl, int *dummy, POUND_CTX_HEAD *ctx_head)
 }
 #endif
 
+/* ClientCert MODE [DEPTH] */
 static int
-https_parse_client_cert (void *call_data, void *section_data)
+lst_clientcert_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   int depth;
   POUND_CTX *pc;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
+  if (cfg_assert_range (arg, 0, 3))
+    return -1;
+
+  if (lst->clnt_check > 0)
     {
-      conf_error ("%s", "ClientCert may only be used after Cert");
-      return CFGPARSER_FAIL;
+      if ((arg = cfg_arg_next (arg)) != NULL)
+	{
+	  if (cfg_assert_range (arg, 0, 9))
+	    return -1;
+	  depth = arg->v.number;
+	}
+      else
+	depth = 9;
     }
-
-  if (cfg_assign_int_range (&lst->clnt_check, 0, 3) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
-
-  if (lst->clnt_check > 0 && cfg_assign_int (&depth, NULL) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
+  else if ((arg = cfg_arg_next (arg)) != NULL)
+    conf_error_at_locus_range (&arg->locus, "superfluous argument ignored");
 
   switch (lst->clnt_check)
     {
@@ -5091,71 +6559,57 @@ https_parse_client_cert (void *call_data, void *section_data)
 	}
       break;
     }
-  return CFGPARSER_OK;
+  return 0;
 }
 
-static int
-https_parse_disable (void *call_data, void *section_data)
-{
-  LISTENER *lst = call_data;
-  return set_proto_opt (&lst->ssl_op_enable);
-}
+static CFG_TYPE cfg_type_lst_clientcert = {
+  .argdef = "nn?",
+  .commit = lst_clientcert_commit
+};
 
+/* Disable <PROTO> */
 static int
-https_parse_ciphers (void *call_data, void *section_data)
+lst_disable_proto_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
-  struct token *tok;
-  int copt = CIPHER_LIST;
+  int *opt = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  int n;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
+  static struct kwtab kwtab[] = {
+    { "SSLv2", SSL_OP_NO_SSLv2 },
+    { "SSLv3", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 },
+#ifdef SSL_OP_NO_TLSv1
+    { "TLSv1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 | SSL_OP_NO_TLSv1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_1
+    { "TLSv1_1", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 },
+#endif
+#ifdef SSL_OP_NO_TLSv1_2
+    { "TLSv1_2", SSL_OP_NO_SSLv2 | SSL_OP_NO_SSLv3 |
+		 SSL_OP_NO_TLSv1 | SSL_OP_NO_TLSv1_1 |
+		 SSL_OP_NO_TLSv1_2 },
+#endif
+    { NULL }
+  };
+
+  if (kw_to_tok (kwtab, string_ptr (arg->v.string), 1, &n))
     {
-      conf_error ("%s", "Ciphers may only be used after Cert");
-      return CFGPARSER_FAIL;
+      conf_error_at_locus_range (&arg->locus, "unrecognized protocol name");
+      return -1;
     }
-
-  for (;;)
-    {
-      if (getopt_cipher (&copt) == CFGPARSER_FAIL)
-	return CFGPARSER_FAIL;
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == T_STRING)
-	{
-	  POUND_CTX *pc;
-	  SLIST_FOREACH (pc, &lst->ctx_head, next)
-	    {
-	      if (set_ciphers (pc->ctx, copt, tok->str) == 0)
-		{
-		  conf_error ("failed to set %s %s",
-			      cipherset_str[copt], tok->str);
-		  return CFGPARSER_FAIL;
-		}
-	    }
-	}
-      else if (tok->type == '\n')
-	break;
-      else
-	{
-	  conf_error ("expected cipher list, ciphersuites or newline,"
-		      " but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-    }
-  return CFGPARSER_OK_NONL;
+  *opt |= n;
+  return 0;
 }
 
+/* SSLHonorCipherOrder <BOOL> */
 static int
-https_parse_honor_cipher_order (void *call_data, void *section_data)
+honor_cipher_order_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
-  int bv;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
 
-  if (cfg_assign_bool (&bv, NULL) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
-
-  if (bv)
+  if (arg->v.number)
     {
       lst->ssl_op_enable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
       lst->ssl_op_disable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
@@ -5165,17 +6619,20 @@ https_parse_honor_cipher_order (void *call_data, void *section_data)
       lst->ssl_op_disable |= SSL_OP_CIPHER_SERVER_PREFERENCE;
       lst->ssl_op_enable &= ~SSL_OP_CIPHER_SERVER_PREFERENCE;
     }
-
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/* SSLAllowClientRenegotiation <N> */
 static int
-https_parse_allow_client_renegotiation (void *call_data, void *section_data)
+alloc_client_reneg_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
 
-  if (cfg_assign_int_range (&lst->allow_client_reneg, 0, 2) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
+  if (cfg_assert_range (arg, 0, 2))
+    return -1;
+
+  lst->allow_client_reneg = arg->v.number;
 
   if (lst->allow_client_reneg == 2)
     {
@@ -5188,116 +6645,99 @@ https_parse_allow_client_renegotiation (void *call_data, void *section_data)
       lst->ssl_op_enable &= ~SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION;
     }
 
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/* CAList "FILENAME" */
 static int
-https_parse_calist (void *call_data, void *section_data)
+calist_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   STACK_OF (X509_NAME) *cert_names;
-  struct token *tok;
   POUND_CTX *pc;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
+  if ((cert_names = SSL_load_client_CA_file (string_ptr (arg->v.string)))
+       == NULL)
     {
-      conf_error ("%s", "CAList may only be used after Cert");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((cert_names = SSL_load_client_CA_file (tok->str)) == NULL)
-    {
-      conf_openssl_error (NULL, "SSL_load_client_CA_file");
-      return CFGPARSER_FAIL;
+      conf_openssl_error (&arg->locus, NULL, "SSL_load_client_CA_file");
+      return -1;
     }
 
   SLIST_FOREACH (pc, &lst->ctx_head, next)
     SSL_CTX_set_client_CA_list (pc->ctx, cert_names);
 
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/* VerifyList "FILENAME" */
 static int
-https_parse_verifylist (void *call_data, void *section_data)
+verifylist_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
-  struct token *tok;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *str = string_ptr (arg->v.string);
   POUND_CTX *pc;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
-    {
-      conf_error ("%s", "VerifyList may only be used after Cert");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
   SLIST_FOREACH (pc, &lst->ctx_head, next)
-    if (SSL_CTX_load_verify_locations (pc->ctx, tok->str, NULL) != 1)
+    if (SSL_CTX_load_verify_locations (pc->ctx, str, NULL) != 1)
       {
-	conf_openssl_error (tok->str, "SSL_CTX_load_verify_locations");
-	return CFGPARSER_FAIL;
+	conf_openssl_error (&node->locus, str,
+			    "SSL_CTX_load_verify_locations");
+	return -1;
       }
-
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/* CRList "FILENAME" */
 static int
-https_parse_crlist (void *call_data, void *section_data)
+crlist_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
-  struct token *tok;
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *str = string_ptr (arg->v.string);
   X509_STORE *store;
   X509_LOOKUP *lookup;
   POUND_CTX *pc;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
-    {
-      conf_error ("%s", "CRlist may only be used after Cert");
-      return CFGPARSER_FAIL;
-    }
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
   SLIST_FOREACH (pc, &lst->ctx_head, next)
     {
       store = SSL_CTX_get_cert_store (pc->ctx);
-      if ((lookup = X509_STORE_add_lookup (store, X509_LOOKUP_file ())) == NULL)
+      if ((lookup = X509_STORE_add_lookup (store, X509_LOOKUP_file ()))
+	  == NULL)
 	{
-	  conf_openssl_error (NULL, "X509_STORE_add_lookup");
-	  return CFGPARSER_FAIL;
+	  conf_openssl_error (&node->locus, NULL, "X509_STORE_add_lookup");
+	  return -1;
 	}
 
-      if (X509_load_crl_file (lookup, tok->str, X509_FILETYPE_PEM) != 1)
+      if (X509_load_crl_file (lookup, str, X509_FILETYPE_PEM) != 1)
 	{
-	  conf_openssl_error (tok->str, "X509_load_crl_file failed");
-	  return CFGPARSER_FAIL;
+	  conf_openssl_error (&node->locus, str, "X509_load_crl_file failed");
+	  return -1;
 	}
 
-      X509_STORE_set_flags (store, X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
+      X509_STORE_set_flags (store,
+			    X509_V_FLAG_CRL_CHECK | X509_V_FLAG_CRL_CHECK_ALL);
     }
 
-  return CFGPARSER_OK;
+  return 0;
 }
 
+/* NoHTTPS11 <N> */
 static int
-https_parse_nohttps11 (void *call_data, void *section_data)
+nohttps11_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  LISTENER *lst = call_data;
-  return cfg_assign_int_range (&lst->noHTTPS11, 0, 2);
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+
+  if (cfg_assert_range (arg, 0, 2))
+    return -1;
+  lst->noHTTPS11 = arg->v.number;
+  return 0;
 }
 
-static CFGPARSER_TABLE https_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-
+/* Statements allowed in ListenHTTPS sections. */
+static CFG_DEFN lst_https_defn[] = {
   {
     .name = "",
     .type = KWT_TABREF,
@@ -5308,50 +6748,260 @@ static CFGPARSER_TABLE https_parsetab[] = {
     .type = KWT_TABREF,
     .ref = http_deprecated
   },
-
   {
     .name = "Cert",
-    .parser = https_parse_cert
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = cert_commit
   },
   {
     .name = "ClientCert",
-    .parser = https_parse_client_cert
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_lst_clientcert
   },
   {
     .name = "Disable",
-    .parser = https_parse_disable
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .commit = lst_disable_proto_commit,
+    .rcvr = {
+      .off = offsetof (LISTENER, ssl_op_enable)
+    }
   },
   {
     .name = "Ciphers",
-    .parser = https_parse_ciphers
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_lst_ciphers
   },
   {
     .name = "SSLHonorCipherOrder",
-    .parser = https_parse_honor_cipher_order
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .commit = honor_cipher_order_commit
   },
   {
     .name = "SSLAllowClientRenegotiation",
-    .parser = https_parse_allow_client_renegotiation
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_INT,
+    .commit = alloc_client_reneg_commit
   },
   {
     .name = "CAlist",
-    .parser = https_parse_calist
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = calist_commit
   },
   {
     .name = "VerifyList",
-    .parser = https_parse_verifylist
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = verifylist_commit
   },
   {
     .name = "CRLlist",
-    .parser = https_parse_crlist
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = crlist_commit
   },
   {
     .name = "NoHTTPS11",
-    .parser = https_parse_nohttps11
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = nohttps11_commit
   },
-
   { NULL }
 };
+
+#if 0
+/* Names of the statements that require the presence of the Cert statement.
+ */
+static char *cert_deps[] = {
+  "ClientCert",
+  "Disable",
+  "Ciphers",
+  "CAList",
+  "VerifyList",
+  "CRlist"
+};
+#endif
+
+/* If Cert statement is present in node, move it to the start of the
+   subtree and return 0.  Otherwise, return -1.
+ */
+static int
+lst_https_reorder (CFG_NODE *node)
+{
+  CFG_NODE *np;
+  int rc = -1;
+
+  np = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "Cert");
+  if (np)
+    {
+      rc = 0;
+      cfg_ast_remove (node->subtree, np);
+      cfg_ast_prepend (node->subtree, np);
+    }
+  return rc;
+}
+
+static int
+lst_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  POUND_DEFAULTS *dfl = (POUND_DEFAULTS*) call_data;
+  LISTENER_HEAD *list_head = cfg_rcvr_ptr (&node->rcvr, *baseptr);
+  LISTENER *lst;
+
+  if ((lst = listener_alloc (dfl)) == NULL)
+    return -1;
+
+  if (!cfg_arglist_empty (&node->arglist))
+    {
+      CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+      char const *tag = string_ptr (arg->v.string);
+
+      if (find_listener_ident (list_head, tag))
+	{
+	  conf_error_at_locus_range (&node->locus,
+				     "listener name is not unique");
+	  return -1;
+	}
+      lst->name = xstrdup (tag);
+    }
+
+  SLIST_PUSH (list_head, lst, next);
+
+  *baseptr = lst;
+
+  return 0;
+}
+
+static int
+lst_https_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  LISTENER *lst;
+
+  if (lst_https_reorder (node))
+    {
+      conf_error_at_locus_range (&node->locus, "no certificates for HTTPS;"
+				 " use Cert statement to load some");
+      return -1;
+    }
+  if (lst_prepare (node, call_data, baseptr))
+    return -1;
+  lst = *baseptr;
+
+  lst->ssl_op_enable = SSL_OP_ALL;
+#ifdef  SSL_OP_NO_COMPRESSION
+  lst->ssl_op_enable |= SSL_OP_NO_COMPRESSION;
+#endif
+  lst->ssl_op_disable =
+    SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
+    SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
+
+  return 0;
+}
+
+/*
+ * For each certificate used in ClientCert condition from COND, invoke
+ * function CB with the certificate and DATA as its arguments.
+ *
+ * Return 0 if all calls returned 0, otherwise return the value returned from
+ * the first failed call.
+ *
+ * If CB is NULL, return 1 if at least one ClientCert was found, and 0
+ * otherwise.
+ */
+static int
+foreach_client_cert (SERVICE_COND *cond, int (*cb) (X509 *, void *),
+		     void *data)
+{
+  int rc = 0;
+
+  switch (cond->type)
+    {
+    case COND_CLIENT_CERT:
+      if (cb)
+	rc = cb (cond->x509, data);
+      else
+	rc = 1;
+      break;
+
+    case COND_BOOL:
+      {
+	SERVICE_COND *subcond;
+	SLIST_FOREACH (subcond, &cond->boolean.head, next)
+	  {
+	    if ((rc = foreach_client_cert (subcond, cb, data)) != 0)
+	      break;
+	  }
+      }
+      break;
+
+    default:
+      break;
+    }
+  return rc;
+}
+
+/*
+ * If at least one ClientCert condition is used in S_HEAD, print error
+ * text MSG and return 1.  Otherwise, return 0.
+ */
+static int
+forbid_ssl_usage (SERVICE_HEAD *s_head, char const *msg)
+{
+  SERVICE *svc;
+  SLIST_FOREACH (svc, s_head, next)
+    {
+      if (foreach_client_cert (&svc->cond, NULL, NULL))
+	{
+	  conf_error_at_locus_range (&svc->locus, "%s", msg);
+	  return 1;
+	}
+    }
+  return 0;
+}
+
+static int
+resolve_listener_address (LISTENER *lst, char *defsrv)
+{
+  if (lst->addr.ai_addr == NULL)
+    {
+      struct addrinfo hints, *res, *ptr;
+      char *service;
+      int rc;
+
+      memset (&hints, 0, sizeof (hints));
+      hints.ai_family = AF_UNSPEC;
+      hints.ai_flags = AI_PASSIVE | AI_NUMERICHOST;
+      hints.ai_socktype = SOCK_STREAM;
+      service = lst->port_str ? lst->port_str : defsrv;
+      rc = getaddrinfo (lst->addr_str, service, &hints, &res);
+      if (rc != 0)
+	{
+	  conf_error_at_locus_range (&lst->locus, "bad listener address: %s",
+				     gai_strerror (rc));
+	  return -1;
+	}
+
+      ptr = res;
+      /* Prefer in6addr_any over INADDR_ANY. */
+      if (ptr->ai_family == AF_INET &&
+	  ((struct sockaddr_in*)ptr->ai_addr)->sin_addr.s_addr == INADDR_ANY &&
+	  ptr->ai_next != NULL &&
+	  ptr->ai_next->ai_family == AF_INET6 &&
+	  memcmp (&((struct sockaddr_in6*)ptr->ai_next->ai_addr)->sin6_addr,
+		  &in6addr_any, sizeof (in6addr_any)) == 0)
+	ptr = ptr->ai_next;
+
+      lst->addr = *ptr;
+      lst->addr.ai_next = NULL;
+      lst->addr.ai_addr = xmalloc (ptr->ai_addrlen);
+      memcpy (lst->addr.ai_addr, ptr->ai_addr, ptr->ai_addrlen);
+      freeaddrinfo (res);
+    }
+  return 0;
+}
 
 static int
 client_cert_cb (X509 *x509, void *data)
@@ -5364,7 +7014,7 @@ client_cert_cb (X509 *x509, void *data)
       X509_STORE *store = SSL_CTX_get_cert_store (pc->ctx);
       if (X509_STORE_add_cert (store, x509) != 1)
 	{
-	  openssl_error_at_locus_range (NULL, NULL, "X509_STORE_add_cert");
+	  conf_openssl_error (NULL, NULL, "X509_STORE_add_cert");
 	  return -1;
 	}
     }
@@ -5372,11 +7022,11 @@ client_cert_cb (X509 *x509, void *data)
   return 0;
 }
 
-
 static int
 flush_service_client_cert (LISTENER *lst)
 {
   SERVICE *svc;
+
   SLIST_FOREACH (svc, &lst->services, next)
     {
       if (foreach_client_cert (&svc->cond, client_cert_cb, lst))
@@ -5403,65 +7053,55 @@ flush_service_client_cert (LISTENER *lst)
 	  lst->clnt_check = 3;
 	}
     }
-  return CFGPARSER_OK;
+  return 0;
 }
 
-static int
-parse_listen_https (void *call_data, void *section_data)
+/*
+ * For all services defined in listener, set its lstn field to point to the
+ * listener.
+ */
+static void
+listener_service_backlink (LISTENER *lstn)
 {
-  LISTENER *lst;
-  LISTENER_HEAD *list_head = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  POUND_CTX *pc;
-  struct stringbuf sb;
-  struct token *tok;
+  SERVICE *svc;
+  SLIST_FOREACH (svc, &lstn->services, next)
+    svc->lstn = lstn;
+}
 
-  if ((lst = listener_alloc (dfl)) == NULL)
-    return CFGPARSER_FAIL;
+/* Commit function for ListenHTTP and ListenHHTPS sections */
+static int
+lst_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = baseptr;
 
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  else if (tok->type == T_STRING)
-    {
-      if (find_listener_ident (list_head, tok->str))
-	{
-	  conf_error ("%s", "listener name is not unique");
-	  return CFGPARSER_FAIL;
-	}
-      lst->name = xstrdup (tok->str);
-    }
-  else
-    putback_tkn (tok);
-
-  lst->ssl_op_enable = SSL_OP_ALL;
-#ifdef  SSL_OP_NO_COMPRESSION
-  lst->ssl_op_enable |= SSL_OP_NO_COMPRESSION;
-#endif
-  lst->ssl_op_disable =
-    SSL_OP_ALLOW_UNSAFE_LEGACY_RENEGOTIATION | SSL_OP_LEGACY_SERVER_CONNECT |
-    SSL_OP_DONT_INSERT_EMPTY_FRAGMENTS;
-
-  if (parser_loop (https_parsetab, lst, section_data, &lst->locus))
-    return CFGPARSER_FAIL;
-
-  if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
+  if (resolve_listener_address (lst, PORT_HTTP_STR))
+    return -1;
 
   listener_service_backlink (lst);
+
+  if (SLIST_EMPTY (&lst->ctx_head) &&
+      forbid_ssl_usage (&lst->services,
+			"use of SSL features in ListenHTTP sections"
+			" is forbidden"))
+    return -1;
 
   if (lst->max_uri_length > lst->linebufsize)
     lst->max_uri_length = lst->linebufsize;
 
-  if (SLIST_EMPTY (&lst->ctx_head))
-    {
-      conf_error_at_locus_range (&lst->locus, "Cert statement is missing");
-      return CFGPARSER_FAIL;
-    }
+  return 0;
+}
 
-  if (flush_service_client_cert (lst) != CFGPARSER_OK)
-    {
-      return CFGPARSER_FAIL;
-    }
+static int
+lst_https_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = baseptr;
+  struct stringbuf sb;
+  POUND_CTX *pc;
+
+  if (lst_commit (node, call_data, lst))
+    return -1;
+  if (flush_service_client_cert (lst))
+    return -1;
 
 #ifdef SSL_CTRL_SET_TLSEXT_SERVERNAME_CB
   if (!SLIST_EMPTY (&lst->ctx_head))
@@ -5470,8 +7110,8 @@ parse_listen_https (void *call_data, void *section_data)
       if (!SSL_CTX_set_tlsext_servername_callback (ctx, SNI_server_name)
 	  || !SSL_CTX_set_tlsext_servername_arg (ctx, &lst->ctx_head))
 	{
-	  conf_openssl_error (NULL, "can't set SNI callback");
-	  return CFGPARSER_FAIL;
+	  conf_openssl_error (NULL, NULL, "can't set SNI callback");
+	  return -1;
 	}
     }
 #endif
@@ -5492,63 +7132,82 @@ parse_listen_https (void *call_data, void *section_data)
     }
   stringbuf_free (&sb);
 
-  SLIST_PUSH (list_head, lst, next);
-  return CFGPARSER_OK;
+  return 0;
 }
+
+static CFG_TYPE cfg_type_listener = {
+  .argdef = "s?",
+  .prepare = lst_prepare,
+  .commit = lst_commit
+};
+
+static CFG_TYPE cfg_type_listener_https = {
+  .argdef = "s?",
+  .prepare = lst_https_prepare,
+  .commit = lst_https_commit
+};
 
-static CFGPARSER_TABLE tunnel_backend_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
+/*
+ * The Tunnel section.
+ */
+static CFG_DEFN tunnel_backend_defn[] = {
   {
     .name = "Address",
-    .parser = assign_address_string,
-    .off = offsetof (BACKEND, v.mtx.hostname)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LAZY_STRING,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.hostname)
+    }
   },
   {
     .name = "Port",
-    .parser = assign_port_int,
-    .off = offsetof (BACKEND, v.mtx.port)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_PORT,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.port)
+    }
   },
   {
     .name = "TimeOut",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.to)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.to)
+    }
   },
   {
     .name = "ConnTO",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (BACKEND, v.mtx.conn_to)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (BACKEND, v.mtx.conn_to)
+    }
   },
   {
     .name = "Disabled",
-    .parser = cfg_assign_bool,
-    .off = offsetof (BACKEND, disabled)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (BACKEND, disabled)
+    }
   },
   { NULL }
 };
 
 static int
-parse_tunnel_backend (void *call_data, void *section_data)
+tunnel_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  LISTENER *lst = call_data;
-  BACKEND *be;
+  LISTENER *lst = *baseptr;
   SERVICE *svc;
+  BACKEND *be;
 
-  if (!SLIST_EMPTY (&lst->services))
-    {
-      conf_error ("%s", "only one backend is allowed in Tunnel");
-      return CFGPARSER_FAIL;
-    }
-
-  /* Create service and backend */
   svc = new_service (BALANCER_ALGO_RANDOM);
-  locus_range_copy (&svc->locus, &lst->locus);
+  locus_range_copy (&svc->locus, &node->locus);
 
-  be = parse_backend_internal (tunnel_backend_parsetab, section_data);
+  be = backend_init (node, call_data);
   if (!be)
-    return CFGPARSER_FAIL;
+    return -1;
+
   be->service = svc;
   be->priority = 1;
 
@@ -5558,690 +7217,435 @@ parse_tunnel_backend (void *call_data, void *section_data)
 
   /* Register service in the listener */
   SLIST_PUSH (&lst->services, svc, next);
-  return CFGPARSER_OK;
+
+  *baseptr = be;
+
+  return 0;
 }
 
-static CFGPARSER_TABLE tunnel_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
+static CFG_TYPE cfg_type_tunnel_backend = {
+  .prepare = tunnel_backend_prepare
+};
+
+static CFG_DEFN lst_tunnel_defn[] = {
   {
     .name = "",
     .type = KWT_TABREF,
     .ref = listener_address_common
   },
-  { "Backend", parse_tunnel_backend },
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = &cfg_type_tunnel_backend,
+    .ref = tunnel_backend_defn,
+  },
   { NULL }
 };
 
 static int
-parse_tunnel (void *call_data, void *section_data)
+lst_tunnel_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
   LISTENER *lst;
-  LISTENER_HEAD *list_head = call_data;
-  POUND_DEFAULTS *dfl = section_data;
-  struct token *tok;
+  CFG_NODE *bn0, *bn;
 
-  if ((lst = listener_alloc (dfl)) == NULL)
-    return CFGPARSER_FAIL;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  else if (tok->type == T_STRING)
+  bn0 = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "Backend");
+  if (!bn0)
     {
-      if (find_listener_ident (list_head, tok->str))
-	{
-	  conf_error ("%s", "listener name is not unique");
-	  return CFGPARSER_FAIL;
-	}
-      lst->name = xstrdup (tok->str);
+      conf_error_at_locus_range (&node->locus, "no backend defined");
+      return -1;
     }
-  else
-    putback_tkn (tok);
+  bn = cfg_node_locate_next (bn0, cfg_node_name_eq, "Backend");
+  if (bn)
+    {
+      conf_error_at_locus_range (&bn->locus, "backend redefined");
+      conf_error_at_locus_range (&bn0->locus, "previous definition was here");
+      return -1;
+    }
+
+  if (lst_prepare (node, call_data, (void**)&lst))
+    return -1;
   lst->tunnel = 1;
 
-  if (parser_loop (tunnel_parsetab, lst, section_data, &lst->locus))
-    return CFGPARSER_FAIL;
+  *baseptr = lst;
 
-  if (resolve_listener_address (lst, PORT_HTTPS_STR) != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
-
-  if (SLIST_EMPTY (&lst->services))
-    { // FIXME
-      conf_error_at_locus_range (&lst->locus, "no backend defined");
-      return CFGPARSER_FAIL;
-    }
-
-  listener_service_backlink (lst);
-
-  SLIST_PUSH (list_head, lst, next);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_threads_compat (void *call_data, void *section_data)
-{
-  int rc;
-  unsigned n;
-
-  if ((rc = cfg_assign_unsigned (&n, section_data)) != CFGPARSER_OK)
-    return rc;
-
-  worker_min_count = worker_max_count = n;
-
-  return CFGPARSER_OK;
+  return 0;
 }
 
-static int
-parse_control_socket (void *call_data, void *section_data)
-{
-  struct addrinfo *addr = call_data;
-  struct token *tok;
-  struct sockaddr_un *sun;
-  size_t len;
-
-  /* Get socket address */
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  len = strlen (tok->str);
-  if (len > UNIX_PATH_MAX)
-    {
-      conf_error_at_locus_range (&tok->locus,
-				 "%s", "UNIX path name too long");
-      return CFGPARSER_FAIL;
-    }
-
-  len += offsetof (struct sockaddr_un, sun_path) + 1;
-  sun = xmalloc (len);
-  sun->sun_family = AF_UNIX;
-  strcpy (sun->sun_path, tok->str);
-  unlink_at_exit (sun->sun_path);
-
-  addr->ai_socktype = SOCK_STREAM;
-  addr->ai_family = AF_UNIX;
-  addr->ai_protocol = 0;
-  addr->ai_addr = (struct sockaddr *) sun;
-  addr->ai_addrlen = len;
-
-  return CFGPARSER_OK;
-}
-
-static CFGPARSER_TABLE control_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "Socket",
-    .parser = parse_control_socket,
-    .off = offsetof (LISTENER, addr)
-  },
-  {
-    .name = "ChangeOwner",
-    .parser = cfg_assign_bool,
-    .off = offsetof (LISTENER, chowner)
-  },
-  {
-    .name = "Mode",
-    .parser = cfg_assign_mode,
-    .off = offsetof (LISTENER, mode)
-  },
-  { NULL }
+static CFG_TYPE cfg_type_tunnel = {
+  .argdef = "s?",
+  .prepare = lst_tunnel_prepare,
+  .commit = lst_commit
 };
-
-static int
-parse_control_listener (void *call_data, void *section_data)
-{
-  struct token *tok;
-  LISTENER *lst;
-  SERVICE *svc;
-  BACKEND *be;
-  int rc;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-  lst = listener_alloc (section_data);
-  switch (tok->type)
-    {
-    case '\n':
-      rc = parser_loop (control_parsetab, lst, section_data, &lst->locus);
-      if (rc == CFGPARSER_OK)
-	{
-	  if (lst->addr.ai_addrlen == 0)
-	    {
-	      conf_error_at_locus_range (&lst->locus, "%s",
-					 "Socket statement is missing");
-	      rc = CFGPARSER_FAIL;
-	    }
-	}
-      break;
-
-    case T_STRING:
-      locus_point_copy (&lst->locus.beg, &last_token_locus_range ()->beg);
-      putback_tkn (tok);
-      rc = parse_control_socket (&lst->addr, section_data);
-      locus_point_copy (&lst->locus.end, &last_token_locus_range ()->end);
-      break;
-
-    default:
-      conf_error ("expected string or newline, but found %s",
-		  token_type_str (tok->type));
-      rc = CFGPARSER_FAIL;
-    }
-
-  if (rc != CFGPARSER_OK)
-    return CFGPARSER_FAIL;
-
-  lst->verb = 1; /* Need PUT and DELETE methods */
-  /* Register listener in the global listener list */
-  SLIST_PUSH (&listeners, lst, next);
-
-  /* Create service; there'll be only one backend so the balancing algorithm
-     doesn't really matter. */
-  svc = new_service (BALANCER_ALGO_RANDOM);
-  svc->lstn = lst;
-  locus_range_copy (&svc->locus, &lst->locus);
-
-  /* Register service in the listener */
-  SLIST_PUSH (&lst->services, svc, next);
-
-  /* Create backend */
-  be = xbackend_create (BE_CONTROL, 1, &lst->locus);
-  be->service = svc;
-  /* Register backend in service */
-  balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
-  service_recompute_pri_unlocked (svc, NULL, NULL);
-
-  return CFGPARSER_OK;
-}
 
-static int
-parse_named_backend (void *call_data, void *section_data)
-{
-  NAMED_BACKEND_TABLE *tab = call_data;
-  struct token *tok;
-  BACKEND *be;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
-  NAMED_BACKEND *olddef;
-  char *name;
-
-  locus_point_copy (&range.beg, &last_token_locus_range ()->beg);
-
-  if ((tok = gettkn_expect (T_STRING)) == NULL)
-    return CFGPARSER_FAIL;
-
-  name = xstrdup (tok->str);
-
-  be = parse_backend_internal (backend_parsetab, section_data);
-  if (!be)
-    return CFGPARSER_FAIL;
-  locus_point_copy (&range.end, &last_token_locus_range ()->end);
-  locus_range_copy (&be->locus, &range);
-
-  olddef = named_backend_insert (tab, name, be);
-  free (name);
-  pthread_mutex_destroy (&be->mut);
-  locus_range_unref (&be->locus);
-  free (be);
-
-  if (olddef)
-    {
-      conf_error_at_locus_range (&range, "redefinition of named backend %s",
-				 olddef->name);
-      conf_error_at_locus_range (&olddef->locus,
-				 "original definition was here");
-      return CFGPARSER_FAIL;
-    }
-
-  locus_range_unref (&range);
-  return CFGPARSER_OK;
-}
-
-static int
-parse_combine_headers (void *call_data, void *section_data)
-{
-  struct token *tok;
-
-  if ((tok = gettkn_any ()) == NULL)
-    return CFGPARSER_FAIL;
-
-  if (tok->type != '\n')
-    {
-      conf_error ("expected newline, but found %s", token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  for (;;)
-    {
-      int rc;
-      if ((tok = gettkn_any ()) == NULL)
-	return CFGPARSER_FAIL;
-      if (tok->type == '\n')
-	continue;
-      if (tok->type == T_IDENT)
-	{
-	  if (c_strcasecmp (tok->str, "end") == 0)
-	    break;
-	  if (c_strcasecmp (tok->str, "include") == 0)
-	    {
-	      if ((rc = cfg_parse_include (NULL, NULL)) == CFGPARSER_FAIL)
-		return rc;
-	      continue;
-	    }
-	  conf_error ("expected quoted string, \"Include\", or \"End\", but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-      if (tok->type == T_STRING)
-	combinable_header_add (tok->str);
-      else
-	{
-	  conf_error ("expected quoted string, \"Include\", or \"End\", but found %s",
-		      token_type_str (tok->type));
-	  return CFGPARSER_FAIL;
-	}
-    }
-  return CFGPARSER_OK;
-}
-
-static struct kwtab regex_type_table[] = {
-  { "posix", GENPAT_POSIX },
-#ifdef HAVE_LIBPCRE
-  { "pcre",  GENPAT_PCRE },
-  { "perl",  GENPAT_PCRE },
-#endif
-  { NULL }
-};
-
-static int
-assign_regex_type (void *call_data, void *section_data)
-{
-  return cfg_assign_int_enum (call_data, gettkn_expect (T_IDENT),
-			      regex_type_table,
-			      "regex type");
-}
-
-static int
-read_resolv_conf (void *call_data, void *section_data)
-{
-  char **pstr = call_data;
-
-  if (*pstr)
-    {
-      conf_error ("%s", "ConfigFile statement overrides prior ConfigText");
-      free (*pstr);
-      *pstr = NULL;
-    }
-  return cfg_assign_string_from_file (pstr, section_data);
-}
-
-static int
-read_resolv_text (void *call_data, void *section_data)
-{
-  char **pstr = call_data;
-  char *str;
-  struct token *tok;
-
-  if (*pstr)
-    {
-      conf_error ("%s", "ConfigText statement overrides prior ConfigFile");
-      free (*pstr);
-      *pstr = NULL;
-    }
-
-  if ((tok = gettkn_any ()) == NULL)
-    {
-      conf_error ("%s", "unexpected end of file");
-      return CFGPARSER_FAIL;
-    }
-  if (tok->type != '\n')
-    {
-      conf_error ("expected newline, but found %s",
-		  token_type_str (tok->type));
-      return CFGPARSER_FAIL;
-    }
-
-  if (cfg_read_to_end (cur_input, &str) == EOF)
-    return CFGPARSER_FAIL;
-  *pstr = xstrdup (str);
-  return CFGPARSER_OK_NONL;
-}
-
-static CFGPARSER_TABLE resolver_parsetab[] = {
-  {
-    .name = "End",
-    .parser = cfg_parse_end
-  },
-  {
-    .name = "ConfigFile",
-    .parser = read_resolv_conf,
-  },
-  {
-    .name = "ConfigText",
-    .parser = read_resolv_text,
-  },
-  {
-    .name = "Debug",
-    .parser = cfg_assign_bool,
-    .off = offsetof (struct resolver_config, debug)
-  },
-  {
-    .name = "CNAMEChain",
-    .parser = cfg_assign_unsigned,
-    .off = offsetof (struct resolver_config, max_cname_chain)
-  },
-  {
-    .name = "RetryInterval",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (struct resolver_config, retry_interval)
-  },
-  { NULL }
-};
-
-static int
-parse_resolver (void *call_data, void *section_data)
-{
-  POUND_DEFAULTS *dfl = section_data;
-  struct locus_range range = LOCUS_RANGE_INITIALIZER;
-  int rc = parser_loop (resolver_parsetab, &dfl->resolver, dfl, &range);
-#ifndef ENABLE_DYNAMIC_BACKENDS
-  if (rc == CFGPARSER_OK)
-    conf_error_at_locus_range (&range, "%s",
-			       "section ignored: "
-			       "pound compiled without support "
-			       "for dynamic backends");
-#endif
-  locus_range_unref (&range);
-  return rc;
-}
-
-static int
-increase_reserved_fds (void *call_data, void *section_data)
-{
-  unsigned n;
-  int rc;
-  int per_watcher;
-  char const *arg;
-
-  static struct config_option optab[] = {
-    { "watcher", 1 },
-    { NULL }
-  };
-  struct config_option const *opt;
-
-  if (gettok_option (optab, &opt, &arg) == CFGPARSER_FAIL)
-    return CFGPARSER_FAIL;
-  per_watcher = opt != NULL;
-
-  rc = cfg_assign_unsigned (&n, section_data);
-  if (rc != CFGPARSER_OK)
-    return rc;
-
-  if (per_watcher)
-    {
-      if (INT_MAX - per_worker_fds < n)
-	{
-	  conf_error ("%s", "value out of range");
-	  return CFGPARSER_FAIL;
-	}
-      per_worker_fds += n;
-    }
-  else
-    {
-      if (INT_MAX - num_reserved_fds < n)
-	{
-	  conf_error ("%s", "value out of range");
-	  return CFGPARSER_FAIL;
-	}
-      num_reserved_fds += n;
-    }
-
-  return CFGPARSER_OK;
-}
-
-static CFGPARSER_TABLE top_level_parsetab[] = {
-  {
-    .type = KWT_TOPLEVEL
-  },
+/*
+ * Top-level (global scope) configuration statements.
+ */
+static CFG_DEFN top_level_defn[] = {
   {
     .name = "IncludeDir",
-    .parser = cfg_parse_includedir
+    .token = T_INCLUDEDIR,
+    .vtype = CFG_TYPE_STRING,
+    /* This one is handled in the grammar directly. The node will never be
+       committed directly. */
   },
   {
     .name = "User",
-    .parser = cfg_assign_string,
-    .data = &user
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
   },
   {
     .name = "Group",
-    .parser = cfg_assign_string,
-    .data = &group
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
   },
   {
     .name = "RootJail",
-    .parser = cfg_assign_string,
-    .data = &root_jail
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
   },
   {
     .name = "Daemon",
-    .parser = cfg_assign_bool,
-    .data = &daemonize
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
   },
   {
     .name = "Supervisor",
-    .parser = cfg_assign_bool,
-    .data = &enable_supervisor
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
   },
   {
     .name = "WorkerMinCount",
-    .parser = cfg_assign_unsigned,
-    .data = &worker_min_count
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .rcvr = {
+      .data = &worker_min_count
+    },
+    .verify = verify_range_positive_int,
   },
   {
     .name = "WorkerMaxCount",
-    .parser = cfg_assign_unsigned,
-    .data = &worker_max_count
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .rcvr = {
+      .data = &worker_max_count
+    },
+    .verify = verify_range_positive_int,
   },
   {
     .name = "Threads",
-    .parser = parse_threads_compat
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .commit = cfg_threads_commit,
+    .verify = verify_range_positive_int,
   },
   {
     .name = "WorkerIdleTimeout",
-    .parser = cfg_assign_timeout,
-    .data = &worker_idle_timeout
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .data = &worker_idle_timeout
+    },
   },
   {
     .name = "WorkerStackSize",
-    .parser = cfg_assign_size,
-    .data = &worker_stack_size
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_SIZE,
+    .rcvr = {
+      .data = &worker_stack_size
+    },
   },
   {
     .name = "ConnectionQueueSize",
-    .parser = pound_http_set_qsize
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_UINT,
+    .commit = cfg_connqsize_commit,
+    .verify = verify_range_nonnegative_int,
   },
   {
     .name = "ReserveFD",
-    .parser = increase_reserved_fds
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_reserve_fd,
   },
   {
     .name = "Grace",
-    .parser = cfg_assign_timeout,
-    .data = &grace
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .data = &grace
+    },
   },
   {
     .name = "LogFacility",
-    .parser = cfg_assign_log_facility,
-    .off = offsetof (POUND_DEFAULTS, facility)
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_logfacility,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, facility)
+    },
   },
   {
     .name = "LogLevel",
-    .parser = parse_log_level,
-    .off = offsetof (POUND_DEFAULTS, log_level)
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_loglevel,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, log_level)
+    },
   },
   {
     .name = "LogFormat",
-    .parser = parse_log_format
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_logformat,
   },
   {
     .name = "LogTag",
-    .parser = cfg_assign_string,
-    .data = &syslog_tag
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &syslog_tag
+    },
   },
   {
     .name = "Alive",
-    .parser = cfg_assign_timeout,
-    .data = &alive_to
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .data = &alive_to
+    },
   },
   {
     .name = "Client",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (POUND_DEFAULTS, clnt_to)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, clnt_to)
+    },
   },
   {
     .name = "TimeOut",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (POUND_DEFAULTS, be_to)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, be_to)
+    },
   },
   {
     .name = "WSTimeOut",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (POUND_DEFAULTS, ws_to)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, ws_to)
+    },
   },
   {
     .name = "ConnTO",
-    .parser = cfg_assign_timeout,
-    .off = offsetof (POUND_DEFAULTS, be_connto)
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, be_connto)
+    },
   },
   {
     .name = "Balancer",
-    .parser = parse_balancer,
-    .off = offsetof (POUND_DEFAULTS, balancer_algo)
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_balancer,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, balancer_algo)
+    },
   },
   {
     .name = "HeaderOption",
-    .parser = parse_header_options,
-    .off = offsetof (POUND_DEFAULTS, header_options)
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_headeroptions,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, header_options)
+    },
   },
   {
     .name = "ECDHCurve",
-    .parser = parse_ECDHCurve,
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_IGNORED,
     .deprecated = 1,
     .message = "this setting is no longer used"
   },
   {
     .name = "SSLEngine",
-    .parser = parse_SSLEngine
-  },
-  {
-    .name = "Control",
-    .parser = parse_control_listener
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .commit = commit_sslengine,
   },
   {
     .name = "Anonymise",
-    .parser = cfg_int_set_one,
-    .data = &anonymise
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .rcvr = {
+      .data = &anonymise
+    },
   },
   {
     .name = "Anonymize",
     .type = KWT_ALIAS
   },
   {
-    .name = "Service",
-    .parser = parse_service,
-    .data = &services
-  },
-  {
-    .name = "Backend",
-    .parser = parse_named_backend,
-    .off = offsetof (POUND_DEFAULTS, named_backend_table)
-  },
-  {
-    .name = "Condition",
-    .parser = parse_named_cond
-  },
-  {
-    .name = "ListenHTTP",
-    .parser = parse_listen_http,
-    .data = &listeners
-  },
-  {
-    .name = "ListenHTTPS",
-    .parser = parse_listen_https,
-    .data = &listeners
-  },
-  {
-    .name = "Tunnel",
-    .parser = parse_tunnel,
-    .data = &listeners
-  },
-  {
-    .name = "ACL",
-    .parser = parse_named_acl
-  },
-  {
     .name = "PidFile",
-    .parser = cfg_assign_string,
-    .data = &pid_name
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &pid_name
+    },
   },
   {
     .name = "BackendStats",
-    .parser = cfg_assign_bool,
-    .data = &enable_backend_stats
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .data = &enable_backend_stats
+    },
   },
   {
     .name = "ForwardedHeader",
-    .parser = cfg_assign_string,
-    .data = &forwarded_header
-  },
-  {
-    .name = "TrustedIP",
-    .parser = assign_acl,
-    .data = &trusted_ips
-  },
-  {
-    .name = "CombineHeaders",
-    .parser = parse_combine_headers
-  },
-  {
-    .name = "RegexType",
-    .parser = assign_regex_type,
-    .off = offsetof (POUND_DEFAULTS, re_type),
-  },
-  {
-    .name = "Resolver",
-    .parser = parse_resolver
-  },
-  {
-    .name = "Lua",
-    .parser = pndlua_parse_config
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_STRING,
+    .rcvr = {
+      .data = &forwarded_header
+    },
   },
   {
     .name = "WatcherTTL",
-    .parser = cfg_assign_unsigned,
-    .data = &watcher_ttl
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_DURATION,
+    .rcvr = {
+      .data = &watcher_ttl
+    },
   },
   {
     .name = "LineBufferSize",
-    .parser = assign_bufsize,
-    .off = offsetof (POUND_DEFAULTS, linebufsize),
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_SIZE,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, linebufsize),
+    },
   },
   {
+    .name = "RegexType",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_LITERAL,
+    .commit = &commit_regex_type,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, re_type),
+    },
+  },
+
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = &cfg_type_named_backend,
+    .ref = common_backend_defn,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, named_backend_table)
+    }
+  },
+  {
+    .name = "Control",
+    .token = T_CONTROL,
+    .vtype = &cfg_type_control,
+    .ref = control_defn
+  },
+  {
+    .name = "CombineHeaders",
+    .token = T_COMHEADERS,
+    .vtype = CFG_TYPE_ANY,
+    .commit = comheaders_commit
+  },
+
+  {
+    .name = "Resolver",
+    .token = T_SECTION,
+    .vtype = &cfg_type_resolver,
+    .ref = resolver_defn
+  },
+
+  {
     .name = "Constant",
-    .parser = cfg_parse_strconst,
-    .data = &strconst_tab
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_constant,
+    .rcvr = {
+      .data = &strconst_tab
+    }
+  },
+  {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = &cfg_type_named_acl
+  },
+  {
+    .name = "TrustedIP",
+    .token = T_TRUSTEDIP,
+    .vtype = &cfg_type_trustedip,
+    .rcvr = {
+      .data = &trusted_ips
+    }
+  },
+  {
+    .name = "Condition",
+    .token = T_SECTION,
+    .vtype = &cfg_type_condition,
+    .ref = cond_defn
+  },
+  {
+    .name = "Lua",
+    .token = T_SECTION,
+#ifdef ENABLE_LUA
+    .ref = pndlua_defn,
+#else
+    .commit = nolua_commit
+#endif
+  },
+  {
+    .name = "Service",
+    .token = T_SECTION,
+    .vtype = &cfg_type_service,
+    .ref = svc_defn,
+    .rcvr = {
+      .data = &services
+    }
+  },
+  {
+    .name = "ListenHTTP",
+    .token = T_SECTION,
+    .vtype = &cfg_type_listener,
+    .ref = lst_http_defn,
+    .rcvr = {
+      .data = &listeners
+    }
+  },
+  {
+    .name = "ListenHTTPS",
+    .token = T_SECTION,
+    .vtype = &cfg_type_listener_https,
+    .ref = lst_https_defn,
+    .rcvr = {
+      .data = &listeners
+    }
+  },
+  {
+    .name = "Tunnel",
+    .token = T_SECTION,
+    .vtype = &cfg_type_tunnel,
+    .ref = lst_tunnel_defn,
+    .rcvr = {
+      .data = &listeners
+    }
   },
   /* Backward compatibility. */
   {
     .name = "IgnoreCase",
-    .parser = cfg_assign_bool,
-    .off = offsetof (POUND_DEFAULTS, ignore_case),
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_BOOL,
+    .rcvr = {
+      .off = offsetof (POUND_DEFAULTS, ignore_case),
+    },
     .deprecated = 1,
     .message = "use the -icase matching directive flag to request case-insensitive comparison"
   },
-
   { NULL }
 };
 
@@ -6340,72 +7744,9 @@ ipv4mapped (char const *ipstr, char **ipv4)
     *ipv4 = (char *)ipstr;
   return 0;
 }
-
-void
-backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
-			   struct be_regular *reg)
-{
-  memset (reg, 0, sizeof (*reg));
-  reg->addr = *addr;
-
-  switch (reg->addr.ai_family)
-    {
-    case AF_INET:
-      ((struct sockaddr_in *)reg->addr.ai_addr)->sin_port = mtx->port;
-      break;
-
-    case AF_INET6:
-      ((struct sockaddr_in6 *)reg->addr.ai_addr)->sin6_port = mtx->port;
-      break;
-    }
-
-  reg->alive = 1;
-  reg->to = mtx->to;
-  reg->conn_to = mtx->conn_to;
-  reg->ws_to = mtx->ws_to;
-  reg->ctx = mtx->ctx;
-  reg->servername = mtx->servername;
-}
-
-static int
-backend_resolve (BACKEND *be)
-{
-  struct addrinfo addr;
-  struct be_regular reg;
-  char *hostname = be->v.mtx.hostname;
-
-  if (get_host (hostname, &addr, be->v.mtx.family))
-    {
-      /* if we can't resolve it, assume this is a UNIX domain socket */
-      struct sockaddr_un *sun;
-      size_t len = strlen (hostname);
-      if (len > UNIX_PATH_MAX)
-	{
-	  conf_error_at_locus_range (&be->locus, "%s",
-				     "UNIX path name too long");
-	  return CFGPARSER_FAIL;
-	}
-
-      len += offsetof (struct sockaddr_un, sun_path) + 1;
-      sun = xmalloc (len);
-      sun->sun_family = AF_UNIX;
-      strcpy (sun->sun_path, hostname);
-
-      addr.ai_socktype = SOCK_STREAM;
-      addr.ai_family = AF_UNIX;
-      addr.ai_protocol = 0;
-      addr.ai_addr = (struct sockaddr *) sun;
-      addr.ai_addrlen = len;
-    }
-
-  backend_matrix_to_regular (&be->v.mtx, &addr, &reg);
-  free (hostname);
-  be->v.reg = reg;
-  be->be_type = BE_REGULAR;
-  backend_refcount_init (be);
-  return 0;
-}
-
+/*
+ * Finalize backends.
+ */
 struct be_setup_closure
 {
   /* Input */
@@ -6429,6 +7770,8 @@ be_setup_closure_init (struct be_setup_closure *cp,
   cp->svc = svc;
   cp->bal = bal;
 }
+
+static int backend_resolve (BACKEND *be);
 
 static int
 backend_finalize (BACKEND *be, NAMED_BACKEND_TABLE *tab)
@@ -6543,6 +7886,74 @@ cb_be_setup (BACKEND *be, void *data)
     }
 }
 
+void
+backend_matrix_to_regular (struct be_matrix *mtx, struct addrinfo *addr,
+			   struct be_regular *reg)
+{
+  memset (reg, 0, sizeof (*reg));
+  reg->addr = *addr;
+
+  switch (reg->addr.ai_family)
+    {
+    case AF_INET:
+      ((struct sockaddr_in *)reg->addr.ai_addr)->sin_port = mtx->port;
+      break;
+
+    case AF_INET6:
+      ((struct sockaddr_in6 *)reg->addr.ai_addr)->sin6_port = mtx->port;
+      break;
+    }
+
+  reg->alive = 1;
+  reg->to = mtx->to;
+  reg->conn_to = mtx->conn_to;
+  reg->ws_to = mtx->ws_to;
+  reg->ctx = mtx->ctx;
+  reg->servername = mtx->servername;
+}
+
+static int
+backend_resolve (BACKEND *be)
+{
+  struct addrinfo addr;
+  struct be_regular reg;
+  char *hostname = be->v.mtx.hostname;
+
+  if (get_host (hostname, &addr, be->v.mtx.family))
+    {
+      /* if we can't resolve it, assume this is a UNIX domain socket */
+      struct sockaddr_un *sun;
+      size_t len = strlen (hostname);
+      if (len > UNIX_PATH_MAX)
+	{
+	  conf_error_at_locus_range (&be->locus, "%s",
+				     "UNIX path name too long");
+	  return -1;
+	}
+
+      len += offsetof (struct sockaddr_un, sun_path) + 1;
+      sun = xmalloc (len);
+      sun->sun_family = AF_UNIX;
+      strcpy (sun->sun_path, hostname);
+
+      addr.ai_socktype = SOCK_STREAM;
+      addr.ai_family = AF_UNIX;
+      addr.ai_protocol = 0;
+      addr.ai_addr = (struct sockaddr *) sun;
+      addr.ai_addrlen = len;
+    }
+
+  backend_matrix_to_regular (&be->v.mtx, &addr, &reg);
+  free (hostname);
+  be->v.reg = reg;
+  be->be_type = BE_REGULAR;
+  backend_refcount_init (be);
+  return 0;
+}
+
+/*
+ * Finalize services.
+ */
 static int
 service_finalize (SERVICE *svc, void *data)
 {
@@ -6600,11 +8011,49 @@ service_finalize (SERVICE *svc, void *data)
 
   return 0;
 }
-
-int
-parse_config_file (char const *file, int nosyslog)
+
+static int
+postprocess (POUND_DEFAULTS *dfl, int nosyslog)
 {
-  int res = -1;
+  if (forbid_ssl_usage (&services,
+			"use of SSL features in top-level sections"
+			" is forbidden"))
+    return -1;
+#ifdef ENABLE_DYNAMIC_BACKENDS
+  resolver_set_config (&dfl->resolver);
+#endif
+  if (foreach_service (service_finalize, &dfl->named_backend_table))
+    return -1;
+
+  named_cond_finish ();
+
+  if (pndlua_init ())
+    return -1;
+
+  if (worker_min_count > worker_max_count)
+    abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
+  if (!nosyslog)
+    log_facility = dfl->facility;
+  log_level = dfl->log_level;
+
+  return 0;
+}
+
+static int
+parser_finish (int keepwd)
+{
+  workdir_unref (include_wd);
+  if (include_wd && include_wd->refcount == 0)
+    include_wd = NULL;
+  /* Remove unreferenced wd's and resolve CWD */
+  return workdir_cleanup (keepwd);
+}
+
+int
+parse_config_file (char const *filename, int nosyslog)
+{
+  CFG_AST *ast;
+  int rc = -1;
   POUND_DEFAULTS pound_defaults = {
     .log_level = DEFAULT_LOG_LEVEL,
     .facility = LOG_DAEMON,
@@ -6623,318 +8072,21 @@ parse_config_file (char const *file, int nosyslog)
   named_backend_table_init (&pound_defaults.named_backend_table);
   compile_canned_formats ();
 
-  if (cfgparser_open (file, NULL))
-    return -1;
+  rewrite_branch_defn.vtype = &cfg_type_rewrite_branch;
 
-  res = parser_loop (top_level_parsetab, &pound_defaults, &pound_defaults,
-		     NULL);
-  if (res == 0)
+  ast = cfg_parse_tree (filename, NULL, top_level_defn);
+  if (ast)
     {
-      if (cur_input)
-	return -1;
-
-      if (forbid_ssl_usage (&services,
-			    "use of SSL features in top-level sections"
-			    " is forbidden"))
-	return -1;
-#ifdef ENABLE_DYNAMIC_BACKENDS
-      resolver_set_config (&pound_defaults.resolver);
-#endif
-      if (foreach_service (service_finalize,
-			   &pound_defaults.named_backend_table))
-	return -1;
-
-      named_cond_finish ();
-
-      if (pndlua_init ())
-	return -1;
-
-      if (worker_min_count > worker_max_count)
-	abend (NULL, "WorkerMinCount is greater than WorkerMaxCount");
-      if (!nosyslog)
-	log_facility = pound_defaults.facility;
-      log_level = pound_defaults.log_level;
+      rc = cfg_ast_finalize (ast, &pound_defaults, &pound_defaults);
+      cfg_ast_free (ast);
     }
+
+  if (rc == 0)
+    rc = postprocess (&pound_defaults, nosyslog);
+
   named_backend_table_free (&pound_defaults.named_backend_table);
-  cfgparser_finish (root_jail || daemonize);
-  return res;
-}
-
-enum
-  {
-    F_OFF,
-    F_ON,
-    F_DFL
-  };
 
-struct pound_feature
-{
-  char *name;
-  char *descr;
-  int enabled;
-  void (*setfn) (int, char const *);
-};
+  parser_finish (root_jail || daemonize);
 
-static void
-set_include_dir (int enabled, char const *val)
-{
-  if (enabled)
-    {
-      struct stat st;
-      if (val && (*val == 0 || strcmp (val, ".") == 0))
-	val = NULL;
-      else if (stat (val, &st))
-	{
-	  logmsg (LOG_ERR, "include-dir: can't stat %s: %s", val, strerror (errno));
-	  exit (1);
-	}
-      else if (!S_ISDIR (st.st_mode))
-	{
-	  logmsg (LOG_ERR, "include-dir: %s is not a directory", val);
-	  exit (1);
-	}
-      include_dir = val;
-    }
-  else
-    include_dir = NULL;
-}
-
-static struct pound_feature feature[] = {
-  [FEATURE_DNS] = {
-    .name = "dns",
-    .descr = "resolve host names found in configuration file (default)",
-    .enabled = F_ON
-  },
-  [FEATURE_INCLUDE_DIR] = {
-    .name = "include-dir",
-    .descr = "include file directory",
-    .enabled = F_DFL,
-    .setfn = set_include_dir
-  },
-  [FEATURE_WARN_DEPRECATED] = {
-    .name = "warn-deprecated",
-    .descr = "warn if deprecated configuration statements are used (default)",
-    .enabled = F_ON,
-  },
-  [FEATURE_CLOSE_EXTRA_FDS] = {
-    .name = "close-extra-fds",
-    .descr = "close file descriptors greater than 2 at startup (default)",
-    .enabled = F_ON
-  },
-  { NULL }
-};
-
-int
-feature_is_set (int f)
-{
-  return feature[f].enabled;
-}
-
-static int
-feature_set (char const *name)
-{
-  int i, enabled = F_ON;
-  size_t len;
-  char *val;
-
-  if ((val = strchr (name, '=')) != NULL)
-    {
-      len = val - name;
-      val++;
-    }
-  else
-    len = strlen (name);
-
-  if (val == NULL && strncmp (name, "no-", 3) == 0)
-    {
-      name += 3;
-      len -= 3;
-      enabled = F_OFF;
-    }
-
-  if (*name)
-    {
-      for (i = 0; feature[i].name; i++)
-	{
-	  if (strlen (feature[i].name) == len &&
-	      memcmp (feature[i].name, name, len) == 0)
-	    {
-	      if (feature[i].setfn)
-		feature[i].setfn (enabled, val);
-	      else if (val)
-		break;
-	      feature[i].enabled = enabled;
-	      return 0;
-	    }
-	}
-    }
-  return -1;
-}
-
-struct string_value pound_settings[] = {
-  { "Configuration file",  STRING_CONSTANT, { .s_const = POUND_CONF } },
-  { "Include directory",   STRING_CONSTANT, { .s_const = SYSCONFDIR } },
-  { "PID file",   STRING_CONSTANT,  { .s_const = POUND_PID } },
-  { "Buffer size",STRING_INT, { .s_int = MAXBUF } },
-  { "Regex types", STRING_CONSTANT, { .s_const = "POSIX"
-#if HAVE_LIBPCRE == 1
-				       ", PCRE"
-#elif HAVE_LIBPCRE == 2
-				       ", PCRE2"
-#endif
-    }
-  },
-  { "Dynamic backends", STRING_CONSTANT, { .s_const =
-#if ENABLE_DYNAMIC_BACKENDS
-					  "enabled"
-#else
-					  "disabled"
-#endif
-    }
-  },
-  { "FS event monitoring", STRING_CONSTANT, { .s_const =
-#if WITH_INOTIFY
-				 "inotify"
-#elif WITH_KQUEUE
-				 "kqueue"
-#else
-				 "periodic"
-#endif
-    }
-  },
-  { "Lua support", STRING_CONSTANT, { .s_const =
-#if ENABLE_LUA
-				     "enabled"
-#else
-				     "disabled"
-#endif
-    }
-  },
-  { NULL }
-};
-
-void
-print_help (void)
-{
-  int i;
-
-  printf ("usage: %s [-FVcehv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
-  printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
-  printf ("\nOptions are:\n\n");
-  printf ("   -c               check configuration file syntax and exit\n");
-  printf ("   -e               print errors on stderr (implies -F)\n");
-  printf ("   -F               remain in foreground after startup\n");
-  printf ("   -f FILE          read configuration from FILE\n");
-  printf ("                    (default: %s)\n", POUND_CONF);
-  printf ("   -p FILE          write PID to FILE\n");
-  printf ("                    (default: %s)\n", POUND_PID);
-  printf ("   -V               print program version, compilation settings, and exit\n");
-  printf ("   -v               print log messages to stdout/stderr during startup\n");
-  printf ("   -W [no-]FEATURE  enable or disable optional feature\n");
-  printf ("\n");
-  printf ("FEATUREs are:\n");
-  for (i = 0; feature[i].name; i++)
-    printf ("   %-16s %s\n", feature[i].name, feature[i].descr);
-  printf ("\n");
-  printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
-#ifdef PACKAGE_URL
-  printf ("%s home page: <%s>\n", PACKAGE_NAME, PACKAGE_URL);
-#endif
-}
-
-void
-config_parse (int argc, char **argv)
-{
-  int c;
-  int check_only = 0;
-  char *conf_name = POUND_CONF;
-  char *pid_file_option = NULL;
-  int foreground_option = 0;
-  int stderr_option = 0;
-
-  set_progname (argv[0]);
-
-  while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
-    switch (c)
-      {
-      case 'c':
-	check_only = 1;
-	break;
-
-      case 'e':
-	stderr_option = foreground_option = 1;
-	setlinebuf (stderr);
-	setlinebuf (stdout);
-	break;
-
-      case 'F':
-	foreground_option = 1;
-	break;
-
-      case 'f':
-	conf_name = optarg;
-	break;
-
-      case 'h':
-	print_help ();
-	exit (0);
-
-      case 'p':
-	pid_file_option = optarg;
-	break;
-
-      case 'V':
-	print_version (pound_settings);
-	exit (0);
-
-      case 'v':
-	print_log = 1;
-	break;
-
-      case 'W':
-	if (feature_set (optarg))
-	  {
-	    logmsg (LOG_ERR, "invalid feature name: %s", optarg);
-	    exit (1);
-	  }
-	break;
-
-      default:
-	exit (1);
-      }
-
-  if (optind < argc)
-    {
-      logmsg (LOG_ERR, "unknown extra arguments (%s...)", argv[optind]);
-      exit (1);
-    }
-
-  if (feature_is_set (FEATURE_CLOSE_EXTRA_FDS))
-    close_fds_above (2);
-
-  if (parse_config_file (conf_name, stderr_option))
-    exit (1);
-
-  if (check_only)
-    {
-      logmsg (LOG_INFO, "Config file %s is OK", conf_name);
-      exit (0);
-    }
-
-  if (SLIST_EMPTY (&listeners))
-    abend (NULL, "no listeners defined");
-
-  if (pid_file_option)
-    pid_name = pid_file_option;
-  if (strcmp (pid_name, "-") == 0)
-    pid_name = NULL;
-
-  if (foreground_option)
-    daemonize = 0;
-
-  if (daemonize)
-    {
-      if (log_facility == -1)
-	log_facility = LOG_DAEMON;
-    }
+  return rc;
 }

@@ -47,4 +47,57 @@ end
 x-backend-number: 0
 end
 ])
+
+PT_CHECK(
+[# Test alternative form of referencing the named backend
+ListenHTTP
+	Service
+		Host "example.org"
+		Backend
+			Use "test"
+		End
+	End
+	Service
+		Host "example.com"
+		Backend
+			Use "test"
+		End
+	End
+End
+Backend "test"
+	Address
+	Port
+End
+],
+[GET /echo/foo
+Host: example.org
+end
+
+200
+x-backend-number: 0
+end
+
+GET /echo/foo
+Host: example.com
+end
+
+200
+x-backend-number: 0
+end
+])
+
+PT_CONF([# Only a limited subset of directives can be used in backend references.
+Service
+	Backend
+                Port 8080
+                Use "test"
+	End
+End
+Backend "test"
+End],
+[1],
+[],
+[pound: pound.cfg:4.17-25: statement cannot be used in backend reference
+])
+
 AT_CLEANUP

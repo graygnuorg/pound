@@ -56,6 +56,9 @@ extern ACL *trusted_ips;        /* Trusted IP addresses */
 extern int SOL_TCP;
 #endif
 
+extern char const *include_dir;
+extern WORKDIR *include_wd;
+
 extern LISTENER_HEAD listeners;	/* all available listeners */
 extern SERVICE_HEAD services;	/* global services (if any) */
 
@@ -70,20 +73,11 @@ enum
     FEATURE_DNS,
     FEATURE_INCLUDE_DIR,
     FEATURE_WARN_DEPRECATED,
-    FEATURE_CLOSE_EXTRA_FDS
+    FEATURE_DEPRECATED,
+    FEATURE_CLOSE_EXTRA_FDS,
+    FEATURE_DEBUG
   };
 
 int feature_is_set (int f);
 
 extern unsigned watcher_ttl;
-
-static inline int
-parser_loop (CFGPARSER_TABLE *ptab,
-	     void *call_data, void *section_data,
-	     struct locus_range *retrange)
-{
-  return cfgparser_loop (ptab, call_data, section_data,
-			 feature_is_set (FEATURE_WARN_DEPRECATED)
-			   ? DEPREC_WARN : DEPREC_OK,
-			 retrange);
-}

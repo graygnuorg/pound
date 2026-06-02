@@ -14,6 +14,8 @@
  * You should have received a copy of the GNU General Public License
  * along with pound.  If not, see <http://www.gnu.org/licenses/>.
  */
+#ifndef _POUND_MEM_H
+#define _POUND_MEM_H 1
 
 #include <stdarg.h>
 
@@ -100,3 +102,4 @@ static inline void stringbuf_init_log (struct stringbuf *sb)
 {
   stringbuf_init (sb, lognomem);
 }
+#endif

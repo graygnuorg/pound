@@ -44,7 +44,7 @@ End
 ],
 [1],
 [],
-[pound: pound.cfg:3.9-16: CheckURL multiple pattern
+[pound: pound.cfg:3.9-30: CheckURL multiple pattern
 ])
 
 PT_CHECK([ListenHTTP

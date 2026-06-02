@@ -15,7 +15,7 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AC_PREREQ([2.71])
-AC_INIT([pound],[4.23],[gray@gnu.org],
+AC_INIT([pound],[4.23.90],[gray@gnu.org],
 	[pound],[https://github.com/graygnuorg/pound])
 AC_CONFIG_AUX_DIR([build-aux])
 AC_CONFIG_SRCDIR([src/pound.c])
@@ -28,6 +28,13 @@ AM_SILENT_RULES([yes])
 # Checks for programs.
 AC_PROG_CC
 LT_INIT
+
+dnl These two are to pacify autoconf:
+AC_PROG_YACC
+AC_PROG_LEX(noyywrap)
+
+AC_PATH_PROG([FLEX],[flex],[\$(SHELL) \$(top_srcdir)/build-aux/missing flex])
+AC_PATH_PROG([BISON],[bison],[\$(SHELL) \$(top_srcdir)/build-aux/missing bison])
 
 # Checks for libraries.
 AX_PTHREAD([CC="$PTHREAD_CC"],

@@ -233,6 +233,21 @@
 #define DLIST_COPY(dst, src)			\
   *dst = *src
 
+#define DLIST_CONCAT(head, arg, field)				\
+  do								\
+    {								\
+      if (DLIST_EMPTY (head))					\
+	DLIST_COPY (head, arg);                                 \
+      else if (!DLIST_EMPTY (arg))				\
+	{							\
+	  DLIST_FIRST (arg)->field.dl_prev = DLIST_LAST (head);	\
+	  DLIST_LAST (head)->field.dl_next = DLIST_FIRST (arg);	\
+	  DLIST_LAST (head) = DLIST_LAST (arg);			\
+	}							\
+      DLIST_INIT (arg);						\
+    }								\
+  while (0)
+
 #define DLIST_FIRST(head) ((head)->dl_first)
 #define DLIST_LAST(head) ((head)->dl_last)
 #define DLIST_EMPTY(head) (DLIST_FIRST (head) == NULL)

@@ -2,3 +2,7 @@ pound
 poundctl
 libpound.a
 *.elc
+cfg-lex.c
+cfg-gram.c
+cfg-gram.h
+cfg-gram.output

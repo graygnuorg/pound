@@ -147,7 +147,6 @@
     "Client"
     "ClientCert"
     "ConfigFile"
-    "ConfigText"
     "ConnTO"
     "Constant"
     "ContentCapture"
@@ -219,6 +218,7 @@
     "TimeOut"
     "TrustedIP"
     "Type"
+    "Use"
     "UseBackend"
     "User"
     "VerifyList"
@@ -448,6 +448,7 @@
     "Emergency"
     "Service"
     "Condition"
+    "ConfigText"
     "CombineHeaders"
     "Resolver"
     "Else"
@@ -487,8 +488,8 @@
        ((pound-streq (match-string 1) "end")
 	(setq stk (cdr stk))
 	(if (not stk) (throw 'ret stk)))
-       ((and (looking-at "^[ \t]*Control[ \t]*\\(?:#.*\\)?$")
-	     (pound-at-control-backend)))
+       ((pound-streq (match-string 1) "else")
+	(if (not stk) (throw 'ret stk)))
        (t
 	(setq stk (cons (marker-position (nth 2 (match-data))) stk))))
       (forward-line))
@@ -508,32 +509,118 @@ a Service, as opposed to the top-level Control (whether block or directive)"
 	 ((looking-at "^[ \t]*End\\>")
 	  (throw 'ret nil)))))))
 
+(defvar pound-top-level-sections
+  '("ListenHTTP"
+    "ListenHTTPS"
+    "Tunnel"
+    "Condition"
+    "Resolver"
+    "CombineHeaders"
+    "Lua"))
+
+(defvar pound-maybe-top-level-sections
+  '("Service"
+    "Control"
+    "Backend"
+    "ACL"
+    "TrustedIP"))
+
 (defun pound-top-level-form ()
   "Move point to the beginning of the nearest top-level block statement.
 Return t if such was found, nil otherwise."
-  (if (re-search-backward "^[ \t]*\\(\\(ListenHTTPS?\\|Tunnel\\)\\(?:[ \t]\".*\"\\)?\\|\\(Condition[ \t]+\".*\"\\(?:[ \t]+\\(?:and\\|or\\)\\)?\\)\\|Control\\|Resolver\\|CombineHeaders\\|Lua\\)[ \t]*\\(?:#.*\\)?$" nil t)
+  (beginning-of-line)
+  (if (re-search-backward (regexp-opt
+			   (append
+			    pound-top-level-sections
+			    pound-maybe-top-level-sections) 'words) nil t)
       (cond
-       ((and (pound-streq (match-string 1) "Control")
-	     (pound-at-control-backend))
+       ((pound-streq (match-string 1) "Service")
+	(service-top (point)))
+       ((looking-at "Control\\s-*$")
+	(control-top))
+       ((or (looking-at "Control\\s-+\"")
+	    (looking-at "\\(?:\\(?:ACL\\)\\|\\(?:TrustedIP\\)\\).+-file"))
 	(pound-top-level-form))
+       ((pound-streq (match-string 1) "Backend")
+	(backend-top))
+       ((or (pound-streq (match-string 1) "ACL")
+	    (pound-streq (match-string 1) "TrustedIP"))
+	(default-top))
        (t
 	t))))
 
+(defun service-top (here)
+  (beginning-of-line)
+  (catch 'ret
+    (while (not (bobp))
+      (forward-line -1)
+      (cond
+       ((looking-at "^\\s-*ListenHTTPS?")
+	(if (not (save-excursion (pound-scan here '(1))))
+	    (goto-char here))
+	(throw 'ret t))
+       ((looking-at (regexp-opt (append
+				 pound-top-level-sections
+				 pound-maybe-top-level-sections)))
+	(goto-char here)
+	(throw 'ret t))))))
+
+(defun control-top ()
+  (let ((here (point)))
+    (beginning-of-line)
+    (catch 'ret
+      (while (not (bobp))
+	(forward-line -1)
+	(cond
+	 ((looking-at "^\\s-*Service")
+	  (throw 'ret (service-top here)))
+	 ((looking-at (regexp-opt (append
+				   pound-top-level-sections
+				   pound-maybe-top-level-sections)))
+	  (goto-char here)
+	  (throw 'ret t)))))))
+
+(defun backend-top ()
+  (let ((here (point)))
+    (beginning-of-line)
+    (catch 'ret
+      (while (not (bobp))
+	(forward-line -1)
+	(cond
+	 ((looking-at "^\\s-*Tunnel")
+	  (if (not (save-excursion (pound-scan here '(1))))
+	      (goto-char here))
+	  (throw 'ret t))
+	 ((looking-at "^\\s-*Service")
+	  (throw 'ret (service-top (point))))
+	 ((looking-at (regexp-opt (append
+				   pound-top-level-sections
+				   pound-maybe-top-level-sections)))
+	  (goto-char here)
+	  (throw 'ret t)))))))
+
+(defun default-top ()
+  (let ((here (point)))
+    (beginning-of-line)
+    (catch 'ret
+      (while (not (bobp))
+	(forward-line -1)
+	(cond
+	 ((looking-at "^\\s-*ListenHTTPS?")
+	  (if (not (save-excursion (pound-scan here '(1))))
+	      (goto-char here))
+	  (throw 'ret t))
+	 ((looking-at "^\\s-*Service")
+	  (throw 'ret (service-top (point))))
+	 ((looking-at (regexp-opt pound-top-level-sections))
+	  (goto-char here)
+	  (throw 'ret t)))))))
+
 (defun pound-get-context ()
   (save-excursion
-    (let* ((start (point))
-	   (ctx (if (pound-top-level-form)
-		    (pound-scan start
-				(list (marker-position
-				       (nth 2 (match-data))))))))
-      (if ctx
-	  ctx
-	(goto-char start)
-	(if (and
-	     (re-search-backward "^[ \t]*\\(\\(?:\\(?:ACL\\|Backend\\)[ \t]+\".*\"\\)\\|\\(?:TrustedIP[ \t]*\\(\\(?:[ \t]\".*\"\\)\\|\\(?:\\(?:#.*\\)?$\\)\\)\\)\\|Service\\>\\)" nil t)
-	     (not (looking-at "^[ \t]*\\(?:\\(?:\\(?:ACL[ \t]+\".*\"\\)\\|TrustedIP\\)[ \t]+-file\\(?:watch\\)?\\)")))
-	    (let ((pos (marker-position (nth 2 (match-data)))))
-	      (pound-scan start (list pos))))))))
+    (let ((start (point)))
+      (and (pound-top-level-form)
+	   (pound-scan start (list (point)))))))
 
 (defun pound-indent-level ()
   (save-excursion

@@ -507,6 +507,54 @@ Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
 features.  As of version @value{VERSION}, the following features are
 implemented:
 
+@defvr Feature close-extra-fds
+At startup, @command{pound} closes all inherited file descriptors
+numerically greater than 2. If this is undesirable for some reason,
+use the @option{-Wno-close-extra-fds} option.
+@end defvr
+
+@defvr Feature debug=@var{list}
+Enable additional debugging.  @var{list} is a comma-delimited list of
+@dfn{sections}, each specifying the part of code to debug.  Valid
+sections are:
+
+@table @asis
+@item ast
+Additional information about processing of the @dfn{abstract syntax
+tree} produced from the configuration file.
+
+@item gram
+Print grammar traces while processing the configuration.
+
+@item lex
+Print scanner traces while processing the configuration.
+@end table
+@end defvr
+
+@defvr Feature deprecated=@var{mode}
+Defines what to do if a deprecated statement is encountered in the
+configuration file.  Allowed values of @var{mode} are:
+
+@table @code
+@kwindex ok
+@item ok
+Accept deprecated statements silently.
+
+@kwindex warn
+@item warn
+Accept deprecated statements, but warn about their use.  This is the
+default.
+
+@kwindex error
+@item error
+Treat deprecated statements as errors.
+@end table
+@end defvr
+
+@defvr Feature warn-deprecated
+Same as @code{-Wdeprecated=warn}.
+@end defvr
+
 @anchor{dns}
 @defvr Feature dns
 Resolve host names found in configuration file and returned in the
@@ -539,17 +587,7 @@ configuration file will be looked up in the current working directory.
 This is useful mainly in testsuite.
 @end defvr
 
-@defvr Feature warn-deprecated
-When parsing the configuration file, warn if it uses any deprecated
-statements.  This is the default.  To suppress deprecation
-messages, use @option{-W no-warn-deprecated}.
-@end defvr
 
-@defvr Feature close-extra-fds
-At startup, @command{pound} closes all inherited file descriptors
-numerically greater than 2. If this is undesirable for some reason,
-use the @option{-Wno-close-extra-fds} option.
-@end defvr
 @end table
 
 @node Simple Proxy
@@ -918,7 +956,7 @@ actual originator IP.
 In @dfn{anonymous} form, the @code{ACL} is a section statement: the
 keyword is followed by a newline and a list of CIDRs, terminated with
 @code{End} on a separate line.  Each line in the list defines a single
-CIDR enclosed in double quotes.  A @dfn{CIDR} consists of a
+CIDR, optionally enclosed in double quotes.  A @dfn{CIDR} consists of a
 @dfn{network address} (IPv4 or IPv6), optionally followed by slash and
 @dfn{network mask length}, a decimal number in the range [0,32] for
 IPv4 and [0,64] for IPv6.  For example:
@@ -952,9 +990,8 @@ ACL -filewatch "@var{name}"
 
   Here, @var{name} is the name of a disk file with the ACL definition.
 Its syntax is similar to the contents of anonymous ACL definition,
-except that CIDRs need not be quoted, and @code{Include} statements
-are not allowed.  If the file name is relative, it is looked up in the
-@ref{include directory}.
+except that @code{Include} statements are not allowed.  If the file
+name is relative, it is looked up in the @ref{include directory}.
 
   If the @option{-file} keyword is used, the file is read at startup
 and its contents is remembered for the lifetime of the program.  It is an
@@ -1702,8 +1739,6 @@ matching certificate, @command{pound} will stop at the first one whose
 in most-specific to least-specific order, with wildcard certificates
 appearing after host-specific ones.
 
- @code{Cert} directives must precede all other SSL-specific directives.
-
  Another important directive is @code{Disable}.  It disables the use
 of the specified TLS protocol as well as all protocols older than it.
 Usually it is used to disable obsolete protocols.  For example,
@@ -1813,11 +1848,13 @@ End
 @end group
 @end example
 
- Notice, that unlike other statements, @code{HTTPS} is used without
-arguments.
+ Notice, that @code{HTTPS} is normally used without arguments.
+Generally speaking, it takes an optional boolean argument, so you can
+as well say @code{HTTPS true}, if you prefer.
 
  Additional directives are available for fine-tuning the connection.
-If used, they must appear after the @code{HTTPS} directive,
+The use of any of these implies that the backend is HTTPS capable, so
+it is not necessary to indicate that using the @code{HTTPS} statement.
 
  The @code{Cert} directive specify the client certificate to use when
 connecting.  Use it if the backend requires client authentication.
@@ -2924,11 +2961,11 @@ This will work for requests that don't have a body, such as
 @code{GET}, @code{HEAD}, and the like.  For requests that do,
 such as @code{POST} or @code{PUT}, you will have to configure
 @dfn{request content capturing} as well.  You do so using the
-@code{ContentCapture} statement.  The statement takes a single numeric
-argument specifying maximum size of the request content.  E.g.:
+@code{ContentCapture} statement.  The statement takes a single size
+value argument specifying maximum size of the request content.  E.g.:
 
 @example
-ContentCapture 65536
+ContentCapture 65k
 @end example
 
 @anchor{send to backend}
@@ -2973,7 +3010,7 @@ Service
     Rewrite response
         LuaModify "fallback"
     End
-    ContentCapture 16384
+    ContentCapture 16k
     Backend
         Address 10.1.0.1
         Port 80
@@ -4053,13 +4090,41 @@ underscores that begins with an ASCII letter or underscore.  Keywords
 are always case-insensitive.
 
 @cindex values, configuration file
- There are three kinds of @dfn{values}: numeric values (or
-@dfn{numbers}), boolean values, quoted strings, and IP addresses.
+ There are five kinds of @dfn{values}: numeric values (or
+@dfn{numbers}), sizes, durations, boolean values, quoted strings, and
+IP addresses.
 
 @table @dfn
 @cindex numbers, configuration file
 @item Numbers
  A @dfn{numeric value} is a sequence of decimal digits.
+
+@cindex size value, configuration file
+@item Size Value
+@cindex size suffixes
+@cindex k, size suffix
+@cindex m, size suffix
+@cindex g, size suffix
+@cindex kilobyte
+@cindex megabyte
+@cindex gigabyte
+A @dfn{size value} is a number, optionally followed by one of the
+following @dfn{size} suffixes: @samp{k}, for kilobytes (1024 bytes),
+@samp{m}, for megabytes (1048576 bytes), or @samp{g}, for gigabytes
+(1073741824 bytes). Size suffices are case-insensitive.
+
+@cindex duration, configuration file
+@item Duration
+@cindex time unit suffix
+@dfn{Duration} represents the length of a time interval. It consists
+of a sequence of numbers, each of which is followed by a @dfn{time unit
+suffix}. Valid unit suffixes are: @samp{s}, for seconds, @samp{m}, for
+minutes, @samp{h}, for hours, and @samp{d}, for days.  For example,
+@samp{1m25s} means @samp{one minute and 25 seconds}.  Time unit
+suffixes are case-insensitive.
+
+If a number is used in place of duration, it indicates the duration in
+seconds.
 
 @cindex boolean value, configuration file
 @item Booleans
@@ -4384,7 +4449,7 @@ further monitor it, restarting it if it fails.
 The default is @code{true}.
 @end deffn
 
-@deffn {Global directive} LineBufferSize @var{n}
+@deffn {Global directive} LineBufferSize @var{size}
 @anchor{line buffer}
 Sets the line buffer size.  Line buffer is used when reading request
 line, backend response status line, and header fields in both requests
@@ -4434,13 +4499,13 @@ Sets maximum number of worker threads.  The default is 128.
 @xref{Worker model}.
 @end deffn
 
-@deffn {Global directive} WorkerIdleTimeout @var{n}
-Sets idle timeout for a worker thread, in seconds.  Default is 30 seconds.
+@deffn {Global directive} WorkerIdleTimeout @var{duration}
+Sets idle timeout for a worker thread.  Default is @samp{30s}.
 @xref{Worker model}.
 @end deffn
 
-@deffn {Global directive} WorkerStackSize @var{n}
-Sets worker stack size, in bytes. The default size is 262144.
+@deffn {Global directive} WorkerStackSize @var{size}
+Sets worker stack size, in bytes. The default size is @samp{256k} (262144).
 @end deffn
 
 @deffn {Global directive} Threads @var{n}
@@ -4685,9 +4750,9 @@ be used in @code{Service} statements to limit access to resources
 The statement has two forms: immediate and file reference ACL.  In
 @dfn{immediate} form, the CIDR list follows the @code{ACL} line and
 is terminated with an @code{End} directive on a line by itself.  Each
-non-empty line contains a CIDR enclosed in double quotes.  Comments
-and @code{Include} statements (@pxref{File inclusion}) are allowed.
-For example:
+non-empty line contains a CIDR, optionally enclosed in double quotes.
+Comments and @code{Include} statements (@pxref{File inclusion}) are
+allowed.  For example:
 
 @example
 @group
@@ -4713,11 +4778,10 @@ ACL "@var{name}" -filewatch "@var{filename}"
 
 If @var{filename} is relative, it is looked up in the @ref{include directory}.
 The syntax of the file is similar to the described above, except that
-CIDRs need not be quoted and @code{Include} statements are not
-allowed.  The form with @code{-file} reads the file contents once, at
-the program startup.  The one with @code{-filewatch} reads it and then
-monitors that file for changes.  @xref{File-based Conditions}, for a
-detailed discussion.
+@code{Include} statements are not allowed.  The form with @code{-file}
+reads the file contents once, at the program startup.  The one with
+@code{-filewatch} reads it and then monitors that file for changes.
+@xref{File-based Conditions}, for a detailed discussion.
 @end deffn
 
 @node Condition
@@ -5081,7 +5145,7 @@ End
 Directives discussed in this section set various timeout values.
 Their argument is an integer expressing the value in seconds.
 
-@deffn {Global directive} Alive @var{n}
+@deffn {Global directive} Alive @var{duration}
 Specify how often should @command{pound} check for the status of
 backend servers marked as @dfn{dead} (i.e. inaccessible).  It is a
 good idea to set this as low as possible -- it will find resurrected
@@ -5091,22 +5155,22 @@ resources.
 Default is 30 seconds.
 @end deffn
 
-@deffn {Global directive} Client @var{n}
+@deffn {Global directive} Client @var{duration}
 Specify for how long @command{pound} will wait for a client request
-(default: 10 seconds).  It will drop the connection if client doesn't
+(default: @samp{10s}).  It will drop the connection if client doesn't
 send any data within this interval.
 
 This value can be overridden for specific listeners.
 @end deffn
 
-@deffn {Global directive} TimeOut @var{n}
+@deffn {Global directive} TimeOut @var{duration}
 Specify for how long @command{pound} will wait for the backend to
-respond (default: 15 seconds).
+respond (default: @samp{15s}).
 
 This value can be overridden for specific backends.
 @end deffn
 
-@deffn {Global directive} ConnTO @var{n}
+@deffn {Global directive} ConnTO @var{duration}
 Specify for how long @command{pound} will wait for a connection to
 a backend to be established.  Default is the same as the
 @code{TimeOut} value.
@@ -5114,7 +5178,7 @@ a backend to be established.  Default is the same as the
 This value can be overridden for specific backends.
 @end deffn
 
-@deffn {Global directive} WatcherTTL @var{n}
+@deffn {Global directive} WatcherTTL @var{duration}
 If file reference ACLs are used on a system that doesn't support
 @code{inotify} API, this directive defines the interval between two
 successive checks of file modification times.  @xref{ACL filewatch},
@@ -5132,7 +5196,7 @@ Default is 600 seconds.
 This value can be overridden for specific backends.
 @end deffn
 
-@deffn {Global directive} Grace @var{n}
+@deffn {Global directive} Grace @var{duration}
 How long should @command{pound} continue to answer existing
 connections after a receiving a @samp{INT} or @samp{HUP}
 signal (default: 30 seconds).  The configured listeners are closed
@@ -5207,7 +5271,7 @@ in @command{pound} testsuite.
 @node Listener-specific limits
 @subsection Listener-specific limits
 
-@deffn {ListenHTTP directive} Client @var{n}
+@deffn {ListenHTTP directive} Client @var{duration}
 Specify for how long @command{pound} will wait for a client request
 (default: 10 seconds).  It will drop the connection if client doesn't
 send any data within this interval.
@@ -5216,7 +5280,7 @@ This statement overrides the global timeout value (@pxref{Timeouts})
 for this particular listener.
 @end deffn
 
-@deffn {ListenHTTP directive} LineBufferSize @var{n}
+@deffn {ListenHTTP directive} LineBufferSize @var{size}
 Sets the line buffer size.  Line buffer is used when reading request
 line, backend response status line, and header fields in both requests
 and responses.  Thus, this value limits the maximum length allowed for
@@ -5232,7 +5296,7 @@ A request bigger than that will be responded with status
 By default, there is no limit on the request size.
 @end deffn
 
-@deffn {ListenHTTP directive} MaxURI @var{n}
+@deffn {ListenHTTP directive} MaxURI @var{size}
 Limits the maximum allowed length of incoming request URI.
 A request with an URI longer than that will be responded with status
 414 (@samp{URI Too Long}).
@@ -5645,7 +5709,7 @@ statements that, being applied to a HTTP request, yield @samp{true} or
 @samp{false} depending on whether the request satisfies the condition
 described in the directive.
 
-All directive described below can read a list of conditions from a
+All directives described below can read a list of conditions from a
 disk file and reload that list upon any changes.  @xref{File-based
 Conditions}, for a detailed discussion of this feature.
 
@@ -6206,7 +6270,8 @@ handling @samp{ACME} challenge requests.  @xref{ACME}, for a detailed
 discussion of its use.
 
 The @var{dir} argument defines the directory where to look for
-challenge files.
+challenge files. If @var{dir} is a relative file name, it is looked up
+in the @ref{include directory}.
 @end deffn
 
 @node ListenHTTPS
@@ -6235,7 +6300,10 @@ Statements specific for this section are:
 
 @deffn {ListenHTTPS} Cert "@var{filename}"
 Specifies the server @dfn{certificate}.  @var{Filename} is either a
-certificate file name, or the name of a directory containing certificate files.
+certificate file name, or the name of a directory containing
+certificate files, or a globbing pattern expanding to such pathnames.
+
+Relative file names are looked up in the @ref{include directory}.
 
 A @dfn{certificate file} is a file containing the certificate,
 possibly a certificate chain and the signature for this server, in
@@ -6251,8 +6319,6 @@ The ordering of the directives is important: the first certificate
 where the CN matches the client request will be used, so put your
 directives in the most-specific-to-least specific order (i.e. wildcard
 certificates after host-specific certificates).
-
-@code{Cert} directives must precede all other SSL-specific directives.
 @end deffn
 
 @anchor{ClientCert}
@@ -6438,14 +6504,14 @@ represents a path to a Unix-domain socket.
   Port number to connect to.
 @end deffn
 
-@deffn {Tunnel backend} TimeOut
+@deffn {Tunnel backend} TimeOut @var{duration}
 Sets the @dfn{response timeout}, i.e. time to wait for a response from
-the backend (in seconds).  Default is 15.
+the backend.  Default is @samp{15s}.
 @end deffn
 
-@deffn {Tunnel backend} ConnTO
+@deffn {Tunnel backend} ConnTO @var{duration}
 Sets @dfn{connection timeout}, i.e. time to wait for establishing
-connection with the backend (in seconds).
+connection with the backend.
 @end deffn
 
 @deffn {Tunnel backend} Disabled
@@ -6739,9 +6805,6 @@ it will be assigned verbatim.  The @option{-encode} option is allowed
 after @var{name} argument as well.
 
 Used with one argument, deletes the parameter @var{name}.
-characters.
-
-Used with one argument, deletes the parameter @var{name}.
 @end deffn
 
 @deffn {Service directive} SetHeader "@var{name}: @var{value}"
@@ -6907,19 +6970,11 @@ syntax, as for any section statement, is:
 
 @example
 @group
-Backend [ "@var{name}" ]
+Backend
   @dots{}
 End
 @end group
 @end example
-
-  Optional @var{name} argument assigns a symbolic name to the
-service.  That name is used to identify the backend in diagnostic
-and access log messages (@pxref{log format, @samp{%@{@var{obj}@}N}}),
-metric output (@pxref{Metrics}), and in @command{poundctl}
-requests (@pxref{poundctl}).  In the absence of an assigned
-@var{name}, the ordinal (0-based) number of the backend in the enclosing
-@code{Service} is used as its identifier.
 
   The following statements can be used in a @code{Backend} section:
 
@@ -6981,7 +7036,7 @@ This directive is valid when used together with @code{Resolve srv}
 (see below).
 @end deffn
 
-@deffn {Backend directive} OverrideTTL @var{n}
+@deffn {Backend directive} OverrideTTL @var{duration}
 This directive configures update interval (in seconds) for dynamic
 backends (@pxref{Dynamic backends}).  At the end of each update
 interval, the DNS be queried and dynamic backends reconfigured (if
@@ -7017,8 +7072,8 @@ balancer group where the backend will be hosted.
 @end table
 @end deffn
 
-@deffn {Backend directive} RetryInterval @var{n}
-Retry failed DNS lookups in @var{n} seconds.  Default is 600.
+@deffn {Backend directive} RetryInterval @var{duration}
+Retry failed DNS lookups in given intervals.  Default is @samp{10m}.
 
 See also the @code{RetryInterval} statement in @code{Resolver} section
 (@pxref{resolver}).
@@ -7027,19 +7082,18 @@ See also the @code{RetryInterval} statement in @code{Resolver} section
 The following three directives set various timeout parameters for
 backend operations:
 
-@deffn {Backend directive} ConnTO @var{n}
+@deffn {Backend directive} ConnTO @var{duration}
 Sets @dfn{connection timeout}, i.e. time to wait for establishing
-connection with the backend (in seconds).
+connection with the backend.
 @end deffn
 
-@deffn {Backend directive} TimeOut @var{n}
+@deffn {Backend directive} TimeOut @var{duration}
 Sets the @dfn{response timeout}, i.e. time to wait for a response from
-the backend (in seconds).  Default is 15.
+the backend.  Default is @samp{15s}.
 @end deffn
 
-@deffn {Backend directive} WSTimeOut @var{n}
-Idle timeout for WebSocket operations, in seconds.  Default value: 600
-(10 minutes).
+@deffn {Backend directive} WSTimeOut @var{duration}
+Idle timeout for WebSocket operations.  Default value: @samp{10m}.
 @end deffn
 
 Backend servers can use HTTPS as well as plaintext HTTP.  The
@@ -7094,8 +7148,7 @@ same backend in several different services.
 followed by the backend name in double-quotes.  The assigned name must
 be unique among all global backends.
 
-  To include a globally defined backend in a service, use
-@code{UseBackend} or @code{Backend} keywords.
+  There are two ways to use a globally defined backend in a service.
 
 @deffn {Service directive} UseBackend "@var{name}"
 Use globally-defined backend @var{name} in this service.  The backend
@@ -7103,12 +7156,30 @@ itself may be defined in global scope before or after the
 @code{Service} section that uses it.
 @end deffn
 
+@deffn {Backend directive} Use "@var{name}"
 The @code{UseBackend} keyword adds the backend to the service exactly
 as it was defined.  However, it may sometimes be necessary to alter
-its priority and state.  To do so, use the @code{Backend} section.  If
-the name argument specifies a globally-defined backend, the
-@code{Backend} section can contain only the @code{Priority} and
-@code{Disable} statements.
+its priority and state. To do so, insert a regular @code{Backend}
+section with the @code{Use} directive referring to the desired named
+backend and any additional directives that modify its settings, e.g.:
+
+@example
+Service
+        Backend
+                Use "nb"
+                Priority 3
+        End
+End
+@end example
+
+As of pound version @value{VERSION}, only the @code{Priority} and
+@code{Disabled} statements can be used together with the @code{Use}
+directive.
+
+Just as in case with @code{Backend}, the backend referred to by the
+@code{Use} directive should be defined in global scope before or after the
+@code{Service} section that uses it.
+@end deffn
 
 @node Special Backends
 @subsubsection Special Backends
@@ -7331,8 +7402,8 @@ IP}), query parameter name (for @code{Type URL}), cookie name (for
 @code{Type COOKIE}), or header name (for @code{Type HEADER}).
 @end deffn
 
-@deffn {Session directive} TTL @var{n}
-How long can a session be idle (in seconds). A session that has been idle for
+@deffn {Session directive} TTL @var{duration}
+How long can a session be idle. A session that has been idle for
 longer than the specified number of seconds will be discarded.
 This directive is mandatory.
 @end deffn
@@ -7435,10 +7506,10 @@ statement used wins.
 If set to @code{true}, enables DNS debugging info.
 @end deffn
 
-@deffn {Resolver} RetryInterval @var{n}
-Interval in seconds, after which to retry failed DNS queries or
-queries that returned no RRs.  This value is used unless the backend
-defines its own retry interval value.
+@deffn {Resolver} RetryInterval @var{duration}
+Interval, after which to retry failed DNS queries or queries that
+returned no RRs.  This value is used unless the backend defines its
+own retry interval value.
 @end deffn
 
 @node poundctl
