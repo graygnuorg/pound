@@ -1,0 +1,172 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+
+AT_SETUP([Eval in Rewrite response])
+AT_KEYWORDS([rewrite response respeval eval])
+PT_CHECK([
+Condition "text"
+	Header "Content-Type: text/"
+End
+Condition "app" or
+	Header "Content-Type: application/"
+	Header "Content-Type: image/"
+End
+ListenHTTP
+	Service
+		Rewrite response
+			Eval "text"
+			SetHeader "X-Content: text"
+		Else
+			Eval "app"
+			SetHeader "X-Content: app"
+		End
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: example.net
+Content-type: text/plain
+end
+
+200
+x-content: text
+end
+
+GET /echo/foo
+Host: example.net
+Content-type: application/tar
+end
+
+200
+x-content: app
+end
+
+GET /echo/foo
+Host: example.net
+Content-type: image/whatever
+end
+
+200
+x-content: app
+end
+])
+
+PT_CHECK([
+Condition "text"
+	Header "Content-Type: text/"
+End
+Condition "app"
+	Match or
+		Header "Content-Type: application/"
+		Header "Content-Type: image/"
+	End
+End
+ListenHTTP
+	Service
+		Rewrite response
+			Eval "text"
+			SetHeader "X-Content: text"
+		Else
+			Eval "app"
+			SetHeader "X-Content: app"
+		End
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: example.net
+Content-type: text/plain
+end
+
+200
+x-content: text
+end
+
+GET /echo/foo
+Host: example.net
+Content-type: application/tar
+end
+
+200
+x-content: app
+end
+
+GET /echo/foo
+Host: example.net
+Content-type: image/whatever
+end
+
+200
+x-content: app
+end
+])
+
+PT_CONF([
+Condition "a"
+	Match
+		Header "X-Reply:"
+		Match OR
+			Header "Content-Type" -beg "text/"
+			URL "^/pub"
+		End
+	End
+End
+Service
+	Rewrite response
+		Eval "a"
+	End
+	Backend
+	End
+End
+],
+[1],
+[],
+[pound: pound.cfg:13.17-24: eval refers to a condition that cannot be used in Rewrite response
+pound: pound.cfg:7.25-35: this is the location of the offending statement
+])
+
+PT_CONF([
+Condition "a"
+	Match
+		Header "X-Reply:"
+		Match OR
+			Header "Content-Type" -beg "text/"
+			URL "^/pub"
+		End
+	End
+End
+Condition "b"
+	Eval "a"
+End
+Service
+	Rewrite response
+		Eval "b"
+	End
+	Backend
+	End
+End
+],
+[1],
+[],
+[pound: pound.cfg:16.17-24: eval refers to a condition that cannot be used in Rewrite response
+pound: pound.cfg:7.25-35: this is the location of the offending statement
+])
+
+AT_CLEANUP

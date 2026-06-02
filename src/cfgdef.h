@@ -543,6 +543,8 @@ void cfg_defn_push (CFG_DEFN const *defn);
 void cfg_defn_pop (void);
 int cfg_defn_lookup (char const *name, CFG_DEFN const **ret_defn,
 		     CFG_RCVR *rcvr);
+CFG_DEFN const *locate_defn (CFG_DEFN const *tab, char const *name,
+			     CFG_DEFN const **ref, CFG_RCVR *rcvr);
 
 enum
   {

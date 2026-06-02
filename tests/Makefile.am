@@ -149,6 +149,7 @@ TESTSUITE_AT = \
  regextype.at\
  reqacc.at\
  redirect.at\
+ respeval.at\
  resprw.at\
  rewriteloc.at\
  rewriteloc_https.at\

@@ -14,7 +14,8 @@
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
 AT_SETUP([Detached conditions])
-AT_KEYWORDS([cond detcond])
+AT_KEYWORDS([cond detcond eval])
+
 PT_CHECK([Condition "first" or
 	Host -re "^example.org:?"
 	Host -re "^example.net:?"
@@ -67,4 +68,57 @@ end
 x-backend-number: 2
 end
 ])
+
+PT_CHECK([Condition "first" or
+	Host -re "^example.org:?"
+	Host -re "^example.net:?"
+End
+
+Condition "second"
+	Path -contain "/static/"
+	Eval "first"
+End
+
+ListenHTTP
+	Service
+		Eval "second"
+		Backend
+		End
+	End
+	Service
+		Eval "first"
+		Backend
+		End
+	End
+End
+],
+[GET /echo/static/file
+Host: example.org
+end
+
+200
+x-backend-number: 0
+end
+
+GET /echo/file
+Host: example.org
+end
+
+200
+x-backend-number: 1
+end
+])
+
+PT_CONF([
+ListenHTTP
+	Service
+		Eval "second"
+	End
+End
+],
+[1],
+[],
+[pound: pound.cfg:4.22-29: second: no such condition
+])
+
 AT_CLEANUP

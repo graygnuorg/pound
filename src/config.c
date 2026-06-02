@@ -2824,10 +2824,11 @@ clientcert_commit (CFG_NODE *node, void *call_data, void *baseptr)
  */
 typedef struct named_cond
 {
-  char *name;
+  char *name;                 /* Condition name */
   SERVICE_COND *cond;
-  struct locus_range locus;
-  int idx;
+  CFG_NODE const *node;
+  int idx;                    /* Index of the evaluated result in
+				 eval_response of struct http_request */
 } NAMED_COND;
 
 #define HT_TYPE NAMED_COND
@@ -2901,7 +2902,6 @@ static void
 named_cond_free (NAMED_COND *nc)
 {
   free (nc->name);
-  locus_range_unref (&nc->locus);
 }
 
 /*
@@ -2942,7 +2942,7 @@ named_cond_lookup (char const *name)
 
 /* Allocate new named condition with boolean operation op. */
 static NAMED_COND *
-named_cond_new (char const *name, int op, struct locus_range const *loc)
+named_cond_new (char const *name, int op, CFG_NODE const *node)
 {
   NAMED_COND *nc, *old;
 
@@ -2952,14 +2952,13 @@ named_cond_new (char const *name, int op, struct locus_range const *loc)
   nc->name = xstrdup (name);
   nc->cond = service_cond_alloc (COND_BOOL);
   nc->cond->boolean.op = op;
-  locus_range_init (&nc->locus);
-  locus_range_copy (&nc->locus, loc);
+  nc->node = node;
 
   old = NAMED_COND_INSERT (named_cond_hash, nc);
   if (old != NULL)
     {
-      conf_error ("%s redefined", name);
-      conf_error_at_locus_range (&old->locus, "originally defined here");
+      conf_error_at_locus_range (&node->locus, "%s redefined", name);
+      conf_error_at_locus_range (&old->node->locus, "originally defined here");
       //FIXME named_cond_free (nc);
       return NULL;
     }
@@ -2996,7 +2995,7 @@ condition_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 	}
     }
 
-  if ((nc = named_cond_new (name, op, &node->locus)) == NULL)
+  if ((nc = named_cond_new (name, op, node)) == NULL)
     return -1;
 
   *baseptr = nc->cond;
@@ -3022,7 +3021,7 @@ eval_commit (CFG_NODE *node, void *call_data, void *baseptr)
 
   if ((nc = named_cond_lookup (name)) == NULL)
     {
-      conf_error ("%s: no such condition", name);
+      conf_error_at_locus_range (&arg->locus, "%s: no such condition", name);
       return -1;
     }
 
@@ -3042,7 +3041,7 @@ static CFG_TYPE cfg_type_eval = {
  */
 
 static LISTENER *
-listener_alloc (POUND_DEFAULTS *dfl)
+listener_alloc (POUND_DEFAULTS *dfl, struct locus_range *locus)
 {
   LISTENER *lst;
 
@@ -3059,6 +3058,8 @@ listener_alloc (POUND_DEFAULTS *dfl)
   lst->clnt_check = -1;
   lst->linebufsize = dfl->linebufsize;
   locus_range_init (&lst->locus);
+  locus_range_copy (&lst->locus, locus);
+
   SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
   SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
   SLIST_INIT (&lst->services);
@@ -3142,7 +3143,7 @@ parse_control_address (struct addrinfo *addr, CFG_ARG *arg)
 static int
 control_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  LISTENER *lst = listener_alloc (call_data);
+  LISTENER *lst = listener_alloc (call_data, &node->locus);
   *baseptr = lst;
   // FIXME: Prepare lst for freeing in case of error. This will require a
   // free_data method.
@@ -4506,7 +4507,7 @@ static CFG_DEFN cond_base_defn[] = {
   },
   {
     .name = "Match",
-    .token = T_DIRECTIVE,
+    .token = T_SECTION,
     .vtype = &cfg_type_match,
     .ref = cond_base_defn
   },
@@ -4516,8 +4517,6 @@ static CFG_DEFN cond_base_defn[] = {
     .vtype = &cfg_type_not,
     .ref = cond_base_defn
   },
-  /* FIXME: Eval should make sure that the condition referred to uses only
-     conditions from this defn. */
   {
     .name = "Eval",
     .token = T_DIRECTIVE,
@@ -4634,6 +4633,78 @@ static CFG_DEFN cond_defn[] = {
   },
   { NULL }
 };
+
+static int check_eval_resp_usage (CFG_NODE *node, CFG_NODE **pair);
+static int check_eval_resp_cb (CFG_NODE *node, void *key);
+
+static int
+not_resp_cond (CFG_NODE *node, void *key)
+{
+  CFG_NODE **pair = key;
+  CFG_DEFN const *ref;
+  CFG_RCVR rcv;
+
+  if (node->defn->token == T_SECTION || node->defn->token == T_NOT)
+    return cfg_ast_locate_node (node->subtree, not_resp_cond, key) != NULL;
+
+  if (!locate_defn (cond_base_defn, node->defn->name, &ref, &rcv)
+      && locate_defn (cond_defn, node->defn->name, &ref, &rcv))
+    {
+      if (pair)
+	pair[1] = node;
+      return 1;
+    }
+
+  if (c_strcasecmp (node->defn->name, "Eval") == 0)
+    return check_eval_resp_cb (node, key);
+
+  return 0;
+}
+
+static int
+check_eval_resp_cb (CFG_NODE *node, void *key)
+{
+  CFG_NODE **pair = key;
+  if (node->defn->token == T_DIRECTIVE &&
+      c_strcasecmp (node->defn->name, "Eval") == 0)
+    {
+      CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+      NAMED_COND *nc;
+
+      if ((nc = named_cond_lookup (string_ptr (arg->v.string))) == NULL)
+	/* Error will be reported later */
+	return 0;
+
+      if (cfg_ast_locate_node (nc->node->subtree, not_resp_cond, pair))
+	{
+	  pair[0] = node;
+	  return 1;
+	}
+    }
+  switch (node->defn->token)
+    {
+    case T_SECTION:
+    case T_NOT:
+    case T_REWRITE:
+      return check_eval_resp_usage (node, pair);
+    }
+  return 0;
+}
+
+/*
+ * Recursively scan node->subtree in search of Evals referring to conditions
+ * that cannot be used in Rewrite response. If none are found, return 0.
+ * Otherwise, return 1 and fill pair as follows:
+ *   pair[0]     The erroneous Eval
+ *   pair[1]     The offending condition.
+ */
+static int
+check_eval_resp_usage (CFG_NODE *node, CFG_NODE **pair)
+{
+  if (!node->subtree)
+    return 0;
+  return cfg_ast_locate_node (node->subtree, check_eval_resp_cb, pair) != NULL;
+}
 
 /*
  * The Rewrite section.
@@ -5119,6 +5190,21 @@ service_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 
   assert (node->rwtarget == REWRITE_REQUEST ||
 	  node->rwtarget == REWRITE_RESPONSE);
+
+  if (node->rwtarget == REWRITE_RESPONSE)
+    {
+      CFG_NODE *pair[2];
+      if (check_eval_resp_usage (node, pair))
+	{
+	  conf_error_at_locus_range (&pair[0]->locus,
+				     "eval refers to a condition that cannot"
+				     " be used in Rewrite response");
+	  conf_error_at_locus_range (&pair[1]->locus,
+				     "this is the location of the"
+				     " offending statement");
+	  return -1;
+	}
+    }
 
   XZALLOC (clos);
   clos->rule = rewrite_rule_alloc (&rw[node->rwtarget]);
@@ -6888,7 +6974,7 @@ lst_prepare (CFG_NODE *node, void *call_data, void **baseptr)
   LISTENER_HEAD *list_head = cfg_rcvr_ptr (&node->rcvr, *baseptr);
   LISTENER *lst;
 
-  if ((lst = listener_alloc (dfl)) == NULL)
+  if ((lst = listener_alloc (dfl, &node->locus)) == NULL)
     return -1;
 
   if (!cfg_arglist_empty (&node->arglist))

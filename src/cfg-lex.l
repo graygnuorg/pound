@@ -125,9 +125,6 @@ string_end (void)
   return new_string (stringbuf_value (&sb), stringbuf_len (&sb));
 }
 
-static CFG_DEFN const *locate_defn (CFG_DEFN const *tab, char const *name,
-				    CFG_DEFN const **ref, CFG_RCVR *rcvr);
-
 static inline int
 flag_token_type (CFG_FLAG const *flg)
 {
@@ -914,7 +911,7 @@ iswild (char const *p)
  * Upon successful return, return the receiver data in the memory location
  * pointed to by rcvr.
  */
-static CFG_DEFN const *
+CFG_DEFN const *
 locate_defn (CFG_DEFN const *tab, char const *name,
 	     CFG_DEFN const **ref, CFG_RCVR *rcvr)
 {
