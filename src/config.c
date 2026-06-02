@@ -975,8 +975,7 @@ commit_resolve_mode (CFG_NODE *node, void *unused, void *baseptr)
     }
 
 #ifndef ENABLE_DYNAMIC_BACKENDS
-  if (res != bres_immediate)
-
+  if (n != bres_immediate)
     {
       conf_error_at_locus_range (&arg->locus,
 				 "value not supported;"
