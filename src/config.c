@@ -2143,12 +2143,50 @@ service_cond_free (SERVICE_COND *sc)
     case COND_PATH:
     case COND_QUERY:
     case COND_HDR:
+    case COND_METHOD:
       genpat_free (sc->re);
       break;
 
+    case COND_LUA:
+      pndlua_closure_free (&sc->clua);
+      break;
+
+    case COND_TBF:
+      string_unref (sc->tbf.key);
+      tbf_free (sc->tbf.tbf);
+      break;
+
+    case COND_DYN:
+      string_unref (sc->dyn.string);
+      /* fall through */
+    case COND_BOOL:
+      {
+	SERVICE_COND *cp;
+	while ((cp = SLIST_FIRST (&sc->boolean.head)) != NULL)
+	  {
+	    SLIST_REMOVE_HEAD (&sc->boolean.head, next);
+	    service_cond_free (cp);
+	  }
+      }
+      break;
+
+    case COND_BASIC_AUTH:
+      pass_file_clear (&sc->pwfile);
+      break;
+
+    case COND_CLIENT_CERT:
+      X509_free (sc->x509);
+      break;
+
+    case COND_ACL:
+      acl_free (sc->acl.acl);
+      break;
+
+    case COND_REF:
+      break;
+
     default:
-      /* FIXME: so far this function is only used by dyncond_read which
-	 operates on one of cond types handled above. */
+      /* shouldn't happen; this includes COND_HOST. */
       abort ();
     }
   string_unref (sc->tag);
@@ -3371,9 +3409,9 @@ acl_match (ACL *acl, struct sockaddr *sa)
 void
 acl_clear (ACL *acl)
 {
-  while (!SLIST_EMPTY (&acl->head))
+  struct cidr *cp;
+  while ((cp = SLIST_FIRST (&acl->head)) != NULL)
     {
-      struct cidr *cp = SLIST_FIRST (&acl->head);
       SLIST_SHIFT (&acl->head, next);
       free (cp);
     }

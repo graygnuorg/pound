@@ -184,6 +184,21 @@ tbf_alloc (uint64_t rate, unsigned maxtok)
   return tbf;
 }
 
+void
+tbf_free (TBF *tbf)
+{
+  TOKBKT *bkt;
+
+  while ((bkt = DLIST_FIRST (&tbf->head)) != NULL)
+    {
+      DLIST_REMOVE_HEAD (&tbf->head, link);
+      free (bkt);
+    }
+  pthread_mutex_destroy (&tbf->mut);
+  TOKBKT_HASH_FREE (tbf->tbh);
+  free (tbf);
+}
+
 int
 tbf_eval (TBF *tbf, char const *keyid)
 {

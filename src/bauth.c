@@ -333,16 +333,21 @@ basic_auth_read (void *obj, char const *filename, WORKDIR *wd)
 }
 
 void
-basic_auth_clear (void *obj)
+pass_file_clear (struct pass_file *pwf)
 {
-  SERVICE_COND *cond = obj;
-  struct pass_file *pwf = &cond->pwfile;
-  while (!SLIST_EMPTY (&pwf->head))
+  struct user_pass *up;
+  while ((up = SLIST_FIRST (&pwf->head)) != NULL)
     {
-      struct user_pass *up = SLIST_FIRST (&pwf->head);
       SLIST_SHIFT (&pwf->head, link);
       free (up);
     }
+}
+
+void
+basic_auth_clear (void *obj)
+{
+  SERVICE_COND *cond = obj;
+  pass_file_clear (&cond->pwfile);
 }
 
 static int

@@ -518,6 +518,7 @@ acl_unlock (ACL *acl)
 
 int acl_match (ACL *acl, struct sockaddr *sa);
 void acl_clear (ACL *acl);
+void acl_free (ACL *acl);
 
 enum job_ctl
   {
@@ -780,6 +781,8 @@ enum service_cond_type
 
 struct dyn_service_cond
 {
+  /* NOTE: it is important that this be its first field.  See
+     match_cond and service_cond_free. */
   struct bool_service_cond boolean;
   STRING *string;
   enum service_cond_type cond_type;
@@ -1508,12 +1511,14 @@ int foreach_backend (BACKEND_ITERATOR itr, void *data);
 int basic_auth_read (void *obj, char const *filename, WORKDIR *wd);
 void basic_auth_clear (void *obj);
 int basic_auth (struct pass_file *pwf, struct http_request *req);
+void pass_file_clear (struct pass_file *pwf);
 
 void combinable_header_add (char const *name);
 int is_combinable_header (struct http_header *hdr);
 
 TBF *tbf_alloc (uint64_t rate, unsigned burst);
 int tbf_eval (TBF *env, char const *keyid);
+void tbf_free (TBF *env);
 
 #if ENABLE_LUA
 static inline void phttp_lua_stash_reset (POUND_HTTP *p)
