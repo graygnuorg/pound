@@ -1495,7 +1495,7 @@ backend_init (CFG_NODE *node, POUND_DEFAULTS *dfl)
 static int
 named_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
-  NAMED_BACKEND_TABLE *tab = cfg_rcvr_ptr (&node->rcvr, *baseptr);
+  POUND_DEFAULTS *dfl = call_data;
   BACKEND *be;
   NAMED_BACKEND *olddef;
   CFG_ARG *arg = cfg_arglist_first (&node->arglist);
@@ -1506,7 +1506,8 @@ named_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
       return -1;
     }
 
-  olddef = named_backend_retrieve (tab, string_ptr (arg->v.string));
+  olddef = named_backend_retrieve (&dfl->named_backend_table,
+				   string_ptr (arg->v.string));
   if (olddef)
     {
       conf_error_at_locus_range (&node->locus,
@@ -1517,11 +1518,10 @@ named_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
       return -1;
     }
 
-  be = backend_init (node, call_data);
+  be = backend_init (node, dfl);
   if (!be)
     return -1;
 
-  node->data = tab;
   *baseptr = be;
 
   return 0;
@@ -1531,12 +1531,12 @@ named_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 static int
 named_backend_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
-  NAMED_BACKEND_TABLE *tab = node->data;
+  POUND_DEFAULTS *dfl = call_data;
   BACKEND *be = baseptr;
   CFG_ARG *arg = cfg_arglist_first (&node->arglist);
 
-  named_backend_insert (tab, string_ptr (arg->v.string), be);
-  node->data = NULL;
+  named_backend_insert (&dfl->named_backend_table,
+			string_ptr (arg->v.string), be);
   return 0;
 }
 
@@ -1566,16 +1566,10 @@ backend_free (void *data)
   free (be);
 }
 
-void
-free_nop (void *ptr)
-{
-}
-
 struct cfg_type cfg_type_named_backend = {
   .argdef = "s",
   .prepare = named_backend_prepare,
   .commit = named_backend_commit,
-  .free_data = free_nop
 };
 
 /*
