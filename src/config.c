@@ -2512,7 +2512,7 @@ parse_match_mode (CFG_ARG *arg, int dfl_re_type, int *gp_type, int *sp_flags,
 #ifdef HAVE_LIBPCRE
 	  *gp_type = GENPAT_PCRE;
 #else
-	  oconf_error_at_locus_range(&arg->locus,
+	  conf_error_at_locus_range(&arg->locus,
 				     "pound compiled without PCRE support");
 	  return -1;
 #endif
