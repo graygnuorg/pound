@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "May 30, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "July 7, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1655,17 +1655,27 @@ Syntactically a tunnel is declared using the following construct:
 \fBEnd\fR
 .EE
 .SH "Service"
-A service is a definition of which backend servers
+A service defines backend servers and conditions incoming requests
+must match in order to be processed by one of these backends. It may
+also modify the request before passing it on to the backend.
+.PP
+Services may be defined within a listener (in which case they will be
+used only by that listener), or globally (which makes them available
+to all listeners).
+.PP
+To select a service,
 .B pound
-will use to reply to incoming requests. A service may be defined as part
-of a listener (in which case it will be used only by that listener), or
-globally (which makes it available to all listeners).
-.B Pound
-selects a listener based on user-supplied conditions that analyze the
-incoming request URL and/or headers.  It will always scan
-listener-specific services first.  If none matches, it
-will try the global ones.  Services are tried in the same order as
-they are defined in configuration.
+iterates over a list of services defined in the listener. For each
+service, it checks whether the request matches conditions defined
+in it. If so, that service is selected. If none of the
+per-listener services matched the request, the same process is applied
+to the global service list. Finally, if no matching global service was
+found as well, \fBpound\fR returns a 503 response.
+.PP
+Services marked as \fBFallThrough\fR (see below) are processed
+specially. If the request matches such a service, any request
+modification statements from the service are applied and the selection
+process continues from the next service.
 .PP
 All configuration directives enclosed between
 .B Service
@@ -2291,6 +2301,14 @@ Per-service constants augment per-listener and global ones.  If the
 name of a per-service constant coincides with the name of a
 per-listener or a globally defined one, the former overrides the
 latter for this service.
+.TP
+\fBFallThrough\fR [\fIbool\fR]
+If \fIbool\fR is \fBtrue\fR or omitted, this statement instructs
+\fBpound\fR to process this service as usual and continue service
+selection. In other words, fall-through services are defined for side
+effects, such as modifying the incoming request, changing log
+suppression, etc. They cannot contain backend definitions or response
+rewriting sections.
 .TP
 \fBIgnoreCase\fR \fIbool\fR
 Override the global

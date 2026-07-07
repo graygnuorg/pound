@@ -6534,8 +6534,7 @@ http_process_request (POUND_HTTP *phttp)
     }
 
   /*
-   * check that the requested URL still fits the old back-end (if
-   * any)
+   * Select the service to handle the request.
    */
   if ((res = select_service (phttp)) != HTTP_STATUS_OK)
     {

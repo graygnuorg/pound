@@ -514,69 +514,81 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 }
 
 /*
- * Match the request obtained via PHTTP against conditions from the service
- * SVC.  Return value:
- *
- *  0 request doesn't match or an error occurred;
- *  1 request matches.
- * -1 error
+ * Select from HEAD a service that matches current request in PHTTP,
+ * processing and skipping any FallThrough services.
  */
 static int
-match_service (SERVICE *svc, POUND_HTTP *phttp)
+select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 {
-  int rc;
-  /*
-   * Temporarily assume this service.  This is needed to properly
-   * expand %[remoteip 1] constructs, since TrustedIP lists can be declared
-   * inside a service.
-   */
-  phttp->svc = svc;
-  rc = match_cond (&svc->cond, phttp, &phttp->request);
-  phttp->svc = NULL;
-  return rc;
-}
-
-/*
- * Find the right service for a request and store it in phttp->svc.
- * Return internal HTTP status code.
- */
-int
-select_service (POUND_HTTP *phttp)
-{
-  SERVICE *svc;
   int rc = 0;
+  SERVICE *svc;
 
-  SLIST_FOREACH (svc, &phttp->lstn->services, next)
+  SLIST_FOREACH (svc, head, next)
     {
       if (svc->disabled)
 	continue;
-      if ((rc = match_service (svc, phttp)) != 0)
-	break;
-    }
-  if (rc == 0)
-    {
-      /* try global services */
-      SLIST_FOREACH (svc, &services, next)
+
+      /*
+       * Temporarily assume this service. It will be reset below, if
+       * no service have been found or if an error occurred.
+       * This also makes sure any %[remoteip 1] constructs are properly
+       * expanded in match_cond (TrustedIP lists can be declared
+       * inside a service).
+       */
+      phttp->svc = svc;
+
+      rc = match_cond (&svc->cond, phttp, &phttp->request);
+      if (rc > 0)
 	{
-	  if (svc->disabled)
-	    continue;
-	  if ((rc = match_service (svc, phttp)) != 0)
+	  /* Condition matches. */
+	  phttp->log_suppress_mask |= svc->log_suppress_mask;
+	  if (svc->fall_through)
+	    {
+	      /*
+	       * For FallThrough conditions, apply any rewrites and
+	       * continue, unless an error occurred.
+	       */
+	      if (rewrite_apply (phttp, &phttp->request, REWRITE_REQUEST))
+		{
+		  rc = -1;
+		  break;
+		}
+	      rc = 0;
+	    }
+	  else
 	    break;
 	}
+      else if (rc < 0)
+	break;
     }
 
   switch (rc)
     {
     case -1:
+      phttp->svc = NULL;
       return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
     case 0:
+      phttp->svc = NULL;
       return HTTP_STATUS_SERVICE_UNAVAILABLE;
     }
 
-  phttp->svc = svc;
-
   return HTTP_STATUS_OK;
+}
+
+/*
+ * Find the right service for the request and store it in phttp->svc.
+ * Return internal HTTP status code.
+ */
+int
+select_service (POUND_HTTP *phttp)
+{
+  int rc;
+
+  if ((rc = select_term_service (phttp, &phttp->lstn->services)) ==
+      HTTP_STATUS_SERVICE_UNAVAILABLE)
+    rc = select_term_service (phttp, &services);
+  return rc;
 }
 
 /*

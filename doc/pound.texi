@@ -217,6 +217,7 @@ Service
 * Service Logging::
 * Backends::
 * Session::
+* FallThrough::
 * Other Statements::
 
 Backends
@@ -6562,6 +6563,7 @@ is used as its identifier.  Service numbers start at 0.
 * Service Logging::
 * Backends::
 * Session::
+* FallThrough::
 * Other Statements::
 @end menu
 
@@ -7407,6 +7409,39 @@ How long can a session be idle. A session that has been idle for
 longer than the specified number of seconds will be discarded.
 This directive is mandatory.
 @end deffn
+
+@node FallThrough
+@subsection FallThrough
+@cindex fall-through service
+
+@deffn {Session directive} FallThrough [@var{bool}]
+Declares the service as a @dfn{fall-through}. The argument is optional and
+defaults to @code{true}.
+
+Fall-through services are defined for modifying incoming requests
+before passing them on to another services. They cannot contain
+backend definitions and @code{rewrite response} sections.
+
+During request processing a matching fall-through service applies its
+modification statements to the incoming request, after which service
+selection continues.
+@end deffn
+
+The following example defines a fall-through service which applies to
+any request whose path begins with @samp{/status/}. For each such
+request, the @code{Host} header is set to @samp{internal} and logging
+of successful responses is turned on:
+
+@example
+@group
+Service "status"
+    Path -beg "/status/"
+    SetHeader "Host: internal"
+    LogSuppress success
+    FallThrough
+End
+@end group
+@end example
 
 @node Other Statements
 @subsection Other Statements

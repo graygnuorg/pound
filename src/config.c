@@ -5467,6 +5467,14 @@ static CFG_DEFN svc_defn[] = {
       .off = offsetof (SERVICE, disabled)
     }
   },
+  {
+    .name = "FallThrough",
+    .token = T_DIRECTIVE,
+    .vtype = CFG_TYPE_OPT_BOOL,
+    .rcvr = {
+      .off = offsetof (SERVICE, fall_through)
+    }
+  },
 
   /* Set* statements */
   {
@@ -8118,7 +8126,24 @@ service_finalize (SERVICE *svc, void *data)
       be_count += be_setup.be_count;
     }
 
-  if (be_count == 0)
+  if (svc->fall_through)
+    {
+      if (be_count)
+	{
+	  conf_error_at_locus_range (&svc->locus,
+				     "backends defined in"
+				     " a FallThrough service");
+	  return -1;
+	}
+      if (!SLIST_EMPTY (&svc->rewrite[REWRITE_RESPONSE]))
+	{
+	  conf_error_at_locus_range (&svc->locus,
+				     "Rewrite response defined in"
+				     " a FallThrough service");
+	  return -1;
+	}
+    }
+  else if (be_count == 0)
     {
       conf_error_at_locus_range (&svc->locus, "%s",
 				 "warning: no backends defined");

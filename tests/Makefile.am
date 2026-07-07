@@ -94,6 +94,7 @@ TESTSUITE_AT = \
  errfile.at\
  error.at\
  experr.at\
+ fallthrough.at\
  fromfile.at\
  headdeny.at\
  header.at\

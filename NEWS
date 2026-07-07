@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-06-02
+Pound -- history of user-visible changes. 2026-07-07
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -81,6 +81,26 @@ Cert, Ciphers, Disable. This requirement was lifted. Moreover, any
 of these statements already imply that the backend is HTTPS capable,
 which means that the HTTPS statement is superfluous if any of these
 is used.
+
+* Fall-through services
+
+Fall-through services are processed specially. If the request matches
+a fall-through service, any modification statements from that service
+are applied to the request, and the selection process continues from
+the next service. In other words, a fall-through service provides a
+way to apply a set of modifications common for all services that follow.
+
+A service is marked as a fall-through using the "FallThrough"
+statement. Such services cannot contain backend definitions or
+"Rewrite response" statements. An example of a fall-through service
+follows:
+
+  Service
+      Path -beg "/status/"
+      SetHeader "Host: internal"
+      LogSuppress success
+      FallThrough
+  End
 
 Version 4.23, 2026-05-26
 

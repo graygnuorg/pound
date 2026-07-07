@@ -966,6 +966,7 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
+  int fall_through;
   int rewrite_errors;           /* Rewrite HTTP errors. */
   void *sctab;                  /* String constant table */
 
@@ -1170,7 +1171,7 @@ typedef struct _pound_http
 				backend */
 
   int response_code;
-
+  int log_suppress_mask;
   CONTENT_LENGTH res_bytes;
 
   enum capture_state capturing;

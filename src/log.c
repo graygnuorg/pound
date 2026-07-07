@@ -1104,7 +1104,7 @@ http_log (POUND_HTTP *phttp)
   if (http_log_format_check (lev))
     return;
   if (phttp->svc &&
-      (STATUS_MASK (phttp->response_code) & phttp->svc->log_suppress_mask))
+      (STATUS_MASK (phttp->response_code) & phttp->log_suppress_mask))
     return;
   prog = http_log_tab + lev;
   if (SLIST_EMPTY (&prog->head))

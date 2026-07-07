@@ -1,0 +1,67 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([FallThrough services])
+AT_KEYWORDS([cond fallthrough])
+PT_CHECK([
+ListenHTTP
+	Service
+		SetHeader "FT-1: passed"
+		FallThrough
+	End
+	Service
+		Host "one"
+		Backend
+		End
+	End
+	Service
+		SetHeader "FT-2: passed"
+		FallThrough
+	End
+	Service
+		Host "two"
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: one
+end
+
+200
+x-orig-header-FT-1: passed
+-x-orig-header-FT-2:
+end
+
+GET /echo/foo
+Host: two
+end
+
+200
+x-orig-header-FT-1: passed
+x-orig-header-FT-2: passed
+end
+
+GET /echo/foo
+Host: any
+end
+
+503
+-x-orig-header-FT-1:
+-x-orig-header-FT-2:
+end
+])
+AT_CLEANUP
