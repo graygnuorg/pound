@@ -416,11 +416,15 @@ inctx_pop (void)
   struct inctx *ctx = input_ctx;
 
   if (!ctx)
-    return 1;
+    {
+      fclose (yyin);
+      return 1;
+    }
 
   input_ctx = ctx->prev;
   if (YY_CURRENT_BUFFER != ctx->buf)
     {
+      fclose (yyin);
       yy_delete_buffer (YY_CURRENT_BUFFER);
       yy_switch_to_buffer (ctx->buf);
     }
