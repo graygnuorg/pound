@@ -223,6 +223,13 @@ topstmt     : T_NL
 	    | comheaders
 	    | acldef
 	    | includedir
+	    | error { skip_eol (); } T_NL
+	      {
+		yyclearin;
+		yyerrok;
+		cfg_err++;
+		$$ = NULL;
+	      }
 	    ;
 
 section     : section_kw opt_arglist T_NL opt_stmtlist endsec T_NL
