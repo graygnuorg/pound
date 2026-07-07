@@ -33,19 +33,21 @@ static int nl_injected;
 #define YY_INPUT(buf,result,max_size)				\
   do								\
     {								\
-      size_t n = fread (buf, 1, max_size, yyin);		\
-      if (n == 0)						\
+      if (yyin == NULL)                                         \
+	result = 0;						\
+      else							\
+	result = fread (buf, 1, max_size, yyin);		\
+      if (result == 0)						\
 	{							\
 	  if (!nl_injected)					\
 	    {							\
 	      buf[0] = '\n';					\
-	      n = 1;						\
+	      result = 1;					\
 	      nl_injected = 1;					\
 	    }							\
 	}							\
       else							\
-	nl_injected = buf[n-1] == '\n';				\
-      result = n;						\
+	nl_injected = buf[result-1] == '\n';			\
     }								\
   while (0)
 
@@ -410,6 +412,16 @@ next_name (void)
   return NULL;
 }
 
+static void
+input_close (void)
+{
+  if (yyin)
+    {
+      fclose (yyin);
+      yyin = NULL;
+    }
+}
+
 static int
 inctx_pop (void)
 {
@@ -417,14 +429,14 @@ inctx_pop (void)
 
   if (!ctx)
     {
-      fclose (yyin);
+      input_close ();
       return 1;
     }
 
   input_ctx = ctx->prev;
   if (YY_CURRENT_BUFFER != ctx->buf)
     {
-      fclose (yyin);
+      input_close ();
       yy_delete_buffer (YY_CURRENT_BUFFER);
       yy_switch_to_buffer (ctx->buf);
     }
