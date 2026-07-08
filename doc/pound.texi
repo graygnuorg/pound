@@ -91,6 +91,7 @@ This edition of the @cite{Pound Manual}, last updated
 * Lua::
 * Tunnels::
 * Logging::
+* Preprocessor::
 * Configuration::
 * poundctl::
 * Emacs::
@@ -451,6 +452,11 @@ messages in accordance with its configuration file.
 Check configuration file for syntax error and exit.  Exit code
 indicates whether the configuration is OK (0) or not (1).
 
+@opindex -E
+@item -E
+Print the preprocessed configuration file and exit.
+@pxref{Preprocessor}.
+
 @opindex -e
 @item -e
 Start in foreground mode and log to standard error (or standard
@@ -534,7 +540,7 @@ Print scanner traces while processing the configuration.
 
 @defvr Feature deprecated=@var{mode}
 Defines what to do if a deprecated statement is encountered in the
-configuration file.  Allowed values of @var{mode} are:
+configuration file.  Allowed values for @var{mode} are:
 
 @table @code
 @kwindex ok
@@ -550,6 +556,10 @@ default.
 @item error
 Treat deprecated statements as errors.
 @end table
+@end defvr
+
+@defvr Feature no-deprecated
+Same as @code{-Wdeprecated=error}.
 @end defvr
 
 @defvr Feature warn-deprecated
@@ -588,6 +598,10 @@ configuration file will be looked up in the current working directory.
 This is useful mainly in testsuite.
 @end defvr
 
+@defvr Feature preprocess=@var{command}
+Preprocess configuration files using @var{command}.
+@xref{Preprocessor}, for a detailed discussion of this feature.
+@end defvr
 
 @end table
 
@@ -4048,6 +4062,136 @@ definitions:
 @end example
 @end table
 
+@node Preprocessor
+@chapter Preprocessor
+In really complex configrations you might need a mechanism for
+generating fragments of @file{pound.cfg} that follow a certain
+pattern, but differ in some detail. For such cases, @command{pound}
+provides you with an option of @dfn{preprocessing} the configuration
+file prior to parsing it. Preprocessing consists in running some
+external program with the pathname to the configuration file as its
+argument, and using its output as the actual configuration text. This
+process applies to each file included in the configuration (@pxref{File
+inclusion}) as well.
+
+Preprocessing is enabled by the @option{-Wpreprocess=@var{command}}
+command line option. Its argument, @var{command}, is the full command
+line that starts the preprocessor. For example,
+@option{-Wpreprocess=m4 -s'} will pass each configuration through
+@command{m4 -s}.
+
+As an example of using preprocessor, consider a configuration where
+you need to protect several services with basic authorization, but with
+different user database files for each of them.  The technique for
+implementing basic authentication is discussed in @ref{Authentication}.
+To have per-service user databases, you will have to split each
+service in two: one implementing authentication with @code{BasicAuth}
+special backend, followed by another one implementing the 401 response
+if no credentials were supplied, like
+that:
+
+@example
+@group
+Service
+   @var{cond}
+   BasicAuth "@var{file}"
+   @var{stmt}
+End
+Service
+   @var{cond}
+   Rewrite response
+      SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+   End
+   Error 401
+End
+@end group
+@end example
+
+Here, @var{cond} stands for a set of conditional statements identifying
+this service (@pxref{Service Selection Statements}), @var{file} is the
+pathname of its user database file, and @var{stmt} stand for the
+rest of sub-statements, in particular one or more @code{Backend}
+sections for that service.
+
+Obviously, having to type the same fragment for each service would be
+tedious and error-prone.  The task can be simplified using
+preprocessing.  In this example we will use GNU @command{m4} as
+preprocessor (@pxref{Top, GNU M4 manual, GNU M4, m4, GNU M4 macro
+processor}).  The fragment above can be formulated as @command{m4}
+macro as follows:
+
+@example
+dnl BASICAUTH(FILE,COND,STMT)
+define(`BASICAUTH',`dnl
+Service
+  $2
+  BasicAuth "$1"
+  $3
+End
+Service
+  $2
+  Rewrite response
+    SetHeader "WWW-Authenticate: Basic realm=\"Restricted access\""
+  End
+  Error 401
+End')
+@end example
+
+Add this definition to the beginning of your @file{pound.cfg} file,
+or save it in a disk file and include this file using the
+@code{include} statement.  Now, you can use that macro to define
+as many services as needed, e.g.:
+
+@example
+BASICAUTH(`example.pwd',`
+  Host "example.com"
+',
+` Backend
+    Address 192.0.2.1
+    Port 80
+  End
+')
+
+BASICAUTH(`remote.pwd',`
+  Match OR
+    Host "remote.com"
+    Host "www.remote.com"
+  End
+',
+` Backend
+    Address 192.0.2.5
+    Port 80
+  End
+')
+@end example
+
+To use this configuration, run @command{pound} with the following additional
+option: @option{-Wpreprocess='m4 -s'}.  The use of the @option{-s}
+option is recommended, to have @command{m4} insert additional line
+information in its output.  This information will be used
+by @command{pound} to adjust source locations in its diagnostic
+messages.
+
+Yet another useful @command{m4} option is @option{-P}, which instructs
+it to recognize its keywords only when prefixed with @samp{m4_}. This
+will help avoid processing @command{pound}'s @code{include} statements by
+@command{m4}.
+
+@opindex -E
+To verify that the produced configuration file matches your
+expectations, use the @option{-E} command line option.  It instructs
+@command{pound} to output the preprocessed configuration file and
+exit:
+
+@example
+pound -Wpreprocess='m4 -s' -E
+@end example
+
+Notice, that @code{include} statements are not expanded by the
+@option{-E} option.  To examine the preprocessed output for a
+particular include file, you have to supply its name explicitly, using
+the @option{-f} option.
+
 @node Configuration
 @chapter Configuration
  A configuration file provides @command{pound} with the information
@@ -4862,7 +5006,7 @@ a variable that controls where Lua looks for shared libraries.
 
 The @code{Constant} statement defines a @dfn{configuration constant}
 for use in string expansions and Lua code.  For a detailed description
-of configuration constants and their use, @ref{Constants}, 
+of configuration constants and their use, @ref{Constants},
 
 @deffn {Global directive} Constant "@var{name}" "@var{val}"
 Define constant @var{name} to have the value @var{val}.

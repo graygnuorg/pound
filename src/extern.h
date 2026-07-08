@@ -75,7 +75,8 @@ enum
     FEATURE_WARN_DEPRECATED,
     FEATURE_DEPRECATED,
     FEATURE_CLOSE_EXTRA_FDS,
-    FEATURE_DEBUG
+    FEATURE_DEBUG,
+    FEATURE_PREPROC
   };
 
 int feature_is_set (int f);

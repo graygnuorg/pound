@@ -23,6 +23,7 @@
 #include <openssl/x509v3.h>
 #include <dirent.h>
 #include <assert.h>
+#include <wordexp.h>
 
 /*
  * Special features.
@@ -89,6 +90,41 @@ set_deprec_warn (char const *fname, int enabled, char const *val)
   cfg_deprecation_mode = enabled ? DEPREC_WARN : DEPREC_OK;
 }
 
+static void
+enable_preproc (char const *fname, int enabled, char const *val)
+{
+  if (enabled)
+    {
+      wordexp_t wexp;
+
+      if (!val)
+	abend (NULL, "-W%s requires argument", fname);
+
+      wexp.we_offs = 1;
+      switch (wordexp (val, &wexp, WRDE_SHOWERR|WRDE_DOOFFS))
+	{
+	case 0:
+	  break;
+
+	case WRDE_BADCHAR:
+	  abend (NULL, "-W%s: bad character encountered", fname);
+
+	case WRDE_SYNTAX:
+	  abend (NULL, "-W%s: syntax error", fname);
+
+	case WRDE_NOSPACE:
+	  xnomem ();
+
+	default:
+	  abend (NULL, "-W%s=%s: can't split", fname, val);
+	}
+      memmove (wexp.we_wordv, wexp.we_wordv + wexp.we_offs,
+	       wexp.we_wordc * sizeof (wexp.we_wordv[0]));
+      preproc_argc = wexp.we_wordc;
+      preproc_argv = wexp.we_wordv;
+    }
+}
+
 static struct pound_feature feature[] = {
   [FEATURE_DNS] = {
     .name = "dns",
@@ -123,6 +159,12 @@ static struct pound_feature feature[] = {
     .descr = "enable additional debugging",
     .enabled = F_OFF,
     .setfn = set_debug_feature
+  },
+  [FEATURE_PREPROC] = {
+    .name = "preprocess",
+    .descr = "preprocess configuration files",
+    .enabled = F_OFF,
+    .setfn = enable_preproc
   },
   { NULL }
 };
@@ -175,10 +217,11 @@ struct string_value pound_settings[] = {
 void
 print_help (void)
 {
-  printf ("usage: %s [-FVcehv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
+  printf ("usage: %s [-EFVcehv] [-W [no-]FEATURE] [-f FILE] [-p FILE]\n", progname);
   printf ("HTTP/HTTPS reverse-proxy and load-balancer\n");
   printf ("\nOptions are:\n\n");
   printf ("   -c               check configuration file syntax and exit\n");
+  printf ("   -E               show preprocessed configuration file and exit\n");
   printf ("   -e               print errors on stderr (implies -F)\n");
   printf ("   -F               remain in foreground after startup\n");
   printf ("   -f FILE          read configuration from FILE\n");
@@ -212,15 +255,20 @@ config_parse (int argc, char **argv)
   char *pid_file_option = NULL;
   int foreground_option = 0;
   int stderr_option = 0;
+  int preproc_only = 0;
 
   set_progname (argv[0]);
   feature_init (feature);
 
-  while ((c = getopt (argc, argv, "ceFf:hp:VvW:")) > 0)
+  while ((c = getopt (argc, argv, "cEeFf:hp:VvW:")) > 0)
     switch (c)
       {
       case 'c':
 	check_only = 1;
+	break;
+
+      case 'E':
+	preproc_only = 1;
 	break;
 
       case 'e':
@@ -270,6 +318,9 @@ config_parse (int argc, char **argv)
       logmsg (LOG_ERR, "unknown extra arguments (%s...)", argv[optind]);
       exit (1);
     }
+
+  if (preproc_only)
+    exit (cfg_lex_preproc (conf_name));
 
   if (feature_is_set (FEATURE_CLOSE_EXTRA_FDS))
     close_fds_above (2);

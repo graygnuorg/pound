@@ -1496,8 +1496,12 @@ void service_lb_reset (SERVICE *svc, BACKEND *be);
 
 FILE *fopen_wd (WORKDIR *wd, const char *filename);
 FILE *fopen_include (const char *filename);
+FILE *popen_include (size_t argc, char **argv, const char *filename, pid_t *pid);
 void fopen_error (int pri, int ec, WORKDIR *wd, const char *filename,
 		  struct locus_range const *loc);
+
+
+char *filename_catn (char const *dir, char const *file, size_t flen);
 char *filename_resolve (const char *filename);
 
 typedef int (*LISTENER_ITERATOR) (LISTENER *, void *);

@@ -291,6 +291,7 @@ char const *globstrerror (int rc);
 int cfg_open_input (const char *filename, struct locus_range *loc);
 int cfg_lex_done (void);
 int cfg_lex_init (char const *filename, char const *dir);
+int cfg_lex_preproc (char const *filename);
 
 typedef struct cfg_type CFG_TYPE;
 typedef struct cfg_rcvr CFG_RCVR;
@@ -554,6 +555,8 @@ enum
   };
 
 extern int cfg_debug;
+extern size_t preproc_argc;
+extern char **preproc_argv;
 
 extern CFG_DEFN rewrite_branch_defn;
 
@@ -611,7 +614,7 @@ int feature_set (char const *name);
 int feature_is_set (int f);
 void features_print (FILE *fp);
 
-void set_debug_feature (char const *, int enabled, char const *val);
+void set_debug_feature (char const *fname, int enabled, char const *val);
 
 void skip_eol (void);
 

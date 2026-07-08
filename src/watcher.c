@@ -171,28 +171,6 @@ watcher_reread (struct watcher *watcher)
   pthread_rwlock_unlock (&watcher->rwl);
 }
 
-static char *
-filename_catn (char const *dir, char const *file, size_t flen)
-{
-  char *buf;
-  size_t len;
-  if (dir)
-    {
-      len = strlen (dir);
-      while (len > 0 && dir[len-1] == '/')
-	--len;
-    }
-  else
-    len = 0;
-  buf = xmalloc (len + flen + 2);
-  if (dir)
-    memcpy (buf, dir, len);
-  buf[len++] = '/';
-  memcpy (buf + len, file, flen);
-  buf[len + flen] = 0;
-  return buf;
-}
-
 char const *
 filename_split_wd (char const *filename, WORKDIR **wdp)
 {

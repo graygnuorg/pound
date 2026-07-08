@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 9, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "July 10, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -249,6 +249,10 @@ will exit immediately after parsing the configuration file. This may
 be used for running a quick syntax check before actually activating a
 server.
 .TP
+.B \-E
+Print the preprocessed configuration file and exit.  See the
+description of \fB\-Wpreprocessor\fR, below.
+.TP
 \fB\-e\fR
 Log to standard error (standard output for \fBLOG_DEBUG\fR and
 \fBLOG_INFO\fR severity levels).  Both standard streams are set to
@@ -304,14 +308,61 @@ Enable or disable (if prefixed with \fBno\-\fR) additional \fBpound\fR
 features.  As of this version, the following \fIFEATURE\fRs are implemented:
 .RS
 .TP
-.RB [ no\- ] warn\-deprecated
-Warn if any deprecated statements are used in configuration file.
+.B no\-close\-extra\-fds
+At startup, \fBpound\fR closes all inherited file descriptors
+numerically greater than 2. If this is undesirable for some reason,
+use this option.
+.TP
+.BI debug= LIST
+Enable additional debugging.  \fILIST\fR is a comma-delimited list of
+keywords, each specifying the part of code to debug.  Valid keywords
+sections are:
+.RS
+.TP
+.B ast
+Additional information about processing of the abstract syntax
+tree produced from the configuration file.
+.TP
+.B gram
+Print grammar traces while processing the configuration.
+.TP
+.B lex
+Print scanner traces while processing the configuration.
+.RE
+.TP
+.BI deprecated= MODE
+Defines what to do if a deprecated statement is encountered in the
+configuration file.  Allowed values for \fIMODE\fR are:
+.RS
+.TP
+.B ok
+Accept deprecated statements silently.
+.TP
+.B warn
+Accept deprecated statements, but warn about their use.  This is the
+default.
+.TP
+.B error
+Treat deprecated statements as errors.
+.RE
+.TP
+.B no\-deprecated
+Same as \fB\-Wdeprecated=error\fR.
+.TP
+.B warn\-deprecated
+Same as \fB\-Wdeprecated=warn\fR.
 .TP
 .RB [ no\- ] dns
 Resolve host names found in configuration file.  This is the default.
 You can disable it if your configuration file refers to backends only
 by their IP addresses, in order to suppress potentially lengthy
 network host address lookups.
+.TP
+\fBinclude\-dir=\fIDIR\fR
+Override the default include directory setting.  Set it to \fIDIR\fR.
+See the discussion of the \fBIncludeDir\fR directive in section
+.BR "GLOBAL DIRECTIVES" ,
+below.
 .TP
 .B no\-include\-dir
 Don't set the include directory to the system configuration
@@ -320,11 +371,8 @@ to the directives in the configuration file will be looked up in the
 current working directory.  This feature is useful mainly in
 testsuite.
 .TP
-\fBinclude\-dir=\fIDIR\fR
-Override the default include directory setting.  Set it to \fIDIR\fR.
-See the discussion of the \fBIncludeDir\fR directive in section
-.BR "GLOBAL DIRECTIVES" ,
-below.
+.BI preprocess= COMMAND
+Preprocess configuration files using \fICOMMAND\fR.
 .RE
 .SH "CONFIGURATION FILE"
 Each line in the file is considered a complete configuration

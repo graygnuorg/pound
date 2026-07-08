@@ -29,6 +29,9 @@
 struct locus_range curloc;
 int in_stmt;
 static int nl_injected;
+char **preproc_argv;
+size_t preproc_argc;
+static pid_t preproc_pid;
 
 #define YY_INPUT(buf,result,max_size)				\
   do								\
@@ -127,6 +130,56 @@ string_end (void)
   return new_string (stringbuf_value (&sb), stringbuf_len (&sb));
 }
 
+static int
+char_unescape (int c)
+{
+  static char t[] = "\\\\\"\"a\ab\bf\fn\nr\rt\tv\v";
+  char *p = strchr (t, c);
+  if (p)
+    return p[1];
+  return 0;
+}
+
+static void
+string_unescape (STRING *s)
+{
+  size_t i, j;
+
+  for (i = j = 0; j <= s->len;)
+    {
+      char *p = strchr (s->str + j, '\\');
+      if (p)
+	{
+	  int c;
+	  size_t n = p - (s->str + j);
+	  if (i != j)
+	    memmove (s->str + i, s->str + j, n);
+	  i += n;
+	  j += n;
+	  if (j + 1 == s->len)
+	    s->str[i++] = '\\';
+	  else if ((c = char_unescape (s->str[++j])) != 0)
+	    s->str[i++] = c;
+	  else
+	    {
+	      memcpy (s->str + i, s->str + j, 2);
+	      i += 2;
+	      j++;
+	    }
+	  j++;
+	}
+      else
+	{
+	  if (i != j)
+	    {
+	      memmove (s->str + i, s->str + j, s->len - j + 1);
+	      s->len = strlen (s->str);
+	    }
+	  break;
+	}
+    }
+}
+
 static inline int
 flag_token_type (CFG_FLAG const *flg)
 {
@@ -140,12 +193,84 @@ flag_token_type (CFG_FLAG const *flg)
     }
   return T_FLAG;
 }
+
+static void
+parse_line_directive (char const *str, size_t len, int isline)
+{
+  char *p;
+  unsigned long n;
+  STRING *filename = NULL;
+
+  len--;
+  /* Skip initial whitespace. */
+  str = c_trimlws (str, &len);
+  /* Skip # sign. */
+  str++;
+  /* Skip optional whitespace. */
+  str = c_trimlws (str, &len);
+
+  if (isline)
+    {
+      /* Skip the "line" prefix. */
+      str += 4;
+      len -= 4;
+    }
+
+  /* Skip whitespace before line number. */
+  str = c_trimlws (str, &len);
+  /* Parse line number */
+  errno = 0;
+  n = strtoul (str, &p, 10);
+  if (errno || n <= 1)
+    return;
+  if (*p)
+    {
+      len -= p - str;
+      str = p;
+      len--;
+      str = c_trimws (str, &len);
+      if (len > 0)
+	{
+	  if (len <= 2 || *str != '"' || str[len-1] != *str)
+	    return;
+	  str++;
+	  len -= 2;
+	  filename = string_ninit (str, len);
+	  string_unescape (filename);
+	}
+      else if (!isline)
+	return;
+    }
+  else if (!isline)
+    return;
+
+  if (filename)
+    {
+      locus_range_unref (&curloc);
+      curloc.beg.filename = filename;
+      curloc.end.filename = string_ref (curloc.beg.filename);
+    }
+
+  curloc.beg.line = n;
+  curloc.end.line = n - 1;
+  curloc.beg.col = curloc.end.col = 1;
+}
+
 %}
 %option case-insensitive
 WS [ \t]+
 IDENT [a-zA-Z_][a-zA-Z0-9_]*
 %x STR TEXT
 %%
+	 /* Line directives */
+^[ \t]*#[ \t]*[1-9][0-9]*[ \t]+\".*\"[^\n]*\n {
+  parse_line_directive(yytext, yyleng, 0);
+  locus_newline (1);
+}
+^[ \t]*#[ \t]*line[ \t][^\n]*\n {
+  parse_line_directive(yytext, yyleng, 1);
+  locus_newline (1);
+}
     /* Comments and whitespace. */
 #.*\n                  { in_stmt = 0; return tok (T_NL); }
 {WS}                   locus_reset ();
@@ -369,6 +494,7 @@ struct inctx
   YY_BUFFER_STATE buf;            /* Lex buffer state. */
   ino_t ino;
   dev_t dev;
+  pid_t pid;
   struct locus_range locus;       /* Current location */
   WORKDIR *wd;
   glob_t *glob;
@@ -391,6 +517,7 @@ inctx_push (void)
       ctx->buf = YY_CURRENT_BUFFER;
       ctx->ino = cur_ino;
       ctx->dev = cur_dev;
+      ctx->pid = preproc_pid;
       ctx->locus = curloc;
       locus_range_ref (&curloc);
       input_ctx = ctx;
@@ -415,11 +542,31 @@ next_name (void)
 static void
 input_close (void)
 {
-  if (yyin)
+  if (!yyin)
+    return;
+
+  if (preproc_pid)
     {
-      fclose (yyin);
-      yyin = NULL;
+      int status;
+
+      if (waitpid (preproc_pid, &status, 0) != preproc_pid)
+	conf_error ("waitpid(%d): %s", preproc_pid, strerror (errno));
+      else if (WIFEXITED (status))
+	{
+	  if (WEXITSTATUS (status))
+	    conf_error ("%s exited with status %d", preproc_argv[0],
+			WEXITSTATUS (status));
+	}
+      else if (WIFSIGNALED (status))
+	conf_error ("%s terminated on signal %d", preproc_argv[0],
+		    WTERMSIG (status));
+      else
+	conf_error ("%s terminated abnormally (%d)", preproc_argv[0],
+		    status);
     }
+
+  fclose (yyin);
+  yyin = NULL;
 }
 
 static int
@@ -442,6 +589,7 @@ inctx_pop (void)
     }
   cur_ino = ctx->ino;
   cur_dev = ctx->dev;
+  preproc_pid = ctx->pid;
   curloc = ctx->locus;
   locus_range_unref (&curloc);
 
@@ -550,7 +698,11 @@ cfg_open_input (const char *filename, struct locus_range *loc)
 	}
     }
 
-  if ((yyin = fopen_include (filename)) == 0)
+  if (preproc_argv)
+    yyin = popen_include (preproc_argc, preproc_argv, filename, &preproc_pid);
+  else
+    yyin = fopen_include (filename);
+  if (!yyin)
     {
       conf_error ("can't open %s: %s", filename, strerror (errno));
       inctx_pop ();
@@ -596,6 +748,19 @@ cfg_lex_init (char const *filename, char const *dir)
 
   return rc;
 }
+
+int
+cfg_lex_preproc (char const *filename)
+{
+  int c;
+  if (cfg_lex_init (filename, NULL))
+    return 1;
+  while ((c = input ()) > 0)
+    putchar (c);
+  cfg_lex_done ();
+  return 0;
+}
+
 
 char const *
 argcode_string (int c)

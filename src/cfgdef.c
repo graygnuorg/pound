@@ -329,6 +329,87 @@ fopen_include (const char *filename)
   return fopen_wd (wd, filename);
 }
 
+FILE *
+popen_include (size_t argc, char **argv, const char *filename, pid_t *ppid)
+{
+  int p[2];
+  FILE *fp;
+  pid_t pid;
+  char *absname;
+
+  absname = filename_resolve (filename);
+  if (!absname)
+    return NULL;
+
+  if (pipe (p))
+    {
+      conf_error ("pipe: %s", strerror (errno));
+      free (absname);
+      return NULL;
+    }
+
+  switch (pid = fork ())
+    {
+    case 0:
+      if (dup2 (p[1], 1) == -1)
+	{
+	  conf_error ("dup2: %s", strerror (errno));
+	}
+      else
+	{
+	  close_fds_above (2);
+	  argv[argc] = absname;
+	  execvp (argv[0], argv);
+	}
+      conf_error ("can't run %s: %s", argv[0], strerror (errno));
+      _exit (127);
+
+    case -1:
+      conf_error ("fork: %s", strerror (errno));
+      free (absname);
+      close (p[0]);
+      close (p[1]);
+      return NULL;
+
+    default:
+      break;
+    }
+
+  free (absname);
+  close (p[1]);
+  if ((fp = fdopen (p[0], "r")) == NULL)
+    {
+      conf_error ("fdopen: %s", strerror (errno));
+      kill (pid, SIGKILL);
+      close (p[0]);
+      return NULL;
+    }
+  *ppid = pid;
+  return fp;
+}
+
+char *
+filename_catn (char const *dir, char const *file, size_t flen)
+{
+  char *buf;
+  size_t len;
+  if (dir)
+    {
+      len = strlen (dir);
+      while (len > 0 && dir[len-1] == '/')
+	--len;
+    }
+  else
+    len = 0;
+  buf = xmalloc (len + flen + 2);
+  if (dir)
+    memcpy (buf, dir, len);
+  buf[len++] = '/';
+  memcpy (buf + len, file, flen);
+  buf[len + flen] = 0;
+  return buf;
+}
+
 char *
 filename_resolve (const char *filename)
 {
@@ -340,8 +421,7 @@ filename_resolve (const char *filename)
       WORKDIR *wd = get_include_wd ();
       if (!wd)
 	return NULL;
-      ret = xmalloc (strlen (wd->name) + strlen (filename) + 2);
-      strcat (strcat (strcpy (ret, wd->name), "/"), filename);
+      ret = filename_catn (wd->name, filename, strlen (filename));
     }
   return ret;
 }
