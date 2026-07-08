@@ -1161,7 +1161,7 @@ feature_set (char const *name)
 	      memcmp (feature_tab[i].name, name, len) == 0)
 	    {
 	      if (feature_tab[i].setfn)
-		feature_tab[i].setfn (enabled, val);
+		feature_tab[i].setfn (feature_tab[i].name, enabled, val);
 	      else if (val)
 		break;
 	      feature_tab[i].enabled = enabled;
@@ -1200,7 +1200,7 @@ features_print (FILE *fp)
 }
 
 void
-set_debug_feature (int enabled, char const *val)
+set_debug_feature (char const *fname, int enabled, char const *val)
 {
   enum { DBG_LEX, DBG_GRAM, DBG_AST };
   static char *dbgtok[] = { "lex", "gram", "ast", NULL };
@@ -1209,8 +1209,16 @@ set_debug_feature (int enabled, char const *val)
 
   if (enabled)
     {
-      char *valstr = xstrdup (val);
-      char *valptr = valstr;
+      char *valstr, *valptr;
+
+      if (!val)
+	{
+	  conf_error_at_locus_point (NULL, "-W%s requires argument", fname);
+	  exit (1);
+	}
+
+      valstr = xstrdup (val);
+      valptr = valstr;
       while (*valptr && (i = getsubopt (&valptr, dbgtok, &v)) != -1)
 	{
 	  switch (i)
@@ -1228,7 +1236,8 @@ set_debug_feature (int enabled, char const *val)
 	      break;
 
 	    default:
-	      conf_error_at_locus_point (NULL, "bad debug token: %s", v);
+	      conf_error_at_locus_point (NULL, "-W%s: bad debug token: %s",
+					 fname, v);
 	      exit (1);
 	    }
 	}

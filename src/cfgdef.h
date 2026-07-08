@@ -603,7 +603,7 @@ struct pound_feature
   char *name;
   char *descr;
   int enabled;
-  void (*setfn) (int, char const *);
+  void (*setfn) (char const *, int, char const *);
 };
 
 void feature_init (struct pound_feature *ftab);
@@ -611,7 +611,7 @@ int feature_set (char const *name);
 int feature_is_set (int f);
 void features_print (FILE *fp);
 
-void set_debug_feature (int enabled, char const *val);
+void set_debug_feature (char const *, int enabled, char const *val);
 
 void skip_eol (void);
 

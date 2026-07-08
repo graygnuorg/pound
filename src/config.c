@@ -28,7 +28,7 @@
  * Special features.
  */
 static void
-set_include_dir (int enabled, char const *val)
+set_include_dir (char const *fname, int enabled, char const *val)
 {
   if (enabled)
     {
@@ -37,12 +37,13 @@ set_include_dir (int enabled, char const *val)
 	val = NULL;
       else if (stat (val, &st))
 	{
-	  logmsg (LOG_ERR, "include-dir: can't stat %s: %s", val, strerror (errno));
+	  logmsg (LOG_ERR, "-W%s: can't stat %s: %s", fname, val,
+		  strerror (errno));
 	  exit (1);
 	}
       else if (!S_ISDIR (st.st_mode))
 	{
-	  logmsg (LOG_ERR, "include-dir: %s is not a directory", val);
+	  logmsg (LOG_ERR, "-W%s: %s is not a directory", fname, val);
 	  exit (1);
 	}
       include_dir = val;
@@ -52,29 +53,39 @@ set_include_dir (int enabled, char const *val)
 }
 
 static void
-set_deprec (int enabled, char const *val)
+set_deprec (char const *fname, int enabled, char const *val)
 {
   if (enabled)
     {
-      char *v;
+      char *v, *valstr, *valptr;
       static char *depopt[] = { "ok", "warn", "err", NULL };
-      char *valstr = xstrdup (val);
-      char *valptr = valstr;
-      int n = getsubopt (&valptr, depopt, &v);
+      int n;
+
+      if (!val)
+	abend (NULL, "-W%s requires argument", fname);
+
+      valstr = xstrdup (val);
+      valptr = valstr;
+      n = getsubopt (&valptr, depopt, &v);
       if (n != -1)
-	cfg_deprecation_mode = n;
+	{
+	  if (*valptr)
+	    abend (NULL, "-W%s: multiple values not allowed", fname);
+	  free (valstr);
+	  cfg_deprecation_mode = n;
+	}
       else
-	abend (NULL, "bad deprecation token: %s", v);
+	abend (NULL, "-W%s: bad deprecation token: %s", fname, v);
     }
   else
     cfg_deprecation_mode = DEPREC_ERR;
 }
 
 static void
-set_deprec_warn (int enabled, char const *val)
+set_deprec_warn (char const *fname, int enabled, char const *val)
 {
   if (val)
-    abend (NULL, "unexpected value (%s)", val);
+    abend (NULL, "-W%s: unexpected value (%s)", fname, val);
   cfg_deprecation_mode = enabled ? DEPREC_WARN : DEPREC_OK;
 }
 
