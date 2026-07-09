@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 7, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "July 9, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -2439,9 +2439,9 @@ parameter.
 \fBPort\fR \fIport\fR
 The port number or service name that
 .B pound
-will connect to. This is a
-.B mandatory
-parameter for non Unix-domain backends.
+will connect to. If not supplied, the port number defaults to 443,
+if the \fBHTTPS\fR statement (see below) defines the backend as
+expecting https, and 80 otherwise.
 .TP
 \fBHTTPS\fR
 The backend is using HTTPS.

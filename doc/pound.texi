@@ -6999,8 +6999,9 @@ described below.
 @end deffn
 
 @deffn {Backend directive} Port @var{n}
-Sets the port number to connect to.  This directive must be present if
-the @code{Address} statement contains an IP address.
+Sets the port number to connect to.  In the absense of this directive,
+port defaults to 443, if the @code{HTTPS} directive is used, and to
+80 otherwise.
 @end deffn
 
 @deffn {Backend directive} Priority @var{n}
