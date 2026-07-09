@@ -1367,18 +1367,12 @@ resp_set_body (lua_State *L)
 static void
 set_reason (lua_State *L, struct http_ud *ud, char const *s)
 {
-  size_t n = strlen (s);
-  size_t len = strlen (ud->phttp->response.request);
-
-  if (len < RESP_REASON_START + n)
-    {
-      char *resp = realloc (ud->phttp->response.request,
-			    RESP_REASON_START + n + 1);
-      if (!resp)
-	pndlua_memerr (L);
-      resp[RESP_CODE_END] = ' ';
-      ud->phttp->response.request = resp;
-    }
+  char *resp = realloc (ud->phttp->response.request,
+			RESP_REASON_START + strlen (s) + 1);
+  if (!resp)
+    pndlua_memerr (L);
+  resp[RESP_CODE_END] = ' ';
+  ud->phttp->response.request = resp;
   strcpy (ud->phttp->response.request + RESP_REASON_START, s);
 }
 
@@ -1397,7 +1391,7 @@ resp_set_code (lua_State *L)
       if (check_response (ud->phttp))
 	luaL_error (L, "refusing to modify malformed response line");
       ud->phttp->response_code = code;
-      memcpy(ud->phttp->response.request + RESP_CODE_START, s, 3);
+      memcpy (ud->phttp->response.request + RESP_CODE_START, s, 3);
       if (!ud->phttp->response.request[RESP_REASON_START])
 	{
 	  char const *reason = http_status_reason (code);
