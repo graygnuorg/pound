@@ -1368,18 +1368,13 @@ static void
 set_reason (lua_State *L, struct http_ud *ud, char const *s)
 {
   size_t n = strlen (s);
-  size_t len = strlen (ud->phttp->response.request);
-
-  if (len < RESP_REASON_START + n)
-    {
-      char *resp = realloc (ud->phttp->response.request,
-			    RESP_REASON_START + n + 1);
-      if (!resp)
-	pndlua_memerr (L);
-      resp[RESP_CODE_END] = ' ';
-      ud->phttp->response.request = resp;
-    }
-  strcpy (ud->phttp->response.request + RESP_REASON_START, s);
+  char *resp = realloc (ud->phttp->response.request,
+			RESP_REASON_START + n + 1);
+  if (!resp)
+    pndlua_memerr (L);
+  resp[RESP_CODE_END] = ' ';
+  ud->phttp->response.request = resp;
+  memcpy (ud->phttp->response.request + RESP_REASON_START, s, n + 1);
 }
 
 static int
