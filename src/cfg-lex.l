@@ -1098,6 +1098,9 @@ locate_defn (CFG_DEFN const *tab, char const *name,
 {
   CFG_DEFN const *p;
 
+  if (!tab)
+    return NULL;
+
   *ref = NULL;
   p = tab;
   for (; p->name; p++)
