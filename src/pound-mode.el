@@ -564,7 +564,9 @@ Return t if such was found, nil otherwise."
 				 pound-top-level-sections
 				 pound-maybe-top-level-sections)))
 	(goto-char here)
-	(throw 'ret t))))))
+	(throw 'ret t))))
+    (goto-char here)
+     t))
 
 (defun control-top ()
   (let ((here (point)))
@@ -579,7 +581,9 @@ Return t if such was found, nil otherwise."
 				   pound-top-level-sections
 				   pound-maybe-top-level-sections)))
 	  (goto-char here)
-	  (throw 'ret t)))))))
+	  (throw 'ret t))))
+      (goto-char here)
+      t)))
 
 (defun backend-top ()
   (let ((here (point)))
@@ -612,10 +616,12 @@ Return t if such was found, nil otherwise."
 	      (goto-char here))
 	  (throw 'ret t))
 	 ((looking-at "^\\s-*Service")
-	  (throw 'ret (service-top (point))))
+	  (throw 'ret (service-top here)))
 	 ((looking-at (regexp-opt pound-top-level-sections))
 	  (goto-char here)
-	  (throw 'ret t)))))))
+	  (throw 'ret t))))
+      (goto-char here)
+      t)))
 
 (defun pound-get-context ()
   (save-excursion
@@ -698,7 +704,7 @@ Return t if such was found, nil otherwise."
     map))
 
 ;;;###autoload
-(defun pound-mode ()
+(define-derived-mode pound-mode nil "Pound"
   "Major mode for editing pound configuration files.
 
 Use \\[beginning-of-defun] to find nearest enclosing
@@ -707,14 +713,6 @@ block start and \\[end-of-defun] to find its end.
 Other key bindings are:
 \\{pound-mode-map}
 "
-  (interactive)
-  (kill-all-local-variables)
-  (use-local-map pound-mode-map)
-  (set-syntax-table pound-mode-syntax-table)
-
-  (setq major-mode 'pound-mode
-	mode-name "Pound")
-
   (setq-local font-lock-defaults
 	'((pound-font-lock-keywords) nil t nil nil))
   (setq-local case-fold-search t)
