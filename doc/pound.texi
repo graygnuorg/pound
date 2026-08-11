@@ -7559,7 +7559,7 @@ This directive is mandatory.
 @subsection FallThrough
 @cindex fall-through service
 
-@deffn {Session directive} FallThrough [@var{bool}]
+@deffn {Service directive} FallThrough [@var{bool}]
 Declares the service as a @dfn{fall-through}. The argument is optional and
 defaults to @code{true}.
 

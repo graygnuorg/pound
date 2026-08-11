@@ -386,26 +386,88 @@ json_format_string (struct json_format *fmt, struct json_value *val,
   json_format_escape (fmt, val->v.s);
 }
 
+static int json_null_to_array (struct json_value *);
+static int json_null_to_object (struct json_value *);
+
+/*
+ * Check if J is an object of aggregate type TYPE, or json_null. In the
+ * latter case, promote it to TYPE.
+ *
+ * Return 0 if J is of type TYPE upon return (i.e. it either was of TYPE
+ * initially, or was successfully promoted).  Otherwise, return -1 and set
+ * errno to indicate the reason (EINVAL or ENOMEM).
+ */
+static int
+json_check_aggregate_type (struct json_value *j, enum json_value_type type)
+{
+  if (j->type == json_null)
+    {
+      switch (type)
+	{
+	case json_array:
+	  if (json_null_to_array (j))
+	    return -1;
+	  break;
+
+	case json_object:
+	  if (json_null_to_object (j))
+	    return -1;
+	  break;
+
+	default:
+	  abort ();
+	}
+    }
+  else if (j->type != type)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+  return 0;
+}
+
 /* Array value */
+
+/* Initialize fields of the array value. */
+static int
+json_init_array (struct json_value *j)
+{
+  j->v.a = malloc (sizeof (*j->v.a));
+  if (j->v.a)
+    {
+      j->v.a->oc = 0;
+      j->v.a->on = 0;
+      j->v.a->ov = NULL;
+      return 0;
+    }
+  return -1;
+}
+
+/* Promote json_null value J to json_array type. */
+static int
+json_null_to_array (struct json_value *j)
+{
+  if (json_init_array (j))
+    return -1;
+  j->type = json_array;
+  return 0;
+}
+
 struct json_value *
 json_new_array (void)
 {
   struct json_value *j = json_value_create (json_array);
   if (j)
     {
-      j->v.a = malloc (sizeof (*j->v.a));
-      if (j->v.a)
+      if (json_init_array (j))
 	{
-	  j->v.a->oc = 0;
-	  j->v.a->on = 0;
-	  j->v.a->ov = NULL;
-	}
-      else if (json_memabrt)
-	json_memabrt ();
-      else
-	{
-	  free (j);
-	  j = NULL;
+	  if (json_memabrt)
+	    json_memabrt ();
+	  else
+	    {
+	      free (j);
+	      j = NULL;
+	    }
 	}
     }
   return j;
@@ -475,11 +537,13 @@ json_array_expand (struct json_value *jv)
 int
 json_array_insert (struct json_value *jv, size_t idx, struct json_value *v)
 {
-  if (jv == NULL || jv->type != json_array || v == NULL)
+  if (jv == NULL || v == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (json_check_aggregate_type (jv, json_array))
+    return -1;
 
   if (jv->v.a->oc <= idx)
     {
@@ -497,22 +561,28 @@ json_array_insert (struct json_value *jv, size_t idx, struct json_value *v)
 int
 json_array_append (struct json_value *jv, struct json_value *v)
 {
-  if (jv == NULL || jv->type != json_array || v == NULL)
+  if (jv == NULL || v == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (json_check_aggregate_type (jv, json_array))
+    return -1;
+
   return json_array_insert (jv, jv->v.a->oc, v);
 }
 
 int
 json_array_set (struct json_value *jv, size_t idx, struct json_value *v)
 {
-  if (jv == NULL || jv->type != json_array || v == NULL)
+  if (jv == NULL || v == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (json_check_aggregate_type (jv, json_array))
+    return -1;
+
   if (idx >= json_array_length (jv))
     {
       errno = ENOENT;
@@ -525,11 +595,22 @@ json_array_set (struct json_value *jv, size_t idx, struct json_value *v)
 int
 json_array_get (struct json_value *jv, size_t idx, struct json_value **retval)
 {
-  if (jv == NULL || jv->type != json_array || retval == NULL)
+  if (jv == NULL || retval == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (jv->type == json_null)
+    {
+      errno = ENOENT;
+      return -1;
+    }
+  else if (jv->type != json_array)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
   if (idx >= json_array_length (jv))
     {
       errno = ENOENT;
@@ -565,6 +646,17 @@ json_format_array (struct json_format *fmt, struct json_value *obj,
 }
 
 /* Object value */
+
+/* Promote a json_null onject JV to json_object. */
+static int
+json_null_to_object (struct json_value *jv)
+{
+  if ((jv->v.o = calloc (1, sizeof (*jv->v.o))) == NULL)
+    return -1;
+  jv->type = json_object;
+  return 0;
+}
+
 struct json_value *
 json_new_object (void)
 {
@@ -724,11 +816,13 @@ json_object_set (struct json_value *obj, char const *name,
   struct json_pair *p;
   int res;
 
-  if (obj == NULL || obj->type != json_object || val == NULL)
+  if (obj == NULL || val == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (json_check_aggregate_type (obj, json_object))
+    return -1;
 
   res = json_object_lookup_or_install (obj->v.o, name, 1, &p);
   if (res)
@@ -746,7 +840,17 @@ json_object_get (struct json_value *obj, char const *name,
   struct json_pair *p;
   int res;
 
-  if (obj == NULL || obj->type != json_object || name == NULL || retval == NULL)
+  if (obj == NULL || name == NULL || retval == NULL)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+  if (obj->type == json_null)
+    {
+      errno = ENOENT;
+      return -1;
+    }
+  else if (obj->type != json_object)
     {
       errno = EINVAL;
       return -1;
@@ -800,11 +904,19 @@ json_object_filter (struct json_value *obj,
   struct json_object *op;
   struct json_pair *p, *prev;
 
-  if (obj == NULL || obj->type != json_object || pred == NULL)
+  if (obj == NULL || pred == NULL)
     {
       errno = EINVAL;
       return -1;
     }
+  else if (obj->type == json_null)
+    return 0;
+  else if (obj->type != json_object)
+    {
+      errno = EINVAL;
+      return -1;
+    }
+
   op = obj->v.o;
   if (SLIST_EMPTY (&op->pair_head))
     return 0;

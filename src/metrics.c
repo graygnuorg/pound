@@ -430,6 +430,13 @@ json_object_get_type (struct json_value *obj, char const *attr, int type,
 	}
       break;
 
+    case json_array:
+    case json_object:
+      if (jv->type == json_null)
+	{
+	  *retval = jv;
+	  return 0;
+	}
     default:
       if (jv->type == type)
 	{
@@ -533,6 +540,9 @@ exposition_iterate (EXPOSITION *exp, METRIC_LABELS const *pfx, int fn,
 	  return -1;
 	}
     }
+  if (arr->type == json_null)
+    return 0;
+
   if (arr->type != json_array)
     {
       logmsg (LOG_NOTICE, "attribute \"%s\" type mismatch (expected %d, got %d)",
@@ -631,24 +641,28 @@ gen_backends_count (EXPOSITION *exp, struct metric *metric,
 
   if (json_object_get_type (obj, "backends", json_array, &arr))
     return -1;
-
-  n = json_array_length (arr);
-  for (i = 0; i < n; i++)
+  if (arr->type == json_null)
+    n = 0;
+  else
     {
-      int enabled = 0;
-
-      jv = arr->v.a->ov[i];
-
-      if (json_object_get_type (arr->v.a->ov[i], "enabled", json_bool, &jv) == 0 &&
-	  (enabled = jv->v.b) != 0)
-	n_enabled++;
-
-      if (json_object_get_type (arr->v.a->ov[i], "alive", json_bool, &jv) == 0 &&
-	  jv->v.b)
+      n = json_array_length (arr);
+      for (i = 0; i < n; i++)
 	{
-	  n_alive++;
-	  if (enabled)
-	    n_active++;
+	  int enabled = 0;
+
+	  jv = arr->v.a->ov[i];
+
+	  if (json_object_get_type (arr->v.a->ov[i], "enabled", json_bool, &jv) == 0 &&
+	      (enabled = jv->v.b) != 0)
+	    n_enabled++;
+
+	  if (json_object_get_type (arr->v.a->ov[i], "alive", json_bool, &jv) == 0 &&
+	      jv->v.b)
+	    {
+	      n_alive++;
+	      if (enabled)
+		n_active++;
+	    }
 	}
     }
 
@@ -721,7 +735,8 @@ gen_backend_state (EXPOSITION *exp, struct metric *metric,
 
 static int
 gen_backend_stats (EXPOSITION *exp, struct metric *metric,
-		   METRIC_LABELS *pfx, struct json_value *obj, char const *attr)
+		   METRIC_LABELS *pfx, struct json_value *obj,
+		   char const *attr)
 {
   struct metric_sample *samp;
   struct json_value *stats, *jv;
@@ -736,6 +751,9 @@ gen_backend_stats (EXPOSITION *exp, struct metric *metric,
 	  return -1;
 	}
     }
+  if (stats->type == json_null)
+    return 0;
+
   if (stats->type != json_object)
     {
       logmsg (LOG_NOTICE, "attribute \"%s\" type mismatch (expected %d, got %d)",
