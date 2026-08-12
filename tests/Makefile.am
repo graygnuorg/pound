@@ -68,6 +68,7 @@ TESTSUITE_AT = \
  backref.at\
  balancing.at\
  basicauth.at\
+ beacon.at\
  bemix.at\
  checkurl.at\
  chgvis.at\

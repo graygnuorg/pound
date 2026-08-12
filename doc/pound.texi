@@ -127,6 +127,7 @@ Service Selection
 * File-based Conditions::
 * ACL::
 * Detached Conditions::
+* Beacons::
 
 HTTPS
 
@@ -258,6 +259,7 @@ Input object
 * Listener object::
 * Service object::
 * Backend object::
+* Beacon object::
 
 Example Lua modules
 
@@ -861,6 +863,7 @@ End
 * File-based Conditions::
 * ACL::
 * Detached Conditions::
+* Beacons::
 @end menu
 
 @node Regular Expressions
@@ -1178,6 +1181,76 @@ same statement is encountered in service @samp{c}, no actual ACL
 processing will take place, instead @command{pound} will reuse the
 result cached earlier.  If @file{secure.acl} contains a long list of
 IP addresses, this can save a lot of time.
+
+@node Beacons
+@subsection Externally Settable Conditions
+@cindex beacon
+  An externally settable condition, or @dfn{beacon}, is a boolean
+value that can be examined in conditional statements, and can change
+only as a result of a request to the @command{pound} control interface
+(@pxref{poundctl}). Beacons provide a mechanism for altering @command{pound}
+behavior at runtime, without the need to reconfigure it.
+
+@kwindex DeclareBeacon
+  A beacon is declared using the @code{DeclareBeacon} statement.  Its
+mandatory paramenter the @dfn{beacon name}, which can then be used in
+conditionals to examine its value.  The initial value for the beacon
+can be supplied in the second argument.  This argument is optional; if
+omitted @code{false} is assument.  For example, the following
+statement declares the beacon @samp{daytime} with the default initial value:
+
+@example
+DeclareBeacon "daytime"
+@end example
+
+To assign it the initial value @code{true}, use
+
+@example
+DeclareBeacon "daytime" true
+@end example
+
+@kwindex Beacon
+To examine the actual value of a beacon in a @code{Service} section,
+use the @code{Beacon} statement, with the name of the beacon as its
+argument, e.g.:
+
+@example
+Beacon "daytime"
+@end example
+
+The beacon must be declared prior to using it.  For example, the
+service below applies request rate limiting (@pxref{Rate-limiting}) to any
+request with URL path starting with @samp{/user}, provided that the
+beacon @samp{daytime} is set.  If it is not, the service will be
+silently skipped:
+
+@example
+@group
+Service
+    Beacon "daytime"
+    Path -beg "/user(/.+)"
+    TBF "$1" 5 10
+    ...
+End
+@end group
+@end example
+
+Beacons can be set (assigned a @code{true} value) or cleared (assigned
+@code{false}) using the @command{poundctl} command.  For example, the
+following sets the beacon @code{daytime}:
+
+@example
+$ poundctl beacon -s daytime
+@end example
+
+Similarly, to clear it:
+
+@example
+$ poundctl beacon -d daytime
+@end example
+
+@xref{poundctl beacon}, for a detailed discussion of the beacon management
+interface.
 
 @node Request modifications
 @section Request modifications
@@ -4272,6 +4345,7 @@ If a number is used in place of duration, it indicates the duration in
 seconds.
 
 @cindex boolean value, configuration file
+@anchor{boolean}
 @item Booleans
  A @dfn{boolean} is one of the following: @samp{yes}, @samp{true},
 @samp{on} or @samp{1}, meaning @dfn{true}, and @samp{no},
@@ -4931,7 +5005,6 @@ reads the file contents once, at the program startup.  The one with
 
 @node Condition
 @subsection Condition
-@kwindex Condition
 
 @deffn {Global directive} Condition "@var{name}"
 Defines a @dfn{detached condition} identified by @var{name} (which
@@ -4954,6 +5027,15 @@ End
 Detached conditions can be evaluated in @code{Service} and
 @code{Rewrite} statements using the @code{Eval} statement (@pxref{Eval
 statement}).  For a detailed discussion, see @ref{Detached Conditions}.
+
+@deffn {Global directive} DeclareBeacon "@var{name}" [@var{value}]
+Declares an @dfn{externally settable condition} @var{name}.  Optional second
+argument specifies its initial value (@pxref{boolean}).  If absent,
+@code{false} is assumed.
+
+@xref{Beacons}, for a detailed discussion on externally settable
+conditions and their use.
+@end deffn
 
 @node Lua Settings
 @subsection The @code{Lua} statement
@@ -6767,6 +6849,15 @@ latter enables the default behavior and so need not be specified
 explicitly.  The former disables file change monitoring.
 @end deffn
 
+@deffn {Service Conditional} Beacon "@var{name}"
+Evaluates to the current value of the beacon (externally settable condition)
+@var{name}.  The beacon must be declared prior to using it
+(@pxref{Condition, DeclareBeacon}).
+
+@xref{Beacons}, for a detailed discussion on externally settable
+conditions and their use.
+@end deffn
+
 @anchor{ClientCert conditional}
 @deffn {Service Conditional} ClientCert "@var{filename}"
 Evaluates to @samp{true} if the client presents the certificate
@@ -7794,6 +7885,7 @@ poundctl disable /-/1
 * poundctl list::    Show information about running instance.
 * poundctl enable::  Enabling and disabling @command{pound} entities.
 * poundctl session:: Session management.
+* poundctl beacon::  Beacon management.
 * poundctl log::     Inspect and change log level.
 @end menu
 
@@ -7835,6 +7927,26 @@ Enables listener, service, or backend.
 @deffnx {poundctl} off /@var{L}/@var{S}
 @deffnx {poundctl} off /@var{L}
 Disables listener, service, or backend.
+@end deffn
+
+@node poundctl beacon
+@subsection Maintaining beacons
+
+The @command{poundctl beacon} command lists, sets or clears externally
+settable conditions (beacons).  @pxref{Beacons}, for a detailed
+discussion of this kind of conditions and their use.
+
+@deffn {poundctl} beacon [@var{name}]
+List declared beacons and their actual values.  If @var{name} is
+supplied, lists only the named beacon.
+@end deffn
+
+@deffn {poundctl} beacon -s "@var{name}"
+Set beacon @var{name} to @code{true}.
+@end deffn
+
+@deffn {poundctl} beacon -d "@var{name}"
+Sets beacon @var{name} to @code{false} (@dfn{clears} it).
 @end deffn
 
 @node poundctl session
@@ -8547,10 +8659,13 @@ includes any nested statements that may appear in between.
 Depending on the request issued by @command{poundctl}, the invoked template
 can receive as its argument (@dfn{dot}) an object of one of the following
 types: @dfn{core}, @dfn{full listing}, @dfn{listener}, @dfn{service},
-or @dfn{backend}.  Each object carries an explicit indication of its
-type in its @code{kind} attribute.  Its possible values are:
+@dfn{backend}, or @dfn{beacon}.  Each object carries an explicit
+indication of its type in its @code{kind} attribute.  Its possible
+values are:
 
 @table @samp
+@item beacon
+Beacon values.
 @item backend
 Backend statistics.
 @item core
@@ -8574,6 +8689,7 @@ Structures of each object are discussed in subsections that follow.
 * Listener object::
 * Service object::
 * Backend object::
+* Beacon object::
 @end menu
 
 @node Core listing
@@ -8739,7 +8855,8 @@ Expiration time of this session, formatted as
 @end table
 
 @item backends
-List of @dfn{backends} defined for this service.
+List of @dfn{backends} defined for this service.  It is be
+@code{null} for fall-through services (@pxref{FallThrough}).
 
 @item emergency
 Emergency @dfn{backend} object, or @code{null} if no such backend is
@@ -8822,6 +8939,21 @@ Total number of requests processed by this backend.
 Average time per request, in nanoseconds.
 @item request_time_stddev
 Standard deviation of the above.
+@end table
+
+@node Beacon object
+@subsubsection Beacon
+Beacon object is returned in response to beacon management commands
+(@pxref{poundctl beacon}).  It has the following attributes:
+
+@table @code
+@item kind
+Identifies the beacon object.  The value of this attribute is
+@samp{beacon}.
+
+@item beacons
+Object describing the declared beacons.  Keys are the beacon names,
+and values are the corresponding values.
 @end table
 
 @node Emacs

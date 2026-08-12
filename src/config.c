@@ -3092,6 +3092,33 @@ static CFG_TYPE cfg_type_eval = {
   .commit = eval_commit
 };
 
+
+static int
+beacon_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  SERVICE_COND *cond;
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *name = string_ptr (arg->v.string);
+  POUND_BEACON *beacon = pound_beacon_locate (name);
+
+  if (!beacon)
+    {
+      conf_error_at_locus_range (&node->locus, "beacon not declared");
+      return -1;
+    }
+
+  cond =
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BEACON);
+  cond->beacon = beacon;
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_beacon = {
+  .argdef = "s",
+  .commit = beacon_commit
+};
+
 /*
  * Listener operations.
  */
@@ -4076,7 +4103,7 @@ constant_commit (CFG_NODE *node, void *call_data, void *baseptr)
       conf_error_at_locus_range (&sc->locus, "%s",
 				 "warning: constant redefined");
       conf_error_at_locus_range (&old->locus, "%s",
-				 "This is the place of the previous"
+				 "this is the place of the previous"
 				 " definition");
       strconst_free (old);
     }
@@ -4686,6 +4713,11 @@ static CFG_DEFN cond_defn[] = {
     .name = "LuaMatch",
     .token = T_DIRECTIVE,
     .vtype = &cfg_type_luamatch,
+  },
+  {
+    .name = "Beacon",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_beacon
   },
   { NULL }
 };
@@ -7464,6 +7496,36 @@ static CFG_TYPE cfg_type_tunnel = {
   .commit = lst_commit
 };
 
+
+/* DeclareBeacon "NAME" */
+static int
+cfg_beacon_commit (CFG_NODE *node, void *unused, void *baseptr)
+{
+  CFG_ARG *arg = cfg_arglist_first (&node->arglist);
+  char const *name = string_ptr (arg->v.string);
+  struct locus_range prev;
+  int val = 0;
+
+  if ((arg = cfg_arg_next (arg)) != NULL)
+    val = arg->v.boolean;
+
+  if (pound_beacon_declare (name, val, &node->locus, &prev))
+    {
+      conf_error_at_locus_range (&node->locus, "%s",
+				 "warning: beacon redeclared");
+      conf_error_at_locus_range (&prev, "%s",
+				 "this is the place of the previous"
+				 " declaration");
+      locus_range_unref (&prev);
+    }
+  return 0;
+}
+
+static CFG_TYPE cfg_type_declare_beacon = {
+  .argdef = "sb?",
+  .commit = cfg_beacon_commit
+};
+
 /*
  * Top-level (global scope) configuration statements.
  */
@@ -7821,6 +7883,11 @@ static CFG_DEFN top_level_defn[] = {
     .rcvr = {
       .data = &listeners
     }
+  },
+  {
+    .name = "DeclareBeacon",
+    .token = T_DIRECTIVE,
+    .vtype = &cfg_type_declare_beacon,
   },
   /* Backward compatibility. */
   {

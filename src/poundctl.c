@@ -1311,6 +1311,43 @@ command_log (BIO *bio, int argc, char **argv)
   return command_gen (bio, meth, "log", lst, SUBDIR_ENCODE,
 		      nparam, param);
 }
+
+int
+command_beacon (BIO *bio, int argc, char **argv)
+{
+  int c;
+  char *meth = NULL;
+  optind = 1;
+  while ((c = getopt (argc, argv, "ds")) != EOF)
+    {
+      switch (c)
+	{
+	case 'd':
+	  meth = "DELETE";
+	  break;
+
+	case 's':
+	  meth = "PUT";
+	  break;
+
+	default:
+	  return 1;
+	}
+    }
+
+  argc -= optind;
+  argv += optind;
+  if (meth == NULL)
+    meth = "GET";
+  else if (argc == 0)
+    errormsg (1, 0, "required argument missing");
+
+  if (argc > 1)
+    errormsg (1, 0, "too many arguments");
+
+  return command_gen (bio, meth, "beacon", argv[0], SUBDIR_ENCODE,
+		      0, NULL);
+}
 
 typedef int (*COMMAND) (BIO *, int, char **);
 
@@ -1331,6 +1368,7 @@ static struct dispatch_table dispatch[] = {
   { "del", command_delete_session },
   { "add", command_add_session },
   { "log", command_log },
+  { "beacon", command_beacon },
   { NULL }
 };
 
@@ -1363,6 +1401,10 @@ static char *usage_text[] = {
   "   log /[L] [F]      set log level F.",
   "   log -d /L         use global log level in listener L.",
   "   log -d            set global log level to \"null\".",
+  "   beacon            list all beacons",
+  "   beacon NAME       list beacon NAME",
+  "   beacon -s NAME    set beacon NAME",
+  "   beacon -d NAME    unset beacon NAME",
   "",
   "Shortcuts:",
   "   on                same as enable",

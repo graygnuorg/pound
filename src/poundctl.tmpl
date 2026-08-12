@@ -62,6 +62,20 @@ Queue: {{ if exists . "queue" }}{{with .queue}}
 {{ fdiv . 1000000 | printf "%.2f" }}
 {{- end}}
 
+{{define "default.beacon" -}}
+  {{range $name,$val = .beacons -}}
+{{$name}}  {{$val}}
+{{end}}
+{{- end -}}
+
+{{define "xml.beacon" -}}
+  <beacons>
+   {{- range $name,$val = .beacons }}
+   <beacon><name>{{$name}}</name><value>{{$val}}</value></beacon>
+   {{- end}}
+  </beacons>
+{{- end}}
+
 {{define "default.pound" -}}
 {{if exists . "core" -}}
 {{block "default.core" .core}}
@@ -136,6 +150,8 @@ Global services:
       {{block "default.print_backend" . -}}
     {{else if eq .kind "log" -}}
       {{block "default.log" . -}}
+    {{else if eq .kind "beacon" -}}
+      {{template "default.beacon" . -}}
     {{else -}}
       Unsupported kind of object!
     {{end -}}
@@ -247,6 +263,8 @@ Global services:
     {{else if eq .kind "backend" -}}
       {{- /* Backend listing. */ -}}
       {{block "xml.print_backend" . -}}
+    {{else if eq .kind "beacon" -}}
+      {{block "xml.beacon" . -}}
     {{else -}}
     <error>Missing or unsupported kind of object.</error>
     {{- end -}}

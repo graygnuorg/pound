@@ -30,7 +30,7 @@
  *   the aggregate data type X_HASH, representing a hash table for objects
  *   of type X, and the following inline functions to manipulate it:
  *
- *     X_HASH X_HASH_NEW (void);
+ *     X_HASH *X_HASH_NEW (void);
  *     void X_HASH_FREE (X_HASH *);
  *     X *X_INSERT(X_HASH *, X *);
  *     X *X_RETRIEVE(X_HASH *, X *);

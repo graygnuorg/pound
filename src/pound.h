@@ -744,6 +744,8 @@ typedef struct
 
 SESSION_TABLE *session_table_new (void);
 
+typedef struct beacon POUND_BEACON;
+
 enum
   {
     BOOL_AND,
@@ -776,7 +778,8 @@ enum service_cond_type
     COND_DYN,
     COND_TBF,
     COND_LUA,
-    COND_REF    /* Reference to detached condition. */
+    COND_REF,    /* Reference to detached condition. */
+    COND_BEACON
   };
 
 struct dyn_service_cond
@@ -843,6 +846,7 @@ typedef struct _service_cond
     X509 *x509;              /* COND_CLIENT_CERT */
     struct pndlua_closure clua; /* COND_LUA */
     struct tbf_cond tbf;     /* COND_TBF */
+    POUND_BEACON *beacon;    /* COND_BEACON */
   };
   SLIST_ENTRY (_service_cond) next;
 } SERVICE_COND;
@@ -1618,3 +1622,11 @@ pndlua_backend (POUND_HTTP *phttp, struct pndlua_closure const *cond,
 void close_fds_from (int minfd);
 void close_fds_above (int fd);
 int nopenfd (void);
+
+int pound_beacon_declare (char const *name, int enabled,
+			  struct locus_range const *locus,
+			  struct locus_range *ret);
+POUND_BEACON *pound_beacon_locate (char const *name);
+int pound_beacon_get (POUND_BEACON *);
+int pound_beacon_set (char const *name, int val);
+int pound_beacon_serialize (struct json_value *obj, char const *name);

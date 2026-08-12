@@ -27,6 +27,7 @@ LDADD = libpound.a @LUA_LIBS@ @PCRE_LIBS@ @PTHREAD_LIBS@
 sbin_PROGRAMS=pound
 pound_SOURCES=\
  bauth.c\
+ beacon.c\
  config.c\
  genpat.c\
  http.c\

@@ -13,7 +13,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL.TMPL 5 "October 28, 2025" "pound" "File Formats Manual"
+.TH POUNDCTL.TMPL 5 "August 12, 2026" "pound" "File Formats Manual"
 .SH NAME
 poundctl.tmpl \- templates for poundctl.
 .SH DESCRIPTION
@@ -342,51 +342,36 @@ includes any nested statements that may appear in between.
 .SH INPUT OBJECT
 Depending on the request issued by \fBpoundctl\fR, the invoked template
 can receive as its argument (\fIdot\fR) an object of the following
-types: full listing, listener, service, or backend.
+.IR kinds :
+.BR beacon ,
+.BR backend ,
+.BR core ,
+.BR listener ,
+.BR log ,
+.BR pound ,
+.BR service .
 .PP
-Since there is no explicit indication of the object type being passed,
-templates normally use heuristics based on the presence or absence of
-certain attribute to deduce the object type in question.  The
-recommended approach is described in the following pseudo-code
-fragment:
-.PP
-.EX
-{{if exists . "listeners" }}
-  {{/* This is a full listing, as requested by \fBpoundctl list\fR. */}}
-  ...
-{{else if exists . "services"}}
-  {{/* Single listener, as requested by \fBpoundctl list /\fIL\fR.
-       Notice that this attribute is present in the full listing as
-       well, so presence of "listeners" should be checked first. */}}
-  ...
-{{else if exists . "backends"}}
-  {{/* Single service, as requested by \fBpoundctl list /\fIL\fB/\fIS\fR. */}}
-  ...
-{{else}}
-  {{/* Backend listing (\fBpoundctl list /\fIL\fB/\fIS\fB/\fIB\fR) */}}
-  ...
-{{end}}
-.EE
+The kind of object is stored in its
+.B kind
+attribute.
 .PP
 Structures of each object are discussed in subsections that follow.
-.SS Full listing
-A full listing contains the following attributes:
+.SS Core listing
+A
+.B core
+object describes core
+.B pound configuration.  It
+contains the following attributes:
 .TP
-.B listeners
-An array of \fIlistener\fR objects.  See below for a description.
-.TP
-.B services
-An array of \fIservice\fR objects, representing services defined in
-the global scope of the \fBpound\fR configuration file.
+.B kind
+Identifies the core listing object.  Its value is
+.BR core .
 .TP
 .B pid
-PID of the running
-.B pound
-daemon.
+PID of the running \fBpound\fR daemon.
 .TP
 .B version
-.B Pound
-version number (string).
+\fBPound\fR version number (string).
 .TP
 .B workers
 Workers statistics.  This is a JSON object with the following
@@ -414,15 +399,56 @@ Number of incoming HTTP requests in the queue (integer).
 .TP
 .B timestamp
 Current time on the server, formatted as ISO 8601 date-time with
-microsecond precision, e.g.: "2023-01-05T22:43:18.071559".
+microsecond precision, e.g.: \fB2023-01-05T22:43:18.071559\fR.
 .TP
 .B uptime
-Uptime of the
-.B pound
-daemon: number of microseconds elapsed since its startup.
+Total running time of \fBpound\fR daemon: number of
+microseconds elapsed since its startup.
+.SS Log info
+The \fIlog\fR object conveys information about log level settings.  It
+contains the following attributes:
+.TP
+.B kind
+Identifies the full listing object.  The value if this attribute is
+.BR log .
+.TP
+.B level
+Symbolic name of the configured log level.
+.TP
+.B global
+Symbolic name of the globally configured log level.
+.PP
+If the object describes log settings of a listener, one of the
+following attributes is also present:
+.TP
+.B listener_index
+Index of the listener (0-based) in the configuration.
+.TP
+.B listener_name
+Symbolic name of the listener.
+.SS Full listing
+A full listing contains the following attributes:
+.TP
+.B kind
+Identifies the full listing object.  The value if this attribute is
+.BR pound .
+.TP
+.B core
+A \fIcore\fR object, discussed above.
+.TP
+.B listeners
+An array of \fIlistener\fR objects.  See below for a description.
+.TP
+.B services
+An array of \fIservice\fR objects, representing services defined in
+the global scope of the \fBpound\fR configuration file.
 .SS Listener
 A \fIlistener\fR object represents a single HTTP or HTTPS listener in
 \fBpound\fR configuration.  It has the following attributes:
+.TP
+.B kind
+Identifies the listener object.  The value of this attribute is
+.BR listener.
 .TP
 .B address
 .BR String .
@@ -448,6 +474,10 @@ Value of the \fBNoHTTPS11\fR configuration statement for this
 listener.  One of: 0, 1, 2.
 .SS Service
 A \fIservice\fR object describes a single service.
+.TP
+.B kind
+Identifies the service object.  The value of this attribute is
+.BR service .
 .TP
 .B name
 .BR String .
@@ -493,6 +523,10 @@ Emergency \fIbackend\fR object, or \fBnull\fR if no such backend is
 defined.
 .SS Backend
 The following attributes are always present in each \fIbackend\fR object:
+.TP
+.B kind
+Identifies the backend object.  The value of this attribute is
+.BR backend .
 .TP
 .B alive
 .BR Boolean .
@@ -577,6 +611,17 @@ Average time per request, in nanoseconds.
 .TP
 .B request_time_stddev
 Standard deviation of the above.
+.SS Beacon
+Beacon object is returned in response to beacon management commands.
+It has the following attributes:
+.TP
+.B kind
+Identifies the beacon object.  The value of this attribute is
+.BR beacon .
+.TP
+.B beacons
+Object describing the declared beacons.  Keys are the beacon names,
+and values are the corresponding values.
 .SH SEE ALSO
 .BR pound (8),
 .BR poundctl (8).

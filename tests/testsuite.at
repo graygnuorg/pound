@@ -93,6 +93,7 @@ m4_include([tbf.at])
 m4_include([detcond.at])
 m4_include([dti.at])
 m4_include([fallthrough.at])
+m4_include([beacon.at])
 
 AT_BANNER([Lua])
 m4_include([lua-load.at])

@@ -2915,6 +2915,108 @@ control_delete_log_level (BIO *c, char const *url)
 {
   return control_log_level (c, url, ctl_dellev, NULL);
 }
+
+static int
+get_beacon_name (char const *url, char **ret_name)
+{
+  int rc;
+  IDENT ident = ctl_getident (&url);
+  if (ident.type == IDTYPE_STR)
+    {
+      if (*url && *url != '?')
+	rc = HTTP_STATUS_BAD_REQUEST;
+      else
+	{
+	  char *name = strndup (ident.s.name, ident.s.len);
+	  if (name)
+	    {
+	      *ret_name = name;
+	      rc = 0;
+	    }
+	  else
+	    {
+	      lognomem ();
+	      rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	    }
+	}
+    }
+  else
+    rc = HTTP_STATUS_NOT_FOUND;
+  return rc;
+}
+
+static int
+control_list_beacon (BIO *c, char const *url)
+{
+  size_t len = strcspn (url, "?");
+  struct json_value *obj;
+  int rc;
+  char *name;
+
+  if ((obj = new_typed_object ("beacon")) != NULL)
+    {
+      if (len == 0 || (url[0] == '/' && len == 1))
+	{
+	  rc = pound_beacon_serialize (obj, NULL);
+	}
+      else if ((rc = get_beacon_name (url, &name)) == 0)
+	{
+	  rc = pound_beacon_serialize (obj, name);
+	  free (name);
+	}
+    }
+  else
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+
+  if (rc == 0)
+    rc = send_json_reply (c, obj, url);
+
+  json_value_free (obj);
+
+  return rc;
+}
+
+static int
+ctl_set_beacon (BIO *c, char const *url, int val)
+{
+  int rc;
+  char *name;
+  struct json_value *obj = NULL;
+  int len = strcspn (url, "?");
+  if (len == 0 || (url[0] == '/' && len == 1))
+    rc = HTTP_STATUS_BAD_REQUEST;
+  else if ((rc = get_beacon_name (url, &name)) == 0)
+    {
+      if (pound_beacon_set (name, val) == 0)
+	{
+	  if ((obj = new_typed_object ("beacon")) != NULL)
+	    rc = pound_beacon_serialize (obj, name);
+	  else
+	    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+	}
+      else
+	rc = HTTP_STATUS_NOT_FOUND;
+      free (name);
+    }
+
+  if (rc == 0)
+    rc = send_json_reply (c, obj, url);
+  json_value_free (obj);
+
+  return rc;
+}
+
+static int
+control_set_beacon (BIO *c, char const *url)
+{
+  return ctl_set_beacon (c, url, 1);
+}
+
+static int
+control_unset_beacon (BIO *c, char const *url)
+{
+  return ctl_set_beacon (c, url, 0);
+}
 
 struct endpoint
 {
@@ -2939,6 +3041,9 @@ static struct endpoint control_endpoint[] = {
   { S("/log"), METH_GET, control_get_log_level },
   { S("/log"), METH_PUT, control_put_log_level },
   { S("/log"), METH_DELETE, control_delete_log_level },
+  { S("/beacon"), METH_GET, control_list_beacon },
+  { S("/beacon"), METH_PUT, control_set_beacon },
+  { S("/beacon"), METH_DELETE, control_unset_beacon },
 #undef S
   { NULL }
 };

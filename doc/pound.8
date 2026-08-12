@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "July 10, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "August 12, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -980,6 +980,16 @@ construct:
 Detached conditions are evaluated at most once.  Result of
 evaluation is cached and used by all subsequent \fBEval\fR statements
 that refer to the same \fINAME\fR.
+.SS Beacons
+\fIBeacons\fR are special boolean values that can be used in
+conditional statements to select services to use and that change their
+value only using the pound management interface (\fBpoundctl\fR (8)).
+.PP
+Each beacon must be declared prior to use.
+.TP
+\fBDeclareBeacon "\fINAME\fB" \fR[\fIBOOL\fR]
+Declares new beacon \fINAME\fR.  Optional second argument defines its
+initial value.  The default is \fBfalse\fR.
 .SS Control socket
 .B Pound
 can be instructed to listen for management requests,
@@ -1827,6 +1837,11 @@ or
 .BR \-filewatch .
 The latter is the default and normally need not be specified
 explicitly.  The former can be used to disable file change monitoring.
+.TP
+\fBBeacon\fR "\fINAME\fR"
+Evaluates to the actual value of the beacon \fINAME\fR.  See
+the \fBBeacons\fR subsection above, for the discussion of beacons and
+their use.
 .TP
 \fBClientCert \fR"\fIfilename\fR"
 Evaluates to \fItrue\fR if the client presented the certificate

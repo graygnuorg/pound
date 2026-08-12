@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-08-11
+Pound -- history of user-visible changes. 2026-08-12
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -57,7 +57,7 @@ patterns, e.g.:
 In previous versions, the Cert directive was required to precede any
 other SSL-specific statement (such as ClientCert, etc.) in the
 ListenHTTPS section. This is no longer the case. The Cert directive
-can be placed anywhere whithin ListenHTTPS, it will always be
+can be placed anywhere within ListenHTTPS, it will always be
 processed first.
 
 * The "Use" statement in Backend sections
@@ -102,6 +102,41 @@ follows:
       FallThrough
   End
 
+* Beacons
+
+Beacons are special boolean values that can be used in conditional
+statements to select the service to use.  Beacons can change their
+value only via the pound control interface, using poundctl or similar
+tool.
+
+Beacons provide a mechanism for adopting the pound configuration to
+the changing external conditions (such as the current load or request
+rate) without the need to reconfigure the pound daemon.
+
+Beacons are declared using the "DeclareBeacon" statement in the global
+scope:
+
+  DeclareBeacon "NAME" [BOOL]
+
+Beacons are examined using the "Beacon" statement in "Section",
+"Match", or "Rewrite" section, e.g.:
+
+  Beacon "NAME"
+
+To change or inspect the actual value of a beacon, use poundctl:
+
+  poundctl beacon
+    Examine all declared beacons and their values.
+
+  poundctl beacon NAME
+    Examine the value of beacon NAME.
+
+  poundctl -s NAME
+    Set beacon NAME to "true".
+
+  poundctl -d NAME
+    Set beacon NAME to "false".
+
 * Preprocessing
 
 Configuration files can be optionally preprocessed using an external
@@ -110,7 +145,7 @@ argument, CMD, specifies the preprocessor command, e.g.:
 
   pound -Wpreprocess='m4 -s -P'
 
-Additionally, the -E option instructs pound to print the preprocessed
+New command line option -E instructs pound to print the preprocessed
 text and exit.
 
 Version 4.23, 2026-05-26

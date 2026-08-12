@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "April 24, 2026" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "August 12, 2026" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -150,6 +150,26 @@ specified.
 .TP
 \fBadd\fR \fB/\fIL\fB/\fIS\fB/\fIB\fR \fIKEY\fR
 Add a session with the given key.
+.TP
+\fBbeacon\fR [\fINAME\fR]
+Examine the value of the beacon \fINAME\fR or all available beacons,
+if no argument is given.
+.IP
+Beacons are special boolean values that can be used in conditional
+statements in
+.B pound.cfg
+to assist in selecting the service to be used for each request.  See
+the subsection
+.B Beacons
+in
+.BR pound (8),
+for a detailed discussion.
+.TP
+\fBbeacon \-s \fINAME\fR
+Set beacon \fINAME\fR to true.
+.TP
+\fBbeacon \-d \fINAME\fR
+Set beacon \fINAME\fR to false.
 .SH CONFIGURATION
 Configuration is read from file
 .B .poundctl

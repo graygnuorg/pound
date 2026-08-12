@@ -4350,6 +4350,10 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 
     case COND_HOST:
       abort ();
+
+    case COND_BEACON:
+      res = pound_beacon_get (cond->beacon);
+      break;
     }
   watcher_unlock (cond->watcher);
 
