@@ -2534,7 +2534,7 @@ bio_callback
     }
 }
 
-static void
+static BIO_ARG *
 set_callback (BIO *cl, int timeout, RENEG_STATE *state, struct timespec *ts,
 	      int cmd)
 {
@@ -2542,7 +2542,7 @@ set_callback (BIO *cl, int timeout, RENEG_STATE *state, struct timespec *ts,
   if (!arg)
     {
       lognomem ();
-      return;
+      return arg;
     }
 
   arg->timeout = timeout;
@@ -2556,6 +2556,7 @@ set_callback (BIO *cl, int timeout, RENEG_STATE *state, struct timespec *ts,
 #else
   BIO_set_callback (cl, bio_callback);
 #endif
+  return arg;
 }
 
 /*
@@ -5249,6 +5250,7 @@ static int
 open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 {
   BIO *bb;
+  BIO_ARG *arg;
 
   /* Create new BIO */
   if ((phttp->be = BIO_new_socket (sock, 1)) == NULL)
@@ -5263,11 +5265,8 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 
   /* Configure it */
   BIO_set_close (phttp->be, BIO_CLOSE);
-  if (backend->v.reg.to > 0)
-    {
-      set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state,
-		    &phttp->be_start, BIO_CB_WRITE);
-    }
+  arg = set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state,
+		      &phttp->be_start, BIO_CB_WRITE);
 
   /*
    * Set up SSL, if requested.
@@ -5305,6 +5304,7 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 		     "handshake with backend failed");
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 	}
+      arg->ts = &phttp->be_start;
     }
 
   if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
@@ -6656,6 +6656,7 @@ do_http (POUND_HTTP *phttp)
 {
   int res;  /* General-purpose result variable */
   BIO *bb;
+  BIO_ARG *arg;
 
   if (phttp->lstn->allow_client_reneg)
     phttp->reneg_state = RENEG_ALLOW;
@@ -6672,8 +6673,8 @@ do_http (POUND_HTTP *phttp)
       close (phttp->sock);
       return;
     }
-  set_callback (phttp->cl, phttp->lstn->to, &phttp->reneg_state,
-		&phttp->start_req, BIO_CB_READ);
+  arg = set_callback (phttp->cl, phttp->lstn->to, &phttp->reneg_state,
+		      &phttp->start_req, BIO_CB_READ);
 
   if (!SLIST_EMPTY (&phttp->lstn->ctx_head))
     {
@@ -6718,6 +6719,7 @@ do_http (POUND_HTTP *phttp)
       phttp->x509 = NULL;
     }
   phttp->backend = NULL;
+  arg->ts = &phttp->start_req;
 
   if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
     {
