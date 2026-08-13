@@ -1169,7 +1169,9 @@ typedef struct _pound_http
   struct http_request request;
   struct http_request response;
 
-  struct timespec start_req; /* Time when original request was received */
+  struct timespec start_init;/* Time when started reading the request. */
+  struct timespec start_req; /* Time when first byte of the request was
+			        received. */
   struct timespec end_req;   /* Time after the response was sent */
   struct timespec be_start;  /* Time when the request was handed to the
 				backend */

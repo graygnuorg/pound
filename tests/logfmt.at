@@ -72,6 +72,12 @@ PT_CHECK_LOG_FORMAT([%T],
 
 PT_CHECK_LOG_FORMAT([%{ms}T],
  [[-e '/^[0-9][0-9]*/d']])
+PT_CHECK_LOG_FORMAT([%{init:ms}T],
+ [[-e '/^[0-9][0-9]*/d']])
+PT_CHECK_LOG_FORMAT([%{req:ms}T],
+ [[-e '/^[0-9][0-9]*/d']])
+PT_CHECK_LOG_FORMAT([%{be:ms}T],
+ [[-e '/^[0-9][0-9]*/d']])
 
 # ################
 # Check handling of X-Forwarded-For and similar headers

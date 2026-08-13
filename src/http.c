@@ -2381,6 +2381,8 @@ typedef struct
 {
   int timeout;
   RENEG_STATE *reneg_state;
+  struct timespec *ts;
+  int cmd;
 } BIO_ARG;
 
 /*
@@ -2454,7 +2456,14 @@ bio_callback
 		/*
 		 * there is readable data
 		 */
-		return ret;
+		{
+		  if (bio_arg->ts && bio_arg->cmd == cmd)
+		    {
+		      clock_gettime (CLOCK_REALTIME, bio_arg->ts);
+		      bio_arg->ts = NULL;
+		    }
+		  return ret;
+		}
 	      else
 		{
 #ifdef  EBUG
@@ -2470,7 +2479,14 @@ bio_callback
 		/*
 		 * data can be written
 		 */
-		return ret;
+		{
+		  if (bio_arg->ts && bio_arg->cmd == cmd)
+		    {
+		      clock_gettime (CLOCK_REALTIME, bio_arg->ts);
+		      bio_arg->ts = NULL;
+		    }
+		  return ret;
+		}
 	      else
 		{
 #ifdef  EBUG
@@ -2519,7 +2535,8 @@ bio_callback
 }
 
 static void
-set_callback (BIO *cl, int timeout, RENEG_STATE *state)
+set_callback (BIO *cl, int timeout, RENEG_STATE *state, struct timespec *ts,
+	      int cmd)
 {
   BIO_ARG *arg = malloc (sizeof (*arg));
   if (!arg)
@@ -2530,6 +2547,8 @@ set_callback (BIO *cl, int timeout, RENEG_STATE *state)
 
   arg->timeout = timeout;
   arg->reneg_state = state;
+  arg->ts = ts;
+  arg->cmd = cmd;
 
   BIO_set_callback_arg (cl, (char *) arg);
 #if OPENSSL_VERSION_MAJOR >= 3
@@ -5246,7 +5265,8 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
   BIO_set_close (phttp->be, BIO_CLOSE);
   if (backend->v.reg.to > 0)
     {
-      set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state);
+      set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state,
+		    &phttp->be_start, BIO_CB_WRITE);
     }
 
   /*
@@ -6244,6 +6264,7 @@ do_tunnel (POUND_HTTP *phttp)
   struct pollfd p[P_NUM];
   struct tunnel buf[2] = { TUNNEL_INITIALIZER, TUNNEL_INITIALIZER };
   int to;
+  int init = 0;
 
   memset (&p, 0, sizeof p);
   p[P_CL].fd = phttp->sock;
@@ -6255,8 +6276,7 @@ do_tunnel (POUND_HTTP *phttp)
 
   to = phttp->backend->v.reg.to * 1000;
 
-  clock_gettime (CLOCK_REALTIME, &phttp->start_req);
-  phttp->be_start = phttp->start_req;
+  clock_gettime (CLOCK_REALTIME, &phttp->start_init);
 
   while (p[P_CL].fd != -1 || p[P_BE].fd != -1)
     {
@@ -6279,7 +6299,14 @@ do_tunnel (POUND_HTTP *phttp)
 	}
 
       if (p[P_CL].revents & POLLIN)
-	tunnel_in (p, buf, P_CL);
+	{
+	  if (!(init & (1 << P_CL)))
+	    {
+	      init |= 1 << P_CL;
+	      clock_gettime (CLOCK_REALTIME, &phttp->start_req);
+	    }
+	  tunnel_in (p, buf, P_CL);
+	}
       else if (p[P_CL].revents & POLLHUP)
 	tunnel_hup (p, buf, P_CL);
 
@@ -6292,7 +6319,14 @@ do_tunnel (POUND_HTTP *phttp)
 	tunnel_out (p, buf, P_CL);
 
       if (p[P_BE].revents & POLLOUT)
-	tunnel_out (p, buf, P_BE);
+	{
+	  if (!(init & (1 << P_BE)))
+	    {
+	      init |= 1 << P_BE;
+	      clock_gettime (CLOCK_REALTIME, &phttp->be_start);
+	    }
+	  tunnel_out (p, buf, P_BE);
+	}
     }
   if (p[P_BE].fd >= 0)
     close (p[P_BE].fd);
@@ -6638,7 +6672,8 @@ do_http (POUND_HTTP *phttp)
       close (phttp->sock);
       return;
     }
-  set_callback (phttp->cl, phttp->lstn->to, &phttp->reneg_state);
+  set_callback (phttp->cl, phttp->lstn->to, &phttp->reneg_state,
+		&phttp->start_req, BIO_CB_READ);
 
   if (!SLIST_EMPTY (&phttp->lstn->ctx_head))
     {
@@ -6703,7 +6738,7 @@ do_http (POUND_HTTP *phttp)
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
-      clock_gettime (CLOCK_REALTIME, &phttp->start_req);
+      clock_gettime (CLOCK_REALTIME, &phttp->start_init);
       res = http_request_read (phttp->cl, phttp->lstn, phttp->buffer,
 			       &phttp->request);
       if (res != HTTP_STATUS_OK)

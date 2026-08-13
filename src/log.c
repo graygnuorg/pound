@@ -30,6 +30,7 @@ struct http_log_instr
   http_log_printer_fn prt;
   char *arg;
   void *data;
+  size_t off;
   SLIST_ENTRY (http_log_instr) link;
 };
 
@@ -67,7 +68,8 @@ http_log_parser_warning (struct http_log_parser *parser, char const *text,
 }
 
 static void
-add_instr (HTTP_LOG_PROG prog, http_log_printer_fn prt, void *data,
+add_instr (HTTP_LOG_PROG prog, http_log_printer_fn prt,
+	   void *data, size_t off,
 	   const char *fmt, size_t fmtsize)
 {
     struct http_log_instr *p;
@@ -76,6 +78,7 @@ add_instr (HTTP_LOG_PROG prog, http_log_printer_fn prt, void *data,
     p = xzalloc (sizeof(*p) + (fmtsize ? (fmtsize + 1) : 0));
     p->prt = prt;
     p->data = data;
+    p->off = off;
     if (fmtsize)
       {
 	p->arg = (char*) (p + 1);
@@ -436,6 +439,12 @@ phttp_field_ptr (struct http_log_instr *instr, POUND_HTTP *phttp)
   return (char*)phttp + off;
 }
 
+static void *
+phttp_field_ptr1 (struct http_log_instr *instr, POUND_HTTP *phttp)
+{
+  return (char*)phttp + instr->off;
+}
+
 static void
 i_timedfl (struct stringbuf *sb, struct http_log_instr *instr,
 	   POUND_HTTP *phttp)
@@ -509,9 +518,50 @@ static http_log_printer_fn
 argprt_find(struct argprt const *ap, char const *arg, int arglen)
 {
   for (; ap->arg; ap++)
-    if (ap->arglen == arglen && memcmp(ap->arg, arg, arglen) == 0)
+    if (ap->arglen == arglen && memcmp (ap->arg, arg, arglen) == 0)
       return ap->prt;
   return NULL;
+}
+
+struct prefix
+{
+  char const *pfx;
+  int len;
+  size_t off0;
+  size_t off1;
+};
+
+static int
+select_prefix2 (struct prefix *ptab, char const **argp, int *lenp,
+		size_t *off0p, size_t *off1p)
+{
+  char const *arg = *argp;
+  int len = *lenp;
+  int n;
+  char *p = memchr (arg, ':', len);
+  if (!p)
+    return 0;
+  n = p - arg;
+  for (; ptab->pfx; ptab++)
+    {
+      if (ptab->len == n && memcmp (arg, ptab->pfx, n) == 0)
+	{
+	  *argp = arg + n + 1;
+	  *lenp = len - n - 1;
+	  *off0p = ptab->off0;
+	  if (off1p)
+	    *off1p = ptab->off1;
+	  return 0;
+	}
+    }
+  return -1;
+}
+
+static int
+select_prefix (struct prefix *ptab, char const **argp, int *lenp,
+	       size_t *offp)
+{
+  return select_prefix2 (ptab, argp, lenp, offp, NULL);
 }
 
 static struct argprt timeprt[] = {
@@ -526,10 +576,11 @@ static struct argprt timeprt[] = {
 static int
 p_time (struct http_log_parser *parser, char const *arg, int len)
 {
-  static char beg_pfx[] = "begin:";
-  static int beg_pfx_len = sizeof (beg_pfx) - 1;
-  static char end_pfx[] = "end:";
-  static int end_pfx_len = sizeof (end_pfx) - 1;
+  static struct prefix ptab[] = {
+    { ARG("begin"), offsetof (POUND_HTTP, start_req) },
+    { ARG("end"),   offsetof (POUND_HTTP, end_req) },
+    { NULL }
+  };
 
   size_t ts_off = offsetof (POUND_HTTP, start_req);
   http_log_printer_fn prt;
@@ -540,16 +591,10 @@ p_time (struct http_log_parser *parser, char const *arg, int len)
     }
   else
     {
-      if (beg_pfx_len <= len && memcmp (arg, beg_pfx, beg_pfx_len) == 0)
+      if (select_prefix (ptab, &arg, &len, &ts_off))
 	{
-	  arg += beg_pfx_len;
-	  len -= beg_pfx_len;
-	}
-      else if (end_pfx_len <= len && memcmp (arg, end_pfx, end_pfx_len) == 0)
-	{
-	  ts_off = offsetof (POUND_HTTP, end_req);
-	  arg += end_pfx_len;
-	  len -= end_pfx_len;
+	  http_log_parser_error (parser, "bad time prefix", arg);
+	  return -1;
 	}
 
       if (len == 0)
@@ -566,7 +611,7 @@ p_time (struct http_log_parser *parser, char const *arg, int len)
 	  len = 0;
 	}
     }
-  add_instr (parser->prog, prt, (void*) (intptr_t) ts_off, arg, len);
+  add_instr (parser->prog, prt, (void*) (intptr_t) ts_off, 0, arg, len);
   return 0;
 }
 
@@ -574,7 +619,8 @@ static void
 i_process_time_ms (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
+  struct timespec diff = timespec_sub (&phttp->end_req,
+				       phttp_field_ptr (instr, phttp));
   stringbuf_printf (sb, "%"PRIu64,
 		    (uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
 }
@@ -583,7 +629,8 @@ static void
 i_process_time_us (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
+  struct timespec diff = timespec_sub (&phttp->end_req,
+				       phttp_field_ptr (instr, phttp));
   stringbuf_printf (sb, "%"PRIu64,
 		    (uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
 }
@@ -592,7 +639,8 @@ static void
 i_process_time_s (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
+  struct timespec diff = timespec_sub (&phttp->end_req,
+				       phttp_field_ptr (instr, phttp));
   stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
 }
 
@@ -600,32 +648,153 @@ static void
 i_process_time_f (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req, &phttp->start_req);
+  struct timespec diff = timespec_sub (&phttp->end_req,
+				       phttp_field_ptr (instr, phttp));
   stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
 		    diff.tv_nsec / MICRO);
 }
-
-static struct argprt proctimeprt[] = {
-  { ARG("s"), i_process_time_s },
-  { ARG("f"), i_process_time_f },
-  { ARG("ms"), i_process_time_ms },
-  { ARG("us"), i_process_time_us },
-  { NULL }
-};
 
 static int
 p_process_time (struct http_log_parser *parser, char const *arg, int len)
 {
   http_log_printer_fn prt;
+  static struct prefix ptab[] = {
+    { ARG("init"), offsetof (POUND_HTTP, start_init) },
+    { ARG("req"),  offsetof (POUND_HTTP, start_req) },
+    { ARG("be"),   offsetof (POUND_HTTP, be_start) },
+    { NULL }
+  };
+  static struct argprt proctimeprt[] = {
+    { ARG("s"), i_process_time_s },
+    { ARG("f"), i_process_time_f },
+    { ARG("ms"), i_process_time_ms },
+    { ARG("us"), i_process_time_us },
+    { NULL }
+  };
+  size_t ts_off = offsetof (POUND_HTTP, start_req);
 
   if (arg == NULL)
     prt = i_process_time_s;
-  else if ((prt = argprt_find (proctimeprt, arg, len)) == NULL)
+  else
     {
-      http_log_parser_error (parser, "bad process time format", arg);
-      return -1;
+      if (select_prefix (ptab, &arg, &len, &ts_off))
+	{
+	  http_log_parser_error (parser, "bad process time prefix", arg);
+	  return -1;
+	}
+      if (len == 0)
+	{
+	  prt = i_process_time_s;
+	  arg = NULL;
+	  len = 0;
+	}
+      else if ((prt = argprt_find (proctimeprt, arg, len)) == NULL)
+	{
+	  http_log_parser_error (parser, "bad process time format", arg);
+	  return -1;
+	}
+      else
+	{
+	  arg = NULL;
+	  len = 0;
+	}
     }
-  add_instr (parser->prog, prt, NULL, NULL, 0);
+  add_instr (parser->prog, prt, (void*) (intptr_t) ts_off, 0, arg, len);
+  return 0;
+}
+
+static void
+i_duration_ms (struct stringbuf *sb, struct http_log_instr *instr,
+	       POUND_HTTP *phttp)
+{
+  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
+				       phttp_field_ptr (instr, phttp));
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
+}
+
+static void
+i_duration_us (struct stringbuf *sb, struct http_log_instr *instr,
+	       POUND_HTTP *phttp)
+{
+  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
+				       phttp_field_ptr (instr, phttp));
+  stringbuf_printf (sb, "%"PRIu64,
+		    (uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
+}
+
+static void
+i_duration_s (struct stringbuf *sb, struct http_log_instr *instr,
+	      POUND_HTTP *phttp)
+{
+  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
+				       phttp_field_ptr (instr, phttp));
+  stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
+}
+
+static void
+i_duration_f (struct stringbuf *sb, struct http_log_instr *instr,
+	      POUND_HTTP *phttp)
+{
+  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
+				       phttp_field_ptr (instr, phttp));
+  stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
+		    diff.tv_nsec / MICRO);
+}
+
+static int
+p_duration (struct http_log_parser *parser, char const *arg, int len)
+{
+  http_log_printer_fn prt;
+  static struct prefix ptab[] = {
+    { ARG("init"),
+      offsetof (POUND_HTTP, start_init),
+      offsetof (POUND_HTTP, start_req) },
+    { ARG("header"),
+      offsetof (POUND_HTTP, start_req),
+      offsetof (POUND_HTTP, be_start) },
+    { ARG("be"),
+      offsetof (POUND_HTTP, be_start),
+      offsetof (POUND_HTTP, end_req) },
+    { ARG("totalreq"),
+      offsetof (POUND_HTTP, start_req),
+      offsetof (POUND_HTTP, end_req) },
+    { ARG("grandtotal"),
+      offsetof (POUND_HTTP, start_init),
+      offsetof (POUND_HTTP, end_req) },
+    { NULL }
+  };
+  static struct argprt proctimeprt[] = {
+    { ARG("s"), i_duration_s },
+    { ARG("f"), i_duration_f },
+    { ARG("ms"), i_duration_ms },
+    { ARG("us"), i_duration_us },
+    { NULL }
+  };
+  size_t ts_off[2] = {
+    offsetof (POUND_HTTP, start_req),
+    offsetof (POUND_HTTP, end_req)
+  };
+
+  if (arg == NULL)
+    prt = i_duration_us;
+  else
+    {
+      if (select_prefix2 (ptab, &arg, &len, &ts_off[0], &ts_off[1]))
+	{
+	  http_log_parser_error (parser, "bad duration prefix", arg);
+	  return -1;
+	}
+      if (len == 0)
+	prt = i_duration_s;
+      else if ((prt = argprt_find (proctimeprt, arg, len)) == NULL)
+	{
+	  http_log_parser_error (parser, "bad duratiom format", arg);
+	  return -1;
+	}
+    }
+  add_instr (parser->prog, prt, (void*) (intptr_t) ts_off[0], ts_off[1],
+	     NULL, 0);
   return 0;
 }
 
@@ -707,7 +876,7 @@ p_objname (struct http_log_parser *parser, char const *arg, int len)
       http_log_parser_error (parser, "unrecognized Pound object name", arg);
       return -1;
     }
-  add_instr (parser->prog, prt, NULL, NULL, 0);
+  add_instr (parser->prog, prt, NULL, 0, NULL, 0);
   return 0;
 }
 
@@ -755,7 +924,7 @@ p_objloc (struct http_log_parser *parser, char const *arg, int len)
       http_log_parser_error (parser, "unrecognized Pound object name", arg);
       return -1;
     }
-  add_instr (parser->prog, prt, NULL, NULL, 0);
+  add_instr (parser->prog, prt, NULL, 0, NULL, 0);
   return 0;
 }
 
@@ -861,8 +1030,28 @@ static struct http_log_spec http_log_spec[] = {
     /* Size of response in bytes in CLF format, i.e. a '-' rather
        than a 0 when no bytes are sent. */
     { 'b', i_response_size_clf },
-    /* The time taken to serve the request, in microseconds. */
-    { 'D', i_process_time_us },
+    /* %D          The time taken to serve the request, in microseconds.
+       %{UNIT}D    Same as %{UNIT}T.
+       %{init:UNIT}D
+		   Time between establishing the connection or sending last
+		   byte of the previous response and receiving first byte of
+		   the request.
+       %{header:UNIT}D
+		   Total time reading the request headers, i.e. between
+		   receiving first byte of the request and sending it over
+		   to the backend.
+       %{be:UNIT}D
+		   Time between sending first byte to the backend and sending
+		   last byte of the response to the client.
+       %{totalreq:UNIT}D
+		   Time between receiving first byte of the request and
+		   sending last byte of the response to the client.
+       %{grandtotal:UNIT}D
+		   Time between establishing the connection or sending last
+		   byte of the previous response and sending last byte of
+		   the response to the client.
+    */
+    { 'D', NULL, SPEC_OPT_ARG, p_duration },
     /* Remote hostname - same as %a */
     { 'h', i_remote_ip },
     /* The request protocol. */
@@ -1007,7 +1196,7 @@ http_log_format_compile (char const *name, char const *fmt,
 
       len = p - parser.cur;
       if (len)
-	add_instr (parser.prog, i_print, NULL, parser.cur, len);
+	add_instr (parser.prog, i_print, NULL, 0, parser.cur, len);
       p++;
       if (*p == '>' && p[1] == 's')
 	{
@@ -1022,7 +1211,7 @@ http_log_format_compile (char const *name, char const *fmt,
 	  if (!q)
 	    {
 	      http_log_parser_error (&parser, "missing terminating `}'", p);
-	      add_instr (parser.prog, i_print, NULL, p - 1, 2);
+	      add_instr (parser.prog, i_print, NULL, 0, p - 1, 2);
 	      parser.cur = p + 1;
 	      continue;
 	    }
@@ -1035,7 +1224,8 @@ http_log_format_compile (char const *name, char const *fmt,
       if (!tptr)
 	{
 	  http_log_parser_error (&parser, "unknown format char", p);
-	  add_instr (parser.prog, i_print, NULL, parser.cur, p - parser.cur + 1);
+	  add_instr (parser.prog, i_print, NULL, 0,
+		     parser.cur, p - parser.cur + 1);
 	}
       else
 	{
@@ -1076,13 +1266,13 @@ http_log_format_compile (char const *name, char const *fmt,
 		return -1;
 	    }
 	  else
-	    add_instr (parser.prog, tptr->prt, NULL, arg, arglen);
+	    add_instr (parser.prog, tptr->prt, NULL, 0, arg, arglen);
 	}
       parser.cur = p + 1;
     }
   len = strlen (parser.cur);
   if (len)
-    add_instr (parser.prog, i_print, NULL, parser.cur, len);
+    add_instr (parser.prog, i_print, NULL, 0, parser.cur, len);
   return i;
 }
 

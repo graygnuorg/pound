@@ -3952,7 +3952,63 @@ response size is zero.
 @end deffn
 
 @deffn {Format specifier} %D
-The time taken to serve the request, in microseconds.
+The time taken to serve the request, in microseconds, measured between
+receiving first byte of the request and sending last byte of the
+response to the client.
+@end deffn
+
+@deffn {Format specifier} %@{[@var{stage}:]@var{unit}@}D
+Duration of various stages of request processing, measured in
+@var{unit}s.  Valid values for @var{stage} are:
+
+@table @code
+@kwindex init
+@item init
+Time between establishing the connection or sending last byte of the
+previous response and receiving first byte of the request.
+
+@kwindex header
+@item header
+Total time reading the request headers, i.e. between receiving first
+byte of the request and sending it over to the backend.
+
+@kwindex be
+@item be
+Time between sending first byte to the backend and sending last byte
+of the response to the client.
+
+@kwindex totalreq
+@item totalreq
+Time between receiving first byte of the request and sending last byte
+of the response to the client.
+
+@kwindex grandtotal
+@item grandtotal
+Time between establishing the connection or sending last byte of the
+previous response and sending last byte of the response to the client.
+@end table
+
+Valid values for @var{unit} are:
+
+@table @code
+@item s
+Seconds.
+
+@item f
+Seconds with fractional part (three digits).
+
+@item ms
+Milliseconds.
+
+@item us
+Microseconds.
+@end table
+
+Either stage or unit can be omitted, but not both. Omitting stage
+defailts to @code{totalreq}, and omitting unit defaults to
+microseconds.
+
+See also @code{%T}, below.
 @end deffn
 
 @deffn {Format specifier} %h
@@ -4061,15 +4117,46 @@ Microsecond fraction of the time.
 @end deffn
 
 @deffn {Format specifier} %T
-The time taken to process the request, in seconds.
+The time taken to process the request, measured in seconds from
+receiving the first byte of the request up to sending back the last
+byte of the response.
 @end deffn
 
-@deffn {Format specifier} %@{@var{unit}@}T
+@deffn {Format specifier} %@{[@var{start}:]@var{unit}@}T
 The time taken to process the request, in a time unit given by
 @var{unit}.  Valid units are @samp{ms} for milliseconds, @samp{us} for
 microseconds, @samp{s} for seconds, and @samp{f} for seconds with
 fractional part.  Using @samp{s} gives the same result as @samp{%T}
-without any format; using @samp{us} gives the same result as @samp{%D}.
+without any format; using @samp{us} gives the same result as
+@samp{%D}.
+
+Optional @var{start} part specifies from when the time is
+measured.
+
+@table @code
+@kwindex init
+@item init
+Time between establishing the connection or sending last byte of the
+previous response and sending last byte of the response to the client.
+
+@kwindex req
+@item req
+Time between receiving first byte of the request and sending last byte
+of the response to the client.
+
+@kwindex be
+@item be
+Time between sending first byte to the backend and sending last byte
+of the response to the client.
+@end table
+
+See also @code{%D} above.  Notice the following relations:
+
+@example
+%@{init:@}T = %@{grandtotal:@}D = %@{init:@}D + %@{header:@}D + %@{be:@}D
+%@{req:@}T = %@{totalreq:@}D = %@{header:@}D + %@{be:@}D
+%@{be:@}T = %@{be:@}D
+@end example
 @end deffn
 
 @deffn {Format specifier} %u

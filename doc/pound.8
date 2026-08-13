@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 12, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "August 13, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -3441,6 +3441,41 @@ response size is zero.
 .B %D
 The time taken to serve the request, in microseconds.
 .TP
+\fB%{\fR[\fISTAGE\fR:]\fIUNIT\fB}D
+Duration of various stages of request processing, measured in
+.IR UNIT s.
+Valid values for \fISTAGE\fR are:
+.RS
+.TP
+.B init
+Time between establishing the connection or sending last byte of the
+previous response and receiving first byte of the request.
+.TP
+.B header
+Total time reading the request headers, i.e. between receiving first
+byte of the request and sending it over to the backend.
+.TP
+.B be
+Time between sending first byte to the backend and sending last byte
+of the response to the client.
+.TP
+.B totalreq
+Time between receiving first byte of the request and sending last byte
+of the response to the client.
+.TP
+.B grandtotal
+Time between establishing the connection or sending last byte of the
+previous response and sending last byte of the response to the client.
+.RE
+.IP
+Valid units are \fBms\fR for milliseconds, \fBus\fR for
+microseconds, \fBs\fR for seconds, and \fBf\fR for seconds with
+fractional part.
+.IP
+Either \fISTAGE\fR or \fIUNIT\fR can be omitted, but not
+both. Omitting \fISTAGE\fR defailts to \fBtotalreq\fR, and omitting
+\fIUNIT\fR defaults to \fRus\fR.
+.TP
 .B %h
 Client IP address of the request.
 .TP
@@ -3563,6 +3598,23 @@ The time taken to process the request, in a time unit given by
 microseconds, \fBs\fR for seconds, and \fBf\fR for seconds with
 fractional part.  Using \fBs\fR gives the same result as \fB%T\fR
 without any format; using \fBus\fR gives the same result as \fB%D\fR.
+.IP
+The \fIUNIT\fR can be optionally prefixed by following prefixes:
+.RS
+.TP
+.B init
+Measure time between establishing the connection or sending last byte
+of the previous response and sending last byte of the response to the
+client.
+.TP
+.B req
+Measure time between receiving first byte of the request and sending last byte
+of the response to the client.  This is the default.
+.TP
+.B be
+Time between sending first byte to the backend and sending last byte
+of the response to the client.
+.RE
 .TP
 .B %u
 Remote user if the request was authenticated.

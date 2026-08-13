@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-08-12
+Pound -- history of user-visible changes. 2026-08-13
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.23.91 (git)
+Version 4.23.92 (git)
 
 * Changes in the configuration.
 
@@ -136,6 +136,50 @@ To change or inspect the actual value of a beacon, use poundctl:
 
   poundctl -d NAME
     Set beacon NAME to "false".
+
+* Logging times
+
+The %T log conversion specifier takes an optional prefix,
+specifying from when to measure the time.  Its possible values are
+
+  init
+    Measure time between establishing the connection or sending last
+    byte of the previous response and sending last byte of the
+    response to the client.
+  req
+    Measure time between receiving first byte of the request and
+    sending last byte of the response to the client.  This is the
+    default.
+  be
+    Time between sending first byte to the backend and sending last
+    byte of the response to the client.
+
+E.g.: "%{backend:us}T"
+
+Similar extension applies to the "D" convertsion.  Here, the prefix
+indicates the stage of request processing whose duration is requested.
+Its values are:
+
+  init
+    Time between establishing the connection or sending last byte of
+    the previous response and receiving first byte of the request.
+
+  header
+    Total time reading the request headers, i.e. between receiving
+    first byte of the request and sending it over to the backend.
+
+  be
+    Time between sending first byte to the backend and sending last
+    byte of the response to the client.
+
+  totalreq
+    Time between receiving first byte of the request and sending last
+    byte of the response to the client.
+
+  grandtotal
+    Time between establishing the connection or sending last byte of
+    the previous response and sending last byte of the response to the
+    client.
 
 * Preprocessing
 
