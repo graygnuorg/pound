@@ -577,12 +577,12 @@ static int
 p_time (struct http_log_parser *parser, char const *arg, int len)
 {
   static struct prefix ptab[] = {
-    { ARG("begin"), offsetof (POUND_HTTP, start_req) },
-    { ARG("end"),   offsetof (POUND_HTTP, end_req) },
+    { ARG("begin"), offsetof (POUND_HTTP, ts[TS_REQ_START]) },
+    { ARG("end"),   offsetof (POUND_HTTP, ts[TS_RESP_END]) },
     { NULL }
   };
 
-  size_t ts_off = offsetof (POUND_HTTP, start_req);
+  size_t ts_off = offsetof (POUND_HTTP, ts[TS_REQ_START]);
   http_log_printer_fn prt;
 
   if (arg == NULL)
@@ -616,42 +616,90 @@ p_time (struct http_log_parser *parser, char const *arg, int len)
 }
 
 static void
+fmt_duration_ms (struct stringbuf *sb, struct http_log_instr *instr,
+		 struct timespec *start, struct timespec *end)
+{
+  if (timespec_is_null (start) || timespec_is_null (end))
+    print_str (sb, NULL);
+  else
+    {
+      struct timespec diff = timespec_sub (end, start);
+      stringbuf_printf (sb, "%"PRIu64,
+			(uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
+    }
+}
+
+static void
+fmt_duration_us (struct stringbuf *sb, struct http_log_instr *instr,
+		 struct timespec *start, struct timespec *end)
+{
+  if (timespec_is_null (start) || timespec_is_null (end))
+    print_str (sb, NULL);
+  else
+    {
+      struct timespec diff = timespec_sub (end, start);
+      stringbuf_printf (sb, "%"PRIu64,
+			(uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
+    }
+}
+
+static void
+fmt_duration_s (struct stringbuf *sb, struct http_log_instr *instr,
+		   struct timespec *start, struct timespec *end)
+{
+  if (timespec_is_null (start) || timespec_is_null (end))
+    print_str (sb, NULL);
+  else
+    {
+      struct timespec diff = timespec_sub (end, start);
+      stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
+    }
+}
+
+static void
+fmt_duration_f (struct stringbuf *sb, struct http_log_instr *instr,
+		struct timespec *start, struct timespec *end)
+{
+  if (timespec_is_null (start) || timespec_is_null (end))
+    print_str (sb, NULL);
+  else
+    {
+      struct timespec diff = timespec_sub (end, start);
+      stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
+			diff.tv_nsec / MICRO);
+    }
+}
+
+static void
 i_process_time_ms (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req,
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64,
-		    (uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
+  fmt_duration_ms (sb, instr,
+		   phttp_field_ptr (instr, phttp), &phttp->ts[TS_RESP_END]);
 }
 
 static void
 i_process_time_us (struct stringbuf *sb, struct http_log_instr *instr,
 		   POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req,
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64,
-		    (uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
+  fmt_duration_us (sb, instr,
+		   phttp_field_ptr (instr, phttp), &phttp->ts[TS_RESP_END]);
 }
 
 static void
 i_process_time_s (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req,
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
+  fmt_duration_s (sb, instr,
+		  phttp_field_ptr (instr, phttp), &phttp->ts[TS_RESP_END]);
 }
 
 static void
 i_process_time_f (struct stringbuf *sb, struct http_log_instr *instr,
 		  POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (&phttp->end_req,
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
-		    diff.tv_nsec / MICRO);
+  fmt_duration_f (sb, instr,
+		  phttp_field_ptr (instr, phttp), &phttp->ts[TS_RESP_END]);
 }
 
 static int
@@ -659,9 +707,10 @@ p_process_time (struct http_log_parser *parser, char const *arg, int len)
 {
   http_log_printer_fn prt;
   static struct prefix ptab[] = {
-    { ARG("init"), offsetof (POUND_HTTP, start_init) },
-    { ARG("req"),  offsetof (POUND_HTTP, start_req) },
-    { ARG("be"),   offsetof (POUND_HTTP, be_start) },
+    { ARG("init"), offsetof (POUND_HTTP, ts[TS_INIT]) },
+    { ARG("req"),  offsetof (POUND_HTTP, ts[TS_REQ_START]) },
+    { ARG("reqend"), offsetof (POUND_HTTP, ts[TS_REQ_END]) },
+    { ARG("be"),   offsetof (POUND_HTTP, ts[TS_BE_START]) },
     { NULL }
   };
   static struct argprt proctimeprt[] = {
@@ -671,7 +720,7 @@ p_process_time (struct http_log_parser *parser, char const *arg, int len)
     { ARG("us"), i_process_time_us },
     { NULL }
   };
-  size_t ts_off = offsetof (POUND_HTTP, start_req);
+  size_t ts_off = offsetof (POUND_HTTP, ts[TS_REQ_START]);
 
   if (arg == NULL)
     prt = i_process_time_s;
@@ -707,39 +756,36 @@ static void
 i_duration_ms (struct stringbuf *sb, struct http_log_instr *instr,
 	       POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64,
-		    (uint64_t) diff.tv_sec * MILLI + diff.tv_nsec / MICRO);
+  fmt_duration_ms (sb, instr,
+		   phttp_field_ptr (instr, phttp),
+		   phttp_field_ptr1 (instr, phttp));
 }
 
 static void
 i_duration_us (struct stringbuf *sb, struct http_log_instr *instr,
 	       POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64,
-		    (uint64_t) diff.tv_sec * MICRO + diff.tv_nsec / MILLI);
+  fmt_duration_us (sb, instr,
+		   phttp_field_ptr (instr, phttp),
+		   phttp_field_ptr1 (instr, phttp));
 }
 
 static void
 i_duration_s (struct stringbuf *sb, struct http_log_instr *instr,
 	      POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64, (uint64_t) diff.tv_sec);
+  fmt_duration_s (sb, instr,
+		  phttp_field_ptr (instr, phttp),
+		  phttp_field_ptr1 (instr, phttp));
 }
 
 static void
 i_duration_f (struct stringbuf *sb, struct http_log_instr *instr,
 	      POUND_HTTP *phttp)
 {
-  struct timespec diff = timespec_sub (phttp_field_ptr1 (instr, phttp),
-				       phttp_field_ptr (instr, phttp));
-  stringbuf_printf (sb, "%"PRIu64".%03ld", (uint64_t) diff.tv_sec,
-		    diff.tv_nsec / MICRO);
+  fmt_duration_f (sb, instr,
+		  phttp_field_ptr (instr, phttp),
+		  phttp_field_ptr1 (instr, phttp));
 }
 
 static int
@@ -748,20 +794,26 @@ p_duration (struct http_log_parser *parser, char const *arg, int len)
   http_log_printer_fn prt;
   static struct prefix ptab[] = {
     { ARG("init"),
-      offsetof (POUND_HTTP, start_init),
-      offsetof (POUND_HTTP, start_req) },
+      offsetof (POUND_HTTP, ts[TS_INIT]),
+      offsetof (POUND_HTTP, ts[TS_REQ_START]) },
     { ARG("header"),
-      offsetof (POUND_HTTP, start_req),
-      offsetof (POUND_HTTP, be_start) },
+      offsetof (POUND_HTTP, ts[TS_REQ_START]),
+      offsetof (POUND_HTTP, ts[TS_REQ_END]) },
+    { ARG("select"),
+      offsetof (POUND_HTTP, ts[TS_REQ_END]),
+      offsetof (POUND_HTTP, ts[TS_SELECT]) },
     { ARG("be"),
-      offsetof (POUND_HTTP, be_start),
-      offsetof (POUND_HTTP, end_req) },
+      offsetof (POUND_HTTP, ts[TS_BE_START]),
+      offsetof (POUND_HTTP, ts[TS_RESP_END]) },
+    { ARG("resp"),
+      offsetof (POUND_HTTP, ts[TS_SELECT]),
+      offsetof (POUND_HTTP, ts[TS_RESP_END]) },
     { ARG("totalreq"),
-      offsetof (POUND_HTTP, start_req),
-      offsetof (POUND_HTTP, end_req) },
+      offsetof (POUND_HTTP, ts[TS_REQ_START]),
+      offsetof (POUND_HTTP, ts[TS_RESP_END]) },
     { ARG("grandtotal"),
-      offsetof (POUND_HTTP, start_init),
-      offsetof (POUND_HTTP, end_req) },
+      offsetof (POUND_HTTP, ts[TS_INIT]),
+      offsetof (POUND_HTTP, ts[TS_RESP_END]) },
     { NULL }
   };
   static struct argprt proctimeprt[] = {
@@ -772,8 +824,8 @@ p_duration (struct http_log_parser *parser, char const *arg, int len)
     { NULL }
   };
   size_t ts_off[2] = {
-    offsetof (POUND_HTTP, start_req),
-    offsetof (POUND_HTTP, end_req)
+    offsetof (POUND_HTTP, ts[TS_REQ_START]),
+    offsetof (POUND_HTTP, ts[TS_RESP_END])
   };
 
   if (arg == NULL)

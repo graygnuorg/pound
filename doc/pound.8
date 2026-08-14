@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 13, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "August 14, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -3455,6 +3455,14 @@ previous response and receiving first byte of the request.
 Total time reading the request headers, i.e. between receiving first
 byte of the request and sending it over to the backend.
 .TP
+.B select
+Time spent selecting the service and backend.
+.TP
+.B resp
+Time processing the response, i.e. time elapsed between the moment
+when the service and backend have been selected and the moment after
+the last byte of the response has been sent to the client.
+.TP
 .B be
 Time between sending first byte to the backend and sending last byte
 of the response to the client.
@@ -3610,6 +3618,10 @@ client.
 .B req
 Measure time between receiving first byte of the request and sending last byte
 of the response to the client.  This is the default.
+.TP
+.B reqend
+Time after receiving last byte of the request header and sending last byte
+of the response to the client.
 .TP
 .B be
 Time between sending first byte to the backend and sending last byte

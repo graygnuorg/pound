@@ -441,13 +441,21 @@ phttp_log (POUND_HTTP *phttp, int flags, int status, int en,
 
   if (phttp->response.request)
     stringbuf_printf (&sb, " (%s sec)",
-		      log_duration (buf, sizeof (buf), &phttp->start_req));
+		      log_duration (buf, sizeof (buf), &phttp->ts[TS_REQ_START]));
 
   if ((p = stringbuf_finish (&sb)) != NULL)
     logmsg (LOG_NOTICE, "%s", p);
   else
     logmsg (LOG_CRIT, "failed to log message");
   stringbuf_free (&sb);
+}
+
+void
+phttp_gettime (POUND_HTTP *phttp, int idx)
+{
+  clock_gettime (CLOCK_REALTIME, &phttp->ts[idx]);
+  if (idx == TS_RESP_END && timespec_is_null (&phttp->ts[TS_SELECT]))
+    phttp->ts[TS_SELECT] = phttp->ts[TS_RESP_END];
 }
 
 char *
@@ -5266,7 +5274,7 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
   /* Configure it */
   BIO_set_close (phttp->be, BIO_CLOSE);
   arg = set_callback (phttp->be, backend->v.reg.to, &phttp->reneg_state,
-		      &phttp->be_start, BIO_CB_WRITE);
+		      &phttp->ts[TS_BE_START], BIO_CB_WRITE);
 
   /*
    * Set up SSL, if requested.
@@ -5304,7 +5312,7 @@ open_backend (POUND_HTTP *phttp, BACKEND *backend, int sock)
 		     "handshake with backend failed");
 	  return HTTP_STATUS_SERVICE_UNAVAILABLE;
 	}
-      arg->ts = &phttp->be_start;
+      arg->ts = &phttp->ts[TS_BE_START];
     }
 
   if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
@@ -6276,7 +6284,7 @@ do_tunnel (POUND_HTTP *phttp)
 
   to = phttp->backend->v.reg.to * 1000;
 
-  clock_gettime (CLOCK_REALTIME, &phttp->start_init);
+  phttp_gettime (phttp, TS_INIT);
 
   while (p[P_CL].fd != -1 || p[P_BE].fd != -1)
     {
@@ -6303,7 +6311,7 @@ do_tunnel (POUND_HTTP *phttp)
 	  if (!(init & (1 << P_CL)))
 	    {
 	      init |= 1 << P_CL;
-	      clock_gettime (CLOCK_REALTIME, &phttp->start_req);
+	      phttp_gettime (phttp, TS_REQ_START);
 	    }
 	  tunnel_in (p, buf, P_CL);
 	}
@@ -6323,7 +6331,7 @@ do_tunnel (POUND_HTTP *phttp)
 	  if (!(init & (1 << P_BE)))
 	    {
 	      init |= 1 << P_BE;
-	      clock_gettime (CLOCK_REALTIME, &phttp->be_start);
+	      phttp_gettime (phttp, TS_BE_START);
 	    }
 	  tunnel_out (p, buf, P_BE);
 	}
@@ -6332,9 +6340,9 @@ do_tunnel (POUND_HTTP *phttp)
     close (p[P_BE].fd);
   if (p[P_CL].fd >= 0)
     close (p[P_CL].fd);
-  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
+  phttp_gettime (phttp, TS_RESP_END);
   if (enable_backend_stats && phttp->backend)
-    backend_update_stats (phttp->backend, &phttp->be_start, &phttp->end_req);
+    backend_update_stats (phttp->backend, &phttp->ts[TS_BE_START], &phttp->ts[TS_RESP_END]);
 }
 
 enum transfer_encoding
@@ -6584,6 +6592,8 @@ http_process_request (POUND_HTTP *phttp)
   if ((res = select_backend (phttp)) != HTTP_STATUS_OK)
     return res;
 
+  phttp_gettime (phttp, TS_SELECT);
+
   /*
    * if we have anything but a regular backend we close the channel
    */
@@ -6599,7 +6609,7 @@ http_process_request (POUND_HTTP *phttp)
       http_request_free (&phttp->response);
       phttp_clear_resend (phttp);
 
-      clock_gettime (CLOCK_REALTIME, &phttp->be_start);//FIXME
+      phttp_gettime (phttp, TS_BE_START);//FIXME
       res = backend_driver (phttp,
 			    !is_http10 (phttp) &&
 			      (transfer_encoding == TRANSFER_ENCODING_CHUNKED),
@@ -6674,7 +6684,7 @@ do_http (POUND_HTTP *phttp)
       return;
     }
   arg = set_callback (phttp->cl, phttp->lstn->to, &phttp->reneg_state,
-		      &phttp->start_req, BIO_CB_READ);
+		      &phttp->ts[TS_REQ_START], BIO_CB_READ);
 
   if (!SLIST_EMPTY (&phttp->lstn->ctx_head))
     {
@@ -6719,7 +6729,6 @@ do_http (POUND_HTTP *phttp)
       phttp->x509 = NULL;
     }
   phttp->backend = NULL;
-  arg->ts = &phttp->start_req;
 
   if ((bb = BIO_new (BIO_f_buffer ())) == NULL)
     {
@@ -6740,25 +6749,30 @@ do_http (POUND_HTTP *phttp)
 
       phttp->ws_state = WSS_INIT;
       phttp->conn_closed = 0;
-      clock_gettime (CLOCK_REALTIME, &phttp->start_init);
+      memset (&phttp->ts, 0, sizeof (phttp->ts));
+
+      phttp_gettime (phttp, TS_INIT);
+      phttp->ts[TS_REQ_START] = phttp->ts[TS_INIT];
+      arg->ts = &phttp->ts[TS_REQ_START];
       res = http_request_read (phttp->cl, phttp->lstn, phttp->buffer,
 			       &phttp->request);
+      phttp_gettime (phttp, TS_REQ_END);
       if (res != HTTP_STATUS_OK)
 	{
 	  if (res == -1)
 	    phttp_log (phttp, PHTTP_LOG_DFL, res, errno,
 		       "request dropped");
-	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
+	  phttp_gettime (phttp, TS_RESP_END);
 	}
       else if (phttp->request.request == NULL)
 	break;
       else
 	{
 	  res = http_process_request (phttp);
-	  clock_gettime (CLOCK_REALTIME, &phttp->end_req);
+	  phttp_gettime (phttp, TS_RESP_END);
 	  if (enable_backend_stats && phttp->backend)
-	    backend_update_stats (phttp->backend, &phttp->be_start,
-				  &phttp->end_req);
+	    backend_update_stats (phttp->backend, &phttp->ts[TS_BE_START],
+				  &phttp->ts[TS_RESP_END]);
 	}
 
       if (res < 0)

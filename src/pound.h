@@ -316,6 +316,12 @@ timespec_sub (struct timespec const *a, struct timespec const *b)
 
   return d;
 }
+
+static inline int
+timespec_is_null (struct timespec *spec)
+{
+  return spec->tv_sec == 0;
+}
 
 #include "json.h"
 /* Memory allocation primitives. */
@@ -1142,6 +1148,17 @@ enum capture_state         /* State of request content capturing. */
 			      request.body */
   };
 
+enum
+  {
+    TS_INIT,      /* Time when started reading the request. */
+    TS_REQ_START, /* Time when first byte of the request was received. */
+    TS_REQ_END,   /* Finished reading request headers. */
+    TS_SELECT,    /* Selected service and backend. */
+    TS_BE_START,  /* Time when the request was handed to the backend */
+    TS_RESP_END,  /* Time after the response was sent */
+    TS_MAX
+  };
+
 typedef struct _pound_http
 {
   /* Input parameters */
@@ -1169,12 +1186,7 @@ typedef struct _pound_http
   struct http_request request;
   struct http_request response;
 
-  struct timespec start_init;/* Time when started reading the request. */
-  struct timespec start_req; /* Time when first byte of the request was
-			        received. */
-  struct timespec end_req;   /* Time after the response was sent */
-  struct timespec be_start;  /* Time when the request was handed to the
-				backend */
+  struct timespec ts[TS_MAX];
 
   int response_code;
   int log_suppress_mask;

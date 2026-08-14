@@ -3972,6 +3972,16 @@ previous response and receiving first byte of the request.
 Total time reading the request headers, i.e. between receiving first
 byte of the request and sending it over to the backend.
 
+@kwindex select
+@item select
+Time spent selecting the service and backend.
+
+@kwindex resp
+@item resp
+Time processing the response, i.e. time elapsed between the moment
+when the service and backend have been selected and the moment after
+the last byte of the response has been sent to the client.
+
 @kwindex be
 @item be
 Time between sending first byte to the backend and sending last byte
@@ -4144,6 +4154,11 @@ previous response and sending last byte of the response to the client.
 Time between receiving first byte of the request and sending last byte
 of the response to the client.
 
+@kwindex reqend
+@item reqend
+Time after receiving last byte of the request header and sending last byte
+of the response to the client.
+
 @kwindex be
 @item be
 Time between sending first byte to the backend and sending last byte
@@ -4153,8 +4168,8 @@ of the response to the client.
 See also @code{%D} above.  Notice the following relations:
 
 @example
-%@{init:@}T = %@{grandtotal:@}D = %@{init:@}D + %@{header:@}D + %@{be:@}D
-%@{req:@}T = %@{totalreq:@}D = %@{header:@}D + %@{be:@}D
+%@{init:@}T = %@{grandtotal:@}D = %@{init:@}D + %@{header:@}D + %@{resp:@}D
+%@{req:@}T = %@{totalreq:@}D = %@{header:@}D + %@{resp:@}D
 %@{be:@}T = %@{be:@}D
 @end example
 @end deffn
