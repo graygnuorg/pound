@@ -425,6 +425,11 @@ rewrite_begin : T_REWRITE opt_lit
 		      target = REWRITE_RESPONSE;
 		    else if (c_strcasecmp (id, "request") == 0)
 		      target = REWRITE_REQUEST;
+		    else if (c_strcasecmp (id, "early") == 0)
+		      {
+			id = "request";
+			target = REWRITE_EARLY;
+		      }
 		    else
 		      {
 			conf_error_at_locus_range (&@2,

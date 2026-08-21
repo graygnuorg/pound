@@ -4703,7 +4703,7 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
   return res;
 }
 
-static int
+int
 rewrite_apply_rules (POUND_HTTP *phttp, int what,
 		     REWRITE_RULE_HEAD *rewrite_rules,
 		     struct http_request *request)
@@ -6578,6 +6578,11 @@ http_process_request (POUND_HTTP *phttp)
 	  close_backend (phttp);
 	}
     }
+
+  if (rewrite_apply_rules (phttp, REWRITE_EARLY,
+			   &phttp->lstn->rewrite[REWRITE_EARLY],
+			   &phttp->request))
+    return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*
    * Select the service to handle the request.

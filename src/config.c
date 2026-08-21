@@ -2884,7 +2884,7 @@ typedef struct named_cond
   SERVICE_COND *cond;
   CFG_NODE const *node;
   int idx;                    /* Index of the evaluated result in
-				 eval_response of struct http_request */
+				 eval_result of struct http_request */
 } NAMED_COND;
 
 #define HT_TYPE NAMED_COND
@@ -3127,6 +3127,7 @@ static LISTENER *
 listener_alloc (POUND_DEFAULTS *dfl, struct locus_range *locus)
 {
   LISTENER *lst;
+  int i;
 
   XZALLOC (lst);
 
@@ -3143,8 +3144,9 @@ listener_alloc (POUND_DEFAULTS *dfl, struct locus_range *locus)
   locus_range_init (&lst->locus);
   locus_range_copy (&lst->locus, locus);
 
-  SLIST_INIT (&lst->rewrite[REWRITE_REQUEST]);
-  SLIST_INIT (&lst->rewrite[REWRITE_RESPONSE]);
+  for (i = 0; i < REWRITE_MAX; i++)
+    SLIST_INIT (&lst->rewrite[i]);
+
   SLIST_INIT (&lst->services);
   SLIST_INIT (&lst->ctx_head);
   return lst;
@@ -5277,7 +5279,8 @@ service_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
   struct rwclosure *clos;
 
   assert (node->rwtarget == REWRITE_REQUEST ||
-	  node->rwtarget == REWRITE_RESPONSE);
+	  node->rwtarget == REWRITE_RESPONSE ||
+	  node->rwtarget == REWRITE_EARLY);
 
   if (node->rwtarget == REWRITE_RESPONSE)
     {

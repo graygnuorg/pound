@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 14, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "August 21, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1466,9 +1466,9 @@ header, expands to the user name extracted from its value.  Otherwise,
 its expansion is empty.
 .SS Modification directives
 The following directives modify the incoming request prior to passing
-it to the selected service. These are discussed in detail
+it to the selected backend. These are discussed in detail
 in section
-.BR "REQUEST MODIFICATION" ,
+.BR "REQUEST MODIFICATION DIRECTIVES" ,
 below.
 .TP
 \fBDeleteHeader\fR [\fIoptions\fR] "\fIpattern\fR"
@@ -1535,15 +1535,41 @@ Modifies the query.  Sets the query parameter \fIname\fR to
 \fIvalue\fR. The \fIvalue\fR argument is subject to string expansion,
 and, if \fB\-encode\fR is given, percent-encoding.
 .TP
-.BR Rewrite " [" request | response "] ... [ " Else " ... ] " End
+.BR Rewrite " [" request | early | response "] ... [ " Else " ... ] " End
 Conditionally modify request or response depending on whether it
 matches certain conditions.  If the argument is omitted, \fBrequest\fR
 is assumed.
 .IP
+Both \fBrequest\fR and \fBearly\fR modifiers indicate that the
+statement modifies the incoming request. Normally any modifications
+are applied to the request right before sending it to the backend.
+This means they are not visible to any conditional statements.  The
+\fBearly\fR modifier instructs \fBpound\fR to apply them right after
+request headers are received and parsed.
+.IP
+If the \fBRewrite request\fR statements are present in both the
+\fBListenHTTP\fR and the \fBService\fR, both are applied in that
+order.
+.IP
+\fBRewrite early\fR statements are processed similarly, except that
+statements appearing in \fBService\fR sections are applied before
+service selection stage, which means that if the service won't be
+selected for processing the request, any modifications done by its
+\fBRewrite early\fR statement will remain visible in subsequent
+services.
+.IP
 Request modification is described in detail in section
 .BR "REQUEST MODIFICATION DIRECTIVES" .
 .IP
-Response modification is covered by section
+The \fBresponse\fR modifier indicates that the rewrite must be applied
+to the response received from the backend.  Such modifications are
+applied before transmitting the response back to the client.
+.IP
+If \fBRewrite response\fR statements are defined in both the listener
+and the \fBService\fR sections, they are applied in reverse order:
+first rewrites from the service, then those from the listener.
+.IP
+Response modification is covered in detail in section
 .BR "RESPONSE MODIFICATION" .
 .SS Compatibility directives
 The following directives are retained for compatibility with previous
@@ -2098,7 +2124,7 @@ unenclosed matching directives on the top level of a \fBService\fR block.
 The following directives modify the incoming request prior to passing
 it to the selected backend.  These are discussed in detail
 in the section
-.BR "REQUEST MODIFICATION" ,
+.BR "REQUEST MODIFICATION DIRECTIVES" ,
 below.
 .TP
 \fBDeleteHeader\fR [\fIoptions\fR] "\fIpattern\fR"

@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-08-17
+Pound -- history of user-visible changes. 2026-08-21
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -84,11 +84,13 @@ is used.
 
 * Fall-through services
 
-Fall-through services are processed specially. If the request matches
-a fall-through service, any modification statements from that service
-are applied to the request, and the selection process continues from
-the next service. In other words, a fall-through service provides a
-way to apply a set of modifications common for all services that follow.
+A new kind of services, fall-through services, is
+introduced. Fall-through services are processed specially. If the
+request matches a such service, any modification statements from that
+service are applied to the request, and the selection process
+continues from the next service. In other words, a fall-through
+service provides a way to apply a set of modifications common for all
+services that follow.
 
 A service is marked as a fall-through using the "FallThrough"
 statement. Such services cannot contain backend definitions or
@@ -101,6 +103,33 @@ follows:
       LogSuppress success
       FallThrough
   End
+
+* Early rewrites
+
+Any request modification directives are normally applied to the
+incoming request immediately before sending it to the selected
+backend. A new flavor of the "Rewrite" statement is introduced:
+
+  Rewrite early
+
+Such statements are applied to the request at the early stage of
+its processing.  "Rewrite early" statements appearing in ListenHTTP
+(or ListenHTTPS) section are applied first, right after the request
+headers have been received and parsed. Statements appearing in Service
+sections are applied during service selection, before applying service
+selection statements for that service.
+
+This means that any modifications done in "Rewrite early" sections are
+visible to conditional statements (both standalone, as service
+selection directives, and those contained in "Rewrite" sections).
+
+It is important to notice that any modifications done by early
+rewrites in a Service section remain visible for subsequent sections,
+if this one is not selected for processing the request.
+
+To summarize, this release provides two mechanisms for making
+request modifications visible to conditional statements: early
+rewrites and fall-through sections.
 
 * Beacons
 

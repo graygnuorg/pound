@@ -537,6 +537,15 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
        */
       phttp->svc = svc;
 
+      /* Apply early request rewriting rules. */
+      if (rewrite_apply_rules (phttp, REWRITE_EARLY,
+			       &phttp->svc->rewrite[REWRITE_EARLY],
+			       &phttp->request))
+	{
+	  rc = -1;
+	  break;
+	}
+
       rc = match_cond (&svc->cond, phttp, &phttp->request);
       if (rc > 0)
 	{

@@ -929,7 +929,9 @@ typedef enum
 enum
   {
     REWRITE_REQUEST,
-    REWRITE_RESPONSE
+    REWRITE_RESPONSE,
+    REWRITE_EARLY,
+    REWRITE_MAX
   };
 
 struct iwrr_balancer
@@ -967,7 +969,7 @@ typedef struct _service
   struct locus_range locus;     /* Location in the config file. */
   struct _listener *lstn;
   SERVICE_COND cond;
-  REWRITE_RULE_HEAD rewrite[2];
+  REWRITE_RULE_HEAD rewrite[REWRITE_MAX];
   BALANCER_LIST balancers;
   BALANCER_ALGO balancer_algo;
   pthread_mutex_t mut;		/* mutex for this service */
@@ -1042,7 +1044,7 @@ typedef struct _listener
   int clnt_check;		/* client verification mode */
   int noHTTPS11;		/* HTTP 1.1 mode for SSL */
   int header_options;           /* additional header options */
-  REWRITE_RULE_HEAD rewrite[2];
+  REWRITE_RULE_HEAD rewrite[REWRITE_MAX];
   int rewrite_errors;           /* Rewrite HTTP errors. */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
@@ -1313,6 +1315,9 @@ BACKEND *get_backend (POUND_HTTP *phttp);
 int drain_request (POUND_HTTP *phttp, int chunked,
 		   CONTENT_LENGTH content_length);
 
+int rewrite_apply_rules (POUND_HTTP *phttp, int what,
+			 REWRITE_RULE_HEAD *rewrite_rules,
+			 struct http_request *request);
 int rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what);
 
 int http_simple_response (POUND_HTTP *phttp, char const *headers,

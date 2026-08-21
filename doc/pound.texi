@@ -207,6 +207,7 @@ ListenHTTP
 Request Modification
 
 * Rewrite::
+* Early rewrite::
 
 Response Modification
 
@@ -5850,6 +5851,11 @@ appearing in both sections, the directive from @code{ListenHTTP}
 directives from the @code{Service} section.  Directives from the same
 section are applied in order of their appearance.
 
+All modifications are applied to the request immediately before
+sending it to the backend, so they are not seen to the service
+selection or rewrite conditional statements.  @xref{Early rewrite}, if
+you need the changes to be applied earlier.
+
 @deffn {ListenHTTP Statement} LuaModify "@var{func}" ["@var{arg}"...]
 Run Lua function @var{func} with supplied arguments.  The function
 is supposed to modify the request.
@@ -5995,6 +6001,7 @@ DeleteHeader -icase "@var{pattern}"
 
 @menu
 * Rewrite::
+* Early rewrite::
 @end menu
 
 @node Rewrite
@@ -6009,7 +6016,7 @@ Syntactically, a @code{Rewrite} section is:
 
 @example
 @group
-  Rewrite [ request ]
+  Rewrite [ @var{modifier} ]
     @var{conditional_directives}@dots{}
     @var{modification_directives}@dots{}
 [ Else
@@ -6026,10 +6033,21 @@ for one or more header modification directives.  The @code{Else} part
 is optional; any number of @code{Else} blocks can be supplied, thus
 providing for conditional branching.
 
+ Notice optional @var{modifier}.  For request rewriting it can be
+omitted, or have the value @samp{request}.  Another possible values
+are @samp{early} and @samp{response}, which are discussed in
+@ref{Early rewrite}, and @ref{rewrite response}, correspondingly.
+
  The @code{Rewrite} statement is processed sequentially until a branch
 is found whose @var{conditional_directives} yield @samp{true}, or
 @code{End} is encountered.  If a matching branch is found, its
 @var{modification_directives} are applied to the request.
+
+ Similarly to standalone modification directives, any request
+modifications done within a @code{Rewrite} statement are applied
+immediately before sending the request to the backend and are not seen
+to conditional directives in @code{Rewrite} statements, neither to
+the service selection conditionals.
 
 @anchor{request matching directives}
 @anchor{conditionals}
@@ -6415,6 +6433,44 @@ Path -beg "/ssl"
 
 The @code{Match} statement, like any other conditional, can be
 prefixed with @code{Not}, which reverts its meaning.
+
+@node Early rewrite
+@subsubsection Early rewrite
+@cindex early request rewriting
+@kwindex rewrite early
+@kwindex early
+  Normally, any changes to the request done by the modification
+statements are applied to it right before it is sent over to the
+backend.  This means that they are not visible to conditional
+statements used in @code{Service} and @code{Rewrite} sections.
+Usually this is expected.  Sometimes, however, you might need to
+apply modifications as early as possible, so that the modified request
+is visible to conditional statements, in particular those that select
+what section will be used to process the request.  This is done using
+special @dfn{early rewrite} statement.  Syntactically, it is very
+similar to the @code{Rewrite} statement described above:
+
+@example
+@group
+  Rewrite early
+    @var{conditional_directives}@dots{}
+    @var{modification_directives}@dots{}
+[ Else
+    @var{conditional_directives}@dots{}
+    @var{modification_directives}@dots{} ]...
+  End
+@end group
+@end example
+
+The @code{early} modifier indicates that this statement must be
+applied at the very beginning of the request processing.  Early
+rewrites defined in listener sections are applied right after
+receiving the request headers.  Those defined in @code{Service}
+sections are applied when the service in question is evaluated
+for selection, as described in @ref{Service selection}.  Thus,
+any request modifications applied by a service remain visible for
+subsequent services, unless this service is selected for processing
+the request.
 
 @node Response Modification
 @subsection Response Modification
@@ -7106,6 +7162,14 @@ the backend.  A similar set of statements can be used in listeners
 (@pxref{Request Modification}).  In case both the listener and service
 contain request modification statements, those from the listener are
 applied first, followed by the ones from the service.
+
+  It is important to notice, that these modification directives are
+applied to the request immediately before sending it to the backend.
+That means that these modifications are not seen by the service
+selection statements discussed in the previous subsection.  If you
+want the changes to be visible by the service selection statements,
+use @code{Rewrite early} (@pxref{Early rewrite}) or fall-through
+services (@pxref{FallThrough}).
 
 @anchor{ContentCapture}
 @deffn {Service directive} ContentCapture @var{size}

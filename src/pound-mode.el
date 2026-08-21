@@ -425,7 +425,7 @@
 	  '(1 font-lock-keyword-face)
 	  '(2 font-lock-string-face))
    ;; Special sections
-   (list "^[ \t]*\\(Rewrite\\)[ \t]+\\(request\\|response\\)\\>"
+   (list "^[ \t]*\\(Rewrite\\)[ \t]+\\(request\\|response\\|early\\)\\>"
 	 '(1 font-lock-keyword-face)
 	 '(2 font-lock-constant-face))
    ;; Note: making second subexpression optional doesn't work properly for
