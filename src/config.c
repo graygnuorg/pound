@@ -2947,6 +2947,19 @@ http_request_eval_cache (struct http_request *http, int n, int res)
 }
 
 /*
+ * Reset all evaluation results in the given request. This is necessary after
+ * applying changes to the request: (1) after processing a fall-through service
+ * that uses request modification, and (2) after applying an early rewrite.
+ */
+void
+http_request_eval_reset (struct http_request *http)
+{
+  if (http->eval_result)
+    memset (http->eval_result, 0,
+	    detcond_count * sizeof (http->eval_result[0]));
+}
+
+/*
  * Named condition hash management.
  */
 
@@ -5113,6 +5126,55 @@ static CFG_TYPE cfg_type_rw_lua_modify = {
   .commit = rw_lua_modify_commit
 };
 
+struct rwclosure
+{
+  REWRITE_RULE *prev;
+  REWRITE_RULE *rule;
+};
+
+static int
+sub_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
+{
+  REWRITE_OP *op;
+  struct rwclosure *clos;
+
+  assert (node->rwtarget == REWRITE_REQUEST ||
+	  node->rwtarget == REWRITE_RESPONSE ||
+	  node->rwtarget == REWRITE_EARLY);
+
+  if (node->rwtarget == REWRITE_RESPONSE)
+    {
+      CFG_NODE *pair[2];
+      if (check_eval_resp_usage (node, pair))
+	{
+	  conf_error_at_locus_range (&pair[0]->locus,
+				     "eval refers to a condition that cannot"
+				     " be used in Rewrite response");
+	  conf_error_at_locus_range (&pair[1]->locus,
+				     "this is the location of the"
+				     " offending statement");
+	  return -1;
+	}
+    }
+
+  XZALLOC (clos);
+  clos->rule = rewrite_rule_alloc (NULL);
+  node->data = clos;
+
+  op = rewrite_op_alloc (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			 REWRITE_REWRITE_RULE);
+  op->v.rule = clos->rule;
+
+  *baseptr = clos;
+
+  return 0;
+}
+
+static CFG_TYPE cfg_type_sub_rewrite = {
+  .prepare = sub_rewrite_prepare,
+};
+
+
 /* Minimal set of request modification statements for use in Rewrite sections.
  */
 static CFG_DEFN rw_mod_base[] = {
@@ -5170,6 +5232,8 @@ static CFG_DEFN rw_mod_ext[] = {
   { NULL }
 };
 
+static CFG_DEFN rw_sub_resp_defn[2];
+
 /* Modification statements allowed for use in Rewrite response sections. */
 static CFG_DEFN rw_resp_defn[] = {
   {
@@ -5189,12 +5253,24 @@ static CFG_DEFN rw_resp_defn[] = {
     }
   },
   {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = &cfg_type_sub_rewrite,
+    .ref = rw_sub_resp_defn,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, ophead),
+    },
+    .data = (void *) (intptr_t) REWRITE_RESPONSE
+  },
+  {
     .name = "Else",
     .token = T_ELSE,
     .ref = rw_resp_defn,
   },
   { NULL }
 };
+
+static CFG_DEFN rw_sub_req_defn[2];
 
 /* Modification statements allowed for use in Rewrite request sections. */
 static CFG_DEFN rw_req_defn[] = {
@@ -5223,9 +5299,37 @@ static CFG_DEFN rw_req_defn[] = {
     }
   },
   {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = &cfg_type_sub_rewrite,
+    .ref = rw_sub_req_defn,
+    .rcvr = {
+      .off = offsetof (REWRITE_RULE, ophead),
+    },
+    .data = (void *) (intptr_t) REWRITE_REQUEST
+  },
+  {
     .name = "Else",
     .token = T_ELSE,
     .ref = rw_req_defn,
+  },
+  { NULL }
+};
+
+static CFG_DEFN rw_sub_req_defn[2] = {
+  {
+    .name = "request",
+    .type = KWT_TABREF,
+    .ref  = rw_req_defn
+  },
+  { NULL }
+};
+
+static CFG_DEFN rw_sub_resp_defn[2] = {
+  {
+    .name = "response",
+    .type = KWT_TABREF,
+    .ref  = rw_resp_defn
   },
   { NULL }
 };
@@ -5243,12 +5347,6 @@ static CFG_DEFN rw_defn[] = {
     .ref  = rw_resp_defn
   },
   { NULL }
-};
-
-struct rwclosure
-{
-  REWRITE_RULE *prev;
-  REWRITE_RULE *rule;
 };
 
 static int
@@ -5658,7 +5756,8 @@ static CFG_DEFN svc_defn[] = {
     .ref = rw_defn,
     .rcvr = {
       .off = offsetof (SERVICE, rewrite)
-    }
+    },
+    .data = (void *) (intptr_t) REWRITE_REQUEST
   },
   {
     .name = "IgnoreCase",
@@ -5947,7 +6046,8 @@ static CFG_DEFN http_common[] = {
     .ref = rw_defn,
     .rcvr = {
       .off = offsetof (LISTENER, rewrite)
-    }
+    },
+    .data = (void *) (intptr_t) REWRITE_REQUEST
   },
   {
     .name = "RewriteErrors",

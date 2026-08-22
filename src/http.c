@@ -4716,6 +4716,8 @@ rewrite_apply_rules (POUND_HTTP *phttp, int what,
       if ((res = rewrite_rule_check (rule, request, phttp, what)) != 0)
 	break;
     }
+  if (what == REWRITE_EARLY)
+    http_request_eval_reset (&phttp->request);
   return res;
 }
 

@@ -13,25 +13,25 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Chained rewrites])
-AT_KEYWORDS([rewrite rwchain accessor])
 
+AT_SETUP([Nested response rewrites])
+AT_KEYWORDS([rewrite response resprwnest])
 PT_CHECK([ListenHTTP
 	Service
-		Rewrite
-			URL -beg "/echo/foo"
-			SetHeader "X-Branch: 1"
+		Rewrite response
+			Header "Content-Type: text/(.+)"
+			SetHeader "X-Content-SubType: $1"
 		Else
-			URL -beg "/echo/bar"
-			SetHeader "X-Branch: 2"
-		Else
-			Match And
-				URL -beg "/echo/baz"
-				Header -re ["X-Pass:[[:space:]]+ok"]
+			Header "Content-Type: application/(.+)"
+			Rewrite
+				StringMatch "$1" -exact "foo"
+				SetHeader "X-App: 1"
+			Else
+				StringMatch "$1" -exact "bar"
+				SetHeader "X-App: 2"
+			Else
+				SetHeader "X-App: 3"
 			End
-			SetHeader "X-Branch: 3"
-		Else
-			SetHeader "X-Branch: 4"
 		End
 		Backend
 			Address
@@ -40,41 +40,36 @@ PT_CHECK([ListenHTTP
 	End
 End
 ],
-[GET /echo/foo/bar
+[GET /echo/foo
+Content-Type: text/plain
 end
 
 200
-x-orig-header-x-branch: 1
+x-content-subtype: plain
 end
 
-GET /echo/bar/foo
-end
-
-200
-x-orig-header-x-branch: 2
-end
-
-GET /echo/baz
-X-Pass: ok
+GET /echo/foo
+Content-Type: application/foo
 end
 
 200
-x-orig-header-x-branch: 3
+x-app: 1
 end
 
-GET /echo/baz
-X-Pass: no
-end
-
-200
-x-orig-header-x-branch: 4
-end
-
-GET /echo/baz
+GET /echo/foo
+Content-Type: application/bar
 end
 
 200
-x-orig-header-x-branch: 4
+x-app: 2
+end
+
+GET /echo/foo
+Content-Type: application/quux
+end
+
+200
+x-app: 3
 end
 ])
 AT_CLEANUP

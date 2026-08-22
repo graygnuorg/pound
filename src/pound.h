@@ -454,6 +454,7 @@ static inline void http_request_init (struct http_request *http)
 void http_request_free (struct http_request *);
 int http_request_eval_get (struct http_request *http, int n);
 int http_request_eval_cache (struct http_request *http, int n, int res);
+void http_request_eval_reset (struct http_request *http);
 
 /*
  * Return codes for http_request_get_query_param,

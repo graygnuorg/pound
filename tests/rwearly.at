@@ -1,5 +1,5 @@
 # This file is part of pound testsuite. -*- autotest -*-
-# Copyright (C) 2023-2026 Sergey Poznyakoff
+# Copyright (C) 2026 Sergey Poznyakoff
 #
 # Pound is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,68 +13,68 @@
 #
 # You should have received a copy of the GNU General Public License
 # along with pound.  If not, see <http://www.gnu.org/licenses/>.
-AT_SETUP([Chained rewrites])
-AT_KEYWORDS([rewrite rwchain accessor])
-
+AT_SETUP([Early rewrites])
+AT_KEYWORDS([rewrite rwearly])
 PT_CHECK([ListenHTTP
+	Rewrite early
+		DeleteHeader "X-Known"
+	End
+
+	Rewrite early
+		Header "X-Input" -beg "One"
+		SetHeader "X-Known: 1"
+	Else
+		Header "X-Input" -beg "Two"			
+		SetHeader "X-Known: 2"
+	Else
+		Header "^X-Input:"
+		SetHeader "X-Known: 3"
+	End
+
 	Service
-		Rewrite
-			URL -beg "/echo/foo"
-			SetHeader "X-Branch: 1"
-		Else
-			URL -beg "/echo/bar"
-			SetHeader "X-Branch: 2"
-		Else
-			Match And
-				URL -beg "/echo/baz"
-				Header -re ["X-Pass:[[:space:]]+ok"]
-			End
-			SetHeader "X-Branch: 3"
-		Else
-			SetHeader "X-Branch: 4"
-		End
+		Header "^X-Known:"
 		Backend
-			Address
-			Port
+		End
+	End
+
+	Service
+		Backend
 		End
 	End
 End
 ],
-[GET /echo/foo/bar
+[GET /echo/foo
+X-Input: one
 end
 
 200
-x-orig-header-x-branch: 1
+x-backend-number: 0
+x-orig-header-x-known: 1
 end
 
-GET /echo/bar/foo
-end
-
-200
-x-orig-header-x-branch: 2
-end
-
-GET /echo/baz
-X-Pass: ok
+GET /echo/foo
+X-Input: two
 end
 
 200
-x-orig-header-x-branch: 3
+x-backend-number: 0
+x-orig-header-x-known: 2
 end
 
-GET /echo/baz
-X-Pass: no
-end
-
-200
-x-orig-header-x-branch: 4
-end
-
-GET /echo/baz
+GET /echo/foo
+X-Input: three
 end
 
 200
-x-orig-header-x-branch: 4
+x-backend-number: 0
+x-orig-header-x-known: 3
+end
+
+GET /echo/foo
+end
+
+200
+x-backend-number: 1
 end
 ])
 AT_CLEANUP

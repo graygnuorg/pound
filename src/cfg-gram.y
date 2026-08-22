@@ -97,7 +97,7 @@ find_rewrite_defn (CFG_DEFN *defn, char const *id)
       if (defn->type == KWT_TABREF && c_strcasecmp (defn->name, id) == 0)
 	return defn->ref;
     }
-  abort ();
+  return NULL;
 }
 
 CFG_DEFN rewrite_branch_defn = {
@@ -418,37 +418,48 @@ rewrite_begin : T_REWRITE opt_lit
 		CFG_DEFN *defn;
 		int target;
 		char const *id;
+		static struct kwtab idtab[] = {
+		  { "request",  REWRITE_REQUEST },
+		  { "response", REWRITE_RESPONSE },
+		  { "early",    REWRITE_EARLY },
+		  { NULL }
+		};
+
 		if ($2)
 		  {
 		    id = string_ptr ($2);
-		    if (c_strcasecmp (id, "response") == 0)
-		      target = REWRITE_RESPONSE;
-		    else if (c_strcasecmp (id, "request") == 0)
-		      target = REWRITE_REQUEST;
-		    else if (c_strcasecmp (id, "early") == 0)
-		      {
-			id = "request";
-			target = REWRITE_EARLY;
-		      }
-		    else
+		    if (kw_to_tok (idtab, id, 1, &target))
 		      {
 			conf_error_at_locus_range (&@2,
-						   "expected response or request");
+						   "invalid rewrite modifier");
 			YYERROR;
 		      }
 		  }
 		else
 		  {
-		    id = "request";
-		    target = REWRITE_REQUEST;
+		    target = (int) (intptr_t) $1.defn->data;
+		    id = kw_to_str (idtab, target);
+		    assert (id != NULL);
 		  }
+		/* Special case */
+		if (target == REWRITE_EARLY)
+		   id = "request";
 
 		defn = find_rewrite_defn ($1.defn->ref, id);
-		cfg_defn_push (defn);
+		if (!defn)
+		  {
+		    conf_error_at_locus_range (&@2,
+					       "rewrite modifier not allowed");
+		    YYERROR;
+		  }
+		else
+		  {
+		    cfg_defn_push (defn);
 
-		$$.defn = $1.defn;
-		$$.rcvr = $1.rcvr;
-		$$.target = target;
+		    $$.defn = $1.defn;
+		    $$.rcvr = $1.rcvr;
+		    $$.target = target;
+		  }
 	      }
 	    ;
 

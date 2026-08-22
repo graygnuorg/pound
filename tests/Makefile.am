@@ -153,10 +153,13 @@ TESTSUITE_AT = \
  redirect.at\
  respeval.at\
  resprw.at\
+ resprwnest.at\
  rewriteloc.at\
  rewriteloc_https.at\
  rwchain.at\
+ rwearly.at\
  rwerr.at\
+ rwnest.at\
  sendfile.at\
  sessauth.at\
  sessctl.at\

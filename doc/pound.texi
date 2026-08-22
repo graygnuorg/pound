@@ -6029,14 +6029,21 @@ Syntactically, a @code{Rewrite} section is:
 @noindent
 where @var{conditional_directives} represents one or more @dfn{request
 conditionals} described below and @var{modification_directives} stands
-for one or more header modification directives.  The @code{Else} part
-is optional; any number of @code{Else} blocks can be supplied, thus
-providing for conditional branching.
+for one or more @ref{Request Modification, request modification
+directives}.  The @code{Else} part is optional; any number of
+@code{Else} blocks can be supplied, thus providing for conditional
+branching.
 
  Notice optional @var{modifier}.  For request rewriting it can be
 omitted, or have the value @samp{request}.  Another possible values
 are @samp{early} and @samp{response}, which are discussed in
 @ref{Early rewrite}, and @ref{rewrite response}, correspondingly.
+
+ Rewrite sections can be nested, the only requirement being that each
+nested section either bear the same @var{modifier} as the top-most
+one, or don't have any modifier at all.  In other words, all nested
+@code{Rewrite} section must operate on the same object as the
+top-level section.
 
  The @code{Rewrite} statement is processed sequentially until a branch
 is found whose @var{conditional_directives} yield @samp{true}, or

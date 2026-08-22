@@ -562,6 +562,7 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 		  rc = -1;
 		  break;
 		}
+	      http_request_eval_reset (&phttp->request);
 	      rc = 0;
 	    }
 	  else
