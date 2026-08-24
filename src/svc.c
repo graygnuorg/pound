@@ -462,11 +462,20 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
 
   if (addr->ai_family == AF_UNIX)
     {
-      struct sockaddr_un *sun = (struct sockaddr_un *)addr->ai_addr;
-      n = addr->ai_addrlen - offsetof (struct sockaddr_un, sun_path);
-      if (n > res_len)
-	n = res_len;
-      strncpy (ptr, sun->sun_path, n);
+      if (addr->ai_addrlen == sizeof (addr->ai_addr->sa_family))
+	{
+	  /* unnamed socket */
+	  n = res_len;
+	  strncpy (ptr, "(UNIX unnamed)", n);
+	}
+      else
+	{
+	  struct sockaddr_un *sun = (struct sockaddr_un *)addr->ai_addr;
+	  n = addr->ai_addrlen - offsetof (struct sockaddr_un, sun_path);
+	  if (n > res_len)
+	    n = res_len;
+	  strncpy (ptr, sun->sun_path, n);
+	}
       if (ptr[n-1] != 0 && n < res_len)
 	ptr[n] = 0;
     }

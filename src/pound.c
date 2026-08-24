@@ -670,6 +670,13 @@ thr_dispatch (void *unused)
 			  continue;
 			}
 
+		      if (clnt_addr.ss_family == AF_UNIX &&
+			  clnt_length == sizeof (clnt_addr.ss_family))
+			{
+			  clnt_length = lstn->addr.ai_addrlen;
+			  memcpy (&clnt_addr, lstn->addr.ai_addr, clnt_length);
+			}
+
 		      if (pound_http_enqueue (clnt, lstn,
 					      (struct sockaddr *) &clnt_addr,
 					      clnt_length) == 0)
