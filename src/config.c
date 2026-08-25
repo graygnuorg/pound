@@ -23,36 +23,10 @@
 #include <openssl/x509v3.h>
 #include <dirent.h>
 #include <assert.h>
-#include <wordexp.h>
 
 /*
  * Special features.
  */
-static void
-set_include_dir (char const *fname, int enabled, char const *val)
-{
-  if (enabled)
-    {
-      struct stat st;
-      if (val && (*val == 0 || strcmp (val, ".") == 0))
-	val = NULL;
-      else if (stat (val, &st))
-	{
-	  logmsg (LOG_ERR, "-W%s: can't stat %s: %s", fname, val,
-		  strerror (errno));
-	  exit (1);
-	}
-      else if (!S_ISDIR (st.st_mode))
-	{
-	  logmsg (LOG_ERR, "-W%s: %s is not a directory", fname, val);
-	  exit (1);
-	}
-      include_dir = val;
-    }
-  else
-    include_dir = NULL;
-}
-
 static void
 set_deprec (char const *fname, int enabled, char const *val)
 {
@@ -88,41 +62,6 @@ set_deprec_warn (char const *fname, int enabled, char const *val)
   if (val)
     abend (NULL, "-W%s: unexpected value (%s)", fname, val);
   cfg_deprecation_mode = enabled ? DEPREC_WARN : DEPREC_OK;
-}
-
-static void
-enable_preproc (char const *fname, int enabled, char const *val)
-{
-  if (enabled)
-    {
-      wordexp_t wexp;
-
-      if (!val)
-	abend (NULL, "-W%s requires argument", fname);
-
-      wexp.we_offs = 1;
-      switch (wordexp (val, &wexp, WRDE_SHOWERR|WRDE_DOOFFS))
-	{
-	case 0:
-	  break;
-
-	case WRDE_BADCHAR:
-	  abend (NULL, "-W%s: bad character encountered", fname);
-
-	case WRDE_SYNTAX:
-	  abend (NULL, "-W%s: syntax error", fname);
-
-	case WRDE_NOSPACE:
-	  xnomem ();
-
-	default:
-	  abend (NULL, "-W%s=%s: can't split", fname, val);
-	}
-      memmove (wexp.we_wordv, wexp.we_wordv + wexp.we_offs,
-	       wexp.we_wordc * sizeof (wexp.we_wordv[0]));
-      preproc_argc = wexp.we_wordc;
-      preproc_argv = wexp.we_wordv;
-    }
 }
 
 static struct pound_feature feature[] = {
@@ -164,7 +103,7 @@ static struct pound_feature feature[] = {
     .name = "preprocess",
     .descr = "preprocess configuration files",
     .enabled = F_OFF,
-    .setfn = enable_preproc
+    .setfn = enable_preproc_feature
   },
   { NULL }
 };

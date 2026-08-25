@@ -567,6 +567,8 @@ input_close (void)
 
   fclose (yyin);
   yyin = NULL;
+
+  yy_delete_buffer (YY_CURRENT_BUFFER);
 }
 
 static int
@@ -1228,11 +1230,11 @@ cfg_flag_find (char const *name, size_t len)
 		       name, len);
 }
 
-void
+int
 skip_eol (void)
 {
   int c;
-  while ((c = input ()) > 0)
+  while (YY_CURRENT_BUFFER && (c = input ()) > 0)
     {
       if (c == '\n')
 	{
@@ -1240,4 +1242,5 @@ skip_eol (void)
 	  break;
 	}
     }
+  return !YY_CURRENT_BUFFER;
 }

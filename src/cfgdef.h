@@ -274,6 +274,7 @@ int workdir_cleanup (int keepwd);
 char *slurp (char const *filename, WORKDIR *wd,
 	     struct locus_range const *locus, size_t *len);
 
+void set_include_dir (char const *fname, int enabled, char const *val);
 void set_include_wd (WORKDIR *wd);
 WORKDIR *get_include_wd (void);
 int open_wd (WORKDIR *wd, const char *filename, int flags, mode_t mode);
@@ -615,7 +616,8 @@ int feature_is_set (int f);
 void features_print (FILE *fp);
 
 void set_debug_feature (char const *fname, int enabled, char const *val);
+void enable_preproc_feature (char const *fname, int enabled, char const *val);
 
-void skip_eol (void);
+int skip_eol (void);
 
 #endif

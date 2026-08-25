@@ -223,7 +223,7 @@ topstmt     : T_NL
 	    | comheaders
 	    | acldef
 	    | includedir
-	    | error { skip_eol (); } T_NL
+	    | error skip_eol T_NL
 	      {
 		yyclearin;
 		yyerrok;
@@ -231,6 +231,13 @@ topstmt     : T_NL
 		$$ = NULL;
 	      }
 	    ;
+
+skip_eol    : /* empty */
+              {
+		if (skip_eol ())
+		  YYABORT;
+	      }
+            ;
 
 section     : section_kw opt_arglist T_NL opt_stmtlist endsec T_NL
 	      {
@@ -267,7 +274,7 @@ opt_stmt    : T_NL
 		$$ = NULL;
 	      }
 	    | stmt
-	    | error { skip_eol (); } T_NL
+	    | error skip_eol T_NL
 	      {
 		yyclearin;
 		yyerrok;
@@ -290,7 +297,7 @@ directive   : directive_kw opt_arglist nl
 		$$ = cfg_gen_node ($1.defn, &$1.rcvr, &$2, NULL,
 				   &@1.beg, &@2.end);
 	      }
-	    | directive_kw error { skip_eol (); } nl
+	    | directive_kw error skip_eol nl
 	      {
 		yyclearin;
 		yyerrok;
@@ -373,7 +380,7 @@ control     : T_CONTROL arglist T_NL
 		$$ = cfg_gen_node ($1.defn, &$1.rcvr, NULL, $3,
 				   &@1.beg, &@4.end);
 	      }
-	    | control_kw error { skip_eol (); } nl
+	    | control_kw error skip_eol nl
 	      {
 		yyclearin;
 		yyerrok;
@@ -404,7 +411,7 @@ rewrite     : rewrite_begin T_NL opt_stmtlist rwelse endsec T_NL
 				   ast, &@1.beg, &@5.end);
 		$$->rwtarget = $1.target;
 	      }
-	    | rewrite_begin error { skip_eol (); } nl
+	    | rewrite_begin error skip_eol nl
 	      {
 		yyclearin;
 		yyerrok;
@@ -527,7 +534,7 @@ acldef      : acl_kw tag T_NL opt_stringlist endsec T_NL
 		    $$->acl.tag = string_ref ($2);
 		  }
 	      }
-	    | acl_kw error { skip_eol (); } nl
+	    | acl_kw error skip_eol nl
 	      {
 		yyclearin;
 		yyerrok;
@@ -563,7 +570,7 @@ trustedip   : trustedip_kw fileflags nl
 		if ($$)
 		  $$->acl.type = ACLT_IMM;
 	      }
-	    | trustedip_kw error { skip_eol (); } nl
+	    | trustedip_kw error skip_eol nl
 	      {
 		yyclearin;
 		yyerrok;

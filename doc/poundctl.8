@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "August 12, 2026" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "August 25, 2026" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -29,6 +29,7 @@ poundctl \- control the pound daemon
 [\fB\-s \fISOCKET\fR]
 [\fB\-T \fITEMPLATE-FILE\fR]
 [\fB\-t \fITEMPLATE-NAME\fR]
+[\fB\-W [\fBno\-]\fIFEATURE\fR]
 \fICOMMAND\fR
 [\fB/\fIL\fB/\fIS\fB/\fIB\fR]
 [\fIARG\fR]
@@ -349,6 +350,46 @@ Print program version, compilation settings, and exit.
 .TP
 .B \-v
 Increases output verbosity level.
+.TP
+\fB\-W [\fBno\-]\fIFEATURE\fR
+Enable or disable (if prefixed with \fBno\-\fR) additional \fBpound\fR
+features.  As of this version, the following \fIFEATURE\fRs are implemented:
+.RS
+.TP
+.BI debug= LIST
+Enable additional debugging.  \fILIST\fR is a comma-delimited list of
+keywords, each specifying the part of code to debug.  Valid keywords
+sections are:
+.RS
+.TP
+.B ast
+Additional information about processing of the abstract syntax
+tree produced from the configuration file.
+.TP
+.B gram
+Print grammar traces while processing the configuration.
+.TP
+.B lex
+Print scanner traces while processing the configuration.
+.RE
+.TP
+\fBinclude\-dir=\fIDIR\fR
+Use \fIDIR\fR as the default include directory.  See the discussion of
+the \fBIncludeDir\fR directive in
+.BR pound (8),
+section
+.BR "GLOBAL DIRECTIVES"  .
+.TP
+.B no\-include\-dir
+Don't set the include directory to the system configuration
+directory.  This means that each relative filename used in arguments
+to the directives in the configuration file will be looked up in the
+current working directory.  This feature is useful mainly in
+testsuite.
+.TP
+.BI preprocess= COMMAND
+Preprocess configuration files using \fICOMMAND\fR.
+.RE
 .SH ENVIRONMENT
 .TP
 .B POUNDCTL_CONF

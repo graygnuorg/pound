@@ -517,6 +517,7 @@ Enable or disable (if prefixed with @samp{no-}) additional @command{pound}
 features.  As of version @value{VERSION}, the following features are
 implemented:
 
+@anchor{features}
 @defvr Feature close-extra-fds
 At startup, @command{pound} closes all inherited file descriptors
 numerically greater than 2. If this is undesirable for some reason,
@@ -8411,6 +8412,15 @@ Prints program version, compilation settings, and exits.
 @kwindex -v, poundctl
 @item -v
 Increases output verbosity level.
+
+@kwindex -W, poundctl
+@item -W @var{feature}
+@itemx -W no-@var{feature}
+Enable or disable (if prefixed with @samp{no-}) additional @command{poundctl}
+features.  Valid features are a subset of those supported by
+@command{pound}: @code{debug}, @code{include-dir}, and
+@code{preprocess}.  @xref{features}, for a detailed description of
+these.
 @end table
 
 @node poundctl template

@@ -1424,6 +1424,7 @@ static char *usage_text[] = {
   "   -T NAME           name of the default template",
   "   -v                verbose output",
   "   -V                print program version, compilation settings, and exit",
+  "   -W[no-]FEATURE    enable or disable optional feature",
   "   -h                show this help output and exit",
   NULL
 };
@@ -1438,6 +1439,10 @@ usage (int code)
   for (i = 0; usage_text[i]; i++)
     fprintf (fp, "%s\n", usage_text[i]);
   printf ("\n");
+  printf ("FEATUREs are:\n");
+  features_print (stdout);
+  printf ("\n");
+
   printf ("Report bugs and suggestions to <%s>\n", PACKAGE_BUGREPORT);
 #ifdef PACKAGE_URL
   printf ("%s home page: <%s>\n", PACKAGE_NAME, PACKAGE_URL);
@@ -1650,10 +1655,22 @@ static struct string_value poundctl_settings[] = {
 
 static struct pound_feature feature[] = {
   {
+    .name = "include-dir",
+    .descr = "include file directory",
+    .enabled = F_DFL,
+    .setfn = set_include_dir
+  },
+  {
     .name = "debug",
     .descr = "enable additional debugging",
     .enabled = F_OFF,
     .setfn = set_debug_feature
+  },
+  {
+    .name = "preprocess",
+    .descr = "preprocess configuration files",
+    .enabled = F_OFF,
+    .setfn = enable_preproc_feature
   },
   { NULL }
 };
