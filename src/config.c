@@ -5273,8 +5273,13 @@ static CFG_DEFN rw_sub_resp_defn[2] = {
   { NULL }
 };
 
-/* Selector for the two Rewrite flavors. */
+/* Selector for the three Rewrite flavors. */
 static CFG_DEFN rw_defn[] = {
+  {
+    .name = "early",
+    .type = KWT_TABREF,
+    .ref  = rw_req_defn
+  },
   {
     .name = "request",
     .type = KWT_TABREF,

@@ -448,9 +448,6 @@ rewrite_begin : T_REWRITE opt_lit
 		    id = kw_to_str (idtab, target);
 		    assert (id != NULL);
 		  }
-		/* Special case */
-		if (target == REWRITE_EARLY)
-		   id = "request";
 
 		defn = find_rewrite_defn ($1.defn->ref, id);
 		if (!defn)
