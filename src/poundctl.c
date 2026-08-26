@@ -297,18 +297,19 @@ static CFG_DEFN any_defn[] = {
   { NULL }
 };
 
-static CFG_DEFN rw_defn[] = {
+static CFG_DEFN rw_defn[4];
+static CFG_DEFN match_defn[] = {
   {
     .name = "Match",
     .token = T_SECTION,
     .vtype = CFG_TYPE_ANY,
-    .ref = rw_defn
+    .ref = match_defn
   },
   {
     .name = "NOT",
     .token = T_NOT,
     .vtype = CFG_TYPE_ANY,
-    .ref = rw_defn
+    .ref = match_defn
   },
   {
     .name = "ACL",
@@ -316,9 +317,35 @@ static CFG_DEFN rw_defn[] = {
     .vtype = &any_type,
   },
   {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
+  },
+  {
     .name = "",
     .type = KWT_TABREF,
     .ref = any_defn
+  },
+  { NULL }
+};
+
+/* Selector for the two Rewrite flavors. */
+static CFG_DEFN rw_defn[] = {
+  {
+    .name = "early",
+    .type = KWT_TABREF,
+    .ref  = match_defn
+  },
+  {
+    .name = "request",
+    .type = KWT_TABREF,
+    .ref  = match_defn
+  },
+  {
+    .name = "response",
+    .type = KWT_TABREF,
+    .ref  = match_defn
   },
   { NULL }
 };
@@ -353,15 +380,9 @@ static CFG_DEFN svc_defn[] = {
     .vtype = &any_type,
   },
   {
-    .name = "Rewrite",
-    .token = T_SECTION,
-    .vtype = CFG_TYPE_ANY,
-    .ref = rw_defn
-  },
-  {
     .name = "",
     .type = KWT_TABREF,
-    .ref = rw_defn
+    .ref = match_defn
   },
   { NULL }
 };
@@ -372,6 +393,12 @@ static CFG_DEFN lst_defn[] = {
     .token = T_SECTION,
     .vtype = CFG_TYPE_ANY,
     .ref = svc_defn
+  },
+  {
+    .name = "Rewrite",
+    .token = T_REWRITE,
+    .vtype = CFG_TYPE_ANY,
+    .ref = rw_defn
   },
   {
     .name = "",
@@ -469,7 +496,7 @@ static CFG_DEFN pound_top_defn[] = {
     .name = "Condition",
     .token = T_SECTION,
     .vtype = CFG_TYPE_ANY,
-    .ref = rw_defn
+    .ref = match_defn
   },
   {
     .name = "Lua",
@@ -1686,6 +1713,7 @@ main (int argc, char **argv)
   set_progname (argv[0]);
   json_memabrt = xnomem;
   feature_init (feature);
+  rewrite_branch_defn.vtype = CFG_TYPE_NULL;
 
   read_config ();
   while ((c = getopt (argc, argv, "+C:f:i:jK:khS:s:T:t:vVW:")) != EOF)
