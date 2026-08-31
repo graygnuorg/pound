@@ -43,6 +43,7 @@ my $fakedns;
 my $valgrind;
 my @source_addr;
 my $userfile = 'userlist';
+my $confheader;
 
 use constant {
     EX_SUCCESS => 0,
@@ -207,7 +208,8 @@ GetOptions('config|f=s' => \$config,
 	   'test-threads' => sub {
 	       exit(PoundSub->using_threads == 0);
 	   },
-	   'userfile=s' => \$userfile
+	   'userfile=s' => \$userfile,
+	   'header=s' => \$confheader
     )
     or exit(EX_USAGE);
 
@@ -369,6 +371,18 @@ sub preproc {
     my @state;
     unshift @state, $initstate // ST_INIT;
     if ($init) {
+	if ($confheader) {
+	    if ($confheader =~ /^@(.+)$/) {
+		open(my $fh, '<', $1) or
+		    die "can't open $1: $!";
+		local $/;
+		my $s = <$fh>;
+		close $fh;
+		print $out "$s\n";
+	    } else {
+		print $out "$confheader\n";
+	    }
+	}
 	print $out <<EOT;
 # Initial settings by $0
 Daemon 0

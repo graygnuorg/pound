@@ -56,9 +56,6 @@ extern ACL *trusted_ips;        /* Trusted IP addresses */
 extern int SOL_TCP;
 #endif
 
-extern char const *include_dir;
-extern WORKDIR *include_wd;
-
 extern LISTENER_HEAD listeners;	/* all available listeners */
 extern SERVICE_HEAD services;	/* global services (if any) */
 
@@ -75,8 +72,7 @@ enum
     FEATURE_WARN_DEPRECATED,
     FEATURE_DEPRECATED,
     FEATURE_CLOSE_EXTRA_FDS,
-    FEATURE_DEBUG,
-    FEATURE_PREPROC
+    FEATURE_DEBUG
   };
 
 int feature_is_set (int f);

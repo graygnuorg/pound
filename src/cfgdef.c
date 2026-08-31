@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <unistd.h>
 #include <errno.h>
-#include <wordexp.h>
 #include "pound.h"
 #include "cctype.h"
 #include "cfgdef.h"
@@ -1327,48 +1326,6 @@ set_debug_feature (char const *fname, int enabled, char const *val)
   else
     {
       cfg_debug = 0;
-    }
-}
-
-void
-enable_preproc_feature (char const *fname, int enabled, char const *val)
-{
-  if (enabled)
-    {
-      wordexp_t wexp;
-
-      if (!val)
-	{
-	  conf_error_at_locus_point (NULL, "-W%s requires argument", fname);
-	  exit (1);
-	}
-
-      wexp.we_offs = 1;
-      switch (wordexp (val, &wexp, WRDE_SHOWERR|WRDE_DOOFFS))
-	{
-	case 0:
-	  break;
-
-	case WRDE_BADCHAR:
-	  conf_error_at_locus_point (NULL, "-W%s: bad character encountered",
-				     fname);
-	  exit (1);
-
-	case WRDE_SYNTAX:
-	  conf_error_at_locus_point (NULL, "-W%s: syntax error", fname);
-	  exit (1);
-
-	case WRDE_NOSPACE:
-	  xnomem ();
-
-	default:
-	  conf_error_at_locus_point (NULL, "-W%s=%s: can't split", fname, val);
-	  exit (1);
-	}
-      memmove (wexp.we_wordv, wexp.we_wordv + wexp.we_offs,
-	       wexp.we_wordc * sizeof (wexp.we_wordv[0]));
-      preproc_argc = wexp.we_wordc;
-      preproc_argv = wexp.we_wordv;
     }
 }
 

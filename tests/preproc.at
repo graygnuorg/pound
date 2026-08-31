@@ -1,0 +1,51 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([Preprocessor])
+AT_KEYWORDS([preproc])
+AT_CHECK([m4 -s < /dev/null > /dev/null 2>&1 || exit 77])
+
+AT_DATA([pp],
+[# Preprocessor is requested by pragma preproc line appearing
+# before the first statement, like this:
+#pragma preproc m4 -s
+])
+
+m4_pushdef([HARNESS_OPTIONS],[--header=@pp])
+PT_CHECK(
+[define(`HOST',dnl
+`Rewrite
+   Host -re ["(.+)--[[:digit:]]+(:[[:digit:]]+)?@S|@"]
+   SetHeader "Host: @S|@`'1"
+End')
+
+ListenHTTP
+	Service
+		HOST
+		Backend
+		End
+	End
+End
+],
+[GET /echo/foo
+Host: example.com--128
+end
+
+200
+x-orig-header-host: example.com
+end
+])
+m4_popdef([HARNESS_OPTIONS])
+AT_CLEANUP

@@ -602,11 +602,6 @@ configuration file will be looked up in the current working directory.
 This is useful mainly in testsuite.
 @end defvr
 
-@defvr Feature preprocess=@var{command}
-Preprocess configuration files using @var{command}.
-@xref{Preprocessor}, for a detailed discussion of this feature.
-@end defvr
-
 @end table
 
 @node Simple Proxy
@@ -4241,7 +4236,8 @@ definitions:
 
 @node Preprocessor
 @chapter Preprocessor
-In really complex configrations you might need a mechanism for
+@cindex preprocessor
+In really complex configurations you might need a mechanism for
 generating fragments of @file{pound.cfg} that follow a certain
 pattern, but differ in some detail. For such cases, @command{pound}
 provides you with an option of @dfn{preprocessing} the configuration
@@ -4251,11 +4247,23 @@ argument, and using its output as the actual configuration text. This
 process applies to each file included in the configuration (@pxref{File
 inclusion}) as well.
 
-Preprocessing is enabled by the @option{-Wpreprocess=@var{command}}
-command line option. Its argument, @var{command}, is the full command
-line that starts the preprocessor. For example,
-@option{-Wpreprocess=m4 -s'} will pass each configuration through
-@command{m4 -s}.
+@kwindex pragma preprocessor
+Preprocessing is enabled by the @dfn{pragmatic comment} @code{#pragma
+preprocessor} appearing at the beginning of the main configuration
+file, before the first configuration statement.  The text following
+the pragmatic comment is taken as the command line (in the shell
+sense) to start the preprocessor.  Before parsing the configuration
+file (and any file included by it), its name will be appended as the
+last argument to that line, the resulting command will be executed and
+its output used as the actual configuration text.  For example:
+
+@example
+# pragma preprocessor m4
+@end example
+
+This line at the beginning of @code{pound.cfg} informs @command{pound}
+that it should pass it through @command{m4} and parse the
+resulting output.
 
 As an example of using preprocessor, consider a configuration where
 you need to protect several services with basic authorization, but with
@@ -4342,12 +4350,17 @@ BASICAUTH(`remote.pwd',`
 ')
 @end example
 
-To use this configuration, run @command{pound} with the following additional
-option: @option{-Wpreprocess='m4 -s'}.  The use of the @option{-s}
-option is recommended, to have @command{m4} insert additional line
-information in its output.  This information will be used
-by @command{pound} to adjust source locations in its diagnostic
-messages.
+To use this configuration, add the following comment at the very
+beginning of your @file{pound.cfg}:
+
+@example
+# pragma preprocessor m4 -s
+@end example
+
+The use of the @option{-s} option is recommended, to have @command{m4}
+insert additional line information in its output.  This information
+will be used by @command{pound} to adjust source locations in its
+diagnostic messages.
 
 Yet another useful @command{m4} option is @option{-P}, which instructs
 it to recognize its keywords only when prefixed with @samp{m4_}. This
@@ -4361,13 +4374,8 @@ expectations, use the @option{-E} command line option.  It instructs
 exit:
 
 @example
-pound -Wpreprocess='m4 -s' -E
+pound -E
 @end example
-
-Notice, that @code{include} statements are not expanded by the
-@option{-E} option.  To examine the preprocessed output for a
-particular include file, you have to supply its name explicitly, using
-the @option{-f} option.
 
 @node Configuration
 @chapter Configuration
@@ -4404,7 +4412,16 @@ keywords and values.
 @cindex comments, configuration file
  @dfn{Comments} may appear anywhere where white space may appear in the
 configuration file.  A comment begins with a hash sign (@samp{#}) and
-continues to the end of the line.
+continues to the end of the line.  Comments are treated as empty
+lines, except for pragmatic comments.
+
+@cindex pragmatic comments
+@kwindex pragma
+ Comments starting with the word @code{pragma} are @dfn{pragmatic
+comments} and are treated specially -- they modify the way
+configuration file is parsed.  As of version @value{VERSION}, only one
+pragmatic comment is defined: @code{pragma preprocessor}, discussed in
+detail in @ref{Preprocessor}.
 
 @cindex keywords, configuration file
  A @dfn{keyword} is a sequence of ASCII letters, digits and
@@ -5229,15 +5246,16 @@ newline (ASCII 10), vertical tabulation (ASCII 11), form feed (ASCII
 @node File inclusion
 @section File inclusion
 
+Directives discussed in this section control file inclusion.  They can
+appear both at topmost level and in any subsections of the
+configuration file.
+
 @deffn {Global directive} Include "@var{file}"
 Include @var{file} as if it were part of the configuration file.  If
 @var{file} is a relative file name, it will be looked in the @dfn{include
 directory} (see below).  If @var{file} is a shell globbing pattern,
 all regular files matching that pattern will be included, in
 lexicographical order.
-
-This directive is allowed both at topmost level and in any subsections
-of the configuration file.
 @end deffn
 
 @deffn {Global directive} IncludeDir "@var{dir}"
@@ -8418,9 +8436,8 @@ Increases output verbosity level.
 @itemx -W no-@var{feature}
 Enable or disable (if prefixed with @samp{no-}) additional @command{poundctl}
 features.  Valid features are a subset of those supported by
-@command{pound}: @code{debug}, @code{include-dir}, and
-@code{preprocess}.  @xref{features}, for a detailed description of
-these.
+@command{pound}: @code{debug}, and @code{include-dir}.
+@xref{features}, for a detailed description of these.
 @end table
 
 @node poundctl template

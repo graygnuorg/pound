@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "August 21, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "September 1, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -250,8 +250,7 @@ be used for running a quick syntax check before actually activating a
 server.
 .TP
 .B \-E
-Print the preprocessed configuration file and exit.  See the
-description of \fB\-Wpreprocessor\fR, below.
+Print the preprocessed configuration file and exit.
 .TP
 \fB\-e\fR
 Log to standard error (standard output for \fBLOG_DEBUG\fR and
@@ -370,9 +369,6 @@ directory.  This means that each relative filename used in arguments
 to the directives in the configuration file will be looked up in the
 current working directory.  This feature is useful mainly in
 testsuite.
-.TP
-.BI preprocess= COMMAND
-Preprocess configuration files using \fICOMMAND\fR.
 .RE
 .SH "CONFIGURATION FILE"
 Each line in the file is considered a complete configuration
@@ -900,6 +896,9 @@ discussion of \fB\-W\fR below).
 The directory set by \fBIncludeDir\fR statement remains in effect
 until next \fBIncludeDir\fR statement is encountered, or end of input,
 whichever occurs first.
+.IP
+This directive is allowed both at topmost level and in any subsections
+of the configuration file.
 .TP
 \fBInclude\fR "\fIfile\fR"
 Include the file as though it were part of the configuration file.  If

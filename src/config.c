@@ -99,12 +99,6 @@ static struct pound_feature feature[] = {
     .enabled = F_OFF,
     .setfn = set_debug_feature
   },
-  [FEATURE_PREPROC] = {
-    .name = "preprocess",
-    .descr = "preprocess configuration files",
-    .enabled = F_OFF,
-    .setfn = enable_preproc_feature
-  },
   { NULL }
 };
 
@@ -190,7 +184,7 @@ config_parse (int argc, char **argv)
 {
   int c;
   int check_only = 0;
-  char *conf_name = POUND_CONF;
+  char *conf_name = NULL;
   char *pid_file_option = NULL;
   int foreground_option = 0;
   int stderr_option = 0;
@@ -257,6 +251,11 @@ config_parse (int argc, char **argv)
       logmsg (LOG_ERR, "unknown extra arguments (%s...)", argv[optind]);
       exit (1);
     }
+
+  if (!conf_name)
+    conf_name = POUND_CONF;
+  else
+    include_wd = workdir_get (NULL);
 
   if (preproc_only)
     exit (cfg_lex_preproc (conf_name));
@@ -6685,7 +6684,7 @@ cert_commit (CFG_NODE *node, void *call_data, void *baseptr)
 				     &arg->locus, lst)) != 0)
 		break;
 	    }
-	  globfree(&glob);
+	  globfree (&glob);
 	}
       else
 	{
@@ -7578,13 +7577,6 @@ static CFG_TYPE cfg_type_declare_beacon = {
  */
 static CFG_DEFN top_level_defn[] = {
   {
-    .name = "IncludeDir",
-    .token = T_INCLUDEDIR,
-    .vtype = CFG_TYPE_STRING,
-    /* This one is handled in the grammar directly. The node will never be
-       committed directly. */
-  },
-  {
     .name = "User",
     .token = T_DIRECTIVE,
     .vtype = CFG_TYPE_STRING,
@@ -8392,7 +8384,7 @@ parse_config_file (char const *filename, int nosyslog)
 
   rewrite_branch_defn.vtype = &cfg_type_rewrite_branch;
 
-  ast = cfg_parse_tree (filename, NULL, top_level_defn);
+  ast = cfg_parse_tree (filename, top_level_defn);
   if (ast)
     {
       rc = cfg_ast_finalize (ast, &pound_defaults, &pound_defaults);

@@ -133,8 +133,6 @@ void begin_text (void);
 %token <defn> T_ELSE       "Else"
 %token <defn> T_TEXT       "textual section"
 
-%token T_INCLUDE           "Include"
-%token T_INCLUDEDIR        "Includedir"
 %token T_END               "End"
 
 %token <string> T_STRING   "quoted string"
@@ -157,7 +155,6 @@ void begin_text (void);
 %type <node> negation
 %type <node> aclcond
 %type <node> rewrite
-%type <node> includedir
 %type <string> tag
 %type <arg> arg string
 %type <string> opt_lit
@@ -222,7 +219,6 @@ topstmt     : T_NL
 	    | control
 	    | comheaders
 	    | acldef
-	    | includedir
 	    | error skip_eol T_NL
 	      {
 		yyclearin;
@@ -233,11 +229,11 @@ topstmt     : T_NL
 	    ;
 
 skip_eol    : /* empty */
-              {
+	      {
 		if (skip_eol ())
 		  YYABORT;
 	      }
-            ;
+	    ;
 
 section     : section_kw opt_arglist T_NL opt_stmtlist endsec T_NL
 	      {
@@ -304,42 +300,11 @@ directive   : directive_kw opt_arglist nl
 		cfg_err++;
 		$$ = NULL;
 	      }
-	    | include
-	      {
-		$$ = NULL;
-	      }
 	    ;
 
 directive_kw: T_DIRECTIVE
 	      {
 		cfg_defn_push ($1.defn);
-	      }
-	    ;
-
-includedir  : T_INCLUDEDIR T_STRING T_NL
-	      {
-		WORKDIR *wd;
-		/* Make sure current include directory is open. */
-		get_include_wd ();
-		/* Open new include directory. */
-		if ((wd = workdir_get (string_ptr ($2))) == NULL)
-		  {
-		    conf_error_at_locus_range (&@2,
-					       "can't open directory %s: %s",
-					       string_ptr ($2),
-					       strerror (errno));
-		    YYERROR;
-		  }
-		/* Set it up. */
-		set_include_wd (wd);
-		$$ = NULL;
-	      }
-	    ;
-
-include     : T_INCLUDE T_STRING T_NL
-	      {
-		if (cfg_open_input (string_ptr ($2), &@2))
-		  YYERROR;
 	      }
 	    ;
 
@@ -734,10 +699,6 @@ string      : T_NL
 		$$ = cfg_arg_alloc (T_STRING, &@1);
 		$$->v.string = $1;
 	      }
-	    | include
-	      {
-		$$ = NULL;
-	      }
 	    ;
 
 singlestring: T_STRING
@@ -973,10 +934,10 @@ cfg_ast_free (CFG_AST *ast)
 }
 
 CFG_AST *
-cfg_parse_tree (char const *filename, char const *dir, CFG_DEFN *parsetab)
+cfg_parse_tree (char const *filename, CFG_DEFN *parsetab)
 {
   int rc;
-  if (cfg_lex_init (filename, dir))
+  if (cfg_lex_init (filename))
     return NULL;
   cfg_defn_push (parsetab);
   yydebug = !!(cfg_debug & CFG_DEBUG_GRAM);

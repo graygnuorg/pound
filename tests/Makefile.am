@@ -74,6 +74,8 @@ TESTSUITE_AT = \
  chgvis.at\
  chunked.at\
  chunked2.at\
+ eopt.at\
+ eoptpp.at\
  config.at\
  const.at\
  ctl-core.at\
@@ -91,6 +93,7 @@ TESTSUITE_AT = \
  dynbauth.at\
  dynpat.at\
  echo.at\
+ eopt.at\
  err503.at\
  errfile.at\
  error.at\
@@ -145,6 +148,7 @@ TESTSUITE_AT = \
  patfile.at\
  path.at\
  pcre.at\
+ preproc.at\
  prio.at\
  query.at\
  queryparam.at\
@@ -171,6 +175,7 @@ TESTSUITE_AT = \
  set.at\
  stringmatch.at\
  success.at\
+ syncline.at\
  tbf.at\
  template.at\
  tunnel.at\

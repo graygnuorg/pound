@@ -23,15 +23,17 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <assert.h>
+#include <wordexp.h>
 #include "cfg-gram.h"
 }
 %{
 struct locus_range curloc;
 int in_stmt;
 static int nl_injected;
-char **preproc_argv;
-size_t preproc_argc;
+static char **preproc_argv;
+static size_t preproc_argc;
 static pid_t preproc_pid;
+static int pragma_preproc_suppress;
 
 #define YY_INPUT(buf,result,max_size)				\
   do								\
@@ -54,7 +56,7 @@ static pid_t preproc_pid;
     }								\
   while (0)
 
-#define YY_USER_ACTION  { locus_advance (yytext, yyleng); }
+#define YY_USER_ACTION locus_advance (yytext, yyleng);
 
 static inline void
 locus_newline (size_t n)
@@ -194,88 +196,88 @@ flag_token_type (CFG_FLAG const *flg)
   return T_FLAG;
 }
 
-static void
-parse_line_directive (char const *str, size_t len, int isline)
-{
-  char *p;
-  unsigned long n;
-  STRING *filename = NULL;
+static char const *skip_prefix (char const *str, size_t *plen, int pp,
+				size_t pfxlen);
+static void parse_line_directive (char const *str, size_t len, int isline);
+static int parse_pragma (char const *str, size_t len);
+static int parse_include (char const *str, size_t len);
+static int parse_includedir (char const *str, size_t len);
 
-  len--;
-  /* Skip initial whitespace. */
-  str = c_trimlws (str, &len);
-  /* Skip # sign. */
-  str++;
-  /* Skip optional whitespace. */
-  str = c_trimlws (str, &len);
-
-  if (isline)
-    {
-      /* Skip the "line" prefix. */
-      str += 4;
-      len -= 4;
-    }
-
-  /* Skip whitespace before line number. */
-  str = c_trimlws (str, &len);
-  /* Parse line number */
-  errno = 0;
-  n = strtoul (str, &p, 10);
-  if (errno || n <= 1)
-    return;
-  if (*p)
-    {
-      len -= p - str;
-      str = p;
-      len--;
-      str = c_trimws (str, &len);
-      if (len > 0)
-	{
-	  if (len <= 2 || *str != '"' || str[len-1] != *str)
-	    return;
-	  str++;
-	  len -= 2;
-	  filename = string_ninit (str, len);
-	  string_unescape (filename);
-	}
-      else if (!isline)
-	return;
-    }
-  else if (!isline)
-    return;
-
-  if (filename)
-    {
-      locus_range_unref (&curloc);
-      curloc.beg.filename = filename;
-      curloc.end.filename = string_ref (curloc.beg.filename);
-    }
-
-  curloc.beg.line = n;
-  curloc.end.line = n - 1;
-  curloc.beg.col = curloc.end.col = 1;
-}
+static void leave_header (void);
 
 %}
 %option case-insensitive
 WS [ \t]+
+OWS [ \t]*
 IDENT [a-zA-Z_][a-zA-Z0-9_]*
-%x STR TEXT
+
+/*
+ * Scanner states:
+ *  STR  -  Scanning quoted string.  The state is entered upon encountering
+ *          first backslash and is left when an unescaped double quote is
+ *          seen.
+ *  TEXT -  Entered by begin_text() and left upon encountering an "end" on
+ *          a line by itself.  This is used to implement sections whose
+ *          contents is stored verbatim.  Currently this is "ConfigText"
+ *          statement in the "Resolver" section.
+ *          Notice that the text should not contain occurrencies of "end"
+ *          on a line by itself.
+ *  HEADER - Scanning initial comment block (including pragmatic comments).
+ *           This state is enabled when starting to process the principal
+ *           configuration file.  It's purpose is to handle "#pragma
+ *           preprocessor" directive.  Wheh this directive is seen, the
+ *           preprocessor is started and scanning restarts in INITIAL (or
+ *           PP) state.  Otherwise, the state is switched to INITIAL (or
+ *           PP) when non-empty line starting with a character other than
+ *           # is seen.
+ *  PP     - Preprocessing mode (pound -E).  In this state everyting read is
+ *           immediately echoed to the yyout, except for "Include" and
+ *           "IncludeDir" directives, which are processed as usual.
+ */
+
+%x STR TEXT HEADER PP
 %%
+<INITIAL,HEADER>{
 	 /* Line directives */
-^[ \t]*#[ \t]*[1-9][0-9]*[ \t]+\".*\"[^\n]*\n {
+^{OWS}#{OWS}[1-9][0-9]*[ \t]+\".*\"[^\n]*\n {
   parse_line_directive(yytext, yyleng, 0);
   locus_newline (1);
 }
-^[ \t]*#[ \t]*line[ \t][^\n]*\n {
+^{OWS}#{OWS}line[ \t][^\n]*\n {
   parse_line_directive(yytext, yyleng, 1);
   locus_newline (1);
 }
+
+	 /* Pragmatic comments */
+^{OWS}#{OWS}pragma[ \t][^\n]*\n {
+  if (parse_pragma (yytext, yyleng))
+    return T_BOGUS;
+  locus_newline (1);
+}
+}
+<PP>^{OWS}#{OWS}pragma{WS}preprocessor{WS}.*$ {
+  if (pragma_preproc_suppress)
+    pragma_preproc_suppress = 0;
+  else
+    ECHO;
+}
+<HEADER>{
+    /* Comments and whitespace. */
+^{OWS}(#.*)?\n         tok (T_NL);
+^.                     {
+			 yyless (0);
+			 yy_set_bol(1);
+			 curloc.end.col--;
+			 leave_header ();
+		       }
+}
+
     /* Comments and whitespace. */
 #.*\n                  { in_stmt = 0; return tok (T_NL); }
 {WS}                   locus_reset ();
 \\\n                   ;
 \n+                    { in_stmt = 0; return tok (T_NL); }
+
     /* Strings */
 \"[^\n\\\"]*\"         {
   yylval.string = new_string (yytext + 1, yyleng - 2);
@@ -349,7 +351,31 @@ IDENT [a-zA-Z_][a-zA-Z0-9_]*
 }
     /* Special keywords. */
 "End"                  return tok (T_END);
-"Include"              return tok (T_INCLUDE);
+<INITIAL,PP>{
+^{OWS}Include{WS}[^\n]+\n  {
+			     if (parse_include(yytext, yyleng))
+			       {
+				 if (YYSTATE == PP)
+				   ECHO;
+				 return T_BOGUS;
+			       }
+			     else if (YYSTATE == PP)
+			       fputc ('\n', yyout);
+			   }
+^{OWS}IncludeDir{WS}[^\n]+\n  {
+			     if (parse_includedir(yytext, yyleng))
+			       {
+				 if (YYSTATE == PP)
+				   ECHO;
+				 return T_BOGUS;
+			       }
+			     else if (YYSTATE == PP)
+			       fputc ('\n', yyout);
+			   }
+}
+<PP>{
+[^\n]*\n? ECHO;
+}
     /* Boolean values. */
 "on"|"true"|"yes"      { yylval.boolean = 1; return tok (T_BOOLEAN); }
 "off"|"false"|"no"     { yylval.boolean = 0; return tok (T_BOOLEAN); }
@@ -387,7 +413,7 @@ IDENT [a-zA-Z_][a-zA-Z0-9_]*
   return tok (T_BOGUS);
 }
 <TEXT>{
-[ \t]+end[ \t]*$ {
+{OWS}end{OWS}$ {
   yyless (0);
   BEGIN (INITIAL);
   yylval.string = string_end ();
@@ -398,6 +424,18 @@ IDENT [a-zA-Z_][a-zA-Z0-9_]*
  }
 }
 %%
+static int initial_state = INITIAL;
+
+static void
+leave_header (void)
+{
+  BEGIN  (initial_state);
+  /* Make sure an attempt to open include_dir will
+     be made if needed. */
+  workdir_unref (include_wd);
+  include_wd = NULL;
+}
+
 void
 conf_error (char const *fmt, ...)
 {
@@ -594,6 +632,8 @@ inctx_pop (void)
   preproc_pid = ctx->pid;
   curloc = ctx->locus;
   locus_range_unref (&curloc);
+  locus_newline (1);
+  locus_reset ();
 
   if (ctx->glob)
     {
@@ -625,7 +665,7 @@ yywrap (void)
     {
       char const *name;
       if ((name = next_name ()) != NULL)
-	return cfg_open_input (name, &input_ctx->locus);
+	return cfg_open_input (name);
       if (inctx_pop ())
 	return 1;
     }
@@ -637,7 +677,7 @@ yywrap (void)
  * Interface functions.
  */
 int
-cfg_open_input (const char *filename, struct locus_range *loc)
+cfg_open_input (const char *filename)
 {
   struct stat st;
   WORKDIR *wd =  get_include_wd ();
@@ -660,7 +700,7 @@ cfg_open_input (const char *filename, struct locus_range *loc)
 	      input_ctx->wd = wd;
 	      input_ctx->idx = 0;
 	      if ((name = next_name ()) != NULL &&
-		  cfg_open_input (name, &input_ctx->locus) == 0)
+		  cfg_open_input (name) == 0)
 		return 0;
 	      inctx_pop ();
 	    }
@@ -728,25 +768,17 @@ cfg_lex_done (void)
 }
 
 int
-cfg_lex_init (char const *filename, char const *dir)
+cfg_lex_init (char const *filename)
 {
   int rc;
 
   yyset_debug (cfg_debug & CFG_DEBUG_LEX);
 
-  if ((include_wd = workdir_get (dir)) == NULL)
-    {
-      conf_error ("can't open cwd: %s", strerror (errno));
-      return -1;
-    }
+  rc = cfg_open_input (filename);
 
-  rc = cfg_open_input (filename, NULL);
+  BEGIN (HEADER);
 
   xstringbuf_init (&sb);
-
-  /* Make sure an attempt to open include_dir will be made if needed. */
-  workdir_unref (include_wd);
-  include_wd = NULL;
 
   return rc;
 }
@@ -754,11 +786,11 @@ cfg_lex_init (char const *filename, char const *dir)
 int
 cfg_lex_preproc (char const *filename)
 {
-  int c;
-  if (cfg_lex_init (filename, NULL))
+  initial_state = PP;
+  if (cfg_lex_init (filename))
     return 1;
-  while ((c = input ()) > 0)
-    putchar (c);
+  while (yylex () > 0)
+    ;
   cfg_lex_done ();
   return 0;
 }
@@ -1243,4 +1275,277 @@ skip_eol (void)
 	}
     }
   return !YY_CURRENT_BUFFER;
+}
+
+static char const *
+skip_prefix (char const *str, size_t *plen, int pp, size_t pfxlen)
+{
+  size_t len = *plen;
+
+  len--;
+  /* Skip initial whitespace. */
+  str = c_trimlws (str, &len);
+  if (pp)
+    {
+      /* Skip # sign. */
+      str++;
+      len--;
+      /* Skip optional whitespace. */
+      str = c_trimlws (str, &len);
+    }
+
+  /* Skip the prefix. */
+  if (pfxlen)
+    {
+      str += pfxlen;
+      len -= pfxlen;
+
+      /* Skip whitespace before line number. */
+      str = c_trimlws (str, &len);
+    }
+  *plen = len;
+  return str;
+}
+
+int
+preproc_setup (char const *val, struct locus_range const *loc)
+{
+  wordexp_t wexp;
+
+  if (!val)
+    {
+      conf_error_at_locus_range (loc,
+				 "pragma preprocessor requires argument");
+      return 1;
+    }
+
+  wexp.we_offs = 1;
+  switch (wordexp (val, &wexp, WRDE_SHOWERR|WRDE_DOOFFS))
+    {
+    case 0:
+      break;
+
+    case WRDE_BADCHAR:
+      conf_error_at_locus_range (loc,
+				 "bad character encountered in command line");
+      return 1;
+
+    case WRDE_SYNTAX:
+      conf_error_at_locus_range (loc, "syntax error in command line");
+      return 1;
+
+    case WRDE_NOSPACE:
+      xnomem ();
+
+    default:
+      conf_error_at_locus_range (loc, "can't split command line");
+      return 1;
+    }
+  memmove (wexp.we_wordv, wexp.we_wordv + wexp.we_offs,
+	   wexp.we_wordc * sizeof (wexp.we_wordv[0]));
+  preproc_argc = wexp.we_wordc;
+  preproc_argv = wexp.we_wordv;
+  return 0;
+}
+
+static void
+parse_line_directive (char const *str, size_t len, int isline)
+{
+  char *p;
+  unsigned long n;
+  STRING *filename = NULL;
+
+  str = skip_prefix (str, &len, 1, isline ? sizeof("line")-1 : 0);
+
+  /* Parse line number */
+  errno = 0;
+  n = strtoul (str, &p, 10);
+  if (errno || n <= 1)
+    return;
+  if (*p && p < str + len)
+    {
+      if (!c_isblank (*p))
+	return;
+      len -= p - str;
+      str = p;
+      str = c_trimws (str, &len);
+      if (len > 0)
+	{
+	  if (len <= 2 || *str != '"' || str[len-1] != *str)
+	    return;
+	  str++;
+	  len -= 2;
+	  filename = string_ninit (str, len);
+	  string_unescape (filename);
+	}
+      else if (!isline)
+	return;
+    }
+  else if (!isline)
+    return;
+
+  if (filename)
+    {
+      locus_range_unref (&curloc);
+      curloc.beg.filename = filename;
+      curloc.end.filename = string_ref (curloc.beg.filename);
+    }
+
+  curloc.beg.line = n;
+  curloc.end.line = n - 1;
+  curloc.beg.col = curloc.end.col = 1;
+}
+
+enum
+  {
+    PRAGMA_PREPROCESSOR,
+  };
+
+static struct kwtab pragma_tab[] = {
+  { "preprocessor", PRAGMA_PREPROCESSOR },
+  { NULL }
+};
+
+static int
+parse_pragma (char const *str, size_t len)
+{
+  size_t n;
+  int opcode;
+
+  yylloc = curloc;
+  yylloc.end.col--;
+  locus_reset ();
+
+  str = skip_prefix (str, &len, 1, sizeof ("pragma") - 1);
+  n = c_memcspn (str, CCTYPE_BLANK, len);
+  if (kwn_to_tok (pragma_tab, str, n, 0, &opcode))
+    {
+      conf_error ("unrecognized pragma");
+      return 0;
+    }
+  str += n;
+  len -= n;
+  str = c_trimlws (str, &len);
+
+  switch (opcode)
+    {
+    case PRAGMA_PREPROCESSOR:
+      if (YYSTATE == HEADER)
+	{
+	  char *cmd = xstrndup (str, len);
+	  preproc_setup (cmd, &yylloc);
+	  free (cmd);
+	  if (preproc_argv)
+	    {
+	      char const *filename = string_ptr (curloc.beg.filename);
+	      fclose (yyin);
+	      yyin = popen_include (preproc_argc, preproc_argv,
+				    filename,
+				    &preproc_pid);
+	      if (!yyin)
+		{
+		  conf_error ("can't open %s: %s", filename, strerror (errno));
+		  return -1;
+		}
+	      curloc.beg.line = curloc.end.line = 1;
+	      curloc.beg.col = curloc.end.col = 1;
+	    }
+	  yy_switch_to_buffer (yy_create_buffer (yyin, YY_BUF_SIZE));
+	  leave_header ();
+	  pragma_preproc_suppress = 1;
+	}
+      else if (pragma_preproc_suppress)
+	pragma_preproc_suppress = 0;
+      else
+	conf_error ("warning: ignoring pragma preprocessor in the middle of configuration");
+      break;
+
+    default:
+      abort ();
+    }
+  return 0;
+}
+
+static int
+parse_include (char const *str, size_t len)
+{
+  char const *start = str;
+  int rc;
+  STRING *filename;
+
+  str = skip_prefix (str, &len, 0, sizeof ("include") - 1);
+  len = c_trimrws (str, len);
+
+  if (len > 0 && str[0] == '"' && str[len-1] == '"')
+    {
+      str++;
+      len -= 2;
+
+      filename = string_ninit (str, len);
+      string_unescape (filename);
+      curloc.beg.col += str - start;
+      curloc.end.line = curloc.beg.line;
+      curloc.end.col = curloc.beg.col + len;
+      rc = cfg_open_input (string_ptr (filename));
+      string_unref (filename);
+    }
+  else
+    {
+      conf_error ("malformed include directive");
+      rc = -1;
+    }
+  if (rc)
+    {
+      locus_newline (1);
+      locus_reset ();
+    }
+  return rc;
+}
+
+static int
+parse_includedir (char const *str, size_t len)
+{
+  char const *start = str;
+  int rc;
+
+  str = skip_prefix (str, &len, 0, sizeof ("includedir") - 1);
+  len = c_trimrws (str, len);
+
+  if (len > 0 && str[0] == '"' && str[len-1] == '"')
+    {
+      STRING *filename;
+      WORKDIR *wd;
+
+      str++;
+      len -= 2;
+
+      filename = string_ninit (str, len);
+      string_unescape (filename);
+
+      curloc.beg.col += str - start;
+      curloc.end.line = curloc.beg.line;
+      curloc.end.col = curloc.beg.col + len;
+
+      /* Make sure current include directory is open. */
+      get_include_wd ();
+      /* Open new include directory. */
+      if ((wd = workdir_get (string_ptr (filename))) == NULL)
+	{
+	  conf_error ("can't open directory %s: %s",
+		      string_ptr (filename),
+		      strerror (errno));
+	  rc = -1;
+	}
+      else
+	/* Set it up. */
+	set_include_wd (wd);
+    }
+  else
+    {
+      conf_error ("malformed IncludeDir directive");
+      rc = -1;
+    }
+  locus_newline (1);
+  locus_reset ();
+  return rc;
 }

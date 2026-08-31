@@ -270,6 +270,9 @@ WORKDIR *workdir_get (char const *name);
 int workdir_free (WORKDIR *wd);
 int workdir_cleanup (int keepwd);
 
+extern char const *include_dir;
+extern WORKDIR *include_wd;
+
 /* Read in entire file and return its contents as string. */
 char *slurp (char const *filename, WORKDIR *wd,
 	     struct locus_range const *locus, size_t *len);
@@ -289,10 +292,11 @@ int globat (int wd, const char *restrict pattern, int flags,
 	    glob_t *restrict pglob);
 char const *globstrerror (int rc);
 
-int cfg_open_input (const char *filename, struct locus_range *loc);
+int cfg_open_input (const char *filename);
 int cfg_lex_done (void);
-int cfg_lex_init (char const *filename, char const *dir);
+int cfg_lex_init (char const *filename);
 int cfg_lex_preproc (char const *filename);
+int cfg_lex_preproc_run (int (*fn) (void *), void *data);
 
 typedef struct cfg_type CFG_TYPE;
 typedef struct cfg_rcvr CFG_RCVR;
@@ -515,8 +519,7 @@ cfg_ast_remove (CFG_AST *ast, CFG_NODE *node)
   DLIST_REMOVE (ast, node, link);
 }
 
-CFG_AST *cfg_parse_tree (char const *filename, char const *dir,
-			 CFG_DEFN *parsetab);
+CFG_AST *cfg_parse_tree (char const *filename, CFG_DEFN *parsetab);
 
 int cfg_ast_verify (CFG_AST *ast);
 int cfg_ast_commit (CFG_AST *ast, void *baseptr, void *data);
@@ -556,8 +559,6 @@ enum
   };
 
 extern int cfg_debug;
-extern size_t preproc_argc;
-extern char **preproc_argv;
 
 extern CFG_DEFN rewrite_branch_defn;
 
@@ -616,7 +617,6 @@ int feature_is_set (int f);
 void features_print (FILE *fp);
 
 void set_debug_feature (char const *fname, int enabled, char const *val);
-void enable_preproc_feature (char const *fname, int enabled, char const *val);
 
 int skip_eol (void);
 

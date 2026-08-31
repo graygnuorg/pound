@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-08-25
+Pound -- history of user-visible changes. 2026-09-01
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -224,12 +224,17 @@ Its values are:
 * Preprocessing
 
 Configuration files can be optionally preprocessed using an external
-program.  This is enabled using the -Wpreprocess=CMD option.  Its
-argument, CMD, specifies the preprocessor command, e.g.:
+program.  To do so, specify the command line of the preprocessor in
+the "preprocessor" pragmatic comment appearing in the very beginning
+of the principal configuration file, like that:
 
-  pound -Wpreprocess='m4 -s -P'
+  # pragma preprocessor m4 -s
 
-New command line option -E instructs pound to print the preprocessed
+It is important that this comment appears before the first
+configuration statement.  Comments and empty lines before it are
+allowed.
+
+A new command line option -E instructs pound to print the preprocessed
 text and exit.
 
 Version 4.23, 2026-05-26

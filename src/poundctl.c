@@ -48,7 +48,7 @@ typedef struct server_defn
   struct locus_range locus;
 } SERVER;
 
-char *conf_name = POUND_CONF;
+char *conf_name;
 int json_option;
 int indent_option;
 int verbose_option;
@@ -250,7 +250,8 @@ read_config (void)
   if (!poundctl_conf)
     return;
 
-  ast = cfg_parse_tree (poundctl_conf, homedir, poundctl_top_defn);
+  include_wd = workdir_get (NULL);
+  ast = cfg_parse_tree (poundctl_conf, poundctl_top_defn);
   if (!ast)
     exit (1);
 
@@ -454,13 +455,6 @@ static CFG_TYPE cfg_type_control = {
 
 static CFG_DEFN pound_top_defn[] = {
   {
-    .name = "IncludeDir",
-    .token = T_INCLUDEDIR,
-    .vtype = CFG_TYPE_STRING,
-    /* This one is handled in the grammar directly. The node will never be
-       committed directly. */
-  },
-  {
     .name = "Control",
     .token = T_CONTROL,
     .vtype = &cfg_type_control,
@@ -541,6 +535,11 @@ scan_pound_cfg (void)
 {
   char *control_socket = NULL;
 
+  if (conf_name)
+    include_wd = workdir_get (NULL);
+  else
+    conf_name = POUND_CONF;
+
   if (access (conf_name, F_OK) == 0)
     {
       CFG_AST *ast;
@@ -548,7 +547,7 @@ scan_pound_cfg (void)
       if (verbose_option)
 	errormsg (0, 0, "scanning file %s", conf_name);
 
-      ast = cfg_parse_tree (conf_name, NULL, pound_top_defn);
+      ast = cfg_parse_tree (conf_name, pound_top_defn);
       if (ast)
 	{
 	  cfg_ast_commit (ast, &control_socket, NULL);
@@ -1692,12 +1691,6 @@ static struct pound_feature feature[] = {
     .descr = "enable additional debugging",
     .enabled = F_OFF,
     .setfn = set_debug_feature
-  },
-  {
-    .name = "preprocess",
-    .descr = "preprocess configuration files",
-    .enabled = F_OFF,
-    .setfn = enable_preproc_feature
   },
   { NULL }
 };
