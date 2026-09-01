@@ -359,8 +359,6 @@ IDENT [a-zA-Z_][a-zA-Z0-9_]*
 				   ECHO;
 				 return T_BOGUS;
 			       }
-			     else if (YYSTATE == PP)
-			       fputc ('\n', yyout);
 			   }
 ^{OWS}IncludeDir{WS}[^\n]+\n  {
 			     if (parse_includedir(yytext, yyleng))
@@ -673,6 +671,25 @@ yywrap (void)
   return 0;
 }
 
+static void
+emit_syncline (int line, char const *file)
+{
+  fprintf (yyout, "# %d \"", line);
+  while (*file)
+    {
+      int c = *file++;
+      switch (c)
+	{
+	case '\\':
+	case '\"':
+	  fputc ('\\', yyout);
+	default:
+	  fputc (c, yyout);
+	}
+    }
+  fputs ("\"\n", yyout);
+}
+
 /*
  * Interface functions.
  */
@@ -756,6 +773,9 @@ cfg_open_input (const char *filename)
   cur_dev = st.st_dev;
   locus_range_init_ext (&curloc, filename,
 			(wd->fd != AT_FDCWD) ? wd->name : NULL);
+
+  if (YYSTATE == PP)
+    emit_syncline (1, filename);
 
   return 0;
 }
