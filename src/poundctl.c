@@ -239,18 +239,29 @@ read_config (void)
     }
   else
     {
-      char *buf = xmalloc (strlen (homedir) + 1 + sizeof (DOT_POUNDCTL_NAME));
-      strcat (strcat (strcpy (buf, homedir), "/"), DOT_POUNDCTL_NAME);
-      int exists = access (buf, F_OK) == 0;
-      free (buf);
-      if (exists)
-	poundctl_conf = DOT_POUNDCTL_NAME;
+      WORKDIR *wd = workdir_get (homedir);
+      struct stat st;
+      if (fstatat (wd->fd, DOT_POUNDCTL_NAME, &st, 0))
+	{
+	  if (errno != ENOENT)
+	    errormsg (0, errno, "can't stat ~/%s", DOT_POUNDCTL_NAME);
+	  workdir_unref (wd);
+	}
+      else if (!S_ISREG (st.st_mode))
+	{
+	  errormsg (0, 0, "~/%s exists, but is not a regular file",
+		    DOT_POUNDCTL_NAME);
+	}
+      else
+	{
+	  include_wd = wd;
+	  poundctl_conf = DOT_POUNDCTL_NAME;
+	}
     }
 
   if (!poundctl_conf)
     return;
 
-  include_wd = workdir_get (NULL);
   ast = cfg_parse_tree (poundctl_conf, poundctl_top_defn);
   if (!ast)
     exit (1);
@@ -538,7 +549,10 @@ scan_pound_cfg (void)
   if (conf_name)
     include_wd = workdir_get (NULL);
   else
-    conf_name = POUND_CONF;
+    {
+      conf_name = POUND_CONF;
+      include_wd = NULL;
+    }
 
   if (access (conf_name, F_OK) == 0)
     {
