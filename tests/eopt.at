@@ -28,8 +28,9 @@ AT_DATA([conf.d/2.cfg],
 pound -Wno-include-dir -E -f pound.cfg
 ],
 [0],
-[
+[# 1 "conf.d/1.cfg"
 This is conf.d/1.cfg
+# 1 "conf.d/2.cfg"
 This is conf.d/2.cfg
 ])
 AT_CLEANUP
