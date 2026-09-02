@@ -103,7 +103,8 @@ Content-Type: application/json
       "kind": "service",
       "name": "a",
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \},
     \{
       "backends": \[
@@ -123,7 +124,8 @@ Content-Type: application/json
       "kind": "service",
       "name": "b",
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \},
     \{
       "backends": \[
@@ -142,7 +144,8 @@ Content-Type: application/json
       "kind": "service",
       "name": "c",
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \},
     \{
       "backends": \[
@@ -159,7 +162,8 @@ Content-Type: application/json
       "kind": "service",
       "name": "d",
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \},
     \{
       "backends": \[
@@ -176,7 +180,8 @@ Content-Type: application/json
       "kind": "service",
       "name": "metrics",
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \},
     \{
       "backends": \[
@@ -193,7 +198,8 @@ Content-Type: application/json
       "kind": "service",
       "name": null,
       "session_type": "NONE",
-      "sessions": null
+      "sessions": null,
+      "trace": false
     \}
   \]
 \}

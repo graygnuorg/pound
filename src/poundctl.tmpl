@@ -76,6 +76,39 @@ Queue: {{ if exists . "queue" }}{{with .queue}}
   </beacons>
 {{- end}}
 
+{{define "default.trace" -}}
+{{if exists . "value" -}}
+{{block "default.print_trace" .value -}}
+/{{if exists . "listener_no"}}{{.listener_no}}{{else}}-{{end}}/{{.service_no}} {{.trace}}
+{{- end}}
+{{else if exists . "values" -}}
+{{range $n,$svc = .values -}}
+{{printf "%3d" $n}}. {{block "default.print_trace" $svc}}
+{{end -}}
+{{end -}}
+{{- end}}
+
+{{define "xml.trace" -}}
+  {{if exists . "value" -}}
+  {{block "xml.print_trace" .value -}}
+  <service>
+    <location>
+      /{{if exists . "listener_no"}}{{.listener_no}}{{else}}-{{end}}/{{.service_no}}
+    </location>
+    <trace>
+      {{.trace}}
+    </trace>
+  </service>
+  {{- end}}
+  {{- else if exists . "values" -}}
+  <services>
+    {{range $n,$svc = .values -}}
+      {{block "xml.print_trace" $svc}}
+    {{end -}}
+  </services>
+  {{- end}}
+{{- end}}
+
 {{define "default.pound" -}}
 {{if exists . "core" -}}
 {{block "default.core" .core}}
@@ -152,6 +185,8 @@ Global services:
       {{block "default.log" . -}}
     {{else if eq .kind "beacon" -}}
       {{template "default.beacon" . -}}
+    {{else if eq .kind "trace" -}}
+      {{template "default.trace" . -}}
     {{else -}}
       Unsupported kind of object!
     {{end -}}
@@ -265,6 +300,8 @@ Global services:
       {{block "xml.print_backend" . -}}
     {{else if eq .kind "beacon" -}}
       {{block "xml.beacon" . -}}
+    {{else if eq .kind "trace" -}}
+      {{block "xml.trace" . -}}
     {{else -}}
     <error>Missing or unsupported kind of object.</error>
     {{- end -}}

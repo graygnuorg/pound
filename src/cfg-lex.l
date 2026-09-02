@@ -1380,7 +1380,7 @@ parse_line_directive (char const *str, size_t len, int isline)
   /* Parse line number */
   errno = 0;
   n = strtoul (str, &p, 10);
-  if (errno || n <= 1)
+  if (errno || n < 1)
     return;
   if (*p && p < str + len)
     {

@@ -1,0 +1,148 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([trace log])
+AT_KEYWORDS([ctl trace tracelog])
+PT_CHECK([
+# Notice: 1) in the configuration below, 'Header "Host"' is used instead of
+# 'Host' to ensure predictability of the location (poundharness.pl appends
+# ":PORT" to arguments of 'Host' statements).
+# 2) The #line directive below ensures predictablility of line numbers,
+# which would otherwise depend on the length of the configuration prologue,
+# inserted by harness. This, in turn, means that this test depends on the
+# synclines.at (if the synclines.at fails, this test is bound to fail
+# as well).
+#line 1 "test.cfg"
+Service "c"
+	Header "Host" -re ["^bar(:[[:digit:]]+)?$"]
+	Backend
+	End
+End
+ListenHTTP "L0"
+	xHTTP 1
+	Service "ctl"
+		Match OR
+			Path -beg "/core"
+			Path -beg "/listener"
+			Path -beg "/service"
+			Path -beg "/log"
+			Path -beg "/beacon"
+			Path -beg "/trace"
+		End
+		Control
+	End
+	Service "a"
+		Header "Host" -re ["^foo(:[[:digit:]]+)?$"]
+		Path -beg "/echo/a"
+		Backend
+		End
+	End
+	Service "b"
+		Header "Host" -re ["foo(:[[:digit:]]+)?$"]
+		Backend
+		End
+	End
+End
+],
+[[PUT /trace/L0
+end
+
+200
+end
+
+PUT /trace/-
+end
+
+200
+end
+
+GET /echo/c
+Host: foo
+end
+
+200
+end
+
+GET /echo/a
+Host: foo
+end
+
+200
+end
+
+GET /echo/c
+Host: bar
+end
+
+200
+end
+]])
+
+AT_CHECK([[sed -r -n -e '/^pound: \([^)]+\) test.cfg:/s//test.cfg:/p' pound.log
+]],
+[0],
+[test.cfg:13.9-23.11: considering service
+test.cfg:15.25-41: path /trace/-: 0
+test.cfg:16.25-45: path /trace/-: 0
+test.cfg:17.25-44: path /trace/-: 0
+test.cfg:18.25-40: path /trace/-: 0
+test.cfg:19.25-43: path /trace/-: 0
+test.cfg:20.25-42: path /trace/-: 1
+test.cfg:14.17-21.19: boolean OR: 1
+test.cfg:13.9-23.11: service selected
+test.cfg:13.9-23.11: considering service
+test.cfg:15.25-41: path /echo/c: 0
+test.cfg:16.25-45: path /echo/c: 0
+test.cfg:17.25-44: path /echo/c: 0
+test.cfg:18.25-40: path /echo/c: 0
+test.cfg:19.25-43: path /echo/c: 0
+test.cfg:20.25-42: path /echo/c: 0
+test.cfg:14.17-21.19: boolean OR: 0
+test.cfg:24.9-32.11: considering service
+test.cfg:25.17-57: header: 1
+test.cfg:26.17-35: path /echo/c: 0
+test.cfg:33.9-40.11: considering service
+test.cfg:34.17-56: header: 1
+test.cfg:33.9-40.11: service selected
+test.cfg:13.9-23.11: considering service
+test.cfg:15.25-41: path /echo/a: 0
+test.cfg:16.25-45: path /echo/a: 0
+test.cfg:17.25-44: path /echo/a: 0
+test.cfg:18.25-40: path /echo/a: 0
+test.cfg:19.25-43: path /echo/a: 0
+test.cfg:20.25-42: path /echo/a: 0
+test.cfg:14.17-21.19: boolean OR: 0
+test.cfg:24.9-32.11: considering service
+test.cfg:25.17-57: header: 1
+test.cfg:26.17-35: path /echo/a: 1
+test.cfg:24.9-32.11: service selected
+test.cfg:13.9-23.11: considering service
+test.cfg:15.25-41: path /echo/c: 0
+test.cfg:16.25-45: path /echo/c: 0
+test.cfg:17.25-44: path /echo/c: 0
+test.cfg:18.25-40: path /echo/c: 0
+test.cfg:19.25-43: path /echo/c: 0
+test.cfg:20.25-42: path /echo/c: 0
+test.cfg:14.17-21.19: boolean OR: 0
+test.cfg:24.9-32.11: considering service
+test.cfg:25.17-57: header: 0
+test.cfg:33.9-40.11: considering service
+test.cfg:34.17-56: header: 0
+test.cfg:1.1-8.3: considering service
+test.cfg:2.9-49: header: 1
+test.cfg:1.1-8.3: service selected
+])
+
+AT_CLEANUP

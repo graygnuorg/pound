@@ -2112,11 +2112,13 @@ static CFG_TYPE cfg_type_log_suppress = {
 
 /* Allocate and return a new condition. */
 static SERVICE_COND *
-service_cond_alloc (int type)
+service_cond_alloc (int type, struct locus_range const *locus)
 {
   SERVICE_COND *sc;
   XZALLOC (sc);
   service_cond_init (sc, type);
+  locus_range_init (&sc->locus);
+  locus_range_copy (&sc->locus, locus);
   return sc;
 }
 
@@ -2193,12 +2195,12 @@ service_cond_free (SERVICE_COND *sc)
  * condition.
  */
 static SERVICE_COND *
-service_cond_append (SERVICE_COND *cond, int type)
+service_cond_append (SERVICE_COND *cond, int type, struct locus_range const *locus)
 {
   SERVICE_COND *sc;
 
   assert (cond->type == COND_BOOL || cond->type == COND_DYN);
-  sc = service_cond_alloc (type);
+  sc = service_cond_alloc (type, locus);
   SLIST_PUSH (&cond->boolean.head, sc, next);
 
   return sc;
@@ -2261,7 +2263,7 @@ dyncond_read_internal (SERVICE_COND *cond, char const *filename, WORKDIR *wd,
 	continue;
       p[len] = 0;
 
-      hc = service_cond_alloc (cond_type);
+      hc = service_cond_alloc (cond_type, &loc);
       hc->tag = string_ref (cond->tag);
       rc = genpat_compile (&hc->re, gpt, p, flags);
       if (rc)
@@ -2569,7 +2571,7 @@ cond_matcher_commit_generic (CFG_NODE *node, CFG_ARG *arg,
 	{
 	  if (match_param.watch)
 	    {
-	      cond = service_cond_append (top_cond, COND_DYN);
+	      cond = service_cond_append (top_cond, COND_DYN, &node->locus);
 	      cond->tag = match_param.tag;
 	      cond->decode = match_param.decode;
 	      cond->dyn.boolean.op = BOOL_OR;
@@ -2583,7 +2585,7 @@ cond_matcher_commit_generic (CFG_NODE *node, CFG_ARG *arg,
 	    }
 	  else
 	    {
-	      cond = service_cond_append (top_cond, COND_BOOL);
+	      cond = service_cond_append (top_cond, COND_BOOL, &node->locus);
 	      cond->tag = string_ref (match_param.tag);
 	      cond->decode = match_param.decode;
 	      cond->boolean.op = BOOL_OR;
@@ -2595,7 +2597,7 @@ cond_matcher_commit_generic (CFG_NODE *node, CFG_ARG *arg,
     }
   else if (arg)
     {
-      cond = service_cond_append (top_cond, type);
+      cond = service_cond_append (top_cond, type, &node->locus);
       cond->tag = string_ref (match_param.tag);
       cond->decode = match_param.decode;
       rc = genpat_compile (&cond->re, gp_type, string_ptr (arg->v.string),
@@ -2762,7 +2764,7 @@ match_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 	}
     }
 
-  cond = service_cond_append (cond, COND_BOOL);
+  cond = service_cond_append (cond, COND_BOOL, &node->locus);
   cond->boolean.op = op;
 
   *baseptr = cond;
@@ -2777,7 +2779,8 @@ static int
 not_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, *baseptr), COND_BOOL);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, *baseptr), COND_BOOL,
+			 &node->locus);
   cond->boolean.op = BOOL_NOT;
 
   *baseptr = cond;
@@ -2803,7 +2806,8 @@ static int
 clientcert_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_CLIENT_CERT);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_CLIENT_CERT,
+			 &node->locus);
   return cfg_cert_commit (node, call_data, &cond->x509);
 }
 
@@ -2957,7 +2961,7 @@ named_cond_new (char const *name, int op, CFG_NODE const *node)
     named_cond_hash = NAMED_COND_HASH_NEW ();
   XZALLOC (nc);
   nc->name = xstrdup (name);
-  nc->cond = service_cond_alloc (COND_BOOL);
+  nc->cond = service_cond_alloc (COND_BOOL, &node->locus);
   nc->cond->boolean.op = op;
   nc->node = node;
 
@@ -3032,7 +3036,7 @@ eval_commit (CFG_NODE *node, void *call_data, void *baseptr)
       return -1;
     }
 
-  cond = service_cond_append (cond, COND_REF);
+  cond = service_cond_append (cond, COND_REF, &node->locus);
   cond->ref = nc->idx;
 
   return 0;
@@ -3058,8 +3062,8 @@ beacon_commit (CFG_NODE *node, void *call_data, void *baseptr)
       return -1;
     }
 
-  cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BEACON);
+  cond = service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      COND_BEACON, &node->locus);
   cond->beacon = beacon;
 
   return 0;
@@ -3863,7 +3867,7 @@ aclcond_commit (CFG_NODE *node, void *call_data, void *baseptr)
   if (acl_build (node, &acl, &fwd))
     return -1;
 
-  cond = service_cond_append (cond, COND_ACL);
+  cond = service_cond_append (cond, COND_ACL, &node->locus);
   cond->acl.acl = acl;
   cond->acl.forwarded = fwd;
 
@@ -4261,7 +4265,8 @@ static int
 luamatch_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_LUA);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			 COND_LUA, &node->locus);
   return pndlua_parse_closure (node, &cond->clua);
 }
 
@@ -4276,7 +4281,8 @@ head_deny_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   POUND_DEFAULTS *dfl = call_data;
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BOOL);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BOOL,
+			 &node->locus);
   cond->boolean.op = BOOL_NOT;
   return cond_matcher_commit_generic (node, cfg_arglist_first (&node->arglist),
 				      cond, COND_HDR,
@@ -4320,7 +4326,8 @@ static int
 cond_basicauth_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BASIC_AUTH);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_BASIC_AUTH,
+			 &node->locus);
   CFG_ARG *filename = NULL;
   CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   int opt;
@@ -4494,7 +4501,8 @@ static int
 cond_tbf_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   SERVICE_COND *cond =
-    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_TBF);
+    service_cond_append (cfg_rcvr_ptr (&node->rcvr, baseptr), COND_TBF,
+			 &node->locus);
   CFG_ARG *arg = cfg_arglist_first (&node->arglist);
   uint64_t rate;
   unsigned maxtok;
@@ -4804,12 +4812,14 @@ rewrite_op_head_free (REWRITE_OP_HEAD *ophead)
 }
 
 static REWRITE_RULE *
-rewrite_rule_alloc (REWRITE_RULE_HEAD *head)
+rewrite_rule_alloc (REWRITE_RULE_HEAD *head, struct locus_range const *loc)
 {
   REWRITE_RULE *rule;
 
   XZALLOC (rule);
   service_cond_init (&rule->cond, COND_BOOL);
+  locus_range_init (&rule->locus);
+  locus_range_copy (&rule->locus, loc);
   SLIST_INIT (&rule->ophead);
 
   if (head)
@@ -4830,7 +4840,8 @@ rewrite_rule_free (REWRITE_RULE *rule)
 }
 
 static REWRITE_RULE *
-rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
+rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head,
+			  struct locus_range const *loc)
 {
   if (!SLIST_EMPTY (head))
     {
@@ -4839,7 +4850,7 @@ rewrite_rule_last_uncond (REWRITE_RULE_HEAD *head)
 	return rw;
     }
 
-  return rewrite_rule_alloc (head);
+  return rewrite_rule_alloc (head, loc);
 }
 
 enum {
@@ -4865,7 +4876,8 @@ static int
 service_reqmod_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   gen_rewrite_op (node, &rule->ophead, (int)(intptr_t)node->defn->data);
   return 0;
 }
@@ -4942,7 +4954,8 @@ static int
 service_delete_header_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   return gen_delete_header_commit (node, call_data, &rule->ophead);
 }
 
@@ -4971,7 +4984,8 @@ static int
 service_delete_query_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   rewrite_op_alloc (&rule->ophead, REWRITE_QUERY_DELETE);
   return 0;
 }
@@ -5011,7 +5025,8 @@ static int
 service_setqp_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   return gen_setqp_commit (node, &rule->ophead);
 }
 
@@ -5041,7 +5056,8 @@ static int
 service_lua_modify_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_LUA);
   return pndlua_parse_closure (node, &op->v.lua);
 }
@@ -5096,7 +5112,7 @@ sub_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
     }
 
   XZALLOC (clos);
-  clos->rule = rewrite_rule_alloc (NULL);
+  clos->rule = rewrite_rule_alloc (NULL, &node->locus);
   node->data = clos;
 
   op = rewrite_op_alloc (cfg_rcvr_ptr (&node->rcvr, baseptr),
@@ -5299,7 +5315,7 @@ rewrite_branch_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 
   if (clos->prev)
     {
-      clos->rule = rewrite_rule_alloc (NULL);
+      clos->rule = rewrite_rule_alloc (NULL, &node->locus);
       clos->prev->iffalse = clos->rule;
     }
   clos->prev = clos->rule;
@@ -5339,7 +5355,7 @@ service_rewrite_prepare (CFG_NODE *node, void *call_data, void **baseptr)
     }
 
   XZALLOC (clos);
-  clos->rule = rewrite_rule_alloc (&rw[node->rwtarget]);
+  clos->rule = rewrite_rule_alloc (&rw[node->rwtarget], &node->locus);
   node->data = clos;
 
   *baseptr = clos;
@@ -5840,7 +5856,8 @@ headerremove_commit (CFG_NODE *node, void *call_data, void *baseptr)
 {
   POUND_DEFAULTS *dfl = call_data;
   REWRITE_RULE *rule =
-    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr));
+    rewrite_rule_last_uncond (cfg_rcvr_ptr (&node->rcvr, baseptr),
+			      &node->locus);
   REWRITE_OP *op = rewrite_op_alloc (&rule->ophead, REWRITE_HDR_DEL);
   XZALLOC (op->v.hdrdel);
   return gen_regex_compat (cfg_arglist_first (&node->arglist),
@@ -5900,7 +5917,7 @@ acme_commit (CFG_NODE *node, void *call_data, void *baseptr)
   svc = new_service (BALANCER_ALGO_RANDOM);
 
   /* Create a URL matcher */
-  cond = service_cond_append (&svc->cond, COND_URL);
+  cond = service_cond_append (&svc->cond, COND_URL, &node->locus);
   rc = genpat_compile (&cond->re, GENPAT_POSIX, sp_acme, 0);
   if (rc)
     {

@@ -81,6 +81,7 @@ TESTSUITE_AT = \
  ctl-core.at\
  ctl-listener.at\
  ctl-service.at\
+ ctl-trace.at\
  dti.at\
  detcond.at\
  disable.at\
@@ -178,6 +179,7 @@ TESTSUITE_AT = \
  syncline.at\
  tbf.at\
  template.at\
+ tracelog.at\
  tunnel.at\
  url.at\
  virthost.at\

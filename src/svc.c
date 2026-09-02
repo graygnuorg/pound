@@ -522,6 +522,28 @@ addr2str (char *res, int res_len, const struct addrinfo *addr, int no_port)
   return res;
 }
 
+void
+dumpreq (struct http_request *req, int what)
+{
+  struct http_header *hdr;
+  static char *kind[] = {
+    [REWRITE_REQUEST] = "Request",
+    [REWRITE_RESPONSE] = "Response" ,
+    [REWRITE_EARLY] = "Request"
+  };
+
+  if (req->changed)
+    {
+      tracemsg (NULL, "%s: %s", kind[what], req->request);
+      tracemsg (NULL, "Headers:");
+      DLIST_FOREACH (hdr, &req->headers, link)
+	{
+	  tracemsg (NULL, "%s", hdr->header);
+	}
+      req->changed = 0;
+    }
+}
+
 /*
  * Select from HEAD a service that matches current request in PHTTP,
  * processing and skipping any FallThrough services.
@@ -546,22 +568,31 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
        */
       phttp->svc = svc;
 
+      if (svc->trace)
+	{
+	  tracemsg (&svc->locus, "considering service");
+	  dumpreq (&phttp->request, REWRITE_REQUEST);
+	}
+
       /* Apply early request rewriting rules. */
       if (rewrite_apply_rules (phttp, REWRITE_EARLY,
 			       &phttp->svc->rewrite[REWRITE_EARLY],
-			       &phttp->request))
+			       &phttp->request,
+			       pound_http_trace (phttp)))
 	{
 	  rc = -1;
 	  break;
 	}
 
-      rc = match_cond (&svc->cond, phttp, &phttp->request);
+      rc = match_cond (&svc->cond, phttp, &phttp->request, svc->trace);
       if (rc > 0)
 	{
 	  /* Condition matches. */
 	  phttp->log_suppress_mask |= svc->log_suppress_mask;
 	  if (svc->fall_through)
 	    {
+	      if (svc->trace)
+		tracemsg (&svc->locus, "fall-through service matched");
 	      /*
 	       * For FallThrough conditions, apply any rewrites and
 	       * continue, unless an error occurred.
@@ -572,10 +603,15 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 		  break;
 		}
 	      http_request_eval_reset (&phttp->request);
+	      dumpreq (&phttp->request, REWRITE_REQUEST);
 	      rc = 0;
 	    }
 	  else
-	    break;
+	    {
+	      if (svc->trace)
+		tracemsg (&svc->locus, "service selected");
+	      break;
+	    }
 	}
       else if (rc < 0)
 	break;
@@ -2043,6 +2079,7 @@ service_serialize (SERVICE *svc)
 	  || json_object_set (obj, "enabled", json_new_bool (!svc->disabled))
 	  || json_object_set (obj, "session_type", json_new_string (typename ? typename : "UNKNOWN"))
 	  || json_object_set (obj, "sessions", service_session_serialize (svc))
+	  || json_object_set (obj, "trace", json_new_bool (svc->trace))
 	  || json_object_set (obj, "backends",
 			      backends_serialize (&svc->balancers)))
 	{
@@ -3036,7 +3073,291 @@ control_unset_beacon (BIO *c, char const *url)
 {
   return ctl_set_beacon (c, url, 0);
 }
+
+static int
+listener_no (LISTENER *lst)
+{
+  LISTENER *lp;
+  int i = 0;
+  SLIST_FOREACH (lp, &listeners, next)
+    {
+      if (lp == lst)
+	return i;
+      i++;
+    }
+  return -1;
+}
 
+static int
+service_no (SERVICE *svc)
+{
+  SERVICE_HEAD *head = svc->lstn ? &svc->lstn->services : &services;
+  SERVICE *sp;
+  int i = 0;
+  SLIST_FOREACH (sp, head, next)
+    {
+      if (sp == svc)
+	return i;
+      i++;
+    }
+  return -1;
+}
+
+struct traceinfo
+{
+  int lstn;
+  LISTENER *lst;
+  int svcn;
+  SERVICE *svc;
+  struct json_value *arr;
+};
+
+struct json_value *
+traceinfo_serialize (struct traceinfo *st)
+{
+  struct json_value *obj;
+
+  obj = json_new_object ();
+  if (obj)
+    {
+      int err = 0;
+
+      if (st->lst)
+	{
+	  err |= json_object_set (obj, "listener_no",
+				  json_new_integer (st->lstn));
+	  if (st->lst->name)
+	    err |= json_object_set (obj, "listener_name",
+				    json_new_string (st->lst->name));
+	}
+
+      if (err == 0)
+	{
+	  err |= json_object_set (obj, "service_no",
+				  json_new_integer (st->svcn));
+	  if (st->svc->name)
+	    err |= json_object_set (obj, "service_name",
+				    json_new_string (st->svc->name));
+	  err |= json_object_set (obj, "trace",
+				  json_new_bool (st->svc->trace));
+	}
+
+      if (err)
+	{
+	  json_value_free (obj);
+	  obj = NULL;
+	}
+    }
+  return obj;
+}
+
+struct json_value *
+trace_service_serialize (SERVICE *svc)
+{
+  struct json_value *val;
+  struct traceinfo ti = {
+    .svc = svc,
+    .svcn = service_no (svc),
+    .lst = svc->lstn,
+  };
+  if (svc->lstn)
+    ti.lstn = listener_no (svc->lstn);
+
+  val = new_typed_object ("trace");
+  if (val && json_object_set (val, "value", traceinfo_serialize (&ti)))
+    {
+      json_value_free (val);
+      val = NULL;
+    }
+  return val;
+}
+
+struct json_value *
+trace_services_serialize (SERVICE_HEAD *head)
+{
+  struct json_value *val;
+
+  val = new_typed_object ("trace");
+  if (val)
+    {
+      struct json_value *arr = json_new_array ();
+      int err = arr == NULL;
+      if (!err && (err |= json_object_set (val, "values", arr)) == 0)
+	{
+	  SERVICE *svc = SLIST_FIRST (head);
+	  if (svc)
+	    {
+	      struct traceinfo ti;
+
+	      ti.lst = svc->lstn;
+	      if (svc->lstn)
+		ti.lstn = listener_no (svc->lstn);
+
+	      ti.svcn = 0;
+	      SLIST_FOREACH (ti.svc, head, next)
+		{
+		  err |= json_array_append (arr, traceinfo_serialize (&ti));
+		  if (err)
+		    break;
+		  ti.svcn++;
+		}
+	    }
+	}
+      if (err)
+	{
+	  json_value_free (val);
+	  val = NULL;
+	}
+    }
+  return val;
+}
+
+static int
+serialize_next (SERVICE *svc, void *data)
+{
+  struct traceinfo *tp = data;
+  tp->svc = svc;
+  if (tp->lst != svc->lstn)
+    {
+      tp->lst = svc->lstn;
+      if (svc->lstn)
+	tp->lstn = listener_no (svc->lstn);
+      tp->svcn = 0;
+    }
+  if (json_array_append (tp->arr, traceinfo_serialize (tp)))
+    return -1;
+  tp->svcn++;
+  return 0;
+}
+
+struct json_value *
+trace_all_serialize (void)
+{
+  struct traceinfo ti = {
+    .lstn = -1,
+    .lst = NULL,
+    .svcn = 0,
+    .svc = NULL,
+  };
+  struct json_value *val;
+
+  val = new_typed_object ("trace");
+  if (val)
+    {
+      struct json_value *arr = json_new_array ();
+      int err = arr == NULL;
+      if (!err && (err |= json_object_set (val, "values", arr)) == 0)
+	{
+	  ti.arr = arr;
+	  err = foreach_service (serialize_next, &ti);
+	}
+      if (err)
+	{
+	  json_value_free (val);
+	  val = NULL;
+	}
+    }
+  return val;
+}
+
+static void
+service_set_trace (SERVICE *svc, int trace)
+{
+  if (svc->trace != trace)
+    {
+      svc->trace = trace;
+      if (svc->lstn)
+	{
+	  if (svc->trace)
+	    svc->lstn->tracecnt++;
+	  else
+	    svc->lstn->tracecnt--;
+	}
+    }
+}
+
+static int
+trace_handler (BIO *c, OBJECT *obj, char const *url, void *data)
+{
+  int *b = data;
+  int rc;
+  struct json_value *val;
+
+  if (*url && *url != '?')
+    return HTTP_STATUS_NOT_FOUND;
+
+  switch (obj->type)
+    {
+    case OBJ_BACKEND:
+      return HTTP_STATUS_BAD_REQUEST;
+
+    case OBJ_SERVICE:
+      if (!obj->svc)
+	return HTTP_STATUS_NOT_FOUND;
+      if (b)
+	service_set_trace (obj->svc, *b);
+      val = trace_service_serialize (obj->svc);
+      break;
+
+    case OBJ_LISTENER:
+      {
+	SERVICE_HEAD *head = obj->lstn ? &obj->lstn->services : &services;
+	if (b)
+	  {
+	    SERVICE *svc;
+
+	    SLIST_FOREACH (svc, head, next)
+	      service_set_trace (svc, *b);
+	  }
+	val = trace_services_serialize (head);
+      }
+    }
+
+  if (val)
+    {
+      rc = send_json_reply (c, val, url);
+      json_value_free (val);
+    }
+  else
+    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+  return rc;
+}
+
+static int
+control_get_trace (BIO *c, char const *url)
+{
+  if (*url == 0 || (*url == '/' && (url[1] == 0 || url[1] == '?'))
+      || *url == '?')
+    {
+      int rc;
+      struct json_value *val = trace_all_serialize ();
+      if (val)
+	{
+	  rc = send_json_reply (c, val, url);
+	  json_value_free (val);
+	}
+      else
+	rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
+      return rc;
+    }
+  return ctl_listener (trace_handler, NULL, c, url);
+}
+
+static int
+control_set_trace (BIO *c, char const *url)
+{
+  int dis = 1;
+  return ctl_listener (trace_handler, &dis, c, url);
+}
+
+static int
+control_unset_trace (BIO *c, char const *url)
+{
+  int dis = 0;
+  return ctl_listener (trace_handler, &dis, c, url);
+}
+
+
 struct endpoint
 {
   char *uri;
@@ -3063,6 +3384,9 @@ static struct endpoint control_endpoint[] = {
   { S("/beacon"), METH_GET, control_list_beacon },
   { S("/beacon"), METH_PUT, control_set_beacon },
   { S("/beacon"), METH_DELETE, control_unset_beacon },
+  { S("/trace"),  METH_GET, control_get_trace },
+  { S("/trace"),  METH_PUT, control_set_trace },
+  { S("/trace"),  METH_DELETE, control_unset_trace },
 #undef S
   { NULL }
 };

@@ -442,6 +442,7 @@ struct http_request
 				detached conditions. */
   BIO *body;                 /* For requests: captured response body.
 				For responses: modified response body. */
+  int changed;
 };
 
 static inline void http_request_init (struct http_request *http)
@@ -483,6 +484,11 @@ int http_request_set_url (struct http_request *req, char const *url);
 int http_request_set_query (struct http_request *req, char const *rawquery);
 int http_request_set_query_param (struct http_request *req, char const *name,
 				  char const *raw_value);
+
+void http_request_header_filter (struct http_request *req, GENPAT pat);
+int http_request_header_append (struct http_request *req, char const *text,
+				int replace);
+
 
 #define POUND_TID() ((unsigned long)pthread_self ())
 #define PRItid "lx"
@@ -837,6 +843,7 @@ struct acl_cond
 typedef struct _service_cond
 {
   enum service_cond_type type;
+  struct locus_range locus;
   STRING *tag;
   int decode;
   WATCHER *watcher;
@@ -914,6 +921,7 @@ typedef struct rewrite_op
 typedef struct rewrite_rule
 {
   SERVICE_COND cond;               /* Optional condition. */
+  struct locus_range locus;        /* Source location. */
   SLIST_ENTRY (rewrite_rule) next; /* Next rule in the list. */
   struct rewrite_rule *iffalse;    /* Branch to go if cond yields false. */
   REWRITE_OP_HEAD ophead;          /* Do this if cond yields true. */
@@ -979,7 +987,7 @@ typedef struct _service
   char *sess_id;                /* Session anchor ID */
   SESSION_TABLE *sessions;	/* currently active sessions */
   int disabled;			/* true if the service is disabled */
-  int fall_through;
+  int fall_through;             /* A fall-through service. */
   int rewrite_errors;           /* Rewrite HTTP errors. */
   void *sctab;                  /* String constant table */
 
@@ -988,6 +996,7 @@ typedef struct _service
   ACL *trusted_ips;             /* Trusted IP addresses */
   int log_suppress_mask;        /* Suppress HTTP logging for these status
 				   codes.  A bitmask. */
+  int trace;                    /* Debug mode. */
 
   /* Backend removal */
   BACKEND_HEAD be_rem_head;     /* List of backends scheduled for removal. */
@@ -1049,7 +1058,7 @@ typedef struct _listener
   int rewrite_errors;           /* Rewrite HTTP errors. */
   int verb;			/* allowed HTTP verb group */
   unsigned to;			/* client time-out */
-  GENPAT url_pat;	/* pattern to match the request URL against */
+  GENPAT url_pat;		/* pattern to match the request URL against */
   struct http_errmsg *http_err[HTTP_STATUS_MAX];	/* error messages */
   size_t linebufsize;           /* Line buffer size */
   CONTENT_LENGTH max_req_size;	/* max. request size */
@@ -1062,6 +1071,10 @@ typedef struct _listener
   ACL *trusted_ips;             /* Trusted IP addresses */
   int allow_client_reneg;	/* Allow Client SSL Renegotiation */
   void *sctab;                  /* String constant table */
+
+  /* Tracing support */
+  int tracecnt;                 /* Number of services with trace enabled. */
+
   SERVICE_HEAD services;
   SLIST_ENTRY (_listener) next;
 
@@ -1214,6 +1227,12 @@ typedef struct _pound_http
 
 typedef SLIST_HEAD(,_pound_http) POUND_HTTP_HEAD;
 
+static inline int
+pound_http_trace (POUND_HTTP *phttp)
+{
+  return phttp->lstn && phttp->lstn->tracecnt > 0;
+}
+
 SERVICE_COND *detached_cond (int n);
 
 void stringbuf_store_ip (struct stringbuf *sb, POUND_HTTP *phttp, int fwd);
@@ -1284,6 +1303,9 @@ void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
 void abend (struct locus_range const *range, char const *fmt, ...)
   ATTR_PRINTFLIKE(2,3);
+void tracemsg (struct locus_range const *loc, const char *fmt, ...)
+  ATTR_PRINTFLIKE(2,3);
+void dumpreq (struct http_request *req, int what);
 
 /* Translate inet/inet6 address into a string */
 char *addr2str (char *, int, const struct addrinfo *, int);
@@ -1318,7 +1340,7 @@ int drain_request (POUND_HTTP *phttp, int chunked,
 
 int rewrite_apply_rules (POUND_HTTP *phttp, int what,
 			 REWRITE_RULE_HEAD *rewrite_rules,
-			 struct http_request *request);
+			 struct http_request *request, int trace);
 int rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what);
 
 int http_simple_response (POUND_HTTP *phttp, char const *headers,
@@ -1508,7 +1530,7 @@ int metrics_response (POUND_HTTP *phttp, int chunked,
 		      CONTENT_LENGTH content_length);
 
 int match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
-		struct http_request *req);
+		struct http_request *req, int trace);
 
 struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
 struct http_header *http_header_list_next (struct http_header *hdr);

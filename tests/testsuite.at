@@ -190,12 +190,16 @@ AT_BANNER([Control interface])
 m4_include([ctl-core.at])
 m4_include([ctl-listener.at])
 m4_include([ctl-service.at])
+m4_include([ctl-trace.at])
 
 AT_BANNER([Preprocessing])
 m4_include([syncline.at])
 m4_include([preproc.at])
 m4_include([eopt.at])
 m4_include([eoptpp.at])
+
+AT_BANNER([Tracing])
+m4_include([tracelog.at])
 
 AT_BANNER([Templates])
 m4_include([template.at])

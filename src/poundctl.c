@@ -724,10 +724,11 @@ open_socket (URL *url)
     {
       errormsg (1, errno, "socket");
     }
+  if (url->addr.sa.sa_family == AF_UNIX)
+    bind (fd, &url->addr.sa, url->addrlen);
   if (connect (fd, &url->addr.sa, url->addrlen) < 0)
     {
       errormsg (1, errno, "connect");
-      exit (1);
     }
 
   if ((bio = BIO_new_fd (fd, BIO_CLOSE)) == NULL)
@@ -1353,6 +1354,48 @@ command_log (BIO *bio, int argc, char **argv)
 }
 
 int
+command_trace (BIO *bio, int argc, char **argv)
+{
+  int c;
+  char *meth = "GET";
+  char *lst = NULL;
+
+  optind = 1;
+  while ((c = getopt (argc, argv, "ds")) != EOF)
+    {
+      switch (c)
+	{
+	case 'd':
+	  meth = "DELETE";
+	  break;
+
+	case 's':
+	  meth = "PUT";
+	  break;
+
+	default:
+	  return 1;
+	}
+    }
+
+  switch (argc - optind)
+    {
+    case 0:
+      errormsg (1, 0, "required argument missing");
+      break;
+
+    case 1:
+      lst = argv[optind];
+      break;
+
+    default:
+      errormsg (1, 0, "too many arguments");
+    }
+
+  return command_gen (bio, meth, "trace", lst, SUBDIR_DEFAULT, 0, NULL);
+}
+
+int
 command_beacon (BIO *bio, int argc, char **argv)
 {
   int c;
@@ -1409,6 +1452,7 @@ static struct dispatch_table dispatch[] = {
   { "add", command_add_session },
   { "log", command_log },
   { "beacon", command_beacon },
+  { "trace", command_trace },
   { NULL }
 };
 
@@ -1441,6 +1485,9 @@ static char *usage_text[] = {
   "   log /[L] [F]      set log level F.",
   "   log -d /L         use global log level in listener L.",
   "   log -d            set global log level to \"null\".",
+  "   trace /L[/S]      query trace state\n",
+  "   trace -s /L[/S]   enable tracing\n",
+  "   trace -d /L[/S]   disable tracing\n",
   "   beacon            list all beacons",
   "   beacon NAME       list beacon NAME",
   "   beacon -s NAME    set beacon NAME",

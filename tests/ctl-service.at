@@ -81,7 +81,8 @@ Content-Type: application/json
   "kind": "service",
   "name": null,
   "session_type": "HEADER",
-  "sessions": \[\]
+  "sessions": \[\],
+  "trace": false
 \}
 endnonl
 
@@ -164,7 +165,8 @@ Content-Type: application/json
       "expire": "\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}",
       "key": "3"
     \}
-  \]
+  \],
+  "trace": false
 \}
 endnonl
 ]])

@@ -92,31 +92,42 @@ static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
  * Log an error to the syslog or to stderr
  */
 void
-vlogmsg (const int priority, const char *fmt, va_list ap)
+vlogmsg (const int priority, unsigned long tid,
+	 struct locus_range const *loc,
+	 const char *fmt, va_list ap)
 {
+  struct stringbuf sb;
+  char *msg;
+
+  xstringbuf_init (&sb);
+  if (tid > 0)
+    stringbuf_printf (&sb, "(%"PRItid") ", tid);
+
+  if (loc && loc->beg.filename)
+    {
+      stringbuf_format_locus_range (&sb, loc);
+      stringbuf_add_string (&sb, ": ");
+    }
+  stringbuf_vprintf (&sb, fmt, ap);
+  msg = stringbuf_finish (&sb);
+
   if (log_facility == -1 || print_log)
     {
-      va_list aq;
       FILE *fp = (priority == LOG_INFO || priority == LOG_DEBUG)
 		     ? stdout : stderr;
       pthread_mutex_lock (&log_mutex);
       if (progname)
 	fprintf (fp, "%s: ", progname);
-      va_copy (aq, ap);
-      vfprintf (fp, fmt, aq);
-      va_end (aq);
+      fputs (msg, fp);
       fputc ('\n', fp);
       pthread_mutex_unlock (&log_mutex);
     }
 
   if (log_facility != -1)
-    {
-      struct stringbuf sb;
-      xstringbuf_init (&sb);
-      stringbuf_vprintf (&sb, fmt, ap);
-      syslog (priority, "%s", stringbuf_value (&sb));
-      stringbuf_free (&sb);
-    }
+    syslog (priority, "%s", msg);
+
+  stringbuf_free (&sb);
+
   return;
 }
 
@@ -125,7 +136,16 @@ logmsg (const int priority, const char *fmt, ...)
 {
   va_list ap;
   va_start (ap, fmt);
-  vlogmsg (priority, fmt, ap);
+  vlogmsg (priority, 0, NULL, fmt, ap);
+  va_end (ap);
+}
+
+void
+tracemsg (struct locus_range const *loc, const char *fmt, ...)
+{
+  va_list ap;
+  va_start (ap, fmt);
+  vlogmsg (LOG_DEBUG, POUND_TID (), loc, fmt, ap);
   va_end (ap);
 }
 

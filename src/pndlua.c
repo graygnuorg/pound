@@ -744,10 +744,12 @@ pndlua_header_list_append (lua_State *L, HTTP_HEADER_LIST *head, int idx, int mo
  *                list, and the values from the table are added instead.
  */
 static int
-headers_set (lua_State *L, HTTP_HEADER_LIST *head)
+headers_set (lua_State *L, struct http_request *req)
 {
+  HTTP_HEADER_LIST *head = &req->headers;
   char const *field = lua_tostring (L, 2);
 
+  req->changed = 1;
   if (lua_isnil (L, 3))
     {
       http_header_list_remove_field (head, field);
@@ -784,7 +786,7 @@ static int
 req_headers_newindex (lua_State *L)
 {
   struct req_ud *ud = pndlua_get_userdata (L, 1);
-  return headers_set (L, &ud->req->headers);
+  return headers_set (L, ud->req);
 }
 
 static int
@@ -1097,8 +1099,10 @@ pndlua_req_index (lua_State *L)
 }
 
 static int
-set_headers (lua_State *L, HTTP_HEADER_LIST *head)
+set_headers (lua_State *L, struct http_request *req)
 {
+  HTTP_HEADER_LIST *head = &req->headers;
+  req->changed = 1;
   http_header_list_free (head);
   if (lua_istable (L, 3))
     {
@@ -1122,7 +1126,7 @@ static int
 req_set_headers (lua_State *L)
 {
   struct req_ud *ud = pndlua_get_userdata (L, 1);
-  return set_headers (L, &ud->req->headers);
+  return set_headers (L, ud->req);
 }
 
 static int
@@ -1408,7 +1412,7 @@ static int
 resp_set_headers (lua_State *L)
 {
   struct http_ud *ud = pndlua_get_userdata (L, 1);
-  return set_headers (L, &ud->phttp->response.headers);
+  return set_headers (L, &ud->phttp->response);
 }
 
 static int

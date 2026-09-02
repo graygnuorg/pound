@@ -3216,19 +3216,39 @@ http_header_list_remove (HTTP_HEADER_LIST *head, struct http_header *hdr)
   http_header_free (hdr);
 }
 
-static void
+static int
 http_header_list_filter (HTTP_HEADER_LIST *head, GENPAT pat)
 {
   struct http_header *hdr, *tmp;
-
+  int rc = 0;
   DLIST_FOREACH_SAFE (hdr, tmp, head, link)
     {
       if (genpat_match (pat, hdr->header, 0, NULL) == 0)
 	{
 	  http_header_list_remove (head, hdr);
+	  rc++;
 	}
     }
+  return rc;
 }
+
+void
+http_request_header_filter (struct http_request *req, GENPAT pat)
+{
+  if (http_header_list_filter (&req->headers, pat))
+    req->changed = 1;
+}
+
+int
+http_request_header_append (struct http_request *req, char const *text,
+			    int replace)
+{
+  int rc = http_header_list_append (&req->headers, text, replace);
+  if (rc == 0)
+    req->changed = 1;
+  return rc;
+}
+
 
 static void http_request_free_query (struct http_request *req);
 
@@ -3317,6 +3337,7 @@ http_request_rebuild_line (struct http_request *req)
     req->orig_request_line = req->request;
   req->request = str;
 
+  req->changed = 1;
   return 0;
 }
 
@@ -4135,6 +4156,7 @@ parse_http_request (struct http_request *req, int group)
       if (rebuild)
 	http_request_rebuild_line (req);
     }
+  req->changed = 1;
 
   return status;
 }
@@ -4185,7 +4207,7 @@ match_named_headers (HTTP_HEADER_LIST *headers, struct string_match const *pat,
  */
 int
 match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
-	    struct http_request *req)
+	    struct http_request *req, int trace)
 {
   int res = 1;
   int r;
@@ -4199,15 +4221,21 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
     case COND_ACL:
       {
 	struct addrinfo *tmp;
-	if ((r = acl_match (cond->acl.acl,
-			    get_remote_ip (phttp,
-					   cond->acl.forwarded,
-					   &tmp)->ai_addr)) == -1)
+	struct addrinfo *addr = get_remote_ip (phttp,
+					       cond->acl.forwarded,
+					       &tmp);
+	if ((r = acl_match (cond->acl.acl, addr->ai_addr)) == -1)
 	  res = -1;
 	else
 	  res = r == 0;
 	if (tmp)
 	  freeaddrinfo (tmp);
+	if (trace)
+	  {
+	    char caddr[MAX_ADDR_BUFSIZE];
+	    addr2str (caddr, sizeof (caddr), addr, 1);
+	    tracemsg (&cond->locus, "address %s: %d", caddr, res);
+	  }
       }
       break;
 
@@ -4216,6 +4244,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      if (trace)
+	tracemsg (&cond->locus, "method %s: %d",
+		  res == -1 ? "(null)" : method_name (req->method), res);
       break;
 
     case COND_URL:
@@ -4223,6 +4254,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      if (trace)
+	tracemsg (&cond->locus, "url %s: %d",
+		  res == -1 ? "(null)" : str, res);
       break;
 
     case COND_PATH:
@@ -4230,6 +4264,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec_decode (cond->re, str, cond->decode, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      if (trace)
+	tracemsg (&cond->locus, "path %s: %d",
+		  res == -1 ? "(null)" : str, res);
       break;
 
     case COND_QUERY:
@@ -4248,6 +4285,9 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	  break;
 	}
+      if (trace)
+	tracemsg (&cond->locus, "query %s: %d",
+		  res == -1 ? "(null)" : str, res);
       break;
 
     case COND_QUERY_PARAM:
@@ -4270,16 +4310,24 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 						&sm)) == 1)
 	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	}
+      if (trace)
+	tracemsg (&cond->locus, "parameter %s=%s: %d",
+		  string_ptr (cond->sm.string),
+		  res == -1 ? "(null)" : str, res);
       break;
 
     case COND_HDR:
       if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      if (trace)
+	tracemsg (&cond->locus, "header: %d", res);
       break;
 
     case COND_NAMEHDR:
       if ((res = match_named_headers (&req->headers, &cond->sm, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
+      if (trace)
+	tracemsg (&cond->locus, "header: %d", res);
       break;
 
     case COND_BASIC_AUTH:
@@ -4287,6 +4335,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else
 	res = r == 0;
+      if (trace)
+	tracemsg (&cond->locus, "basic auth: %d", res);
       break;
 
     case COND_STRING_MATCH:
@@ -4299,10 +4349,16 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  {
 	    if ((res = submatch_exec (cond->sm.re, subj, &sm)) == 1)
 	      submatch_queue_push (&phttp->smq, cond->tag, &sm);
+	    if (trace)
+	      tracemsg (&cond->locus, "string %s: %d", subj, res);
 	    free (subj);
 	  }
 	else
-	  res = -1;
+	  {
+	    if (trace)
+	      tracemsg (&cond->locus, "string (null): %d", res);
+	    res = -1;
+	  }
       }
       break;
 
@@ -4317,7 +4373,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (cond->boolean.op == BOOL_NOT)
 	{
 	  subcond = SLIST_FIRST (&cond->boolean.head);
-	  if ((r = match_cond (subcond, phttp, req)) == -1)
+	  if ((r = match_cond (subcond, phttp, req, trace)) == -1)
 	    res = -1;
 	  else
 	    res = ! r;
@@ -4326,12 +4382,18 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	{
 	  SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	    {
-	      res = match_cond (subcond, phttp, req);
+	      res = match_cond (subcond, phttp, req, trace);
 	      if (res == -1)
 		break;
 	      if ((cond->boolean.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
+	}
+      if (trace && cond->locus.beg.filename)
+	{
+	  static char *bool_str[] = { "AND", "OR", "NOT" };
+	  tracemsg (&cond->locus, "boolean %s: %d", bool_str[cond->boolean.op],
+		    res);
 	}
       break;
 
@@ -4339,10 +4401,14 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       res = (phttp->x509 != NULL &&
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
+      if (trace)
+        tracemsg (&cond->locus, "client cert: %d", res);
       break;
 
     case COND_LUA:
       res = pndlua_apply (pndlua_match, phttp, req, &cond->clua, NULL);
+      if (trace)
+        tracemsg (&cond->locus, "Lua: %d", res);
       break;
 
     case COND_TBF:
@@ -4353,6 +4419,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	if (key)
 	  {
 	    res = tbf_eval (cond->tbf.tbf, key);
+            if (trace)
+	      tracemsg (&cond->locus, "TBF %s: %d", key, res);
 	    free (key);
 	  }
 	else
@@ -4368,12 +4436,14 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  /* Reinitialize the queue. */
 	  submatch_queue_init (&phttp->smq);
 	  /* Evaluate the condition and cache the result. */
-	  res = match_cond (detached_cond (cond->ref), phttp, req);
+	  res = match_cond (detached_cond (cond->ref), phttp, req, trace);
 	  http_request_eval_cache (req, cond->ref, res);
 	  /* Restore submatch queue. */
 	  submatch_queue_free (&phttp->smq);
 	  phttp->smq = smq;
 	}
+      if (trace)
+        tracemsg (&cond->locus, "detached cond: %d", res);
       break;
 
     case COND_HOST:
@@ -4381,6 +4451,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 
     case COND_BEACON:
       res = pound_beacon_get (cond->beacon);
+      if (trace)
+        tracemsg (&cond->locus, "beacon: %d", res);
       break;
     }
   watcher_unlock (cond->watcher);
@@ -4429,7 +4501,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
   stringbuf_printf (&sb, "X-Forwarded-For: %s",
 		    addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
   if ((str = stringbuf_finish (&sb)) == NULL
-      || http_header_list_append (&phttp->request.headers, str, H_APPEND))
+      || http_request_header_append (&phttp->request, str, H_APPEND))
     {
       stringbuf_free (&sb);
       return -1;
@@ -4439,7 +4511,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
   stringbuf_printf (&sb, "X-Forwarded-Proto: %s",
 		    phttp->ssl == NULL ? "http" : "https");
   if ((str = stringbuf_finish (&sb)) == NULL
-      || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+      || http_request_header_append (&phttp->request, str, H_REPLACE))
     {
       stringbuf_free (&sb);
       return -1;
@@ -4463,7 +4535,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
   stringbuf_reset (&sb);
   stringbuf_printf (&sb, "X-Forwarded-Port: %d", port);
   if ((str = stringbuf_finish (&sb)) == NULL
-      || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+      || http_request_header_append (&phttp->request, str, H_REPLACE))
     {
       stringbuf_free (&sb);
       return -1;
@@ -4486,7 +4558,7 @@ set_header_from_bio (BIO *bio, struct http_request *req,
       stringbuf_reset (sb);
       stringbuf_printf (sb, "%s: %s", hdr, c_trimlws (buf, NULL));
       if ((str = stringbuf_finish (sb)) == NULL
-	  || http_header_list_append (&req->headers, str, H_REPLACE))
+	  || http_request_header_append (req, str, H_REPLACE))
 	{
 	  return -1;
 	}
@@ -4516,7 +4588,7 @@ add_ssl_headers (POUND_HTTP *phttp)
 			SSL_get_version (phttp->ssl),
 			buf);
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+	  || http_request_header_append (&phttp->request, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -4564,7 +4636,7 @@ add_ssl_headers (POUND_HTTP *phttp)
       stringbuf_printf (&sb, "X-SSL-serial: %ld",
 			ASN1_INTEGER_get (X509_get_serialNumber (phttp->x509)));
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+	  || http_request_header_append (&phttp->request, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -4582,7 +4654,7 @@ add_ssl_headers (POUND_HTTP *phttp)
 	  i++;
 	}
       if ((str = stringbuf_finish (&sb)) == NULL
-	  || http_header_list_append (&phttp->request.headers, str, H_REPLACE))
+	  || http_request_header_append (&phttp->request, str, H_REPLACE))
 	{
 	  res = -1;
 	  goto end;
@@ -4599,11 +4671,11 @@ add_ssl_headers (POUND_HTTP *phttp)
 
 static int rewrite_rule_check (REWRITE_RULE *rule,
 			       struct http_request *request,
-			       POUND_HTTP *phttp, int what);
+			       POUND_HTTP *phttp, int what, int trace);
 
 static int
 rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
-		  POUND_HTTP *phttp, int what)
+		  POUND_HTTP *phttp, int what, int trace)
 {
   int res = 0;
   REWRITE_OP *op;
@@ -4625,17 +4697,17 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
       switch (op->type)
 	{
 	case REWRITE_REWRITE_RULE:
-	  res = rewrite_rule_check (op->v.rule, request, phttp, what);
+	  res = rewrite_rule_check (op->v.rule, request, phttp, what, trace);
 	  break;
 
 	case REWRITE_HDR_DEL:
-	  http_header_list_filter (&request->headers, op->v.hdrdel);
+	  http_request_header_filter (request, op->v.hdrdel);
 	  break;
 
 	case REWRITE_HDR_SET:
 	  if ((s = expand_string (op->v.str, phttp, request, "Header")) != NULL)
 	    {
-	      res = http_header_list_append (&request->headers, s, H_REPLACE);
+	      res = http_request_header_append (request, s, H_REPLACE);
 	      free (s);
 	    }
 	  else
@@ -4687,15 +4759,25 @@ rewrite_op_apply (REWRITE_OP_HEAD *head, struct http_request *request,
 
 static int
 rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
-		    POUND_HTTP *phttp, int what)
+		    POUND_HTTP *phttp, int what, int trace)
 {
   int res = 0;
 
   do
     {
-      if (match_cond (&rule->cond, phttp, request) == 1)
+      if (trace)
 	{
-	  res = rewrite_op_apply (&rule->ophead, request, phttp, what);
+	  tracemsg (&rule->locus, "applying rewrites");
+	  dumpreq (&phttp->request, what);
+	}
+      if (match_cond (&rule->cond, phttp, request, trace) == 1)
+	{
+	  res = rewrite_op_apply (&rule->ophead, request, phttp, what, trace);
+	  if (trace && phttp->request.changed)
+	    {
+	      tracemsg (&rule->locus, "after rewrite");
+	      dumpreq (&phttp->request, what);
+	    }
 	  break;
 	}
     }
@@ -4706,14 +4788,15 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 int
 rewrite_apply_rules (POUND_HTTP *phttp, int what,
 		     REWRITE_RULE_HEAD *rewrite_rules,
-		     struct http_request *request)
+		     struct http_request *request,
+		     int trace)
 {
   int res = 0;
   REWRITE_RULE *rule;
 
   SLIST_FOREACH (rule, rewrite_rules, next)
     {
-      if ((res = rewrite_rule_check (rule, request, phttp, what)) != 0)
+      if ((res = rewrite_rule_check (rule, request, phttp, what, trace)) != 0)
 	break;
     }
   if (what == REWRITE_EARLY)
@@ -4735,8 +4818,9 @@ rewrite_apply (POUND_HTTP *phttp, struct http_request *request, int what)
       rwhead[1] = t;
     }
 
-  return rewrite_apply_rules (phttp, what, rwhead[0], request) ||
-    rewrite_apply_rules (phttp, what, rwhead[1], request);
+  return rewrite_apply_rules (phttp, what, rwhead[0], request,
+			      phttp->svc->trace) ||
+    rewrite_apply_rules (phttp, what, rwhead[1], request, phttp->svc->trace);
 }
 
 /*
@@ -5562,7 +5646,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	  stringbuf_free (&sb);
 	  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 	}
-      rc = http_header_list_append (&phttp->request.headers, hf, H_REPLACE);
+      rc = http_request_header_append (&phttp->request, hf, H_REPLACE);
       stringbuf_free (&sb);
       if (rc)
 	return HTTP_STATUS_INTERNAL_SERVER_ERROR;
@@ -5852,7 +5936,7 @@ backend_response (POUND_HTTP *phttp)
 		  stringbuf_free (&sb);
 		  return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 		}
-	      http_header_list_append (&phttp->response.headers, p, H_REPLACE);
+	      http_request_header_append (&phttp->response, p, H_REPLACE);
 	      stringbuf_free (&sb);
 	    }
 
@@ -6383,6 +6467,14 @@ http_process_request (POUND_HTTP *phttp)
       return res;
     }
 
+  if (pound_http_trace (phttp))
+    {
+      char caddr[MAX_ADDR_BUFSIZE];
+      tracemsg (NULL, "Request from: %s",
+		addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
+      dumpreq (&phttp->request,	REWRITE_REQUEST);
+    }
+
   phttp->no_cont = phttp->request.method == METH_HEAD;
   if (phttp->request.method == METH_GET)
     phttp->ws_state |= WSS_REQ_GET;
@@ -6583,7 +6675,8 @@ http_process_request (POUND_HTTP *phttp)
 
   if (rewrite_apply_rules (phttp, REWRITE_EARLY,
 			   &phttp->lstn->rewrite[REWRITE_EARLY],
-			   &phttp->request))
+			   &phttp->request,
+			   pound_http_trace (phttp)))
     return HTTP_STATUS_INTERNAL_SERVER_ERROR;
 
   /*
