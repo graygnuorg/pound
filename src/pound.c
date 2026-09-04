@@ -445,7 +445,6 @@ pound_http_dequeue (void)
 
   if (inqueue.len == inqueue.cap - 1)
     {
-      logmsg (LOG_NOTICE, "incoming connections unblocked");
       dispatch_command (DSP_ACCEPT);
     }
 
@@ -650,7 +649,15 @@ thr_dispatch (void *unused)
 		case DSP_ACCEPT:
 		case DSP_BLOCK:
 		  if (c != state)
-		    TOGGLE_FD ();
+		    {
+		      static char *action[] = {
+			[DSP_ACCEPT] = "unblocked",
+			[DSP_BLOCK]  = "blocked"
+		      };
+		      logmsg (LOG_NOTICE, "incoming connections %s",
+			      action[(int)c]);
+		      TOGGLE_FD ();
+		    }
 		  break;
 
 		case DSP_STOP:
