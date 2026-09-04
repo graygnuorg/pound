@@ -93,6 +93,7 @@ static pthread_mutex_t log_mutex = PTHREAD_MUTEX_INITIALIZER;
  */
 void
 vlogmsg (const int priority, unsigned long tid,
+	 char const *pfx,
 	 struct locus_range const *loc,
 	 const char *fmt, va_list ap)
 {
@@ -102,6 +103,11 @@ vlogmsg (const int priority, unsigned long tid,
   xstringbuf_init (&sb);
   if (tid > 0)
     stringbuf_printf (&sb, "(%"PRItid") ", tid);
+  if (pfx)
+    {
+      stringbuf_add_string (&sb, pfx);
+      stringbuf_add_string (&sb, ": ");
+    }
 
   if (loc && loc->beg.filename)
     {
@@ -136,16 +142,16 @@ logmsg (const int priority, const char *fmt, ...)
 {
   va_list ap;
   va_start (ap, fmt);
-  vlogmsg (priority, 0, NULL, fmt, ap);
+  vlogmsg (priority, 0, NULL, NULL, fmt, ap);
   va_end (ap);
 }
 
 void
-tracemsg (struct locus_range const *loc, const char *fmt, ...)
+tracemsg (struct locus_range const *loc, const char *msg, const char *fmt, ...)
 {
   va_list ap;
   va_start (ap, fmt);
-  vlogmsg (LOG_DEBUG, POUND_TID (), loc, fmt, ap);
+  vlogmsg (LOG_DEBUG, POUND_TID (), msg, loc, fmt, ap);
   va_end (ap);
 }
 

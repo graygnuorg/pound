@@ -534,11 +534,11 @@ dumpreq (struct http_request *req, int what)
 
   if (req->changed)
     {
-      tracemsg (NULL, "%s: %s", kind[what], req->request);
-      tracemsg (NULL, "Headers:");
+      tracemsg (NULL, NULL, "%s: %s", kind[what], req->request);
+      tracemsg (NULL, NULL, "Headers:");
       DLIST_FOREACH (hdr, &req->headers, link)
 	{
-	  tracemsg (NULL, "%s", hdr->header);
+	  tracemsg (NULL, NULL, "%s", hdr->header);
 	}
       req->changed = 0;
     }
@@ -553,6 +553,7 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 {
   int rc = 0;
   SERVICE *svc;
+  char const *msg = "service selection";
 
   SLIST_FOREACH (svc, head, next)
     {
@@ -570,7 +571,7 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 
       if (svc->trace)
 	{
-	  tracemsg (&svc->locus, "considering service");
+	  tracemsg (&svc->locus, msg, "considering service");
 	  dumpreq (&phttp->request, REWRITE_REQUEST);
 	}
 
@@ -584,7 +585,8 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 	  break;
 	}
 
-      rc = match_cond (&svc->cond, phttp, &phttp->request, svc->trace);
+      rc = match_cond (&svc->cond, phttp, &phttp->request,
+		       svc->trace ? msg : NULL);
       if (rc > 0)
 	{
 	  /* Condition matches. */
@@ -592,7 +594,7 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 	  if (svc->fall_through)
 	    {
 	      if (svc->trace)
-		tracemsg (&svc->locus, "fall-through service matched");
+		tracemsg (&svc->locus, msg, "fall-through service matched");
 	      /*
 	       * For FallThrough conditions, apply any rewrites and
 	       * continue, unless an error occurred.
@@ -609,7 +611,7 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 	  else
 	    {
 	      if (svc->trace)
-		tracemsg (&svc->locus, "service selected");
+		tracemsg (&svc->locus, msg, "service selected");
 	      break;
 	    }
 	}

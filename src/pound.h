@@ -1303,8 +1303,9 @@ void logmsg (const int, const char *, ...)
   ATTR_PRINTFLIKE(2,3);
 void abend (struct locus_range const *range, char const *fmt, ...)
   ATTR_PRINTFLIKE(2,3);
-void tracemsg (struct locus_range const *loc, const char *fmt, ...)
-  ATTR_PRINTFLIKE(2,3);
+void tracemsg (struct locus_range const *loc, const char *msg,
+	       const char *fmt, ...)
+  ATTR_PRINTFLIKE(3,4);
 void dumpreq (struct http_request *req, int what);
 
 /* Translate inet/inet6 address into a string */
@@ -1530,7 +1531,7 @@ int metrics_response (POUND_HTTP *phttp, int chunked,
 		      CONTENT_LENGTH content_length);
 
 int match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
-		struct http_request *req, int trace);
+		struct http_request *req, char const *trace);
 
 struct http_header *http_header_list_locate_name (HTTP_HEADER_LIST *head, char const *name, size_t len);
 struct http_header *http_header_list_next (struct http_header *hdr);

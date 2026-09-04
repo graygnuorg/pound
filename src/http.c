@@ -4207,7 +4207,7 @@ match_named_headers (HTTP_HEADER_LIST *headers, struct string_match const *pat,
  */
 int
 match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
-	    struct http_request *req, int trace)
+	    struct http_request *req, char const *traceid)
 {
   int res = 1;
   int r;
@@ -4230,11 +4230,11 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  res = r == 0;
 	if (tmp)
 	  freeaddrinfo (tmp);
-	if (trace)
+	if (traceid)
 	  {
 	    char caddr[MAX_ADDR_BUFSIZE];
 	    addr2str (caddr, sizeof (caddr), addr, 1);
-	    tracemsg (&cond->locus, "address %s: %d", caddr, res);
+	    tracemsg (&cond->locus, traceid, "address %s: %d", caddr, res);
 	  }
       }
       break;
@@ -4244,8 +4244,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (trace)
-	tracemsg (&cond->locus, "method %s: %d",
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "method %s: %d",
 		  res == -1 ? "(null)" : method_name (req->method), res);
       break;
 
@@ -4254,8 +4254,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (trace)
-	tracemsg (&cond->locus, "url %s: %d",
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "url %s: %d",
 		  res == -1 ? "(null)" : str, res);
       break;
 
@@ -4264,8 +4264,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else if ((res = submatch_exec_decode (cond->re, str, cond->decode, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (trace)
-	tracemsg (&cond->locus, "path %s: %d",
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "path %s: %d",
 		  res == -1 ? "(null)" : str, res);
       break;
 
@@ -4285,8 +4285,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	  break;
 	}
-      if (trace)
-	tracemsg (&cond->locus, "query %s: %d",
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "query %s: %d",
 		  res == -1 ? "(null)" : str, res);
       break;
 
@@ -4310,8 +4310,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 						&sm)) == 1)
 	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	}
-      if (trace)
-	tracemsg (&cond->locus, "parameter %s=%s: %d",
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "parameter %s=%s: %d",
 		  string_ptr (cond->sm.string),
 		  res == -1 ? "(null)" : str, res);
       break;
@@ -4319,15 +4319,15 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
     case COND_HDR:
       if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (trace)
-	tracemsg (&cond->locus, "header: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "header: %d", res);
       break;
 
     case COND_NAMEHDR:
       if ((res = match_named_headers (&req->headers, &cond->sm, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
-      if (trace)
-	tracemsg (&cond->locus, "header: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "header: %d", res);
       break;
 
     case COND_BASIC_AUTH:
@@ -4335,8 +4335,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	res = -1;
       else
 	res = r == 0;
-      if (trace)
-	tracemsg (&cond->locus, "basic auth: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "basic auth: %d", res);
       break;
 
     case COND_STRING_MATCH:
@@ -4349,14 +4349,14 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  {
 	    if ((res = submatch_exec (cond->sm.re, subj, &sm)) == 1)
 	      submatch_queue_push (&phttp->smq, cond->tag, &sm);
-	    if (trace)
-	      tracemsg (&cond->locus, "string %s: %d", subj, res);
+	    if (traceid)
+	      tracemsg (&cond->locus, traceid, "string %s: %d", subj, res);
 	    free (subj);
 	  }
 	else
 	  {
-	    if (trace)
-	      tracemsg (&cond->locus, "string (null): %d", res);
+	    if (traceid)
+	      tracemsg (&cond->locus, traceid, "string (null): %d", res);
 	    res = -1;
 	  }
       }
@@ -4373,7 +4373,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       if (cond->boolean.op == BOOL_NOT)
 	{
 	  subcond = SLIST_FIRST (&cond->boolean.head);
-	  if ((r = match_cond (subcond, phttp, req, trace)) == -1)
+	  if ((r = match_cond (subcond, phttp, req, traceid)) == -1)
 	    res = -1;
 	  else
 	    res = ! r;
@@ -4382,22 +4382,22 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	{
 	  SLIST_FOREACH (subcond, &cond->boolean.head, next)
 	    {
-	      res = match_cond (subcond, phttp, req, trace);
+	      res = match_cond (subcond, phttp, req, traceid);
 	      if (res == -1)
 		break;
 	      if ((cond->boolean.op == BOOL_AND) ? (res == 0) : (res == 1))
 		break;
 	    }
 	}
-      if (trace)
+      if (traceid)
 	{
 	  static char *bool_str[] = { "AND", "OR", "NOT" };
 	  if (cond->locus.beg.filename)
-	    tracemsg (&cond->locus, "boolean %s: %d",
+	    tracemsg (&cond->locus, traceid, "boolean %s: %d",
 		      bool_str[cond->boolean.op],
 		      res);
 	  else
-	    tracemsg (NULL, "implicit %s: %d",
+	    tracemsg (NULL, traceid, "implicit %s: %d",
 		      bool_str[cond->boolean.op],
 		      res);
 	}
@@ -4407,14 +4407,14 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       res = (phttp->x509 != NULL &&
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
-      if (trace)
-        tracemsg (&cond->locus, "client cert: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "client cert: %d", res);
       break;
 
     case COND_LUA:
       res = pndlua_apply (pndlua_match, phttp, req, &cond->clua, NULL);
-      if (trace)
-        tracemsg (&cond->locus, "Lua: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "Lua: %d", res);
       break;
 
     case COND_TBF:
@@ -4425,8 +4425,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	if (key)
 	  {
 	    res = tbf_eval (cond->tbf.tbf, key);
-            if (trace)
-	      tracemsg (&cond->locus, "TBF %s: %d", key, res);
+	    if (traceid)
+	      tracemsg (&cond->locus, traceid, "TBF %s: %d", key, res);
 	    free (key);
 	  }
 	else
@@ -4442,14 +4442,14 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  /* Reinitialize the queue. */
 	  submatch_queue_init (&phttp->smq);
 	  /* Evaluate the condition and cache the result. */
-	  res = match_cond (detached_cond (cond->ref), phttp, req, trace);
+	  res = match_cond (detached_cond (cond->ref), phttp, req, traceid);
 	  http_request_eval_cache (req, cond->ref, res);
 	  /* Restore submatch queue. */
 	  submatch_queue_free (&phttp->smq);
 	  phttp->smq = smq;
 	}
-      if (trace)
-        tracemsg (&cond->locus, "detached cond: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "detached cond: %d", res);
       break;
 
     case COND_HOST:
@@ -4457,8 +4457,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 
     case COND_BEACON:
       res = pound_beacon_get (cond->beacon);
-      if (trace)
-        tracemsg (&cond->locus, "beacon: %d", res);
+      if (traceid)
+	tracemsg (&cond->locus, traceid, "beacon: %d", res);
       break;
     }
   watcher_unlock (cond->watcher);
@@ -4768,20 +4768,26 @@ rewrite_rule_check (REWRITE_RULE *rule, struct http_request *request,
 		    POUND_HTTP *phttp, int what, int trace)
 {
   int res = 0;
+  static char *tracestr[] = {
+    [REWRITE_REQUEST] = "rewriting request",
+    [REWRITE_RESPONSE] = "rewriting response",
+    [REWRITE_EARLY] = "early request rewrite"
+  };
 
   do
     {
       if (trace)
 	{
-	  tracemsg (&rule->locus, "applying rewrites");
+	  tracemsg (&rule->locus, NULL, "applying rewrites");
 	  dumpreq (&phttp->request, what);
 	}
-      if (match_cond (&rule->cond, phttp, request, trace) == 1)
+      if (match_cond (&rule->cond, phttp, request,
+		      trace ? tracestr[what] : NULL) == 1)
 	{
 	  res = rewrite_op_apply (&rule->ophead, request, phttp, what, trace);
 	  if (trace && phttp->request.changed)
 	    {
-	      tracemsg (&rule->locus, "after rewrite");
+	      tracemsg (&rule->locus, NULL, "after rewrite");
 	      dumpreq (&phttp->request, what);
 	    }
 	  break;
@@ -6476,7 +6482,7 @@ http_process_request (POUND_HTTP *phttp)
   if (pound_http_trace (phttp))
     {
       char caddr[MAX_ADDR_BUFSIZE];
-      tracemsg (NULL, "Request from: %s",
+      tracemsg (NULL, NULL, "Request from: %s",
 		addr2str (caddr, sizeof (caddr), &phttp->from_host, 1));
       dumpreq (&phttp->request,	REWRITE_REQUEST);
     }
