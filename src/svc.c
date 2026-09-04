@@ -2492,6 +2492,7 @@ locate_backend (SERVICE *svc, IDENT id)
 
 enum object_type
   {
+    OBJ_TOP,
     OBJ_LISTENER,
     OBJ_SERVICE,
     OBJ_BACKEND,
@@ -2542,10 +2543,10 @@ ctl_listener (OBJHANDLER func, void *data, BIO *c, char const *url)
   size_t len = strcspn (url, "?");
 
   if (len == 0)
-    obj.lstn = NULL;
+    obj.type = OBJ_TOP;
   else if (url[0] == '/' && len == 1)
     {
-      obj.lstn = NULL;
+      obj.type = OBJ_TOP;
       url++;
     }
   else if (url[0] == '/' && url[1] == '-' && (len == 2 || url[2] == '/'))
@@ -2590,9 +2591,13 @@ list_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 
     case OBJ_LISTENER:
       if (obj->lstn)
-	val = listener_serialize (obj->lstn);
-      else
-	val = pound_serialize ();
+	{
+	  val = listener_serialize (obj->lstn);
+	  break;
+	}
+      /* fall through */
+    case OBJ_TOP:
+      val = pound_serialize ();
       break;
     }
 
@@ -2622,6 +2627,8 @@ static int
 service_has_control (SERVICE *svc)
 {
   BALANCER *balancer;
+  if (!svc)
+    return 1;
   DLIST_FOREACH (balancer, &svc->balancers, link)
     {
       BACKEND *be;
@@ -2638,6 +2645,8 @@ static int
 listener_has_control (LISTENER *lstn)
 {
   SERVICE *svc;
+  if (!lstn)
+    return 1;
   SLIST_FOREACH (svc, &lstn->services, next)
     if (service_has_control (svc))
       return 1;
@@ -2673,6 +2682,9 @@ disable_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 	return HTTP_STATUS_BAD_REQUEST;
       obj->lstn->disabled = *dis;
       break;
+
+    case OBJ_TOP:
+      return HTTP_STATUS_BAD_REQUEST;
     }
 
   if ((val = json_new_bool (1)) == NULL)
@@ -2735,6 +2747,7 @@ session_remove_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     {
     case OBJ_BACKEND:
     case OBJ_LISTENER:
+    case OBJ_TOP:
       return HTTP_STATUS_BAD_REQUEST;
 
     case OBJ_SERVICE:
@@ -2778,6 +2791,7 @@ session_add_handler (BIO *c, OBJECT *obj, char const *url, void *data)
     {
     case OBJ_LISTENER:
     case OBJ_SERVICE:
+    case OBJ_TOP:
       return HTTP_STATUS_BAD_REQUEST;
 
     case OBJ_BACKEND:
@@ -3110,6 +3124,7 @@ struct traceinfo
   int svcn;
   SERVICE *svc;
   struct json_value *arr;
+  int *enable;
 };
 
 struct json_value *
@@ -3187,7 +3202,7 @@ trace_services_serialize (SERVICE_HEAD *head)
 	  SERVICE *svc = SLIST_FIRST (head);
 	  if (svc)
 	    {
-	      struct traceinfo ti;
+	      struct traceinfo ti = { .enable = NULL };
 
 	      ti.lst = svc->lstn;
 	      if (svc->lstn)
@@ -3212,10 +3227,14 @@ trace_services_serialize (SERVICE_HEAD *head)
   return val;
 }
 
+static void service_set_trace (SERVICE *svc, int trace);
+
 static int
 serialize_next (SERVICE *svc, void *data)
 {
   struct traceinfo *tp = data;
+  if (tp->enable)
+    service_set_trace (svc, *tp->enable);
   tp->svc = svc;
   if (tp->lst != svc->lstn)
     {
@@ -3231,13 +3250,14 @@ serialize_next (SERVICE *svc, void *data)
 }
 
 struct json_value *
-trace_all_serialize (void)
+trace_all_serialize (int *enable)
 {
   struct traceinfo ti = {
     .lstn = -1,
     .lst = NULL,
     .svcn = 0,
     .svc = NULL,
+    .enable = enable
   };
   struct json_value *val;
 
@@ -3311,6 +3331,11 @@ trace_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 	  }
 	val = trace_services_serialize (head);
       }
+      break;
+
+    case OBJ_TOP:
+      val = trace_all_serialize (b);
+      break;
     }
 
   if (val)
@@ -3326,20 +3351,6 @@ trace_handler (BIO *c, OBJECT *obj, char const *url, void *data)
 static int
 control_get_trace (BIO *c, char const *url)
 {
-  if (*url == 0 || (*url == '/' && (url[1] == 0 || url[1] == '?'))
-      || *url == '?')
-    {
-      int rc;
-      struct json_value *val = trace_all_serialize ();
-      if (val)
-	{
-	  rc = send_json_reply (c, val, url);
-	  json_value_free (val);
-	}
-      else
-	rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-      return rc;
-    }
   return ctl_listener (trace_handler, NULL, c, url);
 }
 

@@ -4389,11 +4389,17 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 		break;
 	    }
 	}
-      if (trace && cond->locus.beg.filename)
+      if (trace)
 	{
 	  static char *bool_str[] = { "AND", "OR", "NOT" };
-	  tracemsg (&cond->locus, "boolean %s: %d", bool_str[cond->boolean.op],
-		    res);
+	  if (cond->locus.beg.filename)
+	    tracemsg (&cond->locus, "boolean %s: %d",
+		      bool_str[cond->boolean.op],
+		      res);
+	  else
+	    tracemsg (NULL, "implicit %s: %d",
+		      bool_str[cond->boolean.op],
+		      res);
 	}
       break;
 
