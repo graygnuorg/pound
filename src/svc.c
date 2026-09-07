@@ -3091,7 +3091,7 @@ control_unset_beacon (BIO *c, char const *url)
 }
 
 static int
-listener_no (LISTENER *lst)
+listener_index (LISTENER *lst)
 {
   LISTENER *lp;
   int i = 0;
@@ -3105,7 +3105,7 @@ listener_no (LISTENER *lst)
 }
 
 static int
-service_no (SERVICE *svc)
+service_index (SERVICE *svc)
 {
   SERVICE_HEAD *head = svc->lstn ? &svc->lstn->services : &services;
   SERVICE *sp;
@@ -3121,9 +3121,9 @@ service_no (SERVICE *svc)
 
 struct traceinfo
 {
-  int lstn;
+  int lsti;
   LISTENER *lst;
-  int svcn;
+  int svci;
   SERVICE *svc;
   struct json_value *arr;
   int *enable;
@@ -3141,8 +3141,8 @@ traceinfo_serialize (struct traceinfo *st)
 
       if (st->lst)
 	{
-	  err |= json_object_set (obj, "listener_no",
-				  json_new_integer (st->lstn));
+	  err |= json_object_set (obj, "listener_index",
+				  json_new_integer (st->lsti));
 	  if (st->lst->name)
 	    err |= json_object_set (obj, "listener_name",
 				    json_new_string (st->lst->name));
@@ -3150,8 +3150,8 @@ traceinfo_serialize (struct traceinfo *st)
 
       if (err == 0)
 	{
-	  err |= json_object_set (obj, "service_no",
-				  json_new_integer (st->svcn));
+	  err |= json_object_set (obj, "service_index",
+				  json_new_integer (st->svci));
 	  if (st->svc->name)
 	    err |= json_object_set (obj, "service_name",
 				    json_new_string (st->svc->name));
@@ -3174,11 +3174,11 @@ trace_service_serialize (SERVICE *svc)
   struct json_value *val;
   struct traceinfo ti = {
     .svc = svc,
-    .svcn = service_no (svc),
+    .svci = service_index (svc),
     .lst = svc->lstn,
   };
   if (svc->lstn)
-    ti.lstn = listener_no (svc->lstn);
+    ti.lsti = listener_index (svc->lstn);
 
   val = new_typed_object ("trace");
   if (val && json_object_set (val, "value", traceinfo_serialize (&ti)))
@@ -3208,15 +3208,15 @@ trace_services_serialize (SERVICE_HEAD *head)
 
 	      ti.lst = svc->lstn;
 	      if (svc->lstn)
-		ti.lstn = listener_no (svc->lstn);
+		ti.lsti = listener_index (svc->lstn);
 
-	      ti.svcn = 0;
+	      ti.svci = 0;
 	      SLIST_FOREACH (ti.svc, head, next)
 		{
 		  err |= json_array_append (arr, traceinfo_serialize (&ti));
 		  if (err)
 		    break;
-		  ti.svcn++;
+		  ti.svci++;
 		}
 	    }
 	}
@@ -3242,12 +3242,12 @@ serialize_next (SERVICE *svc, void *data)
     {
       tp->lst = svc->lstn;
       if (svc->lstn)
-	tp->lstn = listener_no (svc->lstn);
-      tp->svcn = 0;
+	tp->lsti = listener_index (svc->lstn);
+      tp->svci = 0;
     }
   if (json_array_append (tp->arr, traceinfo_serialize (tp)))
     return -1;
-  tp->svcn++;
+  tp->svci++;
   return 0;
 }
 
@@ -3255,9 +3255,9 @@ struct json_value *
 trace_all_serialize (int *enable)
 {
   struct traceinfo ti = {
-    .lstn = -1,
+    .lsti = -1,
     .lst = NULL,
-    .svcn = 0,
+    .svci = 0,
     .svc = NULL,
     .enable = enable
   };

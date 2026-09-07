@@ -58,34 +58,34 @@ Content-Type: application/json
   "kind": "trace",
   "values": \[
     \{
-      "listener_no": 0,
-      "service_no": 0,
+      "listener_index": 0,
+      "service_index": 0,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 0,
       "service_name": "ctl",
-      "service_no": 0,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 1,
       "service_name": "a",
-      "service_no": 1,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 2,
       "service_name": "b",
-      "service_no": 2,
       "trace": false
     \},
     \{
+      "service_index": 0,
       "service_name": "c",
-      "service_no": 0,
       "trace": false
     \}
   \]
@@ -103,24 +103,24 @@ Content-Type: application/json
   "kind": "trace",
   "values": \[
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 0,
       "service_name": "ctl",
-      "service_no": 0,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 1,
       "service_name": "a",
-      "service_no": 1,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 2,
       "service_name": "b",
-      "service_no": 2,
       "trace": false
     \}
   \]
@@ -138,8 +138,8 @@ Content-Type: application/json
   "kind": "trace",
   "values": \[
     \{
+      "service_index": 0,
       "service_name": "c",
-      "service_no": 0,
       "trace": false
     \}
   \]
@@ -156,8 +156,8 @@ Content-Type: application/json
 \{
   "kind": "trace",
   "value": \{
+    "service_index": 0,
     "service_name": "c",
-    "service_no": 0,
     "trace": false
   \}
 \}
@@ -173,10 +173,10 @@ Content-Type: application/json
 \{
   "kind": "trace",
   "value": \{
+    "listener_index": 1,
     "listener_name": "L0",
-    "listener_no": 1,
+    "service_index": 2,
     "service_name": "b",
-    "service_no": 2,
     "trace": false
   \}
 \}
@@ -192,10 +192,10 @@ Content-Type: application/json
 \{
   "kind": "trace",
   "value": \{
+    "listener_index": 1,
     "listener_name": "L0",
-    "listener_no": 1,
+    "service_index": 2,
     "service_name": "b",
-    "service_no": 2,
     "trace": true
   \}
 \}
@@ -211,10 +211,10 @@ Content-Type: application/json
 \{
   "kind": "trace",
   "value": \{
+    "listener_index": 1,
     "listener_name": "L0",
-    "listener_no": 1,
+    "service_index": 2,
     "service_name": "b",
-    "service_no": 2,
     "trace": false
   \}
 \}
@@ -231,24 +231,24 @@ Content-Type: application/json
   "kind": "trace",
   "values": \[
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 0,
       "service_name": "ctl",
-      "service_no": 0,
       "trace": true
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 1,
       "service_name": "a",
-      "service_no": 1,
       "trace": true
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 2,
       "service_name": "b",
-      "service_no": 2,
       "trace": true
     \}
   \]
@@ -266,24 +266,24 @@ Content-Type: application/json
   "kind": "trace",
   "values": \[
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 0,
       "service_name": "ctl",
-      "service_no": 0,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 1,
       "service_name": "a",
-      "service_no": 1,
       "trace": false
     \},
     \{
+      "listener_index": 1,
       "listener_name": "L0",
-      "listener_no": 1,
+      "service_index": 2,
       "service_name": "b",
-      "service_no": 2,
       "trace": false
     \}
   \]

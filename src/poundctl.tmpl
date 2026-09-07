@@ -79,7 +79,29 @@ Queue: {{ if exists . "queue" }}{{with .queue}}
 {{define "default.trace" -}}
 {{if exists . "value" -}}
 {{block "default.print_trace" .value -}}
-/{{if exists . "listener_no"}}{{.listener_no}}{{else}}-{{end}}/{{.service_no}} {{.trace}}
+{{if exists . "listener_index"}}
+ {{- printf "/%d/%d" .listener_index .service_index | printf "%-24s" }}
+{{- else}}
+ {{- printf "/-/%d" .service_index | printf "%-24s" }}
+{{- end}}
+{{- if or (exists . "listener_name") (exists . "service_name")}}
+ {{- if exists . "listener_name"}}
+   {{- if exists . "service_name"}}
+     {{- printf "/%s/%s" .listener_name .service_name | printf "%-24s" }}
+   {{- else}}
+     {{- printf "/%s/%d" .listener_name .service_index | printf "%-24s" }}
+   {{- end}}
+ {{- else if not exists . "listener_index"}}
+   {{- printf "/-/%s" .service_name | printf "%-24s" }}
+ {{- else}}
+   {{- if exists . "listener_index"}}
+     {{- printf "/%d/%s" .listener_index .service_name | printf "%-24s" }}
+   {{- end}}
+ {{- end}}
+{{- else}}
+ {{- printf "%-24s" ""}}
+{{- end}}
+{{- printf "%-10v" .trace}}
 {{- end}}
 {{else if exists . "values" -}}
 {{range $n,$svc = .values -}}
@@ -92,9 +114,14 @@ Queue: {{ if exists . "queue" }}{{with .queue}}
   {{if exists . "value" -}}
   {{block "xml.print_trace" .value -}}
   <service>
-    <location>
-      /{{if exists . "listener_no"}}{{.listener_no}}{{else}}-{{end}}/{{.service_no}}
-    </location>
+    <idx>
+      /{{if exists . "listener_index"}}{{.listener_index}}{{else}}-{{end}}/{{.service_index}}
+    </idx>
+    <sym>
+      /{{if exists . "listener_name"}}{{.listener_name}}
+	{{- else if exists . "listener_index"}}{{.listener_index}}{{else}}-{{end}}/
+	{{- if exists . "service_name"}}{{.service_name}}{{else}}{{.service_index}}{{end}}
+    </sym>
     <trace>
       {{.trace}}
     </trace>
