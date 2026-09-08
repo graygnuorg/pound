@@ -80,26 +80,26 @@ Queue: {{ if exists . "queue" }}{{with .queue}}
 {{if exists . "value" -}}
 {{block "default.print_trace" .value -}}
 {{if exists . "listener_index"}}
- {{- printf "/%d/%d" .listener_index .service_index | printf "%-24s" }}
+ {{- printf "/%d/%d" .listener_index .service_index | printf "%-10s" }}
 {{- else}}
- {{- printf "/-/%d" .service_index | printf "%-24s" }}
+ {{- printf "/-/%d" .service_index | printf "%-10s" }}
 {{- end}}
 {{- if or (exists . "listener_name") (exists . "service_name")}}
  {{- if exists . "listener_name"}}
    {{- if exists . "service_name"}}
-     {{- printf "/%s/%s" .listener_name .service_name | printf "%-24s" }}
+     {{- printf "/%s/%s" .listener_name .service_name | printf "%-48s" }}
    {{- else}}
-     {{- printf "/%s/%d" .listener_name .service_index | printf "%-24s" }}
+     {{- printf "/%s/%d" .listener_name .service_index | printf "%-48s" }}
    {{- end}}
  {{- else if not exists . "listener_index"}}
-   {{- printf "/-/%s" .service_name | printf "%-24s" }}
+   {{- printf "/-/%s" .service_name | printf "%-48s" }}
  {{- else}}
    {{- if exists . "listener_index"}}
-     {{- printf "/%d/%s" .listener_index .service_name | printf "%-24s" }}
+     {{- printf "/%d/%s" .listener_index .service_name | printf "%-48s" }}
    {{- end}}
  {{- end}}
 {{- else}}
- {{- printf "%-24s" ""}}
+ {{- printf "%-48s" ""}}
 {{- end}}
 {{- printf "%-10v" .trace}}
 {{- end}}
