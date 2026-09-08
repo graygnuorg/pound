@@ -116,6 +116,7 @@ Simple Proxy
 * Request modifications::
 * Conditional branches::
 * Modifying responses::
+* Tracing::
 * Authentication::
 * Rate-limiting::
 * Redirects::
@@ -237,6 +238,15 @@ poundctl
 * poundctl options::
 * poundctl template::
 
+@command{poundctl} commands
+
+* poundctl list::    Show information about running instance.
+* poundctl enable::  Enabling and disabling @command{pound} entities.
+* poundctl session:: Session management.
+* poundctl beacon::  Beacon management.
+* poundctl log::     Inspect and change log level.
+* poundctl trace::   Manage service selection tracing.
+
 Configuring @command{poundctl}
 
 * multiple servers::
@@ -261,6 +271,7 @@ Input object
 * Service object::
 * Backend object::
 * Beacon object::
+* Trace object::
 
 Example Lua modules
 
@@ -648,6 +659,7 @@ apply to all requests.
 * Request modifications::
 * Conditional branches::
 * Modifying responses::
+* Tracing::
 * Authentication::
 * Rate-limiting::
 * Redirects::
@@ -1421,7 +1433,7 @@ snippet sets different paths depending on the file type and URL used:
 @example
 Service
     Rewrite
-        Header "Content-Type:[[:space:]]+image/.*"
+        Header "Content-Type:[[:space:]]*image/.*"
         SetPath "/images%[path]"
     Else
         Match AND
@@ -1471,6 +1483,200 @@ End
 This will insert an additional @code{X-Text-Type} header into the
 response.  It will contain the subtype value from the
 @code{Content-Type} header of the original response.
+
+@node Tracing
+@section Tracing
+@cindex tracing conditional statement evaluation
+@cindex trace
+ Conditional statements discussed in previous sections can be combined
+in many ways to form complex conditions.  When deploying a
+configuration, it is often necessary to debug such conditions to see
+why a particular service is not selected, when apparently it should,
+or why a request is not rewritten in a way it was supposed.  To make
+it possible, each service is associated with a boolean value, called
+@code{trace}.  When this value is set to @code{true}, evaluation of
+each conditional statement (both when selecting the service and when
+rewriting requests and responses), is reflected in pound log, using log
+facility @samp{debug}.  The incoming request (as well as resulting
+request, in case of rewriting) is logged as well.
+
+@cindex path notation, for services
+@cindex service path notation
+@anchor{service path notation}
+ Each service is created with @code{trace} flag disabled (set to
+@code{false}).  Tracing can be enabled, disabled or inspected at
+runtime, using @command{pound} control program, @command{poundctl}
+(@pxref{poundctl}).  To address a service in @command{poundctl}
+command line, a @dfn{path notation} is used.  It consists of the
+number of the listener, followed by the number of the service in this
+listener, delimited by slashes.  Both numbers are 0-based.  For
+example, to address service 3 in listener 1, one would write
+@samp{/1/3}.  For globally defined services, use @samp{-} as listener
+index, e.g. @samp{/-/0}.  Instead of numeric indices, symbolic names
+of the corresponding objects can be used.  Both notations can be
+intermixed, should the need be.  For example, given the following
+configuration file:
+
+@example
+@group
+ListenHTTP "plain"
+  Service "first"
+    Host "www.foo.com"
+    Path -beg "/media/"
+    ...
+  End
+  ...
+End
+@end group
+@end example
+
+@noindent
+the service named @samp{first} can be addressed as @samp{/0/0}, or
+@samp{/plain/first}, or @samp{/0/first}, etc.
+
+ To enable tracing for this service, one would do:
+
+@example
+poundctl trace -s /0/0
+@end example
+
+@noindent
+(@option{-s} stands for @samp{set}).  To disable it, use @option{-d}
+(@samp{delete}):
+
+@example
+poundctl trace -d /0/0
+@end example
+
+Finally, to inspect the state of the @code{trace} flag, use the
+command without options:
+
+@example
+poundctl trace /0/0
+@end example
+
+Each of these commands displays the actual tracing state, using the
+three-column format: numeric path to the service, symbolic path to it
+(if symbolic names are used in the declaration), and the @code{trace}
+value.  E.g.:
+
+@example
+/0/0                    /plain/first            true
+@end example
+
+@xref{poundctl trace}, for a detailed discussion of this interface.
+
+The example below illustrates the output produced during service
+selection after the tracing for the example service above have been
+enabled:
+
+@example
+(7f2d5534f640) Request from: 192.0.2.11
+(7f2d5534f640) Request: GET /media/id.jpg HTTP/1.1
+(7f2d5534f640) Headers:
+(7f2d5534f640) Host:foo.com
+(7f2d5534f640) User-Agent: Mozilla/5.0
+(7f2d5534f640) Accept: */*
+(7f2d5534f640) service selection: pound.cfg:29.9-36.11:considering service
+(7f2d5534f640) service selection: pound.cfg:30.17-26: header: 1
+(7f2d5534f640) service selection: pound.cfg:31.17-25: path /media: 1
+(7f2d5534f640) service selection: implicit AND: 1
+(7f2d5534f640) service selection: pound.cfg:29.9-36.11: service selected
+@end example
+
+The hex string in parentheses is the ID of the worker thread.  It
+helps keep track of the related log lines in case of high load.  Lines
+1 to 6 list the incoming request.  The rest of lines (prefixed with
+@samp{service selection}) describe the selection process.  Each
+conditional statement is listed as its short name (with an argument,
+if applicable), followed by the result of its evaluation, as boolean
+value (@samp{0} or @samp{1}).
+
+Conditionals used in @code{rewrite} rules are traced as well.  For
+example, consider the service defined in @ref{Conditional branches}.
+For the sake of example, we reproduce it here with the line numbers
+added on the left:
+
+@example
+ 1 Service
+ 2     Rewrite
+ 3         Header "Content-Type:[[:space:]]*image/.*"
+ 4         SetPath "/images%[path]"
+ 5     Else
+ 6         Match AND
+ 7             Host "example.org"
+ 8             Path "\\.[^.]+$"
+ 9         End
+10         SetPath "/static%[path]"
+11     Else
+12         Path "\\.[^.]+$"
+13         SetPath "/assets%[path]"
+14     End
+       ...
+19 End
+@end example
+
+Now, assume the server handles the GET request to
+@indicateurl{http://example.org/foo/bar.jpg}.  It's processing is
+shown in the log fragment below.  For readability, it is split
+into several sections.
+
+First, the original request is dumped:
+
+@example
+(7fe562d4f640) Request: GET /foo/bar.jpg HTTP/1.1
+(7fe562d4f640) Headers:
+(7fe562d4f640) Host:example.org
+(7fe562d4f640) User-Agent: curl/7.81.0
+(7fe562d4f640) Accept: */*
+@end example
+
+Then goes service selection.  In our example there were no specific
+conditions, so the service is selected by default:
+
+@example
+(7fe562d4f640) service selection: implicit AND: 1
+(7fe562d4f640) service selection: pound.cfg:1.1-19.3: service selected
+@end example
+
+Now, the @code{Rewrite} section is applied to the request.  It
+consists of three alternatives.  The first alternative is processed:
+
+@example
+(7fe562d4f640) pound.cfg:3.17-4: applying rewrites
+(7fe562d4f640) rewriting request: pound.cfg:3.17-58: header: 0
+(7fe562d4f640) rewriting request: implicit AND: 0
+@end example
+
+Condition evaluates to false (@samp{0}), therefore next alternative is
+tried:
+
+@example
+(7fe562d4f640) pound.cfg:6.17-10: applying rewrites
+(7fe562d4f640) rewriting request: pound.cfg:7.25-42: header: 1
+(7fe562d4f640) rewriting request: pound.cfg:8.25-40: path /foo/bar.jpg: 1
+(7fe562d4f640) rewriting request: pound.cfg:6.17-9.19: boolean AND: 1
+(7fe562d4f640) rewriting request: implicit AND: 1
+@end example
+
+The condition succeeds and rewrites are applied.  The modified request
+is dumped afterwards:
+
+@example
+(7fe562d4f640) pound.cfg:6.17-10: after rewrite
+(7fe562d4f640) Request: GET /static/foo/bar.jpg HTTP/1.1
+(7fe562d4f640) Headers:
+(7fe562d4f640) Host:example.org
+(7fe562d4f640) User-Agent: curl/7.81.0
+(7fe562d4f640) Accept: */*
+@end example
+
+Response rewrites (@pxref{Modifying responses}) are logged in a
+similar way.
+
+If the listener contains a @code{Rewrite early} section, and at least
+one of the services defined in that listener have @code{trace} flag
+set, the @code{Rewrite early} will be traced as well.
 
 @node Authentication
 @section Authentication
@@ -8079,6 +8285,7 @@ poundctl disable /-/1
 * poundctl session:: Session management.
 * poundctl beacon::  Beacon management.
 * poundctl log::     Inspect and change log level.
+* poundctl trace::   Manage service selection tracing.
 @end menu
 
 @node poundctl list
@@ -8196,6 +8403,48 @@ In the second form, it removes the log level setting for the listener
 @var{L}, resulting in global log level being used for it.
 
 The output is as described above.
+@end deffn
+
+@node poundctl trace
+@subsection Manage tracing of conditional statements.
+
+The @command{poundctl trace} subcommand manages tracing of conditional
+statements.  This highly useful feature is described in @ref{Tracing}.
+The general syntax of @command{poundctl trace} command is:
+
+@example
+poundctl trace [-ds] @var{path}
+@end example
+
+@noindent
+where options specify the operation to apply, and @var{path}
+identifies the service to operate upon.  Service paths are described
+in detail in @ref{service path notation}.  If the path consists of two
+parts (@samp{/@var{L}/@var{S}}), the operation applies to the service
+@var{S} of the listener @var{L}.  If it contains only one part
+(@samp{/@var{L}}), the operation is applied to all services of the
+listener @var{L}.  In both cases, special notation @samp{-} in place of
+@var{L} means services in global scope.  Finally, the path @samp{/},
+or no @var{path} argument at all, applies the requested operation to
+all services defined in the configuration.
+
+@deffn {poundctl} trace @var{path}
+Shows trace state for services matching @var{path}.  Each line of
+output consists of three fields separated with whitespace: service
+path in numeric form, its path in symbolic form (if at least one of
+service or listener names is defined), and tracing state as a boolean
+value.  If @var{path} matches multiple services, each line is prefixed
+with its ordinal number in the list.
+@end deffn
+
+@deffn {poundctl} trace -s @var{path}
+Enable tracing for services matching @var{path} (@option{-s} stands
+for @samp{set}).  The output is as described above.
+@end deffn
+
+@deffn {poundctl} trace -d @var{path}
+Disable tracing for services matching @var{path} (@option{-d} stands
+for @samp{delete}).  The output is as described above.
 @end deffn
 
 @node poundctl remote
@@ -8890,6 +9139,7 @@ Structures of each object are discussed in subsections that follow.
 * Service object::
 * Backend object::
 * Beacon object::
+* Trace object::
 @end menu
 
 @node Core listing
@@ -9054,6 +9304,9 @@ Expiration time of this session, formatted as
 @samp{1970-01-01T00:00:00.000000} (with microsecond precision).
 @end table
 
+@item trace
+Tracing state for this service (@pxref{Tracing}).
+
 @item backends
 List of @dfn{backends} defined for this service.  It is be
 @code{null} for fall-through services (@pxref{FallThrough}).
@@ -9154,6 +9407,43 @@ Identifies the beacon object.  The value of this attribute is
 @item beacons
 Object describing the declared beacons.  Keys are the beacon names,
 and values are the corresponding values.
+@end table
+
+@node Trace object
+@subsubsection Trace
+Trace object is returned in response to trace management commands
+(@pxref{poundctl trace}).  It has the following attributes:
+
+@table @code
+@item kind
+Identifies the object.  The value of this attribute is
+@samp{trace}.
+
+@item value
+A single trace object.  It consists of the following attributes:
+
+@table @code
+@item listener_index
+0-based index of the listener in the configuration.  For services in
+global scope, this attribute is omitted.
+
+@item listener_name
+Name of the listener, if defined.
+
+@item service_index
+0-based index of the service in the listener (or, for global services,
+in the global scope).
+
+@item service_name
+Name of the service, if defined.
+
+@item trace
+Value of @code{trace} flag for this service (boolean).
+@end table
+
+@item values
+An array of trace objects, in case of multiple trace values.  Each
+element has the structure as described for @code{value}, above.
 @end table
 
 @node Emacs

@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUNDCTL 8 "August 31, 2026" "poundctl" "System Manager's Manual"
+.TH POUNDCTL 8 "September 8, 2026" "poundctl" "System Manager's Manual"
 .SH NAME
 poundctl \- control the pound daemon
 .SH SYNOPSIS
@@ -42,7 +42,7 @@ proxy server.
 The program communicates with the running
 .BR pound
 program via a UNIX \fIcontrol socket\fR, or remotely, via HTTP.  The
-URL of the control socket is looked up in the following locatiions,
+URL of the control socket is looked up in the following locations,
 in that order:
 .TP
 .B ~/.poundctl
@@ -171,6 +171,19 @@ Set beacon \fINAME\fR to true.
 .TP
 \fBbeacon \-d \fINAME\fR
 Set beacon \fINAME\fR to false.
+.TP
+\fBtrace\fR [\fB/\fIL\fR[\fB/\fIS\fR]]
+Show trace state for the specified service.  If \fIS\fR is omitted,
+show trace states for all services defined in listener \fIL\fR.  If
+the argument is omitted, or is \fB/\fR, show states for all services.
+.TP
+\fBtrace -s \fR[\fB/\fIL\fR[\fB/\fIS\fR]]
+Set trace state for the specified service or services.  See above for
+the interpretation of the argument.
+.TP
+\fBtrace -d \fR[\fB/\fIL\fR[\fB/\fIS\fR]]
+Clear (delete) trace state for the specified service or services.  See
+above for the interpretation of the argument.
 .SH CONFIGURATION
 Configuration is read from file
 .B .poundctl

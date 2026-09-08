@@ -1381,7 +1381,6 @@ command_trace (BIO *bio, int argc, char **argv)
   switch (argc - optind)
     {
     case 0:
-      errormsg (1, 0, "required argument missing");
       break;
 
     case 1:
@@ -1485,9 +1484,9 @@ static char *usage_text[] = {
   "   log /[L] [F]      set log level F.",
   "   log -d /L         use global log level in listener L.",
   "   log -d            set global log level to \"null\".",
-  "   trace /L[/S]      query trace state\n",
-  "   trace -s /L[/S]   enable tracing\n",
-  "   trace -d /L[/S]   disable tracing\n",
+  "   trace [/L[/S]]    query trace state",
+  "   trace -s [/L[/S]] enable tracing",
+  "   trace -d [/L[/S]] disable tracing",
   "   beacon            list all beacons",
   "   beacon NAME       list beacon NAME",
   "   beacon -s NAME    set beacon NAME",

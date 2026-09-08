@@ -5318,6 +5318,11 @@ rewrite_branch_prepare (CFG_NODE *node, void *call_data, void **baseptr)
       clos->rule = rewrite_rule_alloc (NULL, &node->locus);
       clos->prev->iffalse = clos->rule;
     }
+  else
+    {
+      locus_range_copy (&clos->rule->locus, &node->locus);
+    }
+
   clos->prev = clos->rule;
 
   *baseptr = clos->rule;
