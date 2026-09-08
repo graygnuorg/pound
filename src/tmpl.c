@@ -407,30 +407,32 @@ two_args (ACTUAL_ARG_HEAD const *head, char const *name,
 static struct json_value *
 func_and (ACTUAL_ARG_HEAD const *head)
 {
-  struct tmpl_actual_arg *arg, *res;
-  struct json_value *jv;
+  struct tmpl_actual_arg *arg;
+  struct json_value *jv = NULL;
   SLIST_FOREACH (arg, head, next)
     {
-      res = arg;
-      if (!is_true (res->val))
-	break;
+      if (!is_true (arg->val))
+	{
+	  json_value_copy (arg->val, &jv);
+	  break;
+	}
     }
-  json_value_copy (res->val, &jv);
   return jv;
 }
 
 static struct json_value *
 func_or (ACTUAL_ARG_HEAD const *head)
 {
-  struct tmpl_actual_arg *arg, *res;
-  struct json_value *jv;
+  struct tmpl_actual_arg *arg;
+  struct json_value *jv = NULL;
   SLIST_FOREACH (arg, head, next)
     {
-      res = arg;
-      if (is_true (res->val))
-	break;
+      if (is_true (arg->val))
+	{
+	  json_value_copy (arg->val, &jv);
+	  break;
+	}
     }
-  json_value_copy (res->val, &jv);
   return jv;
 }
 
@@ -469,6 +471,10 @@ json_cast_to_integer (struct json_value *val)
 
     case json_object:
       n = val->v.o->pair_count;
+      break;
+
+    default:
+      abort ();
     }
   return json_new_integer (n);
 }
@@ -514,6 +520,9 @@ json_cast_to_string (struct json_value *val)
       stringbuf_printf (&sb, "%lu", (unsigned long)val->v.o->pair_count);
       s = stringbuf_finish (&sb);
       break;
+
+    default:
+      abort ();
     }
   result = json_new_string (s);
   stringbuf_free (&sb);
@@ -590,6 +599,9 @@ func_len (ACTUAL_ARG_HEAD const *head)
     case json_object:
       len = val->v.o->pair_count;
       break;
+
+    default:
+      abort ();
     }
 
   return json_new_integer (len);

@@ -1526,7 +1526,7 @@ static int
 parse_includedir (char const *str, size_t len)
 {
   char const *start = str;
-  int rc;
+  int rc = 0;
 
   str = skip_prefix (str, &len, 0, sizeof ("includedir") - 1);
   len = c_trimrws (str, len);

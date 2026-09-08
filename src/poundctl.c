@@ -905,27 +905,24 @@ read_response_line (BIO *bio, char *ret_status, size_t size, int *ret_version)
 
   xgets (bio, buf, sizeof (buf));
   if (strncmp (buf, "HTTP/1.", 7))
-    goto err;
+    return -1;
   ver = buf[7] - '0';
   if (ver != 0 && ver != 1)
-    goto err;
+    return -1;
   p = buf + 8;
   if (!c_isspace (*p))
-    goto err;
+    return -1;
 
   while (c_isspace (*p))
     {
       if (!*p)
-	goto err;
+	return -1;
       p++;
     }
 
   code = strtol (p, &end, 10);
   if (code <= 0 || end - p != 3)
-    {
-  err:
-      errormsg (1, 0, "unexpected response: %s", buf);
-    }
+    return -1;
 
   p = end + strspn (end, " \n");
   len = strlen (p);
@@ -964,7 +961,10 @@ read_response (BIO *bio)
 
   if ((code = read_response_line (bio, buf, sizeof (buf), &ver)) != 200)
     {
-      errormsg (1, 0, "%s", buf);
+      if (code == -1)
+	errormsg (1, 0, "unexpected response: %s", buf);
+      else
+	errormsg (1, 0, "%s", buf);
     }
 
   for (;;)
