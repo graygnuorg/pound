@@ -605,7 +605,8 @@ select_term_service (POUND_HTTP *phttp, SERVICE_HEAD *head)
 		  break;
 		}
 	      http_request_eval_reset (&phttp->request);
-	      dumpreq (&phttp->request, REWRITE_REQUEST);
+	      if (svc->trace)
+		dumpreq (&phttp->request, REWRITE_REQUEST);
 	      rc = 0;
 	    }
 	  else

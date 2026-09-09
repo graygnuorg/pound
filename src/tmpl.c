@@ -417,7 +417,7 @@ func_and (ACTUAL_ARG_HEAD const *head)
 	  break;
 	}
     }
-  return jv;
+  return jv ? jv : json_new_null ();
 }
 
 static struct json_value *
@@ -433,7 +433,7 @@ func_or (ACTUAL_ARG_HEAD const *head)
 	  break;
 	}
     }
-  return jv;
+  return jv ? jv : json_new_null ();
 }
 
 struct json_value *
