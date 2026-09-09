@@ -1,0 +1,479 @@
+# This file is part of pound testsuite. -*- autotest -*-
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([trace output formats])
+AT_KEYWORDS([ctl trace tracefmt])
+
+# PT_TRACECOND COND REQ LOG
+m4_pushdef([PT_TRACECOND],
+[PT_CHECK(
+[Service
+   Path -beg "/trace"
+   Control
+End
+Service
+	$1
+	Backend
+	End
+End
+ListenHTTP
+  xHTTP 1
+End
+],
+[[PUT /trace/-/1
+end
+
+200
+end
+
+$2
+]])
+
+AT_CHECK([[sed -r -n -e '/.*pound\.cfg:11.9-[^:]+: /s///p' pound.log]],
+[0],
+[$3])
+])
+
+# ----
+m4_dnl    COND_BOOL,  /* Boolean operation. */
+
+# ACL
+# ---
+m4_pushdef([HARNESS_OPTIONS],[--source-address=127.0.0.2])
+PT_TRACECOND([ACL
+ "127.0.0.2"
+End
+],
+[source 127.0.0.1
+GET /echo/foo
+end
+
+503
+end
+
+source 127.0.0.2
+
+GET /echo/foo
+end
+
+200
+end
+],
+[ACL(127.0.0.1): 0
+ACL(127.0.0.2): 1
+])
+m4_popdef([HARNESS_OPTIONS])
+
+# Method
+# ------
+PT_TRACECOND([Method "GET"
+],
+[GET /echo
+end
+
+200
+end
+
+HEAD /echo
+end
+
+503
+end
+],
+[Method(GET): 1
+Method(HEAD): 0
+])
+
+# URL
+# ---
+PT_TRACECOND([URL -exact "/echo"
+],
+[GET /echo
+end
+
+200
+end
+
+GET /echo/foo
+end
+
+503
+end
+],
+[URL(/echo): 1
+URL(/echo/foo): 0
+])
+
+# Path
+# ----
+PT_TRACECOND([Path -exact "/echo"
+],
+[GET /echo
+end
+
+200
+end
+
+GET /echo/foo
+end
+
+503
+end
+],
+[Path(/echo): 1
+Path(/echo/foo): 0
+])
+
+# Query
+# -----
+PT_TRACECOND([Query -contains "q=1"
+],
+[GET /echo/foo?q=1
+end
+
+200
+end
+
+GET /echo
+end
+
+503
+end
+],
+[Query(q=1): 1
+Query((null)): 0
+])
+
+# QueryParam
+# ----------
+PT_TRACECOND([QueryParam "q" -exact "1"
+],
+[GET /echo/foo?q=1
+end
+
+200
+end
+
+GET /echo
+end
+
+503
+end
+],
+[QueryParam(q)=1: 1
+QueryParam(q)=(null): 0
+])
+
+# Header
+# ------
+PT_TRACECOND([Header -exact "A: b"
+],
+[GET /echo/foo
+A: b
+end
+
+200
+end
+
+GET /echo/foo
+A: c
+end
+
+503
+end
+
+GET /echo/foo
+end
+
+503
+end
+],
+[Header: 1
+Header: 0
+Header: 0
+])
+
+# Header "H" [OP] "V"
+# -------------------
+PT_TRACECOND([Header "A" -exact "b"
+],
+[GET /echo/foo
+A: b
+end
+
+200
+end
+
+GET /echo/foo
+A: c
+end
+
+503
+end
+
+GET /echo/foo
+end
+
+503
+end
+],
+[Header: 1
+Header: 0
+Header: 0
+])
+
+# Host "PAT"
+# ----------
+PT_TRACECOND([Host -re "^foo\\.org(:.*)?"
+],
+[GET /echo
+Host: foo.org
+end
+
+200
+end
+
+GET /echo
+Host: bar.org
+end
+
+503
+end
+],
+[Header: 1
+Header: 0
+])
+
+AT_DATA([htpass],
+[gray:guessMe
+])
+PT_TRACECOND([BasicAuth "htpass"
+],
+[GET /echo
+end
+
+503
+end
+
+GET /echo
+Authorization: Basic Z3JheTpndWVzc01l
+end
+
+200
+end
+],
+[BasicAuth: 0
+BasicAuth: 1
+])
+
+# StringMatch
+# -----------
+PT_TRACECOND([StringMatch ["%[path]"] -end "/foo"
+],
+[GET /echo/foo
+end
+
+200
+end
+
+GET /echo/foobar
+end
+
+503
+end
+],
+[StringMatch(/echo/foo): 1
+StringMatch(/echo/foobar): 0
+])
+
+# FIXME:   COND_CLIENT_CERT
+# FIXME   COND_DYN,
+
+# Dynamic patterns
+AT_DATA([hostfile],
+[foo
+])
+PT_CHECK(
+[Service
+   Path -beg "/trace"
+   Control
+End
+Service
+	Header "X-Host" -filewatch "hostfile"
+	Backend
+	End
+End
+ListenHTTP
+  xHTTP 1
+End
+],
+[PUT /trace/-/1
+end
+
+200
+end
+
+GET /echo
+X-Host: foo
+end
+
+200
+end
+
+GET /echo
+X-Host: bar
+end
+
+503
+end
+])
+
+AT_CHECK([sed -r -n -e '/^.*hostfile:1.1: /s///p' \
+  -e ['/^.*pound\.cfg:11.9-[^:]+: /s///p'] \
+  pound.log
+],
+[0],
+[Header: 1
+boolean OR: 1
+Header: 0
+boolean OR: 0
+])
+
+# Path
+# ----
+PT_TRACECOND([TBF ["%[path]"] 1 2
+],
+[GET /echo/foo
+end
+
+200
+end
+
+GET /echo/foo
+end
+
+200
+end
+
+GET /echo/foo
+end
+
+503
+end
+],
+[TBF(/echo/foo): 1
+TBF(/echo/foo): 1
+TBF(/echo/foo): 0
+])
+
+# FIXME   COND_LUA,
+
+# Condition/Eval
+# --------------
+PT_CHECK(
+[Condition "a"
+	Path -beg "/echo/foo"
+End
+Service
+	Path -beg "/trace"
+	Control
+End
+Service
+	Eval "a"
+	Backend
+	End
+End
+ListenHTTP
+  xHTTP 1
+End
+],
+[PUT /trace/-/1
+end
+
+200
+end
+
+GET /echo/foo
+end
+
+200
+end
+
+GET /echo/bar
+end
+
+503
+end
+])
+
+AT_CHECK([[sed -r -n -e '/.*pound\.cfg:14.9-[^:]+: /s///p' pound.log]],
+[0],
+[Detached condition: 1
+Detached condition: 0
+])
+
+# Beacon
+# ------
+PT_CHECK(
+[DeclareBeacon "x"
+Service
+   Match OR
+     Path -beg "/trace"
+     Path -beg "/beacon"
+   End
+   Control
+End
+Service
+	Beacon "x"
+	Backend
+	End
+End
+ListenHTTP
+  xHTTP 1
+End
+],
+[PUT /trace/-/1
+end
+
+200
+end
+
+GET /echo
+end
+
+503
+end
+
+PUT /beacon/x
+end
+
+200
+end
+
+GET /echo
+end
+
+200
+end
+])
+
+AT_CHECK([[sed -r -n -e '/.*pound\.cfg:15.9-[^:]+: /s///p' pound.log]],
+[0],
+[Beacon: 0
+Beacon: 1
+])
+
+m4_popdef([PT_TRACECOND])
+AT_CLEANUP

@@ -964,7 +964,7 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
 static int
 expand_string_to_buffer (struct stringbuf *sb, char const *str,
 			 POUND_HTTP *phttp,
-			 struct http_request *req, char *what)
+			 struct http_request *req, char const *what)
 {
   char *p;
   char const *start = str; /* Save the string for error reporting. */
@@ -1149,7 +1149,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 
 char *
 expand_string (char const *str, POUND_HTTP *phttp, struct http_request *req,
-	       char *what)
+	       char const *what)
 {
   struct stringbuf sb;
   char *p = NULL;
@@ -4197,6 +4197,30 @@ match_named_headers (HTTP_HEADER_LIST *headers, struct string_match const *pat,
   return 0;
 }
 
+static char const *cond_name[] = {
+    [COND_ACL] = "ACL",
+    [COND_METHOD] = "Method",
+    [COND_URL] = "URL",
+    [COND_PATH] = "Path",
+    [COND_QUERY] = "Query",
+    [COND_QUERY_PARAM] = "QueryParam",
+    [COND_HDR] = "Header",
+    [COND_NAMEHDR] = "Header",
+    [COND_BASIC_AUTH] = "BasicAuth",
+    [COND_STRING_MATCH] = "StringMatch",
+    [COND_CLIENT_CERT] = "ClientCert",
+    [COND_TBF] = "TBF",
+    [COND_LUA] = "Lua",
+    [COND_REF] = "Detached condition",
+    [COND_BEACON] = "Beacon"
+};
+
+static inline char const *
+safestr (int res, char const *s)
+{
+  return (res != -1 && s) ? s : "(null)";
+}
+
 /*
  * Match request (or response) REQ obtained from PHTTP against condition COND.
  * Return value:
@@ -4212,7 +4236,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
   int res = 1;
   int r;
   SERVICE_COND *subcond;
-  char const *str;
+  char const *str = NULL;
   struct submatch sm = SUBMATCH_INITIALIZER;
 
   watcher_lock (cond->watcher);
@@ -4234,7 +4258,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  {
 	    char caddr[MAX_ADDR_BUFSIZE];
 	    addr2str (caddr, sizeof (caddr), addr, 1);
-	    tracemsg (&cond->locus, traceid, "address %s: %d", caddr, res);
+	    tracemsg (&cond->locus, traceid, "%s(%s): %d",
+		      cond_name[cond->type], caddr, res);
 	  }
       }
       break;
@@ -4245,8 +4270,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "method %s: %d",
-		  res == -1 ? "(null)" : method_name (req->method), res);
+	tracemsg (&cond->locus, traceid, "%s(%s): %d",
+		  cond_name[cond->type], safestr (res, str), res);
       break;
 
     case COND_URL:
@@ -4255,8 +4280,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       else if ((res = submatch_exec (cond->re, str, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "url %s: %d",
-		  res == -1 ? "(null)" : str, res);
+	tracemsg (&cond->locus, traceid, "%s(%s): %d",
+		  cond_name[cond->type], safestr (res, str), res);
       break;
 
     case COND_PATH:
@@ -4265,8 +4290,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       else if ((res = submatch_exec_decode (cond->re, str, cond->decode, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "path %s: %d",
-		  res == -1 ? "(null)" : str, res);
+	tracemsg (&cond->locus, traceid, "%s(%s): %d",
+		  cond_name[cond->type], safestr (res, str), res);
       break;
 
     case COND_QUERY:
@@ -4278,6 +4303,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 
 	case RETRIEVE_NOT_FOUND:
 	  res = 0;
+	  str = NULL;
 	  break;
 
 	case RETRIEVE_OK:
@@ -4286,8 +4312,8 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  break;
 	}
       if (traceid)
-	tracemsg (&cond->locus, traceid, "query %s: %d",
-		  res == -1 ? "(null)" : str, res);
+	tracemsg (&cond->locus, traceid, "%s(%s): %d",
+		  cond_name[cond->type], safestr (res, str), res);
       break;
 
     case COND_QUERY_PARAM:
@@ -4301,6 +4327,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 
 	case RETRIEVE_NOT_FOUND:
 	  res = 0;
+	  str = NULL;
 	  break;
 
 	default:
@@ -4311,23 +4338,26 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	    submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	}
       if (traceid)
-	tracemsg (&cond->locus, traceid, "parameter %s=%s: %d",
+	tracemsg (&cond->locus, traceid, "%s(%s)=%s: %d",
+		  cond_name[cond->type],
 		  string_ptr (cond->sm.string),
-		  res == -1 ? "(null)" : str, res);
+		  safestr (res, str), res);
       break;
 
     case COND_HDR:
       if ((res = match_headers (&req->headers, cond->re, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "header: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d",
+		  cond_name[cond->type], res);
       break;
 
     case COND_NAMEHDR:
       if ((res = match_named_headers (&req->headers, &cond->sm, &sm)) == 1)
 	submatch_queue_push (&phttp->smq, cond->tag, &sm);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "header: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d",
+		  cond_name[cond->type], res);
       break;
 
     case COND_BASIC_AUTH:
@@ -4336,7 +4366,7 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
       else
 	res = r == 0;
       if (traceid)
-	tracemsg (&cond->locus, traceid, "basic auth: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d", cond_name[cond->type], res);
       break;
 
     case COND_STRING_MATCH:
@@ -4344,19 +4374,21 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	char *subj;
 
 	subj = expand_string (string_ptr (cond->sm.string), phttp, req,
-			      "string_match");
+			      cond_name[cond->type]);
 	if (subj)
 	  {
 	    if ((res = submatch_exec (cond->sm.re, subj, &sm)) == 1)
 	      submatch_queue_push (&phttp->smq, cond->tag, &sm);
 	    if (traceid)
-	      tracemsg (&cond->locus, traceid, "string %s: %d", subj, res);
+	      tracemsg (&cond->locus, traceid, "%s(%s): %d",
+			cond_name[cond->type], subj, res);
 	    free (subj);
 	  }
 	else
 	  {
 	    if (traceid)
-	      tracemsg (&cond->locus, traceid, "string (null): %d", res);
+	      tracemsg (&cond->locus, traceid, "%s(null): %d",
+			cond_name[cond->type], res);
 	    res = -1;
 	  }
       }
@@ -4408,25 +4440,27 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	     X509_cmp (phttp->x509, cond->x509) == 0 &&
 	     SSL_get_verify_result (phttp->ssl) == X509_V_OK);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "client cert: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d", cond_name[cond->type], res);
       break;
 
     case COND_LUA:
       res = pndlua_apply (pndlua_match, phttp, req, &cond->clua, NULL);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "Lua: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d", cond_name[cond->type], res);
       break;
 
     case COND_TBF:
       {
 	char *key;
 
-	key = expand_string (string_ptr (cond->tbf.key), phttp, req, "tbf");
+	key = expand_string (string_ptr (cond->tbf.key), phttp, req,
+			     cond_name[cond->type]);
 	if (key)
 	  {
 	    res = tbf_eval (cond->tbf.tbf, key);
 	    if (traceid)
-	      tracemsg (&cond->locus, traceid, "TBF %s: %d", key, res);
+	      tracemsg (&cond->locus, traceid, "%s(%s): %d",
+			cond_name[cond->type], key, res);
 	    free (key);
 	  }
 	else
@@ -4449,16 +4483,13 @@ match_cond (SERVICE_COND *cond, POUND_HTTP *phttp,
 	  phttp->smq = smq;
 	}
       if (traceid)
-	tracemsg (&cond->locus, traceid, "detached cond: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d", cond_name[cond->type], res);
       break;
-
-    case COND_HOST:
-      abort ();
 
     case COND_BEACON:
       res = pound_beacon_get (cond->beacon);
       if (traceid)
-	tracemsg (&cond->locus, traceid, "beacon: %d", res);
+	tracemsg (&cond->locus, traceid, "%s: %d", cond_name[cond->type], res);
       break;
     }
   watcher_unlock (cond->watcher);

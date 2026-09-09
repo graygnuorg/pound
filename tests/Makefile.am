@@ -179,6 +179,7 @@ TESTSUITE_AT = \
  syncline.at\
  tbf.at\
  template.at\
+ tracefmt.at\
  tracelog.at\
  tunnel.at\
  url.at\

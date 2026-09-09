@@ -88,53 +88,53 @@ AT_CHECK([[sed -r -n -e '/^pound: \([^)]+\) service selection: /s///p' pound.log
 ]],
 [0],
 [test.cfg:13.9-23.11: considering service
-test.cfg:15.25-41: path /echo/c: 0
-test.cfg:16.25-45: path /echo/c: 0
-test.cfg:17.25-44: path /echo/c: 0
-test.cfg:18.25-40: path /echo/c: 0
-test.cfg:19.25-43: path /echo/c: 0
-test.cfg:20.25-42: path /echo/c: 0
+test.cfg:15.25-41: Path(/echo/c): 0
+test.cfg:16.25-45: Path(/echo/c): 0
+test.cfg:17.25-44: Path(/echo/c): 0
+test.cfg:18.25-40: Path(/echo/c): 0
+test.cfg:19.25-43: Path(/echo/c): 0
+test.cfg:20.25-42: Path(/echo/c): 0
 test.cfg:14.17-21.19: boolean OR: 0
 implicit AND: 0
 test.cfg:24.9-32.11: considering service
-test.cfg:25.17-57: header: 1
-test.cfg:26.17-35: path /echo/c: 0
+test.cfg:25.17-57: Header: 1
+test.cfg:26.17-35: Path(/echo/c): 0
 implicit AND: 0
 test.cfg:33.9-40.11: considering service
-test.cfg:34.17-56: header: 1
+test.cfg:34.17-56: Header: 1
 implicit AND: 1
 test.cfg:33.9-40.11: service selected
 test.cfg:13.9-23.11: considering service
-test.cfg:15.25-41: path /echo/a: 0
-test.cfg:16.25-45: path /echo/a: 0
-test.cfg:17.25-44: path /echo/a: 0
-test.cfg:18.25-40: path /echo/a: 0
-test.cfg:19.25-43: path /echo/a: 0
-test.cfg:20.25-42: path /echo/a: 0
+test.cfg:15.25-41: Path(/echo/a): 0
+test.cfg:16.25-45: Path(/echo/a): 0
+test.cfg:17.25-44: Path(/echo/a): 0
+test.cfg:18.25-40: Path(/echo/a): 0
+test.cfg:19.25-43: Path(/echo/a): 0
+test.cfg:20.25-42: Path(/echo/a): 0
 test.cfg:14.17-21.19: boolean OR: 0
 implicit AND: 0
 test.cfg:24.9-32.11: considering service
-test.cfg:25.17-57: header: 1
-test.cfg:26.17-35: path /echo/a: 1
+test.cfg:25.17-57: Header: 1
+test.cfg:26.17-35: Path(/echo/a): 1
 implicit AND: 1
 test.cfg:24.9-32.11: service selected
 test.cfg:13.9-23.11: considering service
-test.cfg:15.25-41: path /echo/c: 0
-test.cfg:16.25-45: path /echo/c: 0
-test.cfg:17.25-44: path /echo/c: 0
-test.cfg:18.25-40: path /echo/c: 0
-test.cfg:19.25-43: path /echo/c: 0
-test.cfg:20.25-42: path /echo/c: 0
+test.cfg:15.25-41: Path(/echo/c): 0
+test.cfg:16.25-45: Path(/echo/c): 0
+test.cfg:17.25-44: Path(/echo/c): 0
+test.cfg:18.25-40: Path(/echo/c): 0
+test.cfg:19.25-43: Path(/echo/c): 0
+test.cfg:20.25-42: Path(/echo/c): 0
 test.cfg:14.17-21.19: boolean OR: 0
 implicit AND: 0
 test.cfg:24.9-32.11: considering service
-test.cfg:25.17-57: header: 0
+test.cfg:25.17-57: Header: 0
 implicit AND: 0
 test.cfg:33.9-40.11: considering service
-test.cfg:34.17-56: header: 0
+test.cfg:34.17-56: Header: 0
 implicit AND: 0
 test.cfg:1.1-8.3: considering service
-test.cfg:2.9-49: header: 1
+test.cfg:2.9-49: Header: 1
 implicit AND: 1
 test.cfg:1.1-8.3: service selected
 ])

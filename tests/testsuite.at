@@ -199,6 +199,7 @@ m4_include([eopt.at])
 m4_include([eoptpp.at])
 
 AT_BANNER([Tracing])
+m4_include([tracefmt.at])
 m4_include([tracelog.at])
 
 AT_BANNER([Templates])

@@ -1578,8 +1578,8 @@ enabled:
 (7f2d5534f640) User-Agent: Mozilla/5.0
 (7f2d5534f640) Accept: */*
 (7f2d5534f640) service selection: pound.cfg:29.9-36.11:considering service
-(7f2d5534f640) service selection: pound.cfg:30.17-26: header: 1
-(7f2d5534f640) service selection: pound.cfg:31.17-25: path /media: 1
+(7f2d5534f640) service selection: pound.cfg:30.17-26: Header: 1
+(7f2d5534f640) service selection: pound.cfg:31.17-25: Path(/media): 1
 (7f2d5534f640) service selection: implicit AND: 1
 (7f2d5534f640) service selection: pound.cfg:29.9-36.11: service selected
 @end example
@@ -1644,7 +1644,7 @@ consists of three alternatives.  The first alternative is processed:
 
 @example
 (7fe562d4f640) pound.cfg:3.17-4: applying rewrites
-(7fe562d4f640) rewriting request: pound.cfg:3.17-58: header: 0
+(7fe562d4f640) rewriting request: pound.cfg:3.17-58: Header: 0
 (7fe562d4f640) rewriting request: implicit AND: 0
 @end example
 
@@ -1653,8 +1653,8 @@ tried:
 
 @example
 (7fe562d4f640) pound.cfg:6.17-10: applying rewrites
-(7fe562d4f640) rewriting request: pound.cfg:7.25-42: header: 1
-(7fe562d4f640) rewriting request: pound.cfg:8.25-40: path /foo/bar.jpg: 1
+(7fe562d4f640) rewriting request: pound.cfg:7.25-42: Header: 1
+(7fe562d4f640) rewriting request: pound.cfg:8.25-40: Path(/foo/bar.jpg): 1
 (7fe562d4f640) rewriting request: pound.cfg:6.17-9.19: boolean AND: 1
 (7fe562d4f640) rewriting request: implicit AND: 1
 @end example

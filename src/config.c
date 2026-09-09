@@ -2182,7 +2182,7 @@ service_cond_free (SERVICE_COND *sc)
       break;
 
     default:
-      /* shouldn't happen; this includes COND_HOST. */
+      /* shouldn't happen; */
       abort ();
     }
   string_unref (sc->tag);

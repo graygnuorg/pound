@@ -782,9 +782,7 @@ enum service_cond_type
     COND_QUERY, /* Raw query match. */
     COND_QUERY_PARAM, /* Query parameter match */
     COND_HDR,   /* Header match. */
-    COND_NAMEHDR, /* Named header match. */
-    COND_HOST,  /* Special case of COND_HDR: matches the value of the
-		   Host: header */
+    COND_NAMEHDR, /* Named header match; also "Host" */
     COND_BASIC_AUTH,  /* Check if request passes basic auth. */
     COND_STRING_MATCH,/* String match. */
     COND_CLIENT_CERT,
