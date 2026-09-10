@@ -1566,60 +1566,68 @@ value.  E.g.:
 
 @xref{poundctl trace}, for a detailed discussion of this interface.
 
-The example below illustrates the output produced during service
-selection after the tracing for the example service above have been
-enabled:
+Trace output begins with a detailed dump of the incoming request.
+Then, a descriptive message is output for each condition evaluated.
+That message contains location of the condition in the configuration
+file and its identifier (which coincides, in general, with the
+corresponding configuration keyword).  If applicable, it is followed
+by the actual argument the condition received, in parentheses.  The
+message terminates with a semicolon followed by its result (@samp{0} or
+@samp{1}).
+
+Each line of the output is prefixed with thread identifier and
+short description of the context (whether the condition is evaluated
+when selecting the service, rewriting the request, etc.).
+
+For example, consider the following condition:
 
 @example
-(7f2d5534f640) Request from: 192.0.2.11
-(7f2d5534f640) Request: GET /media/id.jpg HTTP/1.1
-(7f2d5534f640) Headers:
-(7f2d5534f640) Host:foo.com
-(7f2d5534f640) User-Agent: Mozilla/5.0
-(7f2d5534f640) Accept: */*
-(7f2d5534f640) service selection: pound.cfg:29.9-36.11:considering service
-(7f2d5534f640) service selection: pound.cfg:30.17-26: Header: 1
-(7f2d5534f640) service selection: pound.cfg:31.17-25: Path(/media): 1
-(7f2d5534f640) service selection: implicit AND: 1
-(7f2d5534f640) service selection: pound.cfg:29.9-36.11: service selected
+Path -beg "/static"
 @end example
 
-The hex string in parentheses is the ID of the worker thread.  It
-helps keep track of the related log lines in case of high load.  Lines
-1 to 6 list the incoming request.  The rest of lines (prefixed with
-@samp{service selection}) describe the selection process.  Each
-conditional statement is listed as its short name (with an argument,
-if applicable), followed by the result of its evaluation, as boolean
-value (@samp{0} or @samp{1}).
+@noindent
+occurring at line 8 of @file{pound.cfg}.  A trace line for it will
+look like:
 
-Conditionals used in @code{rewrite} rules are traced as well.  For
-example, consider the service defined in @ref{Conditional branches}.
-For the sake of example, we reproduce it here with the line numbers
-added on the left:
+@example
+(7f2d5534f640) service selection: pound.cfg:8.17-35: Path(/media): 0
+@end example
+
+Notice, that it is not always possible to show the actual argument of
+a condition.  This is the case for the @code{Header} condition, which
+involves scanning the list of headers supplied with the request.  In
+this case the request dump that starts the trace output will help
+analyze the process.
+
+Consider the following service (line numbers have been added for clarity):
 
 @example
  1 Service
- 2     Rewrite
- 3         Header "Content-Type:[[:space:]]*image/.*"
- 4         SetPath "/images%[path]"
- 5     Else
- 6         Match AND
- 7             Host "example.org"
- 8             Path "\\.[^.]+$"
- 9         End
-10         SetPath "/static%[path]"
-11     Else
-12         Path "\\.[^.]+$"
-13         SetPath "/assets%[path]"
-14     End
+ 2     Host -re "example.(com|org)"
+ 3     Rewrite
+ 4         Header "Content-Type:[[:space:]]*image/.*"
+ 5         SetPath "/images%[path]"
+ 6     Else
+ 7         Match AND
+ 8             Host "example.org"
+ 9             Path "\\.[^.]+$"
+10         End
+11         SetPath "/static%[path]"
+12     Else
+13         Path "\\.[^.]+$"
+14         SetPath "/assets%[path]"
+15     End
        ...
-19 End
+20 End
 @end example
 
-Now, assume the server handles the GET request to
-@indicateurl{http://example.org/foo/bar.jpg}.  It's processing is
-shown in the log fragment below.  For readability, it is split
-into several sections.
+This is a slightly modified version of the service defined in
+@ref{Conditional branches}.
+
+Now, let's assume the server received a GET request to
+@indicateurl{http://example.org/foo/bar.jpg}.  It will log its
+processing as shown in the log fragment below.  For readability, it is
+split into several sections.
 
 First, the original request is dumped:
 
@@ -1631,31 +1639,35 @@ First, the original request is dumped:
 (7fe562d4f640) Accept: */*
 @end example
 
-Then goes service selection.  In our example there were no specific
-conditions, so the service is selected by default:
+Then goes service selection:
 
 @example
+(7fa9eb378640) service selection: pound.cfg:1.1-20.3: considering service
+(7fe562d4f640) service selection: pound.cfg:2.5-34: Header: 1
 (7fe562d4f640) service selection: implicit AND: 1
-(7fe562d4f640) service selection: pound.cfg:1.1-19.3: service selected
+(7fe562d4f640) service selection: pound.cfg:1.1-20.3: service selected
 @end example
+
+Notice that the @code{Host} condition is represented by @samp{Header},
+to which it is translated internally.
 
 Now, the @code{Rewrite} section is applied to the request.  It
 consists of three alternatives.  The first alternative is processed:
 
 @example
-(7fe562d4f640) pound.cfg:3.17-4: applying rewrites
-(7fe562d4f640) rewriting request: pound.cfg:3.17-58: Header: 0
+(7fe562d4f640) pound.cfg:4.9-5: applying rewrites
+(7fe562d4f640) rewriting request: pound.cfg:4.9-50: Header: 0
 (7fe562d4f640) rewriting request: implicit AND: 0
 @end example
 
-Condition evaluates to false (@samp{0}), therefore next alternative is
+The condition produced false (@samp{0}), therefore next alternative is
 tried:
 
 @example
-(7fe562d4f640) pound.cfg:6.17-10: applying rewrites
-(7fe562d4f640) rewriting request: pound.cfg:7.25-42: Header: 1
-(7fe562d4f640) rewriting request: pound.cfg:8.25-40: Path(/foo/bar.jpg): 1
-(7fe562d4f640) rewriting request: pound.cfg:6.17-9.19: boolean AND: 1
+(7fe562d4f640) pound.cfg:7.9-11: applying rewrites
+(7fe562d4f640) rewriting request: pound.cfg:8.13-30: Header: 1
+(7fe562d4f640) rewriting request: pound.cfg:9.13-28: Path(/foo/bar.jpg): 1
+(7fe562d4f640) rewriting request: pound.cfg:7.9-10.11: boolean AND: 1
 (7fe562d4f640) rewriting request: implicit AND: 1
 @end example
 
@@ -1663,7 +1675,7 @@ The condition succeeds and rewrites are applied.  The modified request
 is dumped afterwards:
 
 @example
-(7fe562d4f640) pound.cfg:6.17-10: after rewrite
+(7fe562d4f640) pound.cfg:7.9-11: after rewrite
 (7fe562d4f640) Request: GET /static/foo/bar.jpg HTTP/1.1
 (7fe562d4f640) Headers:
 (7fe562d4f640) Host:example.org
