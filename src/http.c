@@ -4211,7 +4211,7 @@ static char const *cond_name[] = {
     [COND_CLIENT_CERT] = "ClientCert",
     [COND_TBF] = "TBF",
     [COND_LUA] = "Lua",
-    [COND_REF] = "Detached condition",
+    [COND_REF] = "Eval",
     [COND_BEACON] = "Beacon"
 };
 

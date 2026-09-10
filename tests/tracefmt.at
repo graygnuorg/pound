@@ -418,10 +418,12 @@ end
 end
 ])
 
-AT_CHECK([[sed -r -n -e '/.*pound\.cfg:14.9-[^:]+: /s///p' pound.log]],
+AT_CHECK([[sed -r -n -e '/.*pound\.cfg:(7|14).9-[^:]+: /s///p' pound.log]],
 [0],
-[Detached condition: 1
-Detached condition: 0
+[Path(/echo/foo): 1
+Eval: 1
+Path(/echo/bar): 0
+Eval: 0
 ])
 
 # Beacon
