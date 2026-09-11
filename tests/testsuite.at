@@ -197,6 +197,7 @@ m4_include([syncline.at])
 m4_include([preproc.at])
 m4_include([eopt.at])
 m4_include([eoptpp.at])
+m4_include([ppinc.at])
 
 AT_BANNER([Tracing])
 m4_include([tracefmt.at])

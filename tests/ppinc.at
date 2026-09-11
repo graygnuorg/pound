@@ -1,0 +1,83 @@
+# Copyright (C) 2026 Sergey Poznyakoff
+#
+# Pound is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 3 of the License, or
+# (at your option) any later version.
+#
+# Pound is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with pound.  If not, see <http://www.gnu.org/licenses/>.
+AT_SETUP([Preprocessing and include files])
+AT_KEYWORDS([preproc ppinc])
+AT_CHECK([m4 < /dev/null > /dev/null 2>&1 || exit 77
+m4_pattern_allow([dnl])
+AT_DATA([inc.m4],
+[define(`A',`ListenHTTP
+  Address 127.0.0.1
+  Port 80
+End')[dnl]
+define(`B',`Service "b"
+  Host "foo.bar"
+  Backend
+    Address 127.0.0.1
+    Port 8081
+  End
+End')[dnl]
+define(`C',`Service "c"
+  Error 404
+End')[dnl]
+])
+
+AT_DATA([pound.cfg],
+[#pragma preprocessor m4
+include(`inc.m4')
+A
+`Include' "conf.d/*.cfg"
+])
+
+mkdir conf.d
+
+AT_DATA([conf.d/a.cfg],
+[include(`inc.m4')
+B
+])
+
+AT_DATA([conf.d/b.cfg],
+[include(`inc.m4')
+C
+])
+
+pound -Wno-include-dir -E -f ./pound.cfg
+m4_pattern_forbid([dnl])
+],
+[0],
+[
+
+ListenHTTP
+  Address 127.0.0.1
+  Port 80
+End
+# 1 "conf.d/a.cfg"
+
+Service "b"
+  Host "foo.bar"
+  Backend
+    Address 127.0.0.1
+    Port 8081
+  End
+End
+# 1 "conf.d/b.cfg"
+
+Service "c"
+  Error 404
+End
+])
+
+AT_CHECK([pound -Wno-include-dir -c -f ./pound.cfg])
+
+AT_CLEANUP

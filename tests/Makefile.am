@@ -149,6 +149,7 @@ TESTSUITE_AT = \
  patfile.at\
  path.at\
  pcre.at\
+ ppinc.at\
  preproc.at\
  prio.at\
  query.at\
