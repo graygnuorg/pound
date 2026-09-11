@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-09-10
+Pound -- history of user-visible changes. 2026-09-11
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -9,7 +9,7 @@ Please send pound bug reports to <gray@gnu.org>
 
 Version 4.23.96 (git)
 
-* Changes in the configuration.
+* Changes in configuration syntax.
 
 ** Sizes
 
@@ -39,6 +39,21 @@ hours, or days, correspondingly:
    WSTimeOut
    WatcherTTL
    WorkerIdleTimeout
+
+** Pragmatic comments
+
+Comments that start with the word "pragma" are treated specially.
+Such comments modify parsing of the configuration file.  This version
+introduces two pragmatic comments:
+
+   #pragma preprocessor COMMAND
+      Enables configuration file preprocessing.  See below for
+      details.
+
+   #pragma tab-width N
+      Instructs pound to consider each TAB character to be equal to N
+      spaces. This is used when computing column offsets in
+      configuration file, for diagnostic and reporting.
 
 * Cert and ACME statements take into account include directory
 

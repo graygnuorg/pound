@@ -34,6 +34,8 @@ static char **preproc_argv;
 static size_t preproc_argc;
 static pid_t preproc_pid;
 static int pragma_preproc_suppress;
+static int tab_width = 8;
+#define MAX_TAB_WIDTH 40
 
 #define YY_INPUT(buf,result,max_size)				\
   do								\
@@ -74,7 +76,7 @@ locus_advance (char const *str, int len)
       switch (str[i])
 	{
 	case '\t':
-	  curloc.end.col += 8; //FIXME
+	  curloc.end.col += tab_width;
 	  break;
 	case '\n':
 	  locus_newline (1);
@@ -1419,12 +1421,40 @@ parse_line_directive (char const *str, size_t len, int isline)
 enum
   {
     PRAGMA_PREPROCESSOR,
+    PRAGMA_TAB_WIDTH
   };
 
 static struct kwtab pragma_tab[] = {
   { "preprocessor", PRAGMA_PREPROCESSOR },
+  { "tab-width", PRAGMA_TAB_WIDTH },
   { NULL }
 };
+
+
+static int
+process_tab_width (char const *str, size_t len)
+{
+  unsigned long n;
+  char *p;
+
+  errno = 0;
+  n = strtoul (str, &p, 10);
+  if (errno || n == 0 || n > MAX_TAB_WIDTH)
+    return -1;
+  if (*p)
+    {
+      if (p - str < len)
+	{
+	  if (!c_isblank (*p))
+	    return -1;
+	  len -= p - str;
+	  if (c_memspn (p, CCTYPE_BLANK, len) != len)
+	    return -1;
+	}
+    }
+  tab_width = n;
+  return 0;
+}
 
 static int
 parse_pragma (char const *str, size_t len)
@@ -1478,6 +1508,11 @@ parse_pragma (char const *str, size_t len)
 	pragma_preproc_suppress = 0;
       else
 	conf_error ("warning: ignoring pragma preprocessor in the middle of configuration");
+      break;
+
+    case PRAGMA_TAB_WIDTH:
+      if (process_tab_width (str, len))
+	conf_error ("warning: ignoring malformed pragma tab-width");
       break;
 
     default:

@@ -4635,11 +4635,27 @@ lines, except for pragmatic comments.
 
 @cindex pragmatic comments
 @kwindex pragma
+@anchor{pragmatic comments}
  Comments starting with the word @code{pragma} are @dfn{pragmatic
 comments} and are treated specially -- they modify the way
-configuration file is parsed.  As of version @value{VERSION}, only one
-pragmatic comment is defined: @code{pragma preprocessor}, discussed in
-detail in @ref{Preprocessor}.
+the configuration file is parsed.
+
+@deffn {pragmatic comment} #pragma preprocessor @var{command}
+Instructs @command{pound} to preprocess its configuration file by
+running the shell command @var{command} and using its output as the
+configuration text.
+
+This pragma must appear in configuration before any actual statements.
+@xref{Preprocessor},
+@end deffn
+
+@deffn {pragmatic comment} #pragma tab-width @var{n}
+@cindex tab character
+Assume, for the purpose of reporting file locations, that a TAB
+character (ASCII 9) is equivalent to @var{n} spaces.
+
+The default tabulation width is 8.
+@end deffn
 
 @cindex keywords, configuration file
  A @dfn{keyword} is a sequence of ASCII letters, digits and
