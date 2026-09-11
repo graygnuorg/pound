@@ -149,7 +149,7 @@ Extending @command{pound} functionality with Lua
 * Constants::  Providing constants for Lua code.
 * LuaModify::  Changing requests and responses in Lua.
 * Resend::     Resending requests with Lua.
-* Stash::      Sharing data between Lua functions.
+* Stash::      Sharing data between Lua invocations.
 * LuaBackend:: Lua backends.
 * Lua API::
 
@@ -170,6 +170,7 @@ Configuration
 * Timeouts::
 * ListenHTTP::
 * ListenHTTPS::
+* Tunnel::
 * Service::
 * resolver::
 
@@ -266,6 +267,7 @@ Template syntax
 Input object
 
 * Core listing::
+* Log info::
 * Full listing::
 * Listener object::
 * Service object::
@@ -1202,10 +1204,10 @@ behavior at runtime, without the need to reconfigure it.
 
 @kwindex DeclareBeacon
   A beacon is declared using the @code{DeclareBeacon} statement.  Its
-mandatory paramenter the @dfn{beacon name}, which can then be used in
+mandatory parameter the @dfn{beacon name}, which can then be used in
 conditionals to examine its value.  The initial value for the beacon
 can be supplied in the second argument.  This argument is optional; if
-omitted @code{false} is assument.  For example, the following
+omitted @code{false} is assumed.  For example, the following
 statement declares the beacon @samp{daytime} with the default initial value:
 
 @example
@@ -3862,7 +3864,7 @@ no service with such name, a runtime error will be signalled.  Setting
 this field to @code{nil} instructs @command{pound} to redirect the
 request to a service selected using the standard procedure
 (@pxref{Service selection}).  @xref{send to service}, for a detailed
-discussuion of this feature.
+discussion of this feature.
 @end deftypecv
 
 @deftypecv Field service string locus
@@ -3905,7 +3907,7 @@ interface between local and global contexts.
   A @dfn{tunnel} is a transparent, protocol-agnostic communication
 channel between two sockets.  When operating a tunnel, @command{pound}
 sends packets received from one end (client) to its peer (backend) and
-vice-versa without analysing their content.  Thus, tunnels can be used
+vice-versa without analyzing their content.  Thus, tunnels can be used
 to proxy any protocol based on TCP/IP.
 
   Syntactically, a tunnel declaration is similar to @code{ListenHTTP},
@@ -4230,7 +4232,7 @@ Microseconds.
 @end table
 
 Either stage or unit can be omitted, but not both. Omitting stage
-defailts to @code{totalreq}, and omitting unit defaults to
+defaults to @code{totalreq}, and omitting unit defaults to
 microseconds.
 
 See also @code{%T}, below.
@@ -4631,7 +4633,7 @@ keywords and values.
  @dfn{Comments} may appear anywhere where white space may appear in the
 configuration file.  A comment begins with a hash sign (@samp{#}) and
 continues to the end of the line.  Comments are treated as empty
-lines, except for pragmatic comments.
+lines, except for pragmatic comments and synclines.
 
 @cindex pragmatic comments
 @kwindex pragma
@@ -4656,6 +4658,27 @@ character (ASCII 9) is equivalent to @var{n} spaces.
 
 The default tabulation width is 8.
 @end deffn
+
+@cindex syncline
+@cindex synchronization line
+@anchor{syncline}
+ Another special comment type are @dfn{synchronization lines} or
+@dfn{synclines}, for short.  These change @command{pound}'s notion of
+the actual position in the configuration file and are often emitted by
+preprocessors (@pxref{Preprocessor}).  Synchronization lines have the
+following forms:
+
+@table @code
+@item #line @var{n}
+@itemx # @var{n}
+ Assume next line has number @var{n}.
+@item #line @var{n} "@var{file}"
+@itemx # @var{n} "@var{file}"
+ Assume next line has number @var{n} and the name of the configuration
+file is @var{file}.
+@end table
+
+ Optional whitespace is allowed between the hash sign and @code{line}.
 
 @cindex keywords, configuration file
  A @dfn{keyword} is a sequence of ASCII letters, digits and
@@ -7660,7 +7683,7 @@ described below.
 @end deffn
 
 @deffn {Backend directive} Port @var{n}
-Sets the port number to connect to.  In the absense of this directive,
+Sets the port number to connect to.  In the absence of this directive,
 port defaults to 443, if the @code{HTTPS} directive is used, and to
 80 otherwise.
 @end deffn

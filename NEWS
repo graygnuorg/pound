@@ -40,6 +40,15 @@ hours, or days, correspondingly:
    WatcherTTL
    WorkerIdleTimeout
 
+** Synchronization lines
+
+Synchronization lines in traditional formats are understood:
+
+   #line N
+   #line N "FILE"
+   # N
+   # N "FILE"
+
 ** Pragmatic comments
 
 Comments that start with the word "pragma" are treated specially.

@@ -316,7 +316,7 @@ textstmt    : T_TEXT T_NL { begin_text (); } T_LITERAL T_END T_NL
 		cfg_arglist_init (&arglist);
 		cfg_arglist_append (&arglist, arg);
 		$$ = cfg_gen_node ($1.defn, &$1.rcvr, &arglist, NULL,
-				   &@1.beg, &@4.end);
+				   &@1.beg, &@5.end);
 	      }
 
 endsec      : T_END

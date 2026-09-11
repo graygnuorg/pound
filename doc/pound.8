@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 1, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "September 11, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -376,14 +376,45 @@ directive. Empty lines and comments are ignored. Comments are
 introduced with a \fB#\fR sign and extend to the end of line on which
 it appears.
 .PP
+There are two special kinds of comments: pragmatic comments and
+synchronization lines.  These are not ignored, but rather change the
+way the configuration file is handled.
+.PP
+\fIPragmatic comments\fR begin with the word \fBpragma\fR after the
+hash sign (optional whitespace allowed).  They are:
+.TP
+.BI "#pragma preprocessor " COMMAND
+Instructs \fBpound\fR to preprocess the configuration file by running
+shell \fICOMMAND\fR and using its output as the actual configuration.
+.IP
+This pragma must appear before the first statement in the configuration.
+.TP
+.BI "#pragma tab-width " N
+Assume each \fBTAB\fR character (ASCII 9) to be equivalent to \fIN\fR
+spaces.  This is used for reporting locations in the configuration
+file, in error messages, traces, etc.  The default width is 8.
+.PP
+\fISynchronization lines\fR change logical position in the
+configuration file.  They have the following forms:
+.TP
+.BI "#line " N
+Assume the line that follows has number \fIN\fR.
+.TP
+.BI "#line " N " \(dq" FILE \(dq
+Assume the line that follows has number \fIN\fR and the file name is
+\fIFILE\fR.
+.PP
+In both cases, any amount of whitespace is allowed between \fB#\fR and
+\fBline\fR, and the word \fBline\fR can be omitted.
+.SS Directives
 There are three types of directives:
-.B global
+.I global
 directives (they affect the settings for the entire program instance),
-.B listener
+.I listener
 directives (they define which requests
 .B pound
 will listen for), and
-.B service
+.I service
 directives (they affect only a specific group of requests).
 .PP
 In general, a directive consists of a \fIkeyword\fR and one or
@@ -416,7 +447,7 @@ and
 standing for seconds, minutes, hours, and days, correspondingly.  The
 upper-case equivalents can be used as well.
 .IP
-The \fBs\dR suffix can be omitted.
+The \fBs\fR suffix can be omitted.
 .TP
 .I Boolean
 The words \fByes\fR, \fBtrue\fR, \fBon\fR, or \fB1\fR indicating
@@ -3506,7 +3537,7 @@ microseconds, \fBs\fR for seconds, and \fBf\fR for seconds with
 fractional part.
 .IP
 Either \fISTAGE\fR or \fIUNIT\fR can be omitted, but not
-both. Omitting \fISTAGE\fR defailts to \fBtotalreq\fR, and omitting
+both. Omitting \fISTAGE\fR defaults to \fBtotalreq\fR, and omitting
 \fIUNIT\fR defaults to \fRus\fR.
 .TP
 .B %h
