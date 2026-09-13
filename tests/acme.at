@@ -33,6 +33,7 @@ End
 end
 
 200
+content-type: application/octet-stream
 
 test_acme_challenge
 end

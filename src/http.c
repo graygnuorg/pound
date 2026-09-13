@@ -1596,7 +1596,8 @@ acme_response (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 
       phttp->response_code = 200;
       bio_http_reply_start (phttp->cl, phttp->request.version, 200, "OK", NULL,
-			    "text/html", (CONTENT_LENGTH) st.st_size);
+			    "application/octet-stream",
+			    (CONTENT_LENGTH) st.st_size);
       ec = copy_bin (bin, phttp->cl, st.st_size, NULL);
       switch (ec)
 	{
