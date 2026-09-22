@@ -581,6 +581,14 @@ listener_cleanup (void *ptr)
     close (lstn->sock);
 }
 
+static inline void
+pollfd_toggle (struct pollfd *polls)
+{
+  int i;
+  for (i = 1; i <= n_listeners; i++)
+    polls[i].fd = - polls[i].fd;
+}
+
 void *
 thr_dispatch (void *unused)
 {
@@ -590,22 +598,6 @@ thr_dispatch (void *unused)
   int p[2];
   int nfd = n_listeners + 1;
   int state = DSP_ACCEPT;
-#define TOGGLE_FD()				\
-  do						\
-    {						\
-      int i;					\
-      for (i = 1; i <= n_listeners; i++)	\
-	polls[i].fd = - polls[i].fd;		\
-    }						\
-  while (0)
-#define SET_STATE(c)				\
-  do						\
-    {						\
-      TOGGLE_FD ();				\
-      state = c;				\
-    }						\
-  while (0)
-
 
   if (pipe (p))
     abend (NULL, "pipe: %s", strerror (errno));
@@ -654,6 +646,15 @@ thr_dispatch (void *unused)
 		{
 		case DSP_ACCEPT:
 		case DSP_BLOCK:
+		  /*
+		   * Both commands are advisory: until DSP_BLOCK arrives here
+		   * some workers might become available and consume one or
+		   * more entries from the queue, and the reverse may happen
+		   * between emitting DSP_ACCEPT and its arrival here.
+		   *
+		   * Hence the need to verify the queue state.
+		   */
+		  c = (inqueue.len == inqueue.cap) ? DSP_BLOCK : DSP_ACCEPT;
 		  if (c != state)
 		    {
 		      static char *action[] = {
@@ -662,13 +663,13 @@ thr_dispatch (void *unused)
 		      };
 		      logmsg (LOG_NOTICE, "incoming connections %s",
 			      action[(int)c]);
-		      TOGGLE_FD ();
+		      pollfd_toggle (polls);
 		    }
 		  break;
 
 		case DSP_STOP:
 		  if (c != state && state != DSP_BLOCK)
-		    TOGGLE_FD ();
+		    pollfd_toggle (polls);
 		  pound_http_drain_queue ();
 		}
 	      state = c;
@@ -695,14 +696,12 @@ thr_dispatch (void *unused)
 		      logmsg (LOG_WARNING, "HTTP accept: %s",
 			      strerror (errno));
 		    }
+		  else if (lstn->disabled)
+		    {
+		      close (clnt);
+		    }
 		  else
 		    {
-		      if (lstn->disabled)
-			{
-			  close (clnt);
-			  continue;
-			}
-
 		      if (clnt_addr.ss_family == AF_UNIX &&
 			  clnt_length == sizeof (clnt_addr.ss_family))
 			{
@@ -716,10 +715,8 @@ thr_dispatch (void *unused)
 			{
 			  if (inqueue.len == inqueue.cap)
 			    {
-			      logmsg (LOG_NOTICE,
-				      "connection queue is full;"
-				      " incoming connections blocked");
-			      SET_STATE (DSP_BLOCK);
+			      logmsg (LOG_NOTICE, "connection queue is full");
+			      dispatch_command (DSP_BLOCK);
 			    }
 			}
 		      else
