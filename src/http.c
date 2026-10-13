@@ -2798,7 +2798,7 @@ field_segment_len (char const *fstr, size_t flen)
       if (fstr[i] == ',')
 	break;
       else if (fstr[i] == '"')
-	i += field_string_len (fstr, flen);
+	i += field_string_len (fstr + i, flen - i);
       else
 	i++;
     }
