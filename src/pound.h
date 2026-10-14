@@ -711,9 +711,15 @@ typedef struct _backend
 
 typedef DLIST_HEAD (,_backend) BACKEND_HEAD;
 
-static inline int backend_is_https (BACKEND *be)
+static inline int backend_is_https (BACKEND const *be)
 {
   return be->be_type == BE_REGULAR && be->v.reg.ctx != NULL;
+}
+
+static inline char const *
+backend_proto (BACKEND const *be)
+{
+  return backend_is_https (be) ? "https" : "http";
 }
 
 static inline int backend_is_alive (BACKEND *be)
@@ -1229,6 +1235,18 @@ static inline int
 pound_http_trace (POUND_HTTP *phttp)
 {
   return phttp->lstn && phttp->lstn->tracecnt > 0;
+}
+
+static inline char const *
+listener_proto (LISTENER const *lstn)
+{
+  return SLIST_EMPTY (&lstn->ctx_head) ? "http" : "https";
+}
+
+static inline char const *
+pound_http_proto (POUND_HTTP *phttp)
+{
+  return phttp->ssl ? "https" : "http";
 }
 
 SERVICE_COND *detached_cond (int n);

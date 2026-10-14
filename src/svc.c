@@ -1534,7 +1534,7 @@ need_rewrite (const char *location, const char *v_host,
   else
     result = (be->v.reg.servername &&
 	      c_strcasecmp (host, be->v.reg.servername) == 0 &&
-	      is_proto (be->v.reg.ctx ? "https" : "http",
+	      is_proto (backend_proto (be),
 			proto,
 			matches[1].rm_eo - matches[1].rm_so));
 
@@ -1543,7 +1543,7 @@ need_rewrite (const char *location, const char *v_host,
       result = ((is_listener_address (addr, lstn) ||
 		 c_strcasecmp (host, vhost) == 0) ||
 		((port != listener_port (lstn) ||
-		  !is_proto (SLIST_EMPTY (&lstn->ctx_head) ? "http" : "https",
+		  !is_proto (listener_proto (lstn),
 			     proto,
 			     matches[1].rm_eo - matches[1].rm_so))));
     }
@@ -2115,11 +2115,9 @@ listener_serialize (LISTENER *lstn)
 	err |= json_object_set (obj, "protocol", json_new_string ("tunnel"));
       else
 	{
-	  int is_https = !SLIST_EMPTY (&lstn->ctx_head);
-	  err |= json_object_set (obj, "protocol",
-				  json_new_string (is_https ? "https"
-							    : "http"));
-	  if (is_https)
+	  char const *proto = listener_proto (lstn);
+	  err |= json_object_set (obj, "protocol", json_new_string (proto));
+	  if (strcmp (proto, "https") == 0)
 	    err |= json_object_set (obj, "nohttps11",
 				    json_new_integer (lstn->noHTTPS11));
 	}

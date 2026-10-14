@@ -369,7 +369,7 @@ static void
 i_protocol (struct stringbuf *sb, struct http_log_instr *instr,
 	    POUND_HTTP *phttp)
 {
-  print_str (sb, phttp->ssl == NULL ? "http" : "https");
+  print_str (sb, pound_http_proto (phttp));
 }
 
 static void

@@ -4546,8 +4546,7 @@ add_forwarded_headers (POUND_HTTP *phttp)
     }
 
   stringbuf_reset (&sb);
-  stringbuf_printf (&sb, "X-Forwarded-Proto: %s",
-		    phttp->ssl == NULL ? "http" : "https");
+  stringbuf_printf (&sb, "X-Forwarded-Proto: %s", pound_http_proto (phttp));
   if ((str = stringbuf_finish (&sb)) == NULL
       || http_request_header_append (&phttp->request, str, H_REPLACE))
     {
@@ -5648,7 +5647,7 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 	  str_be (caddr, sizeof (caddr), phttp->backend);
 	  stringbuf_printf (&sb,
 			    "Destination: %s://%s%s",
-			    backend_is_https (phttp->backend) ? "https" : "http",
+			    backend_proto (phttp->backend),
 			    caddr,
 			    val + matches[3].rm_so);
 	  if ((p = stringbuf_finish (&sb)) == NULL)
@@ -5900,7 +5899,7 @@ backend_response (POUND_HTTP *phttp)
 
 		      stringbuf_init_log (&sb);
 		      stringbuf_printf (&sb, "Location: %s://%s/%s",
-					(phttp->ssl == NULL ? "http" : "https"),
+					pound_http_proto (phttp),
 					v_host,
 					path);
 		      if ((p = stringbuf_finish (&sb)) == NULL)
@@ -5930,7 +5929,7 @@ backend_response (POUND_HTTP *phttp)
 		      stringbuf_init_log (&sb);
 		      stringbuf_printf (&sb,
 					"Content-location: %s://%s/%s",
-					(phttp->ssl == NULL ? "http" : "https"),
+					pound_http_proto (phttp),
 					v_host,
 					path);
 		      if ((p = stringbuf_finish (&sb)) == NULL)
@@ -6132,7 +6131,7 @@ regular_serialize (BACKEND *be, struct json_value *obj)
       if (be->service->lstn && be->service->lstn->tunnel)
 	prot = "tunnel";
       else
-	prot = backend_is_https (be) ? "https" : "http";
+	prot = backend_proto (be);
       rc |= json_object_set (obj, "protocol", json_new_string (prot));
     }
   return rc;
