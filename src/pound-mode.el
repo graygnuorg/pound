@@ -530,29 +530,30 @@ a Service, as opposed to the top-level Control (whether block or directive)"
 
 (defun pound-top-level-form ()
   "Move point to the beginning of the nearest top-level block statement.
-Return t if such was found, nil otherwise."
+Return t if such was found, nil otherwise. In the letter case, point position
+is undefined."
   (beginning-of-line)
-  (if (re-search-backward (regexp-opt
-			   (append
-			    pound-top-level-sections
-			    pound-maybe-top-level-sections) 'words) nil t)
+  (if (re-search-backward
+       (concat "^\\s-*"
+	       (regexp-opt
+		(append
+		 pound-top-level-sections
+		 pound-maybe-top-level-sections) 'words)) nil t)
       (cond
-       ((pound-streq (match-string 1) "Service")
-	(service-top (point)))
-       ((looking-at "Control\\s-*$")
-	(control-top))
-       ((or (looking-at "Control\\s-+\"")
-	    (looking-at "\\(?:\\(?:ACL\\)\\|\\(?:TrustedIP\\)\\).+-file"))
+       ((or (looking-at "^\\s-*Control\\s-+\"")
+	    (looking-at "^\\s-*\\(?:\\(?:ACL\\)\\|\\(?:TrustedIP\\)\\).+-file"))
 	(pound-top-level-form))
-       ((pound-streq (match-string 1) "Backend")
-	(backend-top))
-       ((or (pound-streq (match-string 1) "ACL")
-	    (pound-streq (match-string 1) "TrustedIP"))
-	(default-top))
        (t
-	t))))
+	(pound-top-call (match-string 1) (point))))))
 
-(defun service-top (here)
+(defun pound-top-call (kw here)
+  (let ((sym (intern-soft (concat "pound-" (downcase kw) "-top"))))
+    (if (fboundp sym)
+	(funcall sym here)
+      (goto-char here)
+      t)))
+
+(defun pound-service-top (here)
   (beginning-of-line)
   (catch 'ret
     (while (not (bobp))
@@ -562,68 +563,73 @@ Return t if such was found, nil otherwise."
 	(if (not (save-excursion (pound-scan here '(1))))
 	    (goto-char here))
 	(throw 'ret t))
-       ((looking-at (regexp-opt (append
-				 pound-top-level-sections
-				 pound-maybe-top-level-sections)))
-	(goto-char here)
-	(throw 'ret t))))
+       ((looking-at "^\\s-*Service"))
+       ((looking-at
+	 (concat "^\\s-*"
+		 (regexp-opt (append
+			      pound-top-level-sections
+			      pound-maybe-top-level-sections) 'words)))
+	(throw 'ret (pound-top-call (match-string 1) here)))))
     (goto-char here)
      t))
 
-(defun control-top ()
-  (let ((here (point)))
-    (beginning-of-line)
-    (catch 'ret
-      (while (not (bobp))
-	(forward-line -1)
-	(cond
-	 ((looking-at "^\\s-*Service")
-	  (throw 'ret (service-top here)))
-	 ((looking-at (regexp-opt (append
-				   pound-top-level-sections
-				   pound-maybe-top-level-sections)))
-	  (goto-char here)
-	  (throw 'ret t))))
-      (goto-char here)
-      t)))
+(defun pound-control-top (here)
+  (beginning-of-line)
+  (catch 'ret
+    (while (not (bobp))
+      (forward-line -1)
+      (if (looking-at
+	   (concat "^\\s-*"
+		   (regexp-opt (append
+				pound-top-level-sections
+				pound-maybe-top-level-sections) 'words)))
+	(throw 'ret (pound-top-call (match-string 1) here))))
+    (goto-char here)
+    t))
 
-(defun backend-top ()
-  (let ((here (point)))
-    (beginning-of-line)
-    (catch 'ret
-      (while (not (bobp))
-	(forward-line -1)
-	(cond
-	 ((looking-at "^\\s-*Tunnel")
-	  (if (not (save-excursion (pound-scan here '(1))))
-	      (goto-char here))
-	  (throw 'ret t))
-	 ((looking-at "^\\s-*Service")
-	  (throw 'ret (service-top (point))))
-	 ((looking-at (regexp-opt (append
-				   pound-top-level-sections
-				   pound-maybe-top-level-sections)))
-	  (goto-char here)
-	  (throw 'ret t)))))))
+(defun pound-backend-top (here)
+  (beginning-of-line)
+  (catch 'ret
+    (while (not (bobp))
+      (forward-line -1)
+      (cond
+       ((looking-at "^\\s-*Tunnel")
+	(if (not (save-excursion (pound-scan here '(1))))
+	    (goto-char here))
+	(throw 'ret t))
+       ((looking-at
+	 (concat "^\\s-*"
+		 (regexp-opt (append
+			      pound-top-level-sections
+			      pound-maybe-top-level-sections) 'words)))
+	(throw 'ret (pound-top-call (match-string 1) here)))))
+    (goto-char here)
+    t))
 
-(defun default-top ()
-  (let ((here (point)))
-    (beginning-of-line)
-    (catch 'ret
-      (while (not (bobp))
-	(forward-line -1)
-	(cond
-	 ((looking-at "^\\s-*ListenHTTPS?")
-	  (if (not (save-excursion (pound-scan here '(1))))
-	      (goto-char here))
-	  (throw 'ret t))
-	 ((looking-at "^\\s-*Service")
-	  (throw 'ret (service-top here)))
-	 ((looking-at (regexp-opt pound-top-level-sections))
-	  (goto-char here)
-	  (throw 'ret t))))
-      (goto-char here)
-      t)))
+(defun pound-acl-top (here)
+  (pound-default-top here))
+
+(defun pound-trustedip-top (here)
+  (pound-default-top here))
+
+(defun pound-default-top (here)
+  (beginning-of-line)
+  (catch 'ret
+    (while (not (bobp))
+      (forward-line -1)
+      (cond
+       ((looking-at "^\\s-*ListenHTTPS?")
+	(if (not (save-excursion (pound-scan here '(1))))
+	    (goto-char here))
+	(throw 'ret t))
+       ((looking-at
+	 (concat "^\\s-*"
+		 (regexp-opt (append
+			      pound-top-level-sections
+			      pound-maybe-top-level-sections) 'words)))
+	(throw 'ret (pound-top-call (match-string 1) here)))))
+    (goto-char here)
+    t))
 
 (defun pound-get-context ()
   (save-excursion
