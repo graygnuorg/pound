@@ -58,6 +58,7 @@ PT_CHECK([ListenHTTP
 	Service
 		Rewrite
 			SetHeader ["X-Query: (%[query])"]
+			SetHeader ["X-Query-Pfx: (%[query ?])"]
 		End
 		Backend
 			Address
@@ -71,6 +72,15 @@ end
 
 200
 x-orig-header-X-Query: (dir=%2Fvar%2Flib&foo=bar)
+x-orig-header-X-Query-Pfx: (?dir=%2Fvar%2Flib&foo=bar)
+end
+
+GET /echo/foo
+end
+
+200
+x-orig-header-X-Query: ()
+x-orig-header-X-Query-Pfx: ()
 end
 ])
 

@@ -594,6 +594,13 @@ static int http_request_get_query_param (struct http_request *,
 typedef int (*accessor_func) (POUND_HTTP *, char const *, int,
 			      struct stringbuf *);
 
+enum
+  {
+    ACC_ARG_NONE,
+    ACC_ARG_MANDATORY,
+    ACC_ARG_OPTIONAL
+  };
+
 struct accessor
 {
   char *name;
@@ -634,7 +641,11 @@ accessor_query (POUND_HTTP *phttp, char const *arg, int arglen,
   char const *val;
   int rc = http_request_get_query (&phttp->request, &val);
   if (rc == RETRIEVE_OK && val)
-    stringbuf_add_string (sb, val);
+    {
+      if (arglen > 0)
+	stringbuf_add (sb, arg, arglen);
+      stringbuf_add_string (sb, val);
+    }
   else
     rc = RETRIEVE_NOT_FOUND;
   return rc;
@@ -887,19 +898,20 @@ accessor_const (POUND_HTTP *phttp, char const *arg, int arglen,
 static struct accessor accessors[] = {
   { "url",      accessor_url },
   { "path",     accessor_path },
-  { "query",    accessor_query },
-  { "param",    accessor_param, 1 },
-  { "header",   accessor_header, 1 },
+  { "query",    accessor_query, ACC_ARG_OPTIONAL },
+  { "param",    accessor_param, ACC_ARG_MANDATORY },
+  { "header",   accessor_header, ACC_ARG_MANDATORY },
   { "host",     accessor_host },
   { "port",     accessor_port },
-  { "remoteip", accessor_remote_ip, 1 },
+  { "remoteip", accessor_remote_ip, ACC_ARG_MANDATORY },
   { "user",     accessor_user },
-  { "const",    accessor_const, 1 },
+  { "const",    accessor_const, ACC_ARG_MANDATORY },
   { NULL }
 };
 
 static accessor_func
-find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen)
+find_accessor (char const *input, size_t len,
+	       char **ret_arg, size_t *ret_arglen, char **errmsg)
 {
   struct accessor *ap;
   char const *arg = NULL;
@@ -908,37 +920,54 @@ find_accessor (char const *input, size_t len, char **ret_arg, size_t *ret_arglen
 
   input = c_trimlws (input, &len);
   if (len == 0)
-    return NULL;
+    {
+      *errmsg = "malformed accessor";
+      return NULL;
+    }
   i = c_memcspn (input, CCTYPE_BLANK, len);
 
   for (ap = accessors; ; ap++)
     {
       if (ap->name == NULL)
-	return NULL;
+	{
+	  *errmsg = "accessor not found";
+	  return NULL;
+	}
       if (strlen (ap->name) == i && memcmp (ap->name, input, i) == 0)
 	break;
     }
 
+  i += c_memspn (input + i, CCTYPE_BLANK, len - i);
   if (ap->arg)
     {
-      if (!c_isblank (input[i]))
-	return NULL;
-      i += c_memspn (input + i, CCTYPE_BLANK, len - i);
+      if (i == len)
+	{
+	  if (ap->arg == ACC_ARG_MANDATORY)
+	    {
+	      *errmsg = "accessor argument missing";
+	      return NULL;
+	    }
+	}
+      else
+	{
+	  arg = input + i;
+	  arglen = len - i;
 
-      arg = input + i;
-      arglen = len - i;
-
-      arglen = c_trimrws (arg, arglen);
-      if (arglen == 0)
-	return NULL;
+	  arglen = c_trimrws (arg, arglen);
+	  if (arglen == 0 && ap->arg == ACC_ARG_MANDATORY)
+	    {
+	      *errmsg = "accessor argument missing";
+	      return NULL;
+	    }
+	}
     }
   else
     {
-      i += c_memspn (input + i, CCTYPE_BLANK, len - i);
       if (i < len)
-	return NULL;
-      arg = NULL;
-      arglen = 0;
+	{
+	  *errmsg = "accessor argument not allowed";
+	  return NULL;
+	}
     }
 
   *ret_arg = (char*) arg;
@@ -996,6 +1025,7 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 	  accessor_func acc;
 	  char *arg;
 	  size_t arglen;
+	  char *errmsg;
 
 	  q = strchr (str + 2, ']');
 	  if (q == NULL)
@@ -1010,8 +1040,11 @@ expand_string_to_buffer (struct stringbuf *sb, char const *str,
 
 	  len = q - str;
 
-	  if ((acc = find_accessor (str + 2, len - 2, &arg, &arglen)) == NULL)
+	  if ((acc = find_accessor (str + 2, len - 2, &arg, &arglen, &errmsg))
+	      == NULL)
 	    {
+	      logmsg (LOG_ERR, "%s: \"%s\": %s at offset %d",
+		      what, start, errmsg, (int)(str - start));
 	      stringbuf_add (sb, str, len + 1);
 	    }
 	  else if (acc (phttp, arg, arglen, sb) == RETRIEVE_OK)

@@ -4936,8 +4936,15 @@ Request URL.
 Request path.
 @end deffn
 
-@deffn {Accessor} query
-Query part.
+@deffn {Accessor} query [@var{pfx}]
+Query part. The @var{pfx} argument is optional. If provided, it will
+be prepended to the expansion, if the query part is not
+empty. It is normally used when rewriting URLs to ensure the correct
+syntax, e.g.:
+
+@example
+Rewrite 308 "https://example.com/%[query ?]"
+@end example
 @end deffn
 
 @deffn {Accessor} param @var{name}

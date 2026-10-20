@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-09-22
+Pound -- history of user-visible changes. 2026-10-20
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -188,6 +188,14 @@ To change or inspect the actual value of a beacon, use poundctl:
 
   poundctl -d NAME
     Set beacon NAME to "false".
+
+* Query accessor
+
+The "query" accessor takes an optional argument.  If the query part
+is present, the argument is prepended to the expansion.  This is
+useful when rewriting URLs, for example:
+
+   Rewrite 308 "https://example.com/%[query ?]"
 
 * Request timings
 
