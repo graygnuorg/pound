@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-10-20
+Pound -- history of user-visible changes. 2026-10-29
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -7,7 +7,7 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
-Version 4.23.98 (git)
+Version 4.24, 2026-10-29
 
 * Changes in configuration syntax.
 
@@ -23,10 +23,12 @@ suffixes "k", "m", and "g" or their upper-case equivalents:
 
 ** Durations
 
-The following keywords take a duration value as their arguments. A
-duration is a sequence of numbers, each of which is followed by a
-time unit suffix, "s", "m", "h" or "d", standing for seconds, minutes,
-hours, or days, correspondingly:
+A duration is a sequence of decimal numbers, each of which is followed
+by a time unit suffix, "s", "m", "h" or "d", standing for seconds, minutes,
+hours, or days, correspondingly. The suffix is optional for the last
+number in the sequence, in which case "s" is assumed.
+
+The following keywords take a duration value as argument:
 
    Alive
    Client
@@ -66,23 +68,22 @@ introduces two pragmatic comments:
 
 * Cert and ACME statements take into account include directory
 
-Arguments to Cert or ACME are taken relative to the current include
+Arguments to "Cert" or "ACME" are taken relative to the current include
 directory.
 
 * Wildcards are allowed in Cert statement
 
-The argument to the Cert directive in ListenHTTPS can contain glob(7)
+The argument to the "Cert" directive in "ListenHTTPS" can contain glob(7)
 patterns, e.g.:
 
   Cert "ssl/*.pem"
 
 * Placement of Cert directive within ListenHTTPS
 
-In previous versions, the Cert directive was required to precede any
-other SSL-specific statement (such as ClientCert, etc.) in the
-ListenHTTPS section. This is no longer the case. The Cert directive
-can be placed anywhere within ListenHTTPS, it will always be
-processed first.
+In previous versions, the "Cert" directive was required to precede any
+other SSL-specific statement (such as "ClientCert", etc.) in the
+"ListenHTTPS" section. This is no longer the case. This directive can
+now be placed anywhere within "ListenHTTPS".
 
 * The "Use" statement in Backend sections
 
@@ -99,23 +100,23 @@ together with it, e.g.:
 
 * HTTPS statement in Backend sections
 
-In previous versions, the HTTPS statement was required to be used
+In previous versions, the "HTTPS" statement was required to be used
 prior to any of the following statements in a Backend section:
 Cert, Ciphers, Disable. This requirement was lifted. Moreover, any
 of these statements already imply that the backend is HTTPS capable,
-which means that the HTTPS statement is superfluous if any of these
+which means that the "HTTPS" statement can be omitted if any of these
 is used.
 
 * Fall-through services
 
-A new kind of services, fall-through services, is introduced.
-Fall-through services are processed specially. If the request matches
-such a service, any modification statements from that service are
-applied to the request, and the selection process continues from the
-next service. In other words, a fall-through service provides a way to
-apply a set of modifications common for all services that follow.
+This version introduces a new kind of services: fall-through services.
+If the request matches such a service, any modification statements
+from that service are applied to the request, and the selection
+process continues from the next service. In other words, a
+fall-through service provides a way to apply a set of modifications
+common for all services that follow.
 
-A service is marked as a fall-through using the "FallThrough"
+A service is declared as fall-through using the "FallThrough"
 statement. Such services cannot contain backend definitions or
 "Rewrite response" statements. An example of a fall-through service
 follows:
@@ -129,22 +130,21 @@ follows:
 
 * Early rewrites
 
-Any request modification directives are normally applied to the
-incoming request immediately before sending it to the selected
-backend. A new flavor of the "Rewrite" statement is introduced:
+A new flavor of the "Rewrite" statement is introduced:
 
   Rewrite early
 
-Such statements are applied to the request at the early stage of
-its processing.  "Rewrite early" statements appearing in ListenHTTP
-(or ListenHTTPS) section are applied first, right after the request
-headers have been received and parsed. Such statements appearing in
-Service sections are applied during service selection, before applying
-service selection statements for that service.
+In contrast to normal rewrites, which are applied to requests before
+passing them on to the corresponding backends, "Rewrite early"
+statements are applied at the early stage of request processing so
+that the resulting modifications become visible to subsequent
+configuration statements.
 
-This means that any modifications done in "Rewrite early" sections are
-visible to conditional statements (both standalone and those
-contained in "Rewrite" sections).
+"Rewrite early" sections used in ListenHTTP (or ListenHTTPS) sections
+are applied first, right after the request headers have been received
+and parsed.  Those used in Service sections, are applied during
+service selection, before applying service selection statements for
+that service.
 
 It is important to notice that any modifications done by early
 rewrites in a Service section remain visible for subsequent sections,
@@ -162,7 +162,7 @@ value only via the pound control interface, using poundctl or similar
 tool.
 
 Beacons provide a mechanism for adopting pound configuration to
-the changing external conditions (such as the current load or request
+changes in external conditions (such as current load average or request
 rate) without the need to reconfigure the pound daemon.
 
 Beacons are declared using the "DeclareBeacon" statement in the global
@@ -200,7 +200,8 @@ useful when rewriting URLs, for example:
 * Request timings
 
 The %T log conversion specifier takes an optional prefix,
-specifying starting point for time measuring.  Its possible values are
+that determines the starting point for time measuring.  Its possible
+values are
 
   init
     The time between establishing connection or sending last
@@ -219,7 +220,7 @@ specifying starting point for time measuring.  Its possible values are
 
 E.g.: "%{reqend:us}T"
 
-Similar extension applies to the "D" convertsion.  Here, the prefix
+Similar extension applies to the "D" conversion.  Here, the prefix
 indicates the stage of request processing whose duration is requested.
 Its values are:
 
@@ -235,9 +236,9 @@ Its values are:
     Time spent selecting the service and backend.
 
   resp
-    Time processing the response, i.e. time elapsed between the moment
-    when the service and backend have been selected and the moment after
-    the last byte of the response has been sent to the client.
+    Time taken by response processing, i.e. time elapsed between the
+    moment when the service and backend have been selected and the
+    moment after the last byte of the response has been sent to the client.
 
   be
     Time between sending first byte to the backend and sending last
@@ -272,7 +273,7 @@ Example output:
   (7f2d5534f640) service selection: pound.cfg:29.9-36.11: service selected
 
 The value in parentheses identifies the worker thread that did the
-selection.  Result of each conditional is printed as a boolean value
+selection.  The result of each conditional is printed as a boolean value
 (0/1).
 
 To manage trace flags, a new poundctl subcommand, trace, is provided:
@@ -297,7 +298,7 @@ program.  To do so, specify the command line of the preprocessor in
 the "preprocessor" pragmatic comment appearing in the very beginning
 of the principal configuration file, like that:
 
-  # pragma preprocessor m4 -s
+  #pragma preprocessor m4 -s
 
 It is important that this comment appears before the first
 configuration statement.  Comments and empty lines before it are
