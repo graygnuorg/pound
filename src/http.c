@@ -342,6 +342,8 @@ http_simple_response (POUND_HTTP *phttp, char const *headers, char const *conten
   BIO_write (phttp->cl, content, len);
 
   BIO_flush (phttp->cl);
+
+  http_request_free (&resp);
   return 0;
 }
 
