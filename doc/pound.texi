@@ -1204,10 +1204,10 @@ behavior at runtime, without the need to reconfigure it.
 
 @kwindex DeclareBeacon
   A beacon is declared using the @code{DeclareBeacon} statement.  Its
-mandatory parameter the @dfn{beacon name}, which can then be used in
-conditionals to examine its value.  The initial value for the beacon
-can be supplied in the second argument.  This argument is optional; if
-omitted @code{false} is assumed.  For example, the following
+mandatory parameter supplies the @dfn{beacon name}, which can then be used in
+conditionals to examine its value.  Initial value for the beacon
+can be supplied in its second argument.  This argument is optional; if
+omitted, @code{false} is assumed.  For example, the following
 statement declares the beacon @samp{daytime} with the default initial value:
 
 @example
@@ -1229,7 +1229,7 @@ argument, e.g.:
 Beacon "daytime"
 @end example
 
-The beacon must be declared prior to using it.  For example, the
+A beacon must be declared prior to using it.  For example, the
 service below applies request rate limiting (@pxref{Rate-limiting}) to any
 request with URL path starting with @samp{/user}, provided that the
 beacon @samp{daytime} is set.  If it is not, the service will be
