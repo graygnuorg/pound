@@ -1748,18 +1748,27 @@ service_redirect_commit (CFG_NODE *node, void *unused, void *baseptr)
 
   be = xbackend_create (BE_REDIRECT, 1, &node->locus);
   be->v.redirect.status = code;
-  be->v.redirect.url = xstrdup (string_ptr (arg->v.string));
 
-  if (genpat_match (LOCATION, be->v.redirect.url, 4, matches))
+  be->v.redirect.url = xstrdup (string_ptr (arg->v.string));
+  if (be->v.redirect.url[0] == '/')
     {
-      conf_error_at_locus_range (&node->locus, "Redirect bad URL");
+      /*
+       * RFC 7231, section 7.1.2 explicitly allows relative references
+       * in Location.
+       */
+      be->v.redirect.has_uri = 1;
+    }
+  else if (genpat_match (LOCATION, be->v.redirect.url, 4, matches))
+    {
+      conf_error_at_locus_range (&node->locus, "bad URL");
       backend_free (be);
       return -1;
     }
-
-  if ((be->v.redirect.has_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
-    /* the path is a single '/', so remove it */
-    be->v.redirect.url[matches[3].rm_so] = '\0';
+  else if ((be->v.redirect.has_uri = matches[3].rm_eo - matches[3].rm_so) == 1)
+    {
+      /* the path is a single '/', so remove it */
+	be->v.redirect.url[matches[3].rm_so] = '\0';
+    }
 
   balancer_add_backend (balancer_list_get_normal (bml), be);
 

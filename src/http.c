@@ -5669,8 +5669,8 @@ send_to_backend (POUND_HTTP *phttp, int chunked, CONTENT_LENGTH content_length)
 
       if (genpat_match (LOCATION, val, 4, matches))
 	{
-	  logmsg (LOG_ERR, "(%"PRItid") can't parse Destination %s",
-		  POUND_TID (), val);
+	  /* RFC 4918, Section 10.3 allows relative references in
+	     Destination */
 	}
       else
 	{

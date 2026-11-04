@@ -190,4 +190,19 @@ AT_CHECK([grep 'Redirect expression' pound.log],
 pound: Redirect expression "http://%1$1" refers to non-existing group $1
 ])
 
+PT_CHECK([ListenHTTP
+	Service
+		Redirect "/elsewhere"
+	End
+End
+],
+[GET /foo/bar
+Host: example.org
+end
+
+302
+location: /elsewhere
+end
+])
+
 AT_CLEANUP

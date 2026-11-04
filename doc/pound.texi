@@ -1909,9 +1909,11 @@ End
  Allowed values for the status code are 301, 302, 303, 307 and 308.
 This argument is optional: if omitted, 302 is used.
 
- If the URL argument has no path component (as in the example above),
-then the path (and query, if present) components from the original
-request will be appended to it.  For example, if the original URL were
+ The URL argument can be absolute or relative.  For absolute URL,
+presence of the path component decides whether the URL will be modified. 
+If there is no path component (as in the example above), then the path (and
+query, if present) components from the original request will be
+appended to it.  For example, if the original URL were 
 @indicateurl{http://example.com/software}, the service above would
 redirect it @indicateurl{https://www.gnu.org/software}.
 
@@ -1924,8 +1926,11 @@ the URL when redirecting:
 Redirect 301 "https://www.gnu.org/"
 @end example
 
+ This logic does not apply if the URL is relative.  In this case it
+will be returned unchanged.
+
  The URL argument is subject to backreference expansion and
-request accessor interpretation (@pxref{Request modifications}).  If
+request accessor interpretation (@pxref{String Expansions}).  If
 any of these are actually used, the above logic is disabled.
 
  String expansions make it possible to implement complex redirects.
@@ -7973,14 +7978,15 @@ Optional @var{code} can be one of: 301, 302 (the default), 303, 307,
 or 308.
 
 The @var{url} argument specifies the URL to redirect the request to.
-Before use it is expanded as described in @ref{String Expansions}.
+It can be absolute or relative.  Before use, it is expanded as
+described in @ref{String Expansions}.
 
-For compatibility with previous @command{pound} versions, if no
-@samp{$@var{n}} references are found in @var{url}, the following logic
-is used: if it is a "pure" host (i.e. with no path) then the client will be
-redirected to that host, with the original request path appended. If
-the @var{url} does contain a path (even if it is just a @samp{/}),
-then the request path is ignored.
+For compatibility with previous @command{pound} versions, if @var{url}
+is absolute and it does not contain any expansions, the following
+logic is used: if it is a "pure" host (i.e. with no path) then the
+client will be redirected to that host, with the original request path
+appended. If the @var{url} does contain a path (even if it is just a
+@samp{/}), then the request path is ignored.
 
 @xref{Redirects}, for a detailed discussion of this backend and its use.
 @end deffn

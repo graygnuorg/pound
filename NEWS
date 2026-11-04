@@ -7,6 +7,12 @@ on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
 
+Version 4.24.90
+
+* Relative redirects
+
+The Redirect statement now accepts relative URI as its argument.
+
 * New metric family pound_beacon
 
 States (on/off) of beacons declared in the configuration.

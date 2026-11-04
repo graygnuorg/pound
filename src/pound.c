@@ -1376,8 +1376,12 @@ main (const int argc, char **argv)
       || genpat_compile (&CONN_UPGRD, GENPAT_POSIX,
 			"(^|[ \t,])upgrade([ \t,]|$)",
 			GENPAT_ICASE | GENPAT_MULTILINE)
+      /* RFC 3986, Section 3.1:
+	 Scheme names consist of a sequence of characters beginning with a
+	 letter and followed by any combination of letters, digits, plus
+	 ("+"), period ("."), or hyphen ("-"). */
       || genpat_compile (&LOCATION,  GENPAT_POSIX,
-			"(http|https)://([^/]+)(.*)",
+			"([a-zA-Z][a-zA-Z0-9+.-]+)://([^/]+)(.*)",
 			GENPAT_ICASE | GENPAT_MULTILINE))
     abend (NULL, "bad essential Regex");
 
