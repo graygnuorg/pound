@@ -225,37 +225,33 @@ exposition_free (EXPOSITION *exp)
 /*
  * Mertric families.
  */
+typedef int METRICS_ITEM_GENERATOR (EXPOSITION *exp,
+				    struct metric *metric,
+				    METRIC_LABELS *pfx,
+				    struct json_value *obj);
+
 struct metric_family
 {
   char const *name;
   char const *type;
   char const *unit;
   char const *help;
-  int (*setfn) (EXPOSITION *, struct metric *, METRIC_LABELS *, struct json_value *);
+  METRICS_ITEM_GENERATOR *setfn;
 };
 
-static int gen_listener_enabled (EXPOSITION *exp, struct metric *metric,
-				 METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_listener_info (EXPOSITION *exp, struct metric *metric,
-			      METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_backends_count (EXPOSITION *exp, struct metric *metric,
-			       METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_service_enabled (EXPOSITION *exp, struct metric *metric,
-				METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_backend_state (EXPOSITION *exp, struct metric *metric,
-			      METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_backend_requests (EXPOSITION *exp, struct metric *metric,
-				 METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_backend_request_time_avg (EXPOSITION *exp, struct metric *metric,
-				 METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_backend_request_stddev (EXPOSITION *exp, struct metric *metric,
-				 METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_workers (EXPOSITION *exp, struct metric *metric,
-			METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_queue (EXPOSITION *exp, struct metric *metric,
-		      METRIC_LABELS *pfx, struct json_value *obj);
-static int gen_number (EXPOSITION *exp, struct metric *metric,
-		       METRIC_LABELS *pfx, struct json_value *obj);
+static METRICS_ITEM_GENERATOR gen_listener_enabled,
+  gen_listener_info,
+  gen_backends_count,
+  gen_service_enabled,
+  gen_backend_state,
+  gen_backend_requests,
+  gen_backend_request_time_avg,
+  gen_backend_request_stddev,
+  gen_workers,
+  gen_queue,
+  gen_number,
+  gen_beacon;
+
 
 static struct metric_family listener_metric_families[] = {
   { "pound_listener_enabled",
@@ -335,6 +331,16 @@ static struct metric_family queue_metric_families[] = {
     NULL,
     "Connection queue counters.",
     gen_queue },
+  { NULL }
+};
+
+static struct metric_family beacon_metric_families[] = {
+  { "pound_beacon",
+    "stateset",
+    NULL,
+    "Beacon states: on/off",
+    gen_beacon
+  },
   { NULL }
 };
 
@@ -869,6 +875,50 @@ gen_number (EXPOSITION *exp, struct metric *metric,
 }
 
 static int
+gen_beacon (EXPOSITION *exp, struct metric *metric,
+	    METRIC_LABELS *pfx, struct json_value *obj)
+{
+  struct metric_sample *samp;
+
+  if ((samp = metric_add_sample (metric, pfx)) == NULL)
+    return -1;
+  samp->number = obj->v.b;
+  return 0;
+}
+
+static int
+fill_beacon (char const *key, struct json_value *val, void *dat)
+{
+  EXPOSITION *exp = dat;
+  int rc;
+  METRIC_LABELS lab;
+  DLIST_INIT (&lab);
+  if (metric_labels_add (&lab, "name", key))
+    return -1;
+  rc = exposition_apply_family (exp, &lab, beacon_metric_families, val);
+  metric_labels_free (&lab);
+  return rc;
+}
+
+static int
+exposition_fill_beacons (EXPOSITION *exp)
+{
+  int rc;
+  struct json_value *obj = json_new_object ();
+
+  if (!obj)
+    return -1;
+
+  if (pound_beacons_serialize (obj))
+    rc = -1;
+  else
+    rc = json_object_filter (obj, fill_beacon, exp);
+
+  json_value_free (obj);
+  return rc;
+}
+
+static int
 exposition_fill_core (EXPOSITION *exp, struct json_value *obj)
 {
   struct json_value *core, *val;
@@ -892,6 +942,9 @@ exposition_fill (EXPOSITION *exp, struct json_value *obj)
   EXPOSITION_INIT (exp);
 
   if (exposition_fill_core (exp, obj))
+    return -1;
+
+  if (exposition_fill_beacons (exp))
     return -1;
 
   if (exposition_iterate (exp, NULL, METRIC_FAMILY_LISTENER, obj))

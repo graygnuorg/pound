@@ -1689,3 +1689,4 @@ POUND_BEACON *pound_beacon_locate (char const *name);
 int pound_beacon_get (POUND_BEACON *);
 int pound_beacon_set (char const *name, int val);
 int pound_beacon_serialize (struct json_value *obj, char const *name);
+int pound_beacons_serialize (struct json_value *obj);

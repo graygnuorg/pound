@@ -57,6 +57,11 @@ instead. This value is retained for backward compatibility with
 @command{pound} versions 4.19 -- 4.22.
 @end deftypevr
 
+@deftypevr {Metric family} stateset pound_beacon
+States of @dfn{beacons} (@pxref{Beacons}) defined in the
+configuration: on/off.  Indexed by beacon name.
+@end deftypevr
+
 @deftypevr {Metric family} stateset pound_listener_enabled
 State of a listener: enabled/disabled.  Indexed by the listener
 ordinal number and, if available, its name.

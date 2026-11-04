@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-10-29
+Pound -- history of user-visible changes. 2026-11-04
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -6,6 +6,12 @@ Robert Segall at Apsis GmbH, which was officially discontinued
 on 2022-09-19.  See the README file for details.
 
 Please send pound bug reports to <gray@gnu.org>
+
+* New metric family pound_beacon
+
+States (on/off) of beacons declared in the configuration.
+
+* Fixed memory leak in metrics backend
 
 Version 4.24, 2026-10-29
 

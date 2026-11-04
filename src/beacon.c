@@ -115,6 +115,19 @@ beacon_serializer (POUND_BEACON *bp, void *data)
 }
 
 int
+pound_beacons_serialize (struct json_value *val)
+{
+  if (beacon_hash)
+    {
+      struct beacon_serializer_info info = { val, 0 };
+      POUND_BEACON_FOREACH (beacon_hash, beacon_serializer, &info);
+      if (info.err)
+	return -1;
+    }
+  return 0;
+}
+
+int
 pound_beacon_serialize (struct json_value *obj, char const *name)
 {
   int rc = 0;
@@ -136,13 +149,8 @@ pound_beacon_serialize (struct json_value *obj, char const *name)
     }
   else
     {
-      if (beacon_hash)
-	{
-	  struct beacon_serializer_info info = { val, 0 };
-	  POUND_BEACON_FOREACH (beacon_hash, beacon_serializer, &info);
-	  if (info.err)
-	    rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
-	}
+      if (pound_beacons_serialize (val))
+	rc = HTTP_STATUS_INTERNAL_SERVER_ERROR;
     }
 
   if (rc)
