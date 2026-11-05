@@ -420,6 +420,21 @@ static CFG_DEFN lst_defn[] = {
   { NULL }
 };
 
+static CFG_DEFN tun_defn[] = {
+  {
+    .name = "Backend",
+    .token = T_SECTION,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
+    .name = "",
+    .type = KWT_TABREF,
+    .ref = any_defn
+  },
+  { NULL }
+};
+
 static CFG_DEFN resolver_defn[] = {
   {
     .name = "ConfigText",
@@ -531,7 +546,7 @@ static CFG_DEFN pound_top_defn[] = {
     .name = "Tunnel",
     .token = T_SECTION,
     .vtype = CFG_TYPE_ANY,
-    .ref = lst_defn
+    .ref = tun_defn
   },
   {
     .name = "",
