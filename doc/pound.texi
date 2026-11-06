@@ -576,11 +576,11 @@ Treat deprecated statements as errors.
 @end defvr
 
 @defvr Feature no-deprecated
-Same as @code{-Wdeprecated=error}.
+Same as @option{-Wdeprecated=error}.
 @end defvr
 
 @defvr Feature warn-deprecated
-Same as @code{-Wdeprecated=warn}.
+Same as @option{-Wdeprecated=warn}.
 @end defvr
 
 @anchor{dns}
@@ -977,7 +977,7 @@ statements that evaluate to true for requests originating from one
 of the predefined IP addresses.  Access control lists are defined using the
 @code{ACL} section statement, which has three forms: anonymous,
 file reference, and ACL reference.  In all three forms, the @code{ACL}
-statement accepts optional argument @code{-forwarded}, which indicates
+statement accepts optional argument @option{-forwarded}, which indicates
 that the remote IP should be determined from the
 @code{X-Forwarded-From} IP address (@pxref{%a}), instead of using the
 actual originator IP.
@@ -3002,14 +3002,14 @@ treats its content as opaque binary data.  It is common, however, to
 keep textual data there and to maintain it using a text editor.  In
 this case you will need to remove the trailing newline character that
 most editors will add to the end of file.  To do so, use the
-@code{-trim} option, like that:
+@option{-trim} option, like that:
 
 @example
     Constant "key" -file "secret.txt" -trim
 @end example
 
-  As with other configuration statements, in lieu of @code{-file}, you
-can use @code{-filewatch}, the difference between the two being that
+  As with other configuration statements, in lieu of @option{-file}, you
+can use @option{-filewatch}, the difference between the two being that
 the latter will automatically update the value of the constant
 whenever the file contents changes.  @xref{File-based Conditions}, for
 a detailed discussion of that.
@@ -3924,6 +3924,12 @@ subset of statements is allowed within it:
 Tunnel ["@var{name}"]
     Address @var{addr}
     Port @var{n}
+    ACL "@var{name}"
+    ACL @{ -file | -filewatch @} "@var{filename}"
+    ACL
+        @var{cidr}
+        ...
+    End        
     Backend
         Address @var{addr}
         Port @var{n}
@@ -5065,7 +5071,7 @@ line, backend response status line, and header fields in both requests
 and responses.  Thus, this value limits the maximum length allowed for
 these parts of HTTP messages.  By default, it is set to the internal
 buffer size (4096 bytes, configurable at compile time using the
-@code{--with-maxbuf} option)@footnote{To check the value your
+@option{--with-maxbuf} option)@footnote{To check the value your
 @command{pound} is compiled with, run @command{pound -V}}, and it
 cannot be less than that default.
 
@@ -5330,7 +5336,7 @@ that follow this statement, until next @code{RegexType} statement or
 end of the configuration file, whichever occurs first.
 
 Regular expression type can be set individually for a directive, using
-the @code{-pcre} or @code{-posix} option (@pxref{conditional-option}).
+the @option{-pcre} or @option{-posix} option (@pxref{conditional-option}).
 
 @xref{Regular Expressions}, for a detailed discussion.
 @end deffn
@@ -5387,9 +5393,9 @@ ACL "@var{name}" -filewatch "@var{filename}"
 
 If @var{filename} is relative, it is looked up in the @ref{include directory}.
 The syntax of the file is similar to the described above, except that
-@code{Include} statements are not allowed.  The form with @code{-file}
+@code{Include} statements are not allowed.  The form with @option{-file}
 reads the file contents once, at the program startup.  The one with
-@code{-filewatch} reads it and then monitors that file for changes.
+@option{-filewatch} reads it and then monitors that file for changes.
 @xref{File-based Conditions}, for a detailed discussion.
 @end deffn
 
@@ -6225,56 +6231,56 @@ of zero or more option flags from the following list:
 
 @kwindex -beg, DeleteHeader option
 @cindex prefix match, @code{DeleteHeader}
-@item @code{-beg} @tab Exact match at the beginning of string (prefix match).
+@item @option{-beg} @tab Exact match at the beginning of string (prefix match).
 
 @kwindex -case, DeleteHeader option
 @cindex case insensitive match, @code{DeleteHeader}
-@item @code{-case} @tab Case-sensitive comparison.
+@item @option{-case} @tab Case-sensitive comparison.
 
 @kwindex -contain, DeleteHeader option
 @cindex substring match, @code{DeleteHeader}
-@item @code{-contain} @tab Delete each header where "@var{pattern}" is
+@item @option{-contain} @tab Delete each header where "@var{pattern}" is
 a substring.
 
 @kwindex -end, DeleteHeader option
 @cindex suffix match, @code{DeleteHeader}
-@item @code{-end} @tab Exact match at the end of string (suffix match).
+@item @option{-end} @tab Exact match at the end of string (suffix match).
 
 @kwindex -exact, DeleteHeader option
 @cindex exact match, @code{DeleteHeader}
-@item @code{-exact} @tab Use exact string match.
+@item @option{-exact} @tab Use exact string match.
 
 @kwindex -icase, DeleteHeader option
 @cindex case sensitive match, @code{DeleteHeader}
-@item @code{-icase} @tab Case-insensitive comparison.
+@item @option{-icase} @tab Case-insensitive comparison.
 
 @kwindex -pcre, DeleteHeader option
 @cindex Perl-compatible regular expression match, @code{DeleteHeader}
 @cindex PCRE match, @code{DeleteHeader}
-@item @code{-pcre} @tab Use Perl-compatible regular expression.
+@item @option{-pcre} @tab Use Perl-compatible regular expression.
 @pxref{Regular Expressions}.
 
 @kwindex -perl, DeleteHeader option
 @cindex Perl-compatible regular expression match, @code{DeleteHeader}
 @cindex PCRE match, @code{DeleteHeader}
-@item @code{-perl} @tab Same as @code{-pcre}.
+@item @option{-perl} @tab Same as @option{-pcre}.
 
 @kwindex -posix, DeleteHeader option
 @cindex posix regular expression match, @code{DeleteHeader}
-@item @code{-posix} @tab Use POSIX extended regular expression.
+@item @option{-posix} @tab Use POSIX extended regular expression.
 @pxref{Regular Expressions}.
 
 @kwindex -re, DeleteHeader option
 @cindex regular expression match, @code{DeleteHeader}
-@item @code{-re} @tab Use regular expression match.  This assumes the
+@item @option{-re} @tab Use regular expression match.  This assumes the
 default regular expression type, as set by the @code{RegexType}
 directive (@pxref{Regular Expressions}).
 @end multitable
 @end float
 
-The following options are mutually exclusive: @code{-beg},
-@code{-contain}, @code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),
-@code{-posix}, @code{-re}.  If more than one of these are used, the
+The following options are mutually exclusive: @option{-beg},
+@option{-contain}, @option{-end}, @option{-exact}, @option{-pcre} (@option{-perl}),
+@option{-posix}, @option{-re}.  If more than one of these are used, the
 last one takes effect.
 @end deffn
 
@@ -6357,27 +6363,27 @@ Conditions}, for a detailed discussion of this feature.
 
 The following conditionals are available:
 
-@deffn {Request Conditional} ACL [-forwarded] "@var{name}"
+@deffn {Request Conditional} ACL [@option{-forwarded}] "@var{name}"
 Returns @samp{true} if the source IP matches one of the CIDRs from the
 named access control list @var{name}.  The ACL itself must have been
 defined earlier (@pxref{ACL definition}).
 
 @kwindex -forwarded
 By default, @code{ACL} operates on the actual originator IP address.
-This is changed if @code{-forwarded} is specified, in which case it
+This is changed if @option{-forwarded} is specified, in which case it
 uses an IP determined from the @code{X-Forwarded-For} (or similar)
 header (@pxref{%a}).
 
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL [-forwarded]
+@deffn {Request Conditional} ACL [@option{-forwarded}]
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
 described in @ref{ACL definition}.  The ACL definition is finished with an
 @code{End} keyword on a line by itself.
 
-The @code{-forwarded} option instructs @command{pound} to use source
+The @option{-forwarded} option instructs @command{pound} to use source
 IP address determined from the @code{X-Forwarded-For} header
 (@pxref{%a}), instead of the actual originator IP.
 
@@ -6387,17 +6393,17 @@ described above.
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Request Conditional} ACL [-forwarded] -file "@var{filename}"
-@deffnx {Request Conditional} ACL [-forwarded] -filewatch "@var{filename}"
+@deffn {Request Conditional} ACL [@option{-forwarded}] @option{-file} "@var{filename}"
+@deffnx {Request Conditional} ACL [@option{-forwarded}] @option{-filewatch} "@var{filename}"
 Defines an unnamed ACL to match the source IP against.  The ACL definition
 is read from the file @var{filename}, one CIDR per line.  Empty lines
 and comments are allowed.  If @var{filename} is relative, it is looked
-up in the @ref{include directory}.  The form with @code{-file} reads
+up in the @ref{include directory}.  The form with @option{-file} reads
 the file contents once, at the program startup.  The one with
-@code{-filewatch} reads it and then monitors that file for changes.
+@option{-filewatch} reads it and then monitors that file for changes.
 @xref{File-based Conditions}, for a detailed discussion.
 
-The meaning of @code{-forwarded} is as described above.
+The meaning of @option{-forwarded} is as described above.
 @end deffn
 
 @deffn {Request Conditional} BasicAuth [@var{option}] "@var{filename}"
@@ -6437,8 +6443,8 @@ matching the given @var{pattern}.  The directive has two forms.
 In its first form, the @var{pattern} is compared against entire header line.
 In its second form, the @var{field} argument supplies the header name, and
 @var{pattern} the pattern to match against its value (or the name of
-the file to read patterns from, if @var{options} is @code{-file} or
-@code{-filewatch}).
+the file to read patterns from, if @var{options} is @option{-file} or
+@option{-filewatch}).
 
 An example of @code{Header} statement in the first form:
 
@@ -6456,8 +6462,8 @@ In both forms, @var{pattern} is treated as case-insensitive POSIX
 extended regular expression.  This can be changed by @var{options},
 described below.
 
-In the first form, pattern modification options, such as @code{-beg} or
-@code{-contain} apply to entire header line.  In second form, they
+In the first form, pattern modification options, such as @option{-beg} or
+@option{-contain} apply to entire header line.  In second form, they
 apply to header value only.  For example, you can write:
 
 @example
@@ -6611,7 +6617,7 @@ starting with @code{#}) are ignored.
 @end deffn
 
 @deffn {Conditional option} -filewatch
-Same as @code{-file}, but the file will be monitored for changes and
+Same as @option{-file}, but the file will be monitored for changes and
 reloaded as soon as such are detected.  @xref{File-based
 Conditions}, for a detailed description.
 @end deffn
@@ -6661,9 +6667,9 @@ SetPath "$3(host)/$1(type)$1(path)"
 backreferences are expanded in strings.
 @end deffn
 
-The following options are mutually exclusive: @code{-beg}, @code{-contain},
-@code{-end}, @code{-exact}, @code{-pcre} (@code{-perl}),
-@code{-posix}, @code{-re}.  If more than one of these are used, the
+The following options are mutually exclusive: @option{-beg}, @option{-contain},
+@option{-end}, @option{-exact}, @option{-pcre} (@option{-perl}),
+@option{-posix}, @option{-re}.  If more than one of these are used, the
 last one takes effect.
 
 @kwindex Not
@@ -7076,7 +7082,7 @@ TLSv1.3 ciphersuite names from the list below:
 @end itemize
 @end table
 
-If @var{typeopt} is not supplied, @code{-cipherlist} is assumed.
+If @var{typeopt} is not supplied, @option{-cipherlist} is assumed.
 
 Notice, that a single @code{Ciphers} statement can set both TLSv2 and
 TLSv3 ciphersuites, e.g.:
@@ -7162,6 +7168,43 @@ Read the socket to listen on from the UNIX socket supplied by
 @var{pathname}.  If this parameter is supplied, neither @code{Address}
 nor @code{Port} may be used.  This parameter is intended for use
 in @command{pound} testsuite.
+@end deffn
+
+@deffn {Tunnel} ACL "@var{name}"
+Verifies if the source IP matches one of the CIDRs from the
+named access control list @var{name}.  If it doesn't, the connection
+is closed immediately.
+
+The ACL itself must have been defined earlier (@pxref{ACL definition}).
+
+@xref{ACL}, for a detailed discussion.
+@end deffn
+
+@deffn {Tunnel} ACL @option{-file} "@var{filename}"
+@deffnx {Tunnel} ACL @option{-filewatch} "@var{filename}"
+Verifies if the source IP matches one of the CIDRs from the file
+@var{filename}.  If it doesn't, the connection is closed immediately.
+
+The file should contain one CIDR per line.  Empty lines and comments
+are allowed.  If @var{filename} is relative, it is looked up in the
+@ref{include directory}.  The form with @option{-file} reads the file
+contents once, at the program startup.  The one with
+@option{-filewatch} reads it and then monitors that file for changes.
+@xref{File-based Conditions}, for a detailed discussion.
+
+@xref{ACL}, for a detailed discussion.
+@end deffn
+
+@deffn {Tunnel} ACL
+This statement defines an unnamed ACL to match the source IP against.
+This line must be followed by one or more lines defining CIDRs, as
+described in @ref{ACL definition}.  The ACL definition is finished with an
+@code{End} keyword on a line by itself.
+
+If the source IP doesn't match any of the CIDRs, the connection is
+closed immediately.
+
+@xref{ACL}, for a detailed discussion.
 @end deffn
 
 @deffn {Tunnel} Backend ... End
@@ -7251,16 +7294,22 @@ is used as its identifier.  Service numbers start at 0.
   Service selection statements define conditions an incoming request
 must satisfy in order to be handled by this service.
 
-@deffn {Service Conditional} ACL "@var{name}"
+@deffn {Service Conditional} ACL [@option{-forwarded}] "@var{name}"
 Returns @samp{true} if the source IP of the request matches one of the
 CIDRs from the named access control list @var{name}.  The ACL itself
 must have been defined earlier (@pxref{ACL definition}).
 
+@kwindex -forwarded
+By default, @code{ACL} operates on the actual originator IP address.
+This is changed if @option{-forwarded} is specified, in which case it
+uses an IP determined from the @code{X-Forwarded-For} (or similar)
+header (@pxref{%a}).
+
 @xref{ACL}, for a detailed discussion.
 @end deffn
 
-@deffn {Service Conditional} ACL @option{-file} "@var{filename}"
-@deffnx {Service Conditional} ACL @option{-filewatch} "@var{filename}"
+@deffn {Service Conditional} ACL [@option{-forwarded}] @option{-file} "@var{filename}"
+@deffnx {Service Conditional} ACL [@option{-forwarded}] @option{-filewatch} "@var{filename}"
 Reads ACL definitions from the file @var{filename}.  The file shall contain
 unquoted CIDR definitions, each one on a separate line.  Empty
 lines and comments (starting with @samp{#} and ending at the nearest
@@ -7269,9 +7318,11 @@ newline) are ignored.
 If the @option{-filewatch} option is used, the file will be monitored
 and reloaded automatically as soon as it changes.  @xref{File-based
 Conditions}, for a detailed discussion.
+
+See above for the meaning of @option{-forwarded}.
 @end deffn
 
-@deffn {Service Conditional} ACL
+@deffn {Service Conditional} ACL [@option{-forwarded}]
 This statement defines an unnamed ACL to match the source IP against.
 This line must be followed by one or more lines defining CIDRs, as
 described in @ref{ACL definition}.  The ACL definition is finished with an
@@ -7279,6 +7330,8 @@ described in @ref{ACL definition}.  The ACL definition is finished with an
 
 Semantically, this statement is equivalent to the named ACL reference
 described above.
+
+See above for the meaning of @option{-forwarded}.
 
 @xref{ACL}, for a detailed discussion.
 @end deffn

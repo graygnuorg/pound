@@ -7497,22 +7497,17 @@ tunnel_backend_prepare (CFG_NODE *node, void *call_data, void **baseptr)
   SERVICE *svc;
   BACKEND *be;
 
-  svc = new_service (BALANCER_ALGO_RANDOM);
-  locus_range_copy (&svc->locus, &node->locus);
-
   be = backend_init (node, call_data);
   if (!be)
     return -1;
 
+  svc = SLIST_FIRST (&lst->services);
   be->service = svc;
   be->priority = 1;
 
   /* Register backend in service */
   balancer_add_backend (balancer_list_get_normal (&svc->balancers), be);
   service_recompute_pri_unlocked (svc, NULL, NULL);
-
-  /* Register service in the listener */
-  SLIST_PUSH (&lst->services, svc, next);
 
   *baseptr = be;
 
@@ -7523,11 +7518,46 @@ static CFG_TYPE cfg_type_tunnel_backend = {
   .prepare = tunnel_backend_prepare
 };
 
+static int
+tunnel_acl_commit (CFG_NODE *node, void *call_data, void *baseptr)
+{
+  LISTENER *lst = cfg_rcvr_ptr (&node->rcvr, baseptr);
+  SERVICE *svc = SLIST_FIRST (&lst->services);
+  SERVICE_COND *cond;
+  ACL *acl;
+
+  if (acl_build (node, &acl, NULL))
+    return -1;
+
+  cond = service_cond_append (&svc->cond, COND_ACL, &node->locus);
+  cond->acl.acl = acl;
+  cond->acl.forwarded = 0;
+
+  return 0;
+}
+
+static CFG_FLAG tunnel_acl_flagdef[] = {
+  { "file", FLG_FILE, 1 },
+  { "filewatch", FLG_FILEWATCH, 1 },
+  { NULL }
+};
+
+static CFG_TYPE cfg_type_tunnel_acl = {
+  .argdef = "f*s*",
+  .flagdef = tunnel_acl_flagdef,
+  .commit = tunnel_acl_commit
+};
+
 static CFG_DEFN lst_tunnel_defn[] = {
   {
     .name = "",
     .type = KWT_TABREF,
     .ref = listener_address_common
+  },
+  {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = &cfg_type_tunnel_acl
   },
   {
     .name = "Backend",
@@ -7543,6 +7573,7 @@ lst_tunnel_prepare (CFG_NODE *node, void *call_data, void **baseptr)
 {
   LISTENER *lst;
   CFG_NODE *bn0, *bn;
+  SERVICE *svc;
 
   bn0 = cfg_ast_locate_node (node->subtree, cfg_node_name_eq, "Backend");
   if (!bn0)
@@ -7561,6 +7592,12 @@ lst_tunnel_prepare (CFG_NODE *node, void *call_data, void **baseptr)
   if (lst_prepare (node, call_data, (void**)&lst))
     return -1;
   lst->tunnel = 1;
+
+  svc = new_service (BALANCER_ALGO_RANDOM);
+  locus_range_copy (&svc->locus, &node->locus);
+
+  /* Register service in the listener */
+  SLIST_PUSH (&lst->services, svc, next);
 
   *baseptr = lst;
 

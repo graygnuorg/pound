@@ -6413,7 +6413,18 @@ static int
 tunnel_backend_connect (POUND_HTTP *phttp)
 {
   int sock;
+
   phttp->svc = SLIST_FIRST (&phttp->lstn->services);
+
+  if (match_cond (&phttp->svc->cond, phttp, NULL, NULL) <= 0)
+    {
+      char caddr[MAX_ADDR_BUFSIZE];
+      addr2str (caddr, sizeof (caddr), &phttp->from_host, 1);
+      phttp_log (phttp, PHTTP_LOG_DFL,
+		 -1, 0, "tunnel connection refused for %s", caddr);
+      return -1;
+    }
+
   phttp->backend = get_backend (phttp);
   sock = backend_socket (phttp, phttp->backend, 1);
   if (sock != -1 &&
@@ -6443,7 +6454,10 @@ do_tunnel (POUND_HTTP *phttp)
   p[P_CL].events = POLLIN;
 
   if ((p[P_BE].fd = tunnel_backend_connect (phttp)) == -1)
-    return;
+    {
+      close (phttp->sock);
+      return;
+    }
   p[P_BE].events = POLLIN;
 
   to = phttp->backend->v.reg.to * 1000;

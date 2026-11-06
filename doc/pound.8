@@ -14,7 +14,7 @@
 .\"
 .\" You should have received a copy of the GNU General Public License
 .\" along with pound.  If not, see <http://www.gnu.org/licenses/>.
-.TH POUND 8 "September 11, 2026" "pound" "System Manager's Manual"
+.TH POUND 8 "November 6, 2026" "pound" "System Manager's Manual"
 .SH NAME
 pound \- HTTP/HTTPS reverse-proxy and load-balancer
 .SH SYNOPSIS
@@ -1768,6 +1768,92 @@ Syntactically a tunnel is declared using the following construct:
     \fBEnd\fR
 \fBEnd\fR
 .EE
+.PP
+Following statements are allowed in \fBTunnel\fR section:
+.TP
+.BI Address " IPADDR"
+Defines the IP address to listen on.
+.TP
+.BI Port " PORT"
+Defines the port number to listen on.
+.TP
+\fBSocketFrom \fR"\fIpathname\fR"
+Read the socket to listen on from the UNIX socket \fIpathname\fR.
+.PP
+Either the two statements
+.B Address
+and
+.BR Port ,
+or the
+.B SocketFrom
+statement must be present, but not both.
+.TP
+.BR Backend " ... " End
+Defines a \fIbackend\fR, i.e. the network socket to communicate with.
+Exactly one \fBBackend\fR statement must be present in a \fBTunnel\fR
+section.
+.IP
+This is a simplified version of the regular
+.B Backend
+statement.  The following statements can be used in it:
+.BR Address ,
+.BR ConnTO ,
+.BR Disabled,
+.BR Port ,
+and
+.BR Timeout .
+Their meaning is discussed in the
+.B Backend
+section below.
+.TP
+.B ACL
+Verify if the source IP matches one of the CIDRs from the \fIaccess
+control list\fR. If it doesn't the connection is closed immediately.
+.IP
+This statement has the following three forms:
+.IP
+.RS
+.TP
+\fBACL\fR "\fIname\fR"
+Match the source IP address against the named ACL, which has
+been defined earlier in the configuration (see the
+.B ACL
+statement in
+.B "GLOBAL DIRECTIVES"
+section above).
+.TP
+.B ACL
+This statement defines an in-place ACL.    This line must be
+followed by one or more lines defining CIDRs, as described in the
+.B "GLOBAL DIRECTIVES"
+section above.
+The ACL definition is finished with a
+.B End
+keyword on a line by itself.
+.TP
+\fBACL \-file\fR "\fIfilename\fR"
+Defines an in-place ACL, with the CIDR list read from file \fIfilename\fR.
+The name is taken relative to the \fBIncludeDir\fR directory, unless
+it starts with a slash.
+.IP
+The ACL file should contain one CIDR per line.  CIDRs need not be
+quoted.  Empty lines and comments are allowed.
+.TP
+\fBACL \-filewatch\fR "\fIfilename\fR"
+Same as above, but \fIfilename\fR will be watched for changes during
+the runtime.  Once a change is detected, the file will be reloaded and
+the ACL updated.
+.IP
+If possible, this uses OS-specific filesystem monitoring API
+.RB ( inotify (7),
+on GNU/Linux and
+.BR kqueue (7)
+on *BSD systems).  On systems that don't provide such API,
+the file will be checked for changes periodically, in intervals
+defined by the
+.B WatcherTTL
+setting.
+.RE
 .SH "Service"
 A service defines backend servers and conditions incoming requests
 must match in order to be processed by one of these backends. It may

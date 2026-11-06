@@ -618,7 +618,7 @@ is undefined."
     (while (not (bobp))
       (forward-line -1)
       (cond
-       ((looking-at "^\\s-*ListenHTTPS?")
+       ((looking-at "^\\s-*\\(ListenHTTPS?\\|Tunnel\\)")
 	(if (not (save-excursion (pound-scan here '(1))))
 	    (goto-char here))
 	(throw 'ret t))

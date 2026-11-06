@@ -1,4 +1,4 @@
-Pound -- history of user-visible changes. 2026-11-04
+Pound -- history of user-visible changes. 2026-11-06
 See the end of file for copying conditions.
 
 Pound is a continuation of the software originally developed by
@@ -12,6 +12,11 @@ Version 4.24.90
 * Relative redirects
 
 The Redirect statement now accepts relative URI as its argument.
+
+* ACLs in Tunnel section
+
+Usual ACL statements are allowed in Tunnel sections.  The connection
+will be served only if the source IP matches one of the CIDRs in them.
 
 * New metric family pound_beacon
 
