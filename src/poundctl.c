@@ -428,6 +428,12 @@ static CFG_DEFN tun_defn[] = {
     .ref = any_defn
   },
   {
+    .name = "ACL",
+    .token = T_ACL,
+    .vtype = CFG_TYPE_ANY,
+    .ref = any_defn
+  },
+  {
     .name = "",
     .type = KWT_TABREF,
     .ref = any_defn
