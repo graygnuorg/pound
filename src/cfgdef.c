@@ -625,8 +625,10 @@ cfg_bool_commit (CFG_NODE *node, void *unused, void *baseptr)
 				     "0, no, false, off");
 	  return -1;
 	}
+      *ptr = arg->v.number == 1;
     }
-  *ptr = arg->v.number == 1;
+  else
+    *ptr = arg->v.boolean == 1;
   return 0;
 }
 
