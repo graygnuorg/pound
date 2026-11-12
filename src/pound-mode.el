@@ -570,8 +570,7 @@ is undefined."
 			      pound-top-level-sections
 			      pound-maybe-top-level-sections) 'words)))
 	(throw 'ret (pound-top-call (match-string 1) here)))))
-    (goto-char here)
-     t))
+    t))
 
 (defun pound-control-top (here)
   (beginning-of-line)
