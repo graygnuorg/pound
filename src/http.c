@@ -6442,6 +6442,18 @@ tunnel_backend_connect (POUND_HTTP *phttp)
 }
 
 static void
+tunnel_log (POUND_HTTP *phttp, char const *msg)
+{
+  char caddr[3][MAX_ADDR_BUFSIZE];
+
+  logmsg (LOG_INFO, "%s: tunnel %s -> %s: %s",
+	  addr2str (caddr[0], sizeof (caddr[0]), &phttp->lstn->addr, 0),
+	  addr2str (caddr[1], sizeof (caddr[1]), &phttp->from_host, 1),
+	  str_be (caddr[2], sizeof (caddr[2]), phttp->backend),
+	  msg);
+}  
+
+static void
 do_tunnel (POUND_HTTP *phttp)
 {
   struct pollfd p[P_NUM];
@@ -6459,6 +6471,8 @@ do_tunnel (POUND_HTTP *phttp)
       return;
     }
   p[P_BE].events = POLLIN;
+
+  tunnel_log (phttp, "connected");
 
   to = phttp->backend->v.reg.to * 1000;
 
@@ -6521,6 +6535,7 @@ do_tunnel (POUND_HTTP *phttp)
   phttp_gettime (phttp, TS_RESP_END);
   if (enable_backend_stats && phttp->backend)
     backend_update_stats (phttp->backend, &phttp->ts[TS_BE_START], &phttp->ts[TS_RESP_END]);
+  tunnel_log (phttp, "disconnected");
 }
 
 enum transfer_encoding
