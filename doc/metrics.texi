@@ -7,7 +7,7 @@ This appendix describes metric families returned in the output of
 @dfn{openmetrics} @command{pound} backends (@pxref{Metrics}).
 
 @deftypevr {Metric family} counter pound_uptime
-Number of milliseconds elapsed since @command{pound} startup.
+Number of microseconds elapsed since @command{pound} startup.
 @end deftypevr
 
 @deftypevr {Metric family} gauge pound_workers

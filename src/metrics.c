@@ -320,7 +320,7 @@ static struct metric_family uptime_metric_families[] = {
   { "pound_uptime",
     "counter",
     NULL,
-    "Pound uptime, milliseconds since startup.",
+    "Pound uptime, microseconds since startup.",
     gen_number },
   { NULL }
 };
